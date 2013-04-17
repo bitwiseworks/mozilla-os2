@@ -1,0 +1,63 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= embedcomponents
+LIBRARY_NAME	= embedcomponents
+EXPORT_LIBRARY = 1
+SHORT_LIBNAME	= embedcmp
+IS_COMPONENT	= 1
+MODULE_NAME	= embedcomponents
+GRE_MODULE	= 1
+LIBXUL_LIBRARY	= 1
+
+CPPSRCS		= nsEmbeddingModule.cpp
+
+SHARED_LIBRARY_LIBS = \
+	../windowwatcher/src/$(LIB_PREFIX)windowwatcher_s.$(LIB_SUFFIX) \
+	../appstartup/src/$(LIB_PREFIX)appstartupnotifier_s.$(LIB_SUFFIX) \
+	../find/src/$(LIB_PREFIX)find_s.$(LIB_SUFFIX) \
+	../webbrowserpersist/src/$(LIB_PREFIX)webbrowserpersist_s.$(LIB_SUFFIX) \
+	../commandhandler/src/$(LIB_PREFIX)commandhandler_s.$(LIB_SUFFIX) \
+	$(NULL)
+
+ifdef MOZ_XUL
+ifdef NS_PRINTING
+SHARED_LIBRARY_LIBS += \
+	../printingui/src/$(LIB_PREFIX)printingui_s.$(LIB_SUFFIX) \
+	$(NULL)
+endif
+endif
+
+LOCAL_INCLUDES	= \
+	-I$(srcdir)/../windowwatcher/src  \
+	-I$(srcdir)/../appstartup/src  \
+	-I$(srcdir)/../find/src  \
+	-I$(srcdir)/../webbrowserpersist/src  \
+	-I$(srcdir)/../commandhandler/src \
+	$(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
+LOCAL_INCLUDES += -I$(srcdir)/../printingui/src/os2 
+endif
+
+ifdef MOZ_PDF_PRINTING
+LOCAL_INCLUDES += -I$(srcdir)/../printingui/src/unixshared 
+endif
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+LOCAL_INCLUDES += -I$(srcdir)/../printingui/src/win 
+endif
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+LOCAL_INCLUDES += -I$(srcdir)/../printingui/src/mac
+endif
+
+include $(topsrcdir)/config/rules.mk

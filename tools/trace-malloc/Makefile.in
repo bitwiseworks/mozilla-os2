@@ -1,0 +1,100 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+
+SIMPLECSRCS	+= \
+		leakstats.c \
+		tmstats.c \
+		$(NULL)
+
+SIMPLECPPSRCS	= \
+		leaksoup.cpp \
+		bloatblame.cpp \
+		$(NULL)
+
+SIMPLE_PROGRAMS	= \
+		$(SIMPLECSRCS:.c=$(BIN_SUFFIX)) \
+		$(SIMPLECPPSRCS:.cpp=$(BIN_SUFFIX)) \
+		$(NULL)
+
+EXTRACSRCS = tmreader.c
+EXTRACPPSRCS = adreader.cpp
+
+ifndef MOZ_PROFILE_GENERATE
+PROGRAM		= spacetrace$(BIN_SUFFIX)
+
+PROGCSRCS = \
+  spacetrace.c \
+  spacecategory.c \
+  formdata.c \
+  $(NULL)
+
+PROGOBJS = $(PROGCSRCS:.c=.$(OBJ_SUFFIX))
+endif
+
+CSRCS = $(SIMPLECSRCS) $(EXTRACSRCS) $(PROGCSRCS)
+CPPSRCS = $(SIMPLECPPSRCS) $(EXTRACPPSRCS)
+
+ifeq ($(OS_ARCH),WINNT)
+LOCAL_INCLUDES	+= -I$(topsrcdir)/config/os2
+endif
+
+include $(topsrcdir)/config/config.mk
+
+ifneq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+EXTRA_DSO_LIBS	= xul
+endif
+
+LIBS		+= \
+		$(LIBS_DIR) \
+		tmreader.$(OBJ_SUFFIX) \
+		adreader.$(OBJ_SUFFIX) \
+		$(XPCOM_GLUE_LDOPTS) \
+		$(EXTRA_DSO_LIBS) \
+		$(NSPR_LIBS) \
+		$(NULL)
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+LIBS += $(DIST)/bin/XUL
+endif
+
+ifdef HAVE_BOUTELL_GD
+ifeq ($(OS_ARCH),WINNT)
+LOCAL_INCLUDES	+= \
+		-I"$(HAVE_BOUTELL_GD)" \
+		$(NULL)
+LIBS		+= \
+		-lmozz_s \
+		"$(HAVE_BOUTELL_GD)/gd.lib" \
+		$(NULL)
+else
+LIBS		+= \
+		-lgd \
+		$(NULL)
+endif
+
+DEFINES		+= \
+		-DHAVE_BOUTELL_GD \
+		$(NULL)
+endif
+
+EXTRA_DEPS = $(EXTRACSRCS:.c=.$(OBJ_SUFFIX)) $(EXTRACPPSRCS:.cpp=.$(OBJ_SUFFIX))
+
+include $(topsrcdir)/config/rules.mk
+
+# install rules.txt along with spacetrace executable
+libs:: rules.txt
+	$(INSTALL) $< $(DIST)/bin
+
+libs:: spacetrace.css
+	$(INSTALL) $< $(DIST)/bin/res
+

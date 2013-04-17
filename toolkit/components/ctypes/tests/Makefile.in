@@ -1,0 +1,66 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+relativesrcdir = @relativesrcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = jsctypes-test
+LIBRARY_NAME = jsctypes-test
+SHORT_LIBNAME = jscttest
+FORCE_SHARED_LIB = 1
+NO_DIST_INSTALL = 1
+
+CPPSRCS = jsctypes-test.cpp \
+          jsctypes-test-errno.cpp \
+          jsctypes-test-finalizer.cpp \
+          $(NULL)
+
+LOCAL_INCLUDES = \
+    -I$(topsrcdir)/js/src/ctypes \
+    $(NULL)
+
+EXTRA_DSO_LDOPTS += $(MOZALLOC_LIB)
+
+XPCSHELL_TESTS = unit
+
+# should be MOCHITEST_CHROME_FILES, see bug 770938
+MOCHITEST_CHROME_TESTS = \
+  xpcshellTestHarnessAdaptor.js \
+  ctypes_worker.js \
+  test_ctypes.xul \
+  $(NULL)
+
+include $(topsrcdir)/config/rules.mk
+
+xpctestdir = $(testxpcobjdir)/$(relativesrcdir)/unit
+
+chrometestdir = \
+  $(DEPTH)/_tests/testing/mochitest/chrome/toolkit/components/$(relativesrcdir)
+
+# preprocess and install our unit test into the appropriate directory,
+# and install the test library as well. the xpcshell test rules will
+# install the .js.in from the tests srcdir, so remove it when we're done.
+libs:: unit/test_jsctypes.js.in
+	$(PYTHON) $(MOZILLA_DIR)/config/Preprocessor.py $(DEFINES) $(ACDEFINES) \
+	  $^ > $(xpctestdir)/test_jsctypes.js
+	$(INSTALL) $(SHARED_LIBRARY) $(xpctestdir)
+	$(INSTALL) $(SHARED_LIBRARY) $(DEPTH)/_tests/testing/mochitest/chrome/libraries
+	$(INSTALL) $(xpctestdir)/test_jsctypes.js $(chrometestdir)
+	$(INSTALL) $(xpctestdir)/$(SHARED_LIBRARY) $(chrometestdir)
+	$(RM) $(xpctestdir)/test_jsctypes.js.in
+
+libs:: $(MOCHITEST_CHROME_TESTS)
+	$(INSTALL) $(foreach f,$^,"$f") $(chrometestdir)
+
+GARBAGE += \
+    $(xpctestdir)/test_jsctypes.js \
+    $(xpctestdir)/$(SHARED_LIBRARY) \
+    $(chrometestdir)/test_jsctypes.js \
+    $(chrometestdir)/$(SHARED_LIBRARY) \
+    $(NULL)

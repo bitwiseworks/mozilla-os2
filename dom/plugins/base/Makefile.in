@@ -1,0 +1,122 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+FAIL_ON_WARNINGS := 1
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= plugin
+LIBRARY_NAME	= gkplugin
+EXPORT_LIBRARY = 1
+IS_COMPONENT    = 1
+MODULE_NAME	= nsPluginModule
+GRE_MODULE	= 1
+LIBXUL_LIBRARY = 1
+
+EXPORTS_NAMESPACES = mozilla
+
+XPIDLSRCS = \
+  nsIHTTPHeaderListener.idl \
+  nsIPluginDocument.idl \
+  nsIPluginHost.idl \
+  nsIPluginInputStream.idl \
+  nsIPluginInstanceOwner.idl \
+  nsIPluginTag.idl \
+  nsIPluginTagInfo.idl \
+  nspluginroot.idl \
+  $(NULL)
+
+EXPORTS = \
+  npapi.h \
+  npfunctions.h \
+  nptypes.h \
+  npruntime.h \
+  nsPluginLogging.h \
+  nsPluginNativeWindow.h \
+  nsPluginsCID.h \
+  nsNPAPIPluginInstance.h \
+  nsPluginsDir.h \
+  nsPluginTags.h \
+  nsPluginDirServiceProvider.h \
+  nsPluginHost.h \
+  nsPluginInstanceOwner.h \
+  $(NULL)
+
+EXPORTS_mozilla = \
+  PluginPRLibrary.h \
+  $(NULL)
+
+CPPSRCS		= \
+		nsNPAPIPlugin.cpp \
+		nsNPAPIPluginInstance.cpp \
+		nsNPAPIPluginStreamListener.cpp \
+		nsPluginStreamListenerPeer.cpp \
+		nsPluginHost.cpp \
+		nsPluginModule.cpp \
+		nsJSNPRuntime.cpp \
+		nsPluginTags.cpp \
+		PluginPRLibrary.cpp \
+		nsPluginInstanceOwner.cpp \
+		$(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),android)
+DIRS += android
+LOCAL_INCLUDES += -I$(topsrcdir)/dom/plugins/base/android
+endif
+
+ifeq ($(OS_ARCH),WINNT)
+	CPPSRCS += nsPluginsDirWin.cpp
+	CPPSRCS += nsPluginNativeWindowWin.cpp
+	CPPSRCS += nsPluginDirServiceProvider.cpp
+	LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/base
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
+	CPPSRCS += nsPluginsDirOS2.cpp
+	CPPSRCS += nsPluginNativeWindowOS2.cpp
+else
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+	CPPSRCS += nsPluginsDirDarwin.cpp
+	CPPSRCS += nsPluginNativeWindow.cpp
+else
+	CPPSRCS += nsPluginsDirUnix.cpp
+ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+	CPPSRCS += nsPluginNativeWindowGtk2.cpp
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),qt)
+	CPPSRCS += nsPluginNativeWindowQt.cpp
+else
+	CPPSRCS += nsPluginNativeWindow.cpp
+endif
+endif
+endif
+endif
+endif
+
+LOCAL_INCLUDES += \
+  -DSK_BUILD_FOR_ANDROID_NDK \
+  -I$(topsrcdir)/widget/android \
+  -I$(topsrcdir)/widget/xpwidgets \
+  -I$(topsrcdir)/xpcom/base/ \
+  -I$(topsrcdir)/gfx/skia/include/core \
+  -I$(topsrcdir)/gfx/skia/include/config \
+  $(MOZ_CAIRO_CFLAGS) \
+  $(MOZ_PIXMAN_CFLAGS) \
+  $(NULL)
+
+include $(topsrcdir)/dom/dom-config.mk
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+CXXFLAGS         += $(TK_CFLAGS)
+
+$(DIST)/bin/plugins:
+	$(NSINSTALL) -D $@
+
+export:: $(DIST)/bin/plugins

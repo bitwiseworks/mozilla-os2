@@ -1,0 +1,31 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+
+interface nsIDOMSVGPoint;
+
+[scriptable, uuid(7bb28750-7238-4083-b5f4-4def4646a637)]
+interface nsIDOMSVGPointList : nsISupports
+{
+  readonly attribute unsigned long numberOfItems;
+  readonly attribute unsigned long length;  // synonym for numberOfItems
+
+  void clear();
+      // raises( DOMException );
+  nsIDOMSVGPoint initialize(in nsIDOMSVGPoint newItem);
+      // raises( DOMException, SVGException );
+  nsIDOMSVGPoint getItem (in unsigned long index);
+      // raises( DOMException );
+  [getter,noscript,notxpcom,nostdcall] nsIDOMSVGPoint getItemAt(in unsigned long index);
+  nsIDOMSVGPoint insertItemBefore(in nsIDOMSVGPoint newItem, in unsigned long index);
+      // raises( DOMException, SVGException );
+  nsIDOMSVGPoint replaceItem(in nsIDOMSVGPoint newItem, in unsigned long index);
+      // raises( DOMException, SVGException );
+  nsIDOMSVGPoint removeItem(in unsigned long index);
+      // raises( DOMException );
+  nsIDOMSVGPoint appendItem(in nsIDOMSVGPoint newItem);
+      //  raises( DOMException, SVGException );
+};

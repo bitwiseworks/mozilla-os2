@@ -1,0 +1,139 @@
+# vim:set ts=8 sw=8 sts=8 noet:
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+include $(srcdir)/../glue/objs.mk
+
+EXTRA_DEPS += $(srcdir)/../glue/objs.mk
+
+MODULE		= xpcom
+LIBRARY_NAME	= xpcom_core
+SHORT_LIBNAME	= xpcomcor
+LIBXUL_LIBRARY = 1
+EXPORT_LIBRARY = 1
+
+GRE_MODULE	= 1
+MOZILLA_INTERNAL_API = 1
+
+ifeq ($(OS_ARCH),Linux)
+DEFINES += -DXP_LINUX
+endif
+
+ifeq (Darwin, $(OS_ARCH))
+CSRCS = mach_override.c
+endif
+
+CPPSRCS = \
+  $(XPCOM_GLUE_SRC_LCPPSRCS) \
+  $(XPCOM_GLUENS_SRC_LCPPSRCS) \
+  nsXPComInit.cpp \
+  nsXPCOMStrings.cpp \
+  Services.cpp \
+  Omnijar.cpp \
+  FileLocation.cpp \
+  $(NULL)
+
+ifeq (Darwin, $(OS_ARCH))
+CPPSRCS += mozPoisonWriteMac.cpp
+else
+CPPSRCS += mozPoisonWriteStub.cpp
+endif
+
+ifeq ($(OS_ARCH),WINNT)
+CPPSRCS += perfprobe.cpp
+endif
+
+SHARED_LIBRARY_LIBS = \
+		$(DEPTH)/chrome/src/$(LIB_PREFIX)chrome_s.$(LIB_SUFFIX) \
+		../ds/$(LIB_PREFIX)xpcomds_s.$(LIB_SUFFIX) \
+		../io/$(LIB_PREFIX)xpcomio_s.$(LIB_SUFFIX) \
+		../components/$(LIB_PREFIX)xpcomcomponents_s.$(LIB_SUFFIX) \
+		../threads/$(LIB_PREFIX)xpcomthreads_s.$(LIB_SUFFIX) \
+		../base/$(LIB_PREFIX)xpcombase_s.$(LIB_SUFFIX) \
+		../reflect/xptcall/src/$(LIB_PREFIX)xptcall.$(LIB_SUFFIX) \
+		../reflect/xptcall/src/$(LIB_PREFIX)xptcmd.$(LIB_SUFFIX) \
+		../reflect/xptinfo/src/$(LIB_PREFIX)xptinfo.$(LIB_SUFFIX) \
+		$(DIST)/lib/$(LIB_PREFIX)xpt.$(LIB_SUFFIX) \
+		../string/src/$(LIB_PREFIX)string_s.$(LIB_SUFFIX) \
+		$(NULL)
+
+ifdef NS_TRACE_MALLOC
+SHARED_LIBRARY_LIBS += \
+		$(DEPTH)/tools/trace-malloc/lib/$(LIB_PREFIX)tracemalloc.$(LIB_SUFFIX) \
+		$(NULL)
+endif
+
+LOCAL_INCLUDES	= \
+		-I$(srcdir) \
+		-I.. \
+		-I$(srcdir)/../glue \
+		-I$(srcdir)/../base \
+		-I$(srcdir)/../ds \
+		-I$(srcdir)/../io \
+		-I$(srcdir)/../components \
+		-I$(srcdir)/../threads \
+		-I$(srcdir)/../reflect/xptinfo/src \
+		-I$(topsrcdir)/chrome/src \
+		-I$(srcdir)/../../docshell/base \
+		$(NULL)
+
+EXPORTS_NAMESPACES = mozilla
+
+SDK_HEADERS =  \
+  nsXPCOM.h       \
+  nsXPCOMCID.h    \
+  $(NULL)
+
+EXPORTS	= \
+  nsXPCOMCIDInternal.h \
+  xrecore.h \
+  nsXULAppAPI.h \
+  nsXREAppData.h \
+  $(NULL)
+
+EXPORTS_mozilla = \
+  XPCOM.h \
+  Services.h \
+  ServiceList.h \
+  Omnijar.h \
+  FileLocation.h \
+  mozPoisonWrite.h \
+  $(NULL)
+
+ifeq ($(OS_ARCH),WINNT)
+EXPORTS_mozilla += perfprobe.h
+endif
+
+
+GARBAGE         += $(XPCOM_GLUE_SRC_LCPPSRCS) $(XPCOM_GLUENS_SRC_LCPPSRCS)
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+DEFINES		+= \
+		-D_IMPL_NS_COM \
+		-D_IMPL_NS_STRINGAPI \
+		-DEXPORT_XPT_API \
+		-DEXPORT_XPTC_API \
+		-DOMNIJAR_NAME="$(OMNIJAR_NAME)" \
+		$(NULL)
+
+ifdef TARGET_XPCOM_ABI
+DEFINES += -DTARGET_XPCOM_ABI=\"$(TARGET_XPCOM_ABI)\"
+endif
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+CXXFLAGS	+= $(TK_CFLAGS)
+endif
+
+export:: $(XPCOM_GLUE_SRC_CPPSRCS) $(XPCOM_GLUENS_SRC_CPPSRCS)
+	$(INSTALL) $^ .

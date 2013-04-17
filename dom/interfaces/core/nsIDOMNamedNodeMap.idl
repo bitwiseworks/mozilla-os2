@@ -1,0 +1,36 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+
+/**
+ * Objects implementing the nsIDOMNamedNodeMap interface are used to 
+ * represent collections of nodes that can be accessed by name.
+ *
+ * For more information on this interface please see 
+ * http://www.w3.org/TR/DOM-Level-2-Core/
+ */
+
+[scriptable, uuid(a6cf907b-15b3-11d2-932e-00805f8add32)]
+interface nsIDOMNamedNodeMap : nsISupports
+{
+  nsIDOMNode                getNamedItem(in DOMString name);
+  nsIDOMNode                setNamedItem(in nsIDOMNode arg)
+                                  raises(DOMException);
+  nsIDOMNode                removeNamedItem(in DOMString name)
+                                  raises(DOMException);
+  nsIDOMNode                item(in unsigned long index);
+  readonly attribute  unsigned long        length;
+  // Introduced in DOM Level 2:
+  nsIDOMNode                getNamedItemNS(in DOMString namespaceURI, 
+                                           in DOMString localName);
+  // Introduced in DOM Level 2:
+  nsIDOMNode                setNamedItemNS(in nsIDOMNode arg)
+                                  raises(DOMException);
+  // Introduced in DOM Level 2:
+  nsIDOMNode                removeNamedItemNS(in DOMString namespaceURI, 
+                                              in DOMString localName)
+                                  raises(DOMException);
+};

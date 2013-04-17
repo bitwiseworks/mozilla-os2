@@ -1,0 +1,40 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+
+interface mozIDOMApplication;
+
+%{C++
+#define APPS_SERVICE_CID { 0x05072afa, 0x92fe, 0x45bf, { 0xae, 0x22, 0x39, 0xb6, 0x9c, 0x11, 0x70, 0x58 } }
+#define APPS_SERVICE_CONTRACTID "@mozilla.org/AppsService;1"
+%}
+
+/*
+ * This service allows accessing some DOMApplicationRegistry methods from
+ * non-javascript code.
+ */
+[scriptable, uuid(04e4ef3c-1a30-45bc-ab08-291820f13872)]
+interface nsIAppsService : nsISupports
+{
+  mozIDOMApplication getAppByManifestURL(in DOMString manifestURL);
+
+  /**
+   * Returns the |localId| of the app associated with the |manifestURL| passed
+   * in parameter.
+   * Returns nsIScriptSecurityManager::NO_APP_ID if |manifestURL| isn't a valid
+   * installed manifest URL.
+   */
+  unsigned long getAppLocalIdByManifestURL(in DOMString manifestURL);
+
+  /**
+   * Returns the application associated to this localId.
+   */
+  mozIDOMApplication getAppByLocalId(in unsigned long localId);
+
+  /**
+   * Returns the manifest URL associated to this localId.
+   */
+  DOMString getManifestURLByLocalId(in unsigned long localId);
+};

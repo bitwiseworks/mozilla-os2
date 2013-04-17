@@ -1,0 +1,62 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+relativesrcdir  = @relativesrcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MOCHITEST_CHROME_FILES = \
+		test_MozEnteredDomFullscreen_event.xul \
+		MozEnteredDomFullscreen_chrome.xul \
+		test_fullscreen.xul \
+		fullscreen.xul \
+		test_fullscreen_preventdefault.xul \
+		fullscreen_preventdefault.xul \
+		focus_window2.xul \
+		focus_frameset.html \
+		child_focus_frame.html \
+		test_focus_switchbinding.xul \
+		test_focus.xul \
+		window_focus.xul \
+		test_focused_link_scroll.xul \
+		test_geolocation.xul \
+		test_activation.xul \
+		window_activation.xul \
+		test_DOMWindowCreated.xul \
+		DOMWindowCreated_chrome.xul \
+		DOMWindowCreated_content.html \
+		test_sandbox_image.xul \
+		test_cyclecollector.xul \
+		test_resize_move_windows.xul \
+		test_popup_blocker_chrome.xul \
+		test_moving_xhr.xul \
+		test_nodesFromRect.html \
+		489127.html \
+		test_focus_docnav.xul \
+		window_focus_docnav.xul \
+		test_clonewrapper.xul \
+		test_moving_nodeList.xul \
+		test_callback_wrapping.xul \
+		window_callback_wrapping.xul \
+		test_sandbox_postMessage.html \
+		test_sandbox_bindings.xul \
+		test_bug799299.xul \
+		file_bug799299.xul \
+		test_bug800817.xul \
+		file_bug800817.xul \
+		$(NULL)
+
+ifeq (WINNT,$(OS_ARCH))
+MOCHITEST_CHROME_FILES += \
+		test_sizemode_attribute.xul \
+		sizemode_attribute.xul \
+		$(NULL)
+endif
+
+include $(topsrcdir)/config/rules.mk

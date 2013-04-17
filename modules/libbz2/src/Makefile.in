@@ -1,0 +1,55 @@
+# vim:set ts=8 sw=8 sts=8 noet:
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= libbz2
+LIBRARY_NAME	= bz2
+HOST_LIBRARY_NAME = hostbz2
+FORCE_STATIC_LIB= 1
+ifeq ($(OS_ARCH),WINNT)
+USE_STATIC_LIBS = 1
+endif
+
+# This is defined by the bzip2-1.0.3 Makefile.  It appears to be used to
+# configure GLIBC to support large files.  This isn't something we care about
+# at this stage, since we're only interested in the streaming API, but we
+# define it here anyways for consistency.
+DEFINES	+= -D_FILE_OFFSET_BITS=64
+
+CSRCS		= \
+		blocksort.c \
+		bzlib.c \
+		compress.c \
+		crctable.c \
+		decompress.c \
+		huffman.c \
+		randtable.c \
+		$(NULL)
+
+HOST_CSRCS	= $(CSRCS)
+
+EXPORTS		= \
+		bzlib.h \
+		$(NULL)
+
+include $(topsrcdir)/config/rules.mk
+
+ifdef CROSS_COMPILE
+ifdef HOST_NSPR_MDCPUCFG
+HOST_CFLAGS    += -DMDCPUCFG=$(HOST_NSPR_MDCPUCFG)
+endif
+endif
+
+# The intermediate (.ii/.s) files for host and target can have the same name...
+# disable parallel builds
+.NOTPARALLEL:
+

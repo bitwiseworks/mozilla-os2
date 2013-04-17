@@ -1,0 +1,157 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= xpcom
+XPIDL_MODULE	= xpcom_base
+LIBRARY_NAME	= xpcombase_s
+GRE_MODULE	= 1
+MOZILLA_INTERNAL_API =1
+LIBXUL_LIBRARY = 1
+
+# TODO: we do this in crashreporter and storage/src too, should be centralized
+ifeq ($(OS_ARCH),Linux)
+DEFINES += -DXP_LINUX
+endif
+
+CPPSRCS		= \
+		nsVersionComparatorImpl.cpp \
+		nsConsoleMessage.cpp \
+		nsConsoleService.cpp \
+		nsDebugImpl.cpp \
+		nsErrorService.cpp \
+		nsExceptionService.cpp \
+		nsMemoryImpl.cpp \
+		nsTraceRefcntImpl.cpp \
+		nsInterfaceRequestorAgg.cpp \
+		nsUUIDGenerator.cpp \
+		nsSystemInfo.cpp \
+		nsCycleCollector.cpp \
+		nsStackWalk.cpp \
+		nsMemoryReporterManager.cpp \
+		FunctionTimer.cpp \
+		ClearOnShutdown.cpp \
+		VisualEventTracer.cpp \
+		$(NULL)
+
+ifeq ($(OS_ARCH),Linux)
+CPPSRCS += MapsMemoryReporter.cpp
+endif
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+CPPSRCS		+= nsMacUtilsImpl.cpp
+endif
+
+EXPORTS		= \
+		nsAgg.h \
+		nsAutoRef.h \
+		nsCom.h \
+		nsDebugImpl.h \
+		nsIAllocator.h \
+		nsIID.h \
+		nsISizeOf.h \
+		nsISupportsObsolete.h \
+		nsStackWalk.h \
+		nsTraceRefcntImpl.h \
+		nsWeakPtr.h \
+		nsInterfaceRequestorAgg.h \
+		dmd.h \
+		$(NULL)
+
+EXPORTS_NAMESPACES = mozilla
+
+EXPORTS_mozilla = \
+	FunctionTimer.h \
+	MapsMemoryReporter.h \
+	ClearOnShutdown.h \
+	StaticPtr.h \
+	AvailableMemoryTracker.h \
+	StackWalk.h \
+	VisualEventTracer.h \
+	$(NULL)
+
+ifeq (windows,$(MOZ_WIDGET_TOOLKIT))
+CPPSRCS += nsCrashOnException.cpp
+endif
+
+ifeq ($(OS_ARCH),WINNT)
+
+ifdef MOZ_DEBUG
+CSRCS		+= pure_api.c
+EXPORTS		+= pure.h
+endif
+
+CPPSRCS += AvailableMemoryTracker.cpp
+
+endif #if OS_ARCH == WINNT
+
+SDK_XPIDLSRCS   = \
+		nsIDebug.idl               \
+		nsIInterfaceRequestor.idl  \
+		nsIMemory.idl		   \
+		nsIProgrammingLanguage.idl \
+		nsISupports.idl		   \
+		nsITraceRefcnt.idl         \
+		nsIWeakReference.idl	   \
+		nsrootidl.idl
+
+SDK_HEADERS     = \
+		nsAutoPtr.h \
+		nsError.h \
+		nsISupportsBase.h \
+		nscore.h \
+		nsAtomicRefcnt.h \
+		nsCycleCollector.h \
+		nsObjCExceptions.h \
+
+ifeq ($(OS_ARCH),WINNT)
+SDK_HEADERS += \
+		nsWindowsHelpers.h \
+		$(NULL)
+endif
+
+XPIDLSRCS	= \
+		nsIConsoleListener.idl \
+		nsIConsoleMessage.idl \
+		nsIConsoleService.idl \
+		nsICycleCollectorListener.idl \
+		nsIDebug2.idl \
+		nsIErrorService.idl \
+		nsIException.idl \
+		nsIExceptionService.idl \
+		nsIVersionComparator.idl \
+		nsIUUIDGenerator.idl \
+		nsIMutable.idl \
+		nsIMemoryReporter.idl \
+		$(NULL)
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+XPIDLSRCS	+= nsIMacUtils.idl
+endif
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+DEFINES		+= -D_IMPL_NS_COM
+
+ifneq (,$(filter gtk2,$(MOZ_WIDGET_TOOLKIT)))
+CXXFLAGS        += $(MOZ_GTK2_CFLAGS)
+endif
+
+LOCAL_INCLUDES += \
+		-I$(srcdir)/../build \
+		-I$(topsrcdir)/xpcom/ds \
+		$(NULL)

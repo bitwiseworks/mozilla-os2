@@ -1,0 +1,50 @@
+# vim:set ts=8 sw=8 sts=8 noet:
+# 
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= string
+
+EXPORTS		=				\
+		nsAString.h			\
+		nsAlgorithm.h			\
+		nsCharTraits.h			\
+		nsDependentString.h		\
+		nsDependentSubstring.h		\
+		nsLiteralString.h		\
+		nsPrintfCString.h		\
+		nsPromiseFlatString.h		\
+		nsReadableUtils.h		\
+		nsString.h			\
+		nsStringBuffer.h		\
+		nsStringFwd.h			\
+		nsStringIterator.h		\
+		nsSubstring.h			\
+		nsSubstringTuple.h		\
+		nsTDependentString.h		\
+		nsTDependentSubstring.h		\
+		nsTPromiseFlatString.h		\
+		nsTString.h			\
+		nsTSubstring.h			\
+		nsTSubstringTuple.h		\
+		nsUTF8Utils.h			\
+		nsXPIDLString.h			\
+		string-template-def-unichar.h	\
+		string-template-def-char.h	\
+		string-template-undef.h		\
+		$(NULL)			
+
+SDK_HEADERS	=				\
+		nsXPCOMStrings.h		\
+		nsEmbedString.h			\
+		$(NULL)
+
+include $(topsrcdir)/config/rules.mk

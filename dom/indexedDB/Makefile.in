@@ -1,0 +1,107 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+FAIL_ON_WARNINGS := 1
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = dom
+LIBRARY_NAME = dom_indexeddb_s
+XPIDL_MODULE = dom_indexeddb
+LIBXUL_LIBRARY = 1
+FORCE_STATIC_LIB = 1
+
+EXPORTS_NAMESPACES = mozilla/dom/indexedDB
+
+CPPSRCS = \
+  AsyncConnectionHelper.cpp \
+  CheckPermissionsHelper.cpp \
+  CheckQuotaHelper.cpp \
+  DatabaseInfo.cpp \
+  FileInfo.cpp \
+  FileManager.cpp \
+  FileStream.cpp \
+  IDBCursor.cpp \
+  IDBDatabase.cpp \
+  IDBEvents.cpp \
+  IDBFactory.cpp \
+  IDBFileHandle.cpp \
+  IDBIndex.cpp \
+  IDBKeyRange.cpp \
+  IDBObjectStore.cpp \
+  IDBRequest.cpp \
+  IDBTransaction.cpp \
+  IDBWrapperCache.cpp \
+  IndexedDatabaseManager.cpp \
+  Key.cpp \
+  KeyPath.cpp \
+  OpenDatabaseHelper.cpp \
+  TransactionThreadPool.cpp \
+  $(NULL)
+
+EXPORTS_mozilla/dom/indexedDB = \
+  DatabaseInfo.h \
+  IDBCursor.h \
+  IDBDatabase.h \
+  IDBEvents.h \
+  IDBFactory.h \
+  IDBFileHandle.h \
+  IDBIndex.h \
+  IDBKeyRange.h \
+  IDBObjectStore.h \
+  IDBRequest.h \
+  IDBTransaction.h \
+  IDBWrapperCache.h \
+  IndexedDatabase.h \
+  IndexedDatabaseManager.h \
+  Key.h \
+  KeyPath.h \
+  FileManager.h \
+  FileInfo.h \
+  $(NULL)
+
+LOCAL_INCLUDES = \
+  -I$(topsrcdir)/db/sqlite3/src \
+  -I$(topsrcdir)/xpcom/build \
+  -I$(topsrcdir)/dom/base \
+  -I$(topsrcdir)/dom/src/storage \
+  -I$(topsrcdir)/content/base/src \
+  -I$(topsrcdir)/content/events/src \
+  $(NULL)
+
+DEFINES += -D_IMPL_NS_LAYOUT
+
+# Make sure to quickstub as much as possible here! See
+# js/xpconnect/src/dom_quickstubs.qsconf.
+XPIDLSRCS = \
+  nsIIDBCursor.idl \
+  nsIIDBCursorWithValue.idl \
+  nsIIDBDatabase.idl \
+  nsIIDBFactory.idl \
+  nsIIDBFileHandle.idl \
+  nsIIDBIndex.idl \
+  nsIIDBKeyRange.idl \
+  nsIIDBObjectStore.idl \
+  nsIIDBRequest.idl \
+  nsIIDBTransaction.idl \
+  nsIIDBVersionChangeEvent.idl \
+  nsIIDBOpenDBRequest.idl \
+  nsIIndexedDatabaseManager.idl \
+  nsIStandardFileStream.idl \
+  $(NULL)
+
+DIRS += ipc
+TEST_DIRS += test
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+XPIDL_FLAGS += \
+  -I$(topsrcdir)/dom/interfaces/events \
+  $(NULL)

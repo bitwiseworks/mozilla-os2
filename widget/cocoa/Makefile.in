@@ -1,0 +1,117 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= widget
+LIBRARY_NAME	= widget_mac
+EXPORT_LIBRARY	= 1
+IS_COMPONENT	= 1
+MODULE_NAME	= nsWidgetMacModule
+XPIDL_MODULE	= widget_cocoa
+GRE_MODULE	= 1
+LIBXUL_LIBRARY = 1
+
+
+
+EXPORTS = \
+		mozView.h \
+		nsChangeObserver.h \
+		nsCocoaUtils.h \
+		nsCocoaFeatures.h \
+		$(NULL)
+
+CMMSRCS = \
+  nsBidiKeyboard.mm \
+  nsClipboard.mm \
+  nsMenuX.mm \
+  nsMenuBarX.mm \
+  nsMenuItemX.mm \
+  nsMenuItemIconX.mm \
+  nsMenuUtilsX.mm \
+  nsMenuGroupOwnerX.mm \
+  nsFilePicker.mm \
+  nsDragService.mm \
+  nsToolkit.mm \
+  nsAppShell.mm \
+  nsCocoaFeatures.mm \
+  nsCocoaUtils.mm \
+  nsCocoaWindow.mm \
+  nsChildView.mm \
+  nsWindowMap.mm \
+  nsWidgetFactory.mm \
+  nsCursorManager.mm \
+  nsMacCursor.mm \
+  nsScreenCocoa.mm \
+  nsScreenManagerCocoa.mm \
+  nsSound.mm \
+  nsLookAndFeel.mm \
+  nsNativeThemeCocoa.mm \
+  nsDeviceContextSpecX.mm \
+  nsPrintDialogX.mm \
+  nsPrintOptionsX.mm \
+  nsPrintSettingsX.mm \
+  nsIdleServiceX.mm \
+  TextInputHandler.mm \
+  nsMacDockSupport.mm \
+  nsStandaloneNativeMenu.mm \
+  nsMacWebAppUtils.mm \
+  GfxInfo.mm \
+  WidgetTraceEvent.mm \
+  $(NULL)
+
+ifeq (x86_64,$(TARGET_CPU))
+CMMSRCS += ComplexTextInputPanel.mm
+endif
+
+XPIDLSRCS	+= \
+		nsPIWidgetCocoa.idl \
+		$(NULL)
+
+SHARED_LIBRARY_LIBS = ../xpwidgets/libxpwidgets_s.a
+
+include $(topsrcdir)/config/rules.mk
+
+NIB_FILES = \
+	classes.nib \
+	info.nib \
+	keyedobjects.nib \
+	$(NULL)
+NIB_DEST = $(DIST)/bin/res/MainMenu.nib
+
+libs:: $(addprefix $(NIB_DEST)/,$(NIB_FILES))
+
+$(NIB_DEST):
+	$(NSINSTALL) -D $@
+
+$(NIB_DEST)/%: $(srcdir)/resources/MainMenu.nib/% $(NIB_DEST)
+	$(INSTALL) $< $(NIB_DEST)
+
+# for objdir builds, symlink the cursors dir
+ABS_topsrcdir   := $(call core_abspath,$(topsrcdir))
+ifneq ($(ABS_topsrcdir),$(MOZ_BUILD_ROOT))
+export::
+	ln -fs $(srcdir)/cursors
+endif
+
+export::
+	$(INSTALL) $(srcdir)/cursors $(DIST)/bin/res
+
+LOCAL_INCLUDES	= \
+	$(TK_CFLAGS) \
+	-I$(srcdir)/../xpwidgets \
+	-I$(srcdir)/../shared \
+	$(NULL)
+
+LDFLAGS	+= \
+	-framework QuickTime \
+	-framework IOKit \
+	-F/System/Library/PrivateFrameworks -framework CoreUI \
+	$(NULL)

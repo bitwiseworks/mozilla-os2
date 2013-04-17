@@ -1,0 +1,20 @@
+== font-size-wrap.html font-size-wrap-ref.html
+== abs-pos-auto-margin-1.html abs-pos-auto-margin-1-ref.html
+fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == auto-offset-inline-block-1.html auto-offset-inline-block-1-ref.html # bug 696670
+== fieldset-1.html fieldset-1-ref.html
+== table-1.html table-1-ref.html
+== table-2.html table-2-ref.html
+== table-3.html table-3-ref.html
+== continuation-positioned-inline-1.html continuation-positioned-inline-ref.html
+== continuation-positioned-inline-2.html continuation-positioned-inline-ref.html
+== scrollframe-1.html scrollframe-1-ref.html
+fuzzy-if(Android,9,39) == scrollframe-2.html scrollframe-2-ref.html #bug 756530
+== select-1.html select-1-ref.html
+== select-1-dynamic.html select-1-ref.html
+== select-2.html select-2-ref.html
+fuzzy-if(gtk2Widget,1,19) fuzzy-if(Android,17,726) == select-3.html select-3-ref.html
+
+# Fails due to bug 724978. Should be re-enabled once this is fixed.
+fails == multi-column-1.html multi-column-1-ref.html
+== button-1.html button-1-ref.html
+== button-2.html button-2-ref.html

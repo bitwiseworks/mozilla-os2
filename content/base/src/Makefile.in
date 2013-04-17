@@ -1,0 +1,205 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= content
+LIBRARY_NAME	= gkconbase_s
+LIBXUL_LIBRARY	= 1
+
+
+EXPORTS		= \
+		nsAtomListUtils.h \
+		nsAttrName.h \
+		nsContentList.h \
+		nsContentSink.h \
+		nsGkAtomList.h \
+		nsGkAtoms.h \
+		nsNodeInfoManager.h \
+		nsNodeUtils.h \
+		nsPropertyTable.h \
+		nsRange.h \
+		nsScriptLoader.h \
+		nsStubDocumentObserver.h \
+		nsStubImageDecoderObserver.h \
+		nsStubMutationObserver.h \
+		nsTextFragment.h \
+		mozAutoDocUpdate.h \
+		nsFrameMessageManager.h \
+		nsAttrAndChildArray.h \
+		nsAttrValue.h \
+		nsCrossSiteListenerProxy.h \
+		nsDOMAttributeMap.h \
+		nsGenericElement.h \
+		nsMappedAttributeElement.h \
+		nsStyledElement.h \
+    nsSandboxFlags.h \
+		$(NULL)
+
+EXPORTS_NAMESPACES = mozilla/dom
+
+EXPORTS_mozilla/dom = \
+  Link.h \
+  $(NULL)
+
+LOCAL_INCLUDES = \
+		$(NULL)
+
+CPPSRCS		= \
+		DirectionalityUtils.cpp \
+		nsAtomListUtils.cpp \
+		nsAttrAndChildArray.cpp \
+		nsAttrValue.cpp \
+		nsAttrValueOrString.cpp \
+		nsCCUncollectableMarker.cpp \
+		nsChannelPolicy.cpp \
+		nsCommentNode.cpp \
+		nsContentAreaDragDrop.cpp \
+		nsContentIterator.cpp \
+		nsContentList.cpp \
+		nsContentPolicy.cpp \
+		nsContentSink.cpp \
+		nsContentUtils.cpp \
+		nsCopySupport.cpp \
+		nsCrossSiteListenerProxy.cpp \
+		nsCSPService.cpp \
+		nsDataDocumentContentPolicy.cpp \
+		nsDOMAttribute.cpp \
+		nsDOMAttributeMap.cpp \
+		nsDOMBlobBuilder.cpp \
+		nsDOMDocumentType.cpp \
+		nsDOMFile.cpp \
+		nsDOMFileReader.cpp \
+		nsDOMLists.cpp \
+		nsDOMParser.cpp \
+		nsDOMSerializer.cpp \
+		nsDOMTokenList.cpp \
+		nsDOMSettableTokenList.cpp \
+		nsDocument.cpp \
+		nsDocumentEncoder.cpp \
+		nsDocumentFragment.cpp \
+		nsFrameLoader.cpp \
+		nsFormData.cpp \
+		nsGenConImageContent.cpp \
+		nsGenericDOMDataNode.cpp \
+		nsGenericElement.cpp \
+		nsGkAtoms.cpp \
+		nsHTMLContentSerializer.cpp \
+		nsImageLoadingContent.cpp \
+		nsINode.cpp \
+		nsLineBreaker.cpp \
+		nsMappedAttributeElement.cpp \
+		nsMappedAttributes.cpp \
+		nsNameSpaceManager.cpp \
+		nsNoDataProtocolContentPolicy.cpp \
+		nsNodeInfo.cpp \
+		nsNodeInfoManager.cpp \
+		nsNodeIterator.cpp \
+		nsNodeUtils.cpp \
+		nsObjectLoadingContent.cpp \
+		nsPlainTextSerializer.cpp \
+		nsPropertyTable.cpp \
+		nsRange.cpp \
+		nsReferencedElement.cpp \
+		nsScriptElement.cpp \
+		nsScriptLoader.cpp \
+		nsStubDocumentObserver.cpp \
+		nsStubImageDecoderObserver.cpp \
+		nsStubMutationObserver.cpp \
+		nsStyledElement.cpp \
+		nsStyleLinkElement.cpp \
+		nsSyncLoadService.cpp \
+		nsTextFragment.cpp \
+		nsTextNode.cpp \
+		nsTraversal.cpp \
+		nsTreeSanitizer.cpp \
+		nsTreeWalker.cpp \
+		nsWebSocket.cpp \
+		nsXHTMLContentSerializer.cpp \
+		nsXMLContentSerializer.cpp \
+		nsXMLHttpRequest.cpp \
+		nsXMLNameSpaceMap.cpp \
+		FragmentOrElement.cpp \
+		Link.cpp \
+		nsBlobProtocolHandler.cpp \
+		nsBlobURI.cpp \
+		nsFrameMessageManager.cpp \
+		nsInProcessTabChildGlobal.cpp \
+		ThirdPartyUtil.cpp \
+		nsEventSource.cpp \
+		FileIOObject.cpp \
+		nsDOMMutationObserver.cpp \
+		$(NULL)
+
+# Are we targeting x86-32 or x86-64?  If so, we want to include SSE2 code for
+# nsTextFragment.cpp
+ifneq (,$(INTEL_ARCHITECTURE))
+CPPSRCS += nsTextFragmentSSE2.cpp
+endif
+
+GQI_SRCS = contentbase.gqi
+
+# we don't want the shared lib, but we want to force the creation of a
+# static lib.
+FORCE_STATIC_LIB = 1
+
+EXTRA_COMPONENTS = \
+		$(srcdir)/nsBadCertHandler.js \
+		nsBadCertHandler.manifest \
+		contentSecurityPolicy.js \
+		contentSecurityPolicy.manifest \
+		contentAreaDropListener.js \
+		contentAreaDropListener.manifest \
+		messageWakeupService.js \
+		messageWakeupService.manifest \
+		$(NULL)
+
+EXTRA_JS_MODULES = \
+		CSPUtils.jsm \
+		$(NULL)
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+INCLUDES	+= \
+		-I$(srcdir)/../../events/src \
+		-I$(srcdir)/../../xml/content/src \
+		-I$(srcdir)/../../../layout/xul/base/src \
+		-I$(srcdir)/../../xul/content/src \
+		-I$(srcdir)/../../xul/document/src \
+		-I$(srcdir)/../../html/content/src \
+		-I$(srcdir)/../../base/src \
+		-I$(srcdir)/../../xbl/src \
+		-I$(srcdir)/../../../layout/generic \
+		-I$(srcdir)/../../../layout/style \
+		-I$(srcdir)/../../../dom/base \
+		-I$(srcdir)/../../xml/document/src \
+		-I$(topsrcdir)/xpcom/io \
+		-I$(topsrcdir)/dom/ipc \
+		-I$(topsrcdir)/js/xpconnect/src \
+		-I$(topsrcdir)/caps/include \
+		-I$(topsrcdir)/netwerk/base/src \
+		$(NULL)
+
+DEFINES += -D_IMPL_NS_LAYOUT
+DEFINES += -DHB_DONT_DEFINE_STDINT
+
+# gcc requires -msse2 for this file since it uses SSE2 intrinsics.  (See bug
+# 585538 comment 12.)
+ifneq (,$(INTEL_ARCHITECTURE))
+ifdef GNU_CC
+nsTextFragmentSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
+endif
+
+ifdef SOLARIS_SUNPRO_CXX
+nsTextFragmentSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-xarch=sse2 -xO4
+endif
+endif

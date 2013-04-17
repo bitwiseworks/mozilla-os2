@@ -1,0 +1,189 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+#include "nsIDOMDOMRequest.idl"
+#include "nsIDOMEvent.idl"
+
+interface nsIVariant;
+
+[scriptable, uuid(abb936bc-ba81-4c23-8dfa-3e5d96557044)]
+interface nsIWifi : nsISupports
+{
+    /**
+     * Shutdown the wifi system.
+     */
+    void shutdown();
+};
+
+[scriptable, uuid(b1f2e67f-75a8-4781-bf7f-eb21662ae9f3)]
+interface nsIDOMWifiManager : nsISupports
+{
+    /**
+     * TODO Remove in favor of a settings API.
+     * Activates or disactivates wifi.
+     * onsuccess: Wifi has been successfully activated and can start
+     *            attempting to connect to networks. request.value will be true.
+     * onerror: Wifi was not successfully activated. (TODO provide details!)
+     */
+    nsIDOMDOMRequest setEnabled(in boolean enabled);
+
+    /**
+     * Returns the list of currently available networks as well as the list of
+     * currently configured networks.
+     * onsuccess: We have obtained the current list of networks. request.value
+     *            is an object whose property names are SSIDs and values are
+     *            network objects.
+     * onerror: We were unable to obtain a list of property names.
+     */
+    nsIDOMDOMRequest getNetworks();
+
+    /**
+     * Takes one of the networks returned from getNetworks and tries to
+     * connect to it.
+     * @param network A network object with information about the network,
+     *                such as the SSID, key management desired, etc.
+     * onsuccess: We have started attempting to associate with the network.
+     *            request.value is true.
+     * onerror: We were unable to select the network. This most likely means a
+     *          configuration error.
+     */
+    nsIDOMDOMRequest associate(in jsval network);
+
+    /**
+     * Given a network, removes it from the list of networks that we'll
+     * automatically connect to. In order to re-connect to the network, it is
+     * necessary to call associate on it.
+     * @param network A network object with the SSID of the network to remove.
+     * onsuccess: We have removed this network. If we were previously
+     *            connected to it, we have started reconnecting to the next
+     *            network in the list.
+     * onerror: We were unable to remove the network.
+     */
+    nsIDOMDOMRequest forget(in jsval network);
+
+    /**
+     * Wi-Fi Protected Setup functionality.
+     * @param detail WPS detail which has 'method' and 'pin' field.
+     *               The possible method field values are:
+     *                 - pbc: The Push Button Configuration.
+     *                 - pin: The PIN configuration.
+     *                 - cancel: Request to cancel WPS in progress.
+     *               If method field is 'pin', 'pin' field can exist and has
+     *               a PIN number.
+     * onsuccess: We have successfully started/canceled wps.
+     * onerror: We have failed to start/cancel wps.
+     */
+    nsIDOMDOMRequest wps(in jsval detail);
+
+    /**
+     * TODO Remove in favor of a settings API.
+     * Returns whether or not wifi is currently enabled.
+     */
+    readonly attribute boolean enabled;
+
+    /**
+     * An non-null object containing the following information:
+     *  - status ("disconnected", "connecting", "associated", "connected")
+     *  - network
+     *
+     *  Note that the object returned is read only. Any changes required must
+     *  be done by calling other APIs.
+     */
+    readonly attribute jsval connection;
+
+    /**
+     * A connectionInformation object with the same information found in an
+     * nsIDOMMozWifiConnectionInfoEvent (but without the network).
+     * If we are not currently connected to a network, this will be null.
+     */
+    readonly attribute jsval connectionInformation;
+
+    /**
+     * State notification listeners. These all take an
+     * nsIDOMMozWifiStatusChangeEvent with the new status and a network (which
+     * may be null).
+     *
+     * The possible statuses are:
+     *   - connecting: Fires when we start the process of connecting to a
+     *                 network.
+     *   - associated: Fires when we have connected to an access point but do
+     *                 not yet have an IP address.
+     *   - connected: Fires once we are fully connected to an access point and
+     *                can access the internet.
+     *   - disconnected: Fires when we either fail to connect to an access
+     *                   point (transition: associated -> disconnected) or
+     *                   when we were connected to a network but have
+     *                   disconnected for any reason (transition: connected ->
+     *                   disconnected).
+     */
+    attribute nsIDOMEventListener onstatuschange;
+
+    /**
+     * An event listener that is called with information about the signal
+     * strength and link speed every 5 seconds.
+     */
+    attribute nsIDOMEventListener connectionInfoUpdate;
+
+    /**
+     * These two events fire when the wifi system is brought online or taken
+     * offline.
+     */
+    attribute nsIDOMEventListener onenabled;
+    attribute nsIDOMEventListener ondisabled;
+};
+
+[scriptable, builtinclass, uuid(f3ef70b0-b2d3-4eb5-8ea4-008f8d330cd6)]
+interface nsIDOMMozWifiStatusChangeEvent : nsIDOMEvent
+{
+    /**
+     * Network object with a SSID field describing the network affected by
+     * this change. This might be null.
+     */
+    readonly attribute nsIVariant network;
+
+    /**
+     * String describing the current status of the wifi manager. See above for
+     * the possible values.
+     */
+    readonly attribute DOMString status;
+
+    [noscript] void initMozWifiStatusChangeEvent(in DOMString aType,
+                                                 in boolean aCanBubble,
+                                                 in boolean aCancelable,
+                                                 in nsIVariant aNetwork,
+                                                 in DOMString status);
+};
+
+[scriptable, builtinclass, uuid(34994296-d694-4aed-953d-fc25ee25c050)]
+interface nsIDOMMozWifiConnectionInfoEvent : nsIDOMEvent
+{
+    /**
+     * Network object with an SSID field.
+     */
+    readonly attribute nsIVariant network;
+
+    /**
+     * Strength of the signal to network, in dBm between -55 and -100 dBm.
+     */
+    readonly attribute short signalStrength;
+
+    /**
+     * Relative signal strength between 0 and 100.
+     */
+    readonly attribute short relSignalStrength;
+
+    /**
+     * Link speed in Mb/s.
+     */
+    readonly attribute long linkSpeed;
+
+    [noscript] void initMozWifiConnectionInfoEvent(in DOMString aType,
+                                                   in boolean aCanBubble,
+                                                   in boolean aCancelable,
+                                                   in nsIVariant aNetwork,
+                                                   in short signalStrength,
+                                                   in short relSignalStrength,
+                                                   in long linkSpeed);
+};

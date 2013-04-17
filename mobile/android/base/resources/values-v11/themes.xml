@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<resources>
+
+    <style name="Gecko" parent="@android:style/Theme.Holo">
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    
+    <style name="Gecko.TitleBar" parent="Gecko">
+        <item name="android:windowActionBar">true</item>
+        <item name="android:windowNoTitle">false</item>
+    </style>
+
+    <style name="Gecko.NoActionBar" parent="@android:style/Theme.Holo">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    
+    <style name="Gecko.Light" parent="@android:style/Theme.Holo.Light">
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+    
+    <style name="Gecko.Light.TitleBar" parent="Gecko.Light"/>
+
+    <style name="Gecko.Light.NoActionBar" parent="@android:style/Theme.Holo.Light">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    
+    <style name="Gecko.Translucent" parent="@android:style/Theme.Translucent">
+        <item name="android:windowActionBar">true</item>
+        <item name="android:windowNoTitle">false</item>
+    </style>
+
+    <style name="Gecko.Translucent.NoActionBar">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <style name="Gecko.App">
+        <item name="android:windowBackground">@drawable/abouthome_bg_repeat</item>
+        <item name="android:panelBackground">@drawable/menu_panel_bg</item>
+    </style>
+
+    <style name="Gecko.Light.AwesomeBar">
+        <item name="android:actionBarStyle">@style/ActionBar.AwesomeBar</item>
+    </style>
+
+    <style name="Gecko.TitleBar.Preferences">
+        <item name="android:actionBarStyle">@style/ActionBar.GeckoPreferences</item>
+    </style>
+
+    <style name="Gecko.Translucent.TabsTray">
+        <item name="android:actionBarStyle">@style/ActionBar.TabsTray</item>
+    </style>
+    
+</resources>

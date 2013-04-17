@@ -1,0 +1,139 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE           = sqlite3
+LIBRARY_NAME     = mozsqlite3
+SHORT_LIBNAME    = mozsqlt3
+FORCE_SHARED_LIB = 1
+VISIBILITY_FLAGS =
+LIB_IS_C_ONLY    = 1
+
+ifeq ($(OS_ARCH),WINNT)
+ifndef GNU_CC
+DEFFILE = $(CURDIR)/sqlite-processed.def
+RCFILE  = sqlite.rc
+RESFILE = sqlite.res
+
+GARBAGE += \
+  sqlite-version.h \
+  $(DEFFILE) \
+  $(NULL)
+
+# We generate the appropriate version header file with our python script.
+sqlite-version.h: sqlite-version.py sqlite3.h
+	$(PYTHON) $^ > $@
+
+# We have to preprocess our def file because we need different symbols in debug
+# builds exposed that are not built in non-debug builds.
+$(DEFFILE): sqlite.def
+	@$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(DEFINES) \
+	  $(srcdir)/sqlite.def > $(DEFFILE)
+
+export:: sqlite-version.h
+endif
+endif
+
+ifeq (Darwin,$(OS_TARGET))
+# On OSX, with jemalloc enabled, having sqlite linked against mozglue
+# causes crashes in NSS standalone tools.
+MOZ_GLUE_LDFLAGS =
+endif
+
+# XXX Force -O2 optimisation on Mac because using the default -O3 causes
+# crashes. See bug 676499.
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+MODULE_OPTIMIZE_FLAGS = -O2
+endif
+
+# Force /O2 optimisation on Windows because using the default /O1 causes
+# crashes with MSVC2005 and PGO. See bug 719584.
+ifeq ($(OS_ARCH),WINNT)
+MODULE_OPTIMIZE_FLAGS = -O2
+endif
+
+EXPORTS = \
+  sqlite3.h \
+  $(NULL)
+
+CSRCS = \
+  sqlite3.c \
+  $(NULL)
+
+# -DSQLITE_SECURE_DELETE=1 will cause SQLITE to 0-fill delete data so we
+# don't have to vacuum to make sure the data is not visible in the file.
+# -DSQLITE_ENABLE_FTS3=1 enables the full-text index module.
+# -DSQLITE_CORE=1 statically links that module into the SQLite library.
+# -DSQLITE_DEFAULT_PAGE_SIZE=32768 and SQLITE_MAX_DEFAULT_PAGE_SIZE=32768
+# increases the page size from 1k, see bug 416330.  The value must stay in sync
+# with mozIStorageConnection::DEFAULT_PAGE_SIZE.
+# -DSQLITE_MAX_SCHEMA_RETRY increases the times SQLite may try to reparse
+# statements when the schema changes. This is important when supporting lots of
+# concurrent connections, especially when they use shared cache.
+# Note: Be sure to update the configure.in checks when these change!
+DEFINES = \
+  -DSQLITE_SECURE_DELETE=1 \
+  -DSQLITE_THREADSAFE=1 \
+  -DSQLITE_CORE=1 \
+  -DSQLITE_ENABLE_FTS3=1 \
+  -DSQLITE_ENABLE_UNLOCK_NOTIFY=1 \
+  -DSQLITE_DEFAULT_PAGE_SIZE=32768 \
+  -DSQLITE_MAX_DEFAULT_PAGE_SIZE=32768 \
+  -DSQLITE_MAX_SCHEMA_RETRY=25 \
+  $(NULL)
+
+# -DSQLITE_ENABLE_LOCKING_STYLE=1 to help with AFP folders
+ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
+DEFINES += -DSQLITE_ENABLE_LOCKING_STYLE=1
+endif
+
+# Turn on SQLite's assertions in debug builds.
+ifdef MOZ_DEBUG
+DEFINES += -DSQLITE_DEBUG=1
+endif
+
+# disable PGO for Sun Studio
+ifdef SOLARIS_SUNPRO_CC
+NO_PROFILE_GUIDED_OPTIMIZE = 1
+endif
+
+ifeq ($(OS_ARCH),OS2)
+ifdef MOZ_OS2_HIGH_MEMORY
+DEFINES += -DOS2_HIGH_MEMORY
+endif
+endif
+
+ifeq ($(OS_TARGET),Android)
+# default to user readable only to fit Android security model
+DEFINES += -DSQLITE_DEFAULT_FILE_PERMISSIONS=0600
+endif
+
+# Force using malloc_usable_size when building with jemalloc because _msize
+# causes assertions on Win64. See bug 719579.
+ifeq ($(OS_ARCH),WINNT)
+ifdef MOZ_MEMORY
+DEFINES += \
+  -DHAVE_MALLOC_USABLE_SIZE \
+  -DSQLITE_WITHOUT_MSIZE \
+  $(NULL)
+endif
+endif
+
+include $(topsrcdir)/config/rules.mk
+
+# next line allows use of MOZ_OBJDIR in .mozconfig with older gcc on BeOS, maybe others
+LOCAL_INCLUDES += -I$(srcdir)
+
+ifeq ($(OS_ARCH),OS2)
+ADD_TO_DEF_FILE = $(PYTHON) $(topsrcdir)/config/Preprocessor.py $(DEFINES) \
+       $(srcdir)/sqlite.def | sed -e '1,/^EXPORTS$$/ d' -e 's,sqlite3,_\0,' \
+       -e 's,\ DATA.*$$,,' >> $(DEF_FILE)
+endif

@@ -1,0 +1,52 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= xpcom
+LIBRARY_NAME	= xptcmd
+EXPORT_LIBRARY	= ../..
+MOZILLA_INTERNAL_API = 1
+
+LOCAL_INCLUDES += -I$(srcdir)/../../../../xptinfo/src
+
+
+include $(topsrcdir)/config/config.mk
+
+ifneq ($(TARGET_CPU),x86_64)
+
+ifndef GNU_CXX
+# FIXME: bug 413019
+OS_COMPILE_CXXFLAGS += -GL-
+CPPSRCS         := xptcinvoke.cpp xptcstubs.cpp
+else  #!GNU_CXX
+CPPSRCS         := xptcinvoke_x86_gnu.cpp xptcstubs.cpp
+endif #!GNU_CXX
+
+else # !x86_64
+
+ifndef GNU_CXX
+CPPSRCS		:= xptcinvoke_x86_64.cpp xptcstubs_x86_64.cpp
+ASFILES		:= xptcinvoke_asm_x86_64.asm xptcstubs_asm_x86_64.asm
+else #!GNU_CXX
+CPPSRCS		:= xptcinvoke_x86_64.cpp xptcstubs_x86_64_gnu.cpp
+ASFILES		:= xptcinvoke_asm_x86_64_gnu.s
+endif #!GNU_CXX
+
+endif #!x86_64
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/rules.mk
+
+DEFINES		+= -DEXPORT_XPTC_API -D_IMPL_NS_COM
+
+LOCAL_INCLUDES	+= -I$(srcdir)/../..

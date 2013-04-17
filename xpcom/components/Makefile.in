@@ -1,0 +1,68 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= xpcom
+XPIDL_MODULE	= xpcom_components
+LIBRARY_NAME	= xpcomcomponents_s
+GRE_MODULE	= 1
+LIBXUL_LIBRARY = 1
+MOZILLA_INTERNAL_API = 1
+
+EXPORTS_NAMESPACES = mozilla
+
+EXPORTS	= \
+  nsCategoryManagerUtils.h \
+  $(NULL)
+
+EXPORTS_mozilla = \
+  Module.h \
+  ModuleLoader.h \
+  ModuleUtils.h \
+  $(NULL)
+
+CPPSRCS		= \
+		nsCategoryManager.cpp \
+		nsComponentManager.cpp \
+		ManifestParser.cpp \
+		nsNativeComponentLoader.cpp \
+		$(NULL)
+
+SDK_XPIDLSRCS	= \
+		nsIClassInfo.idl	      \
+		nsIComponentRegistrar.idl     \
+		nsIFactory.idl		      \
+		nsIModule.idl		      \
+		nsIServiceManager.idl	      \
+		nsIComponentManager.idl       \
+		nsICategoryManager.idl        \
+		$(NULL)
+
+LOCAL_INCLUDES	= \
+	-I$(srcdir)/../reflect/xptinfo/src \
+	-I$(srcdir)/../base \
+	-I$(srcdir)/../ds \
+	-I$(srcdir)/../build \
+	-I.. \
+	-I$(topsrcdir)/chrome/src \
+	-I$(topsrcdir)/modules/libjar \
+	$(NULL)
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/rules.mk
+
+DEFINES	+= -D_IMPL_NS_COM
+
+ifneq (,$(filter gtk2,$(MOZ_WIDGET_TOOLKIT)))
+CXXFLAGS += $(MOZ_GTK2_CFLAGS)
+endif

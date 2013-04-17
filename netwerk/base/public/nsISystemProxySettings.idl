@@ -1,0 +1,29 @@
+/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+#include "nsIURI.idl"
+
+/** 
+ * This interface allows the proxy code to use platform-specific proxy
+ * settings when the proxy preference is set to "automatic discovery". This service
+ * acts like a PAC parser to netwerk, but it will actually read the system settings and
+ * either return the proper proxy data from the autoconfig URL specified in the system proxy,
+ * or generate proxy data based on the system's manual proxy settings.
+ */
+[scriptable, uuid(a9f3ae38-b769-4e0b-9317-578388e326c9)]
+interface nsISystemProxySettings : nsISupports
+{
+    /**
+     * If non-empty, use this PAC file. If empty, call getProxyForURI instead.
+     */
+    readonly attribute AUTF8String PACURI;
+    
+    /**
+     * See nsIProxyAutoConfig::getProxyForURI; this function behaves exactly
+     * the same way.
+     */
+    AUTF8String getProxyForURI(in nsIURI aURI);
+};

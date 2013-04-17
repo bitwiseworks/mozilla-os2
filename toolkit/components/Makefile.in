@@ -1,0 +1,91 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH     = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH     = @srcdir@
+
+include $(topsrcdir)/config/config.mk
+
+# These component dirs are built for all apps (including suite)
+
+ifdef MOZ_ENABLE_XREMOTE
+PARALLEL_DIRS += remote
+endif
+
+PARALLEL_DIRS += \
+  aboutmemory \
+  alerts \
+  apppicker \
+  commandlines \
+  console \
+  contentprefs \
+  cookie \
+  downloads \
+  exthelper \
+  filepicker \
+  find \
+  intl \
+  microformats \
+  osfile \
+  parentalcontrols \
+  passwordmgr \
+  perf \
+  places \
+  prompts \
+  reflect \
+  social \
+  startup \
+  statusfilter \
+  telemetry \
+  typeaheadfind \
+  urlformatter \
+  viewconfig \
+  viewsource \
+  $(NULL)
+
+ifdef BUILD_CTYPES
+PARALLEL_DIRS += \
+  ctypes \
+  $(NULL)
+endif
+
+ifdef MOZ_FEEDS
+PARALLEL_DIRS += feeds
+endif
+
+ifdef MOZ_HELP_VIEWER
+PARALLEL_DIRS += help
+endif
+
+ifdef NS_PRINTING
+PARALLEL_DIRS += printing
+endif
+
+ifdef MOZ_XUL
+PARALLEL_DIRS += \
+  autocomplete \
+  satchel \
+  $(NULL)
+endif
+
+ifdef MOZ_TOOLKIT_SEARCH
+PARALLEL_DIRS += search
+endif
+
+ifdef MOZ_URL_CLASSIFIER
+PARALLEL_DIRS += url-classifier
+endif
+
+DIRS += \
+  build \
+  $(NULL)
+
+EXTRA_COMPONENTS = \
+  nsDefaultCLH.manifest \
+  nsDefaultCLH.js \
+  $(NULL)
+
+include $(topsrcdir)/config/rules.mk

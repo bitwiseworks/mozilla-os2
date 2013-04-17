@@ -1,0 +1,57 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH            = @DEPTH@
+topsrcdir        = @top_srcdir@
+srcdir           = @srcdir@
+VPATH            = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE           = autoconfig
+LIBRARY_NAME     = autoconfig
+SHORT_LIBNAME    = autocfg
+EXPORT_LIBRARY   = 1
+IS_COMPONENT     = 1
+MODULE_NAME      = nsAutoConfigModule
+LIBXUL_LIBRARY   = 1
+
+
+include $(topsrcdir)/config/config.mk
+
+CPPSRCS          = nsReadConfig.cpp    \
+                   nsAutoConfig.cpp    \
+                   nsConfigFactory.cpp \
+                   nsJSConfigTriggers.cpp \
+                   $(NULL)
+
+ifdef MOZ_LDAP_XPCOM
+DEFINES          += -DMOZ_LDAP_XPCOM
+CPPSRCS          += nsLDAPSyncQuery.cpp
+endif
+
+AUTOCFG_JS_EXPORTS = \
+		$(srcdir)/prefcalls.js \
+		$(NULL)
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+AUTOCFG_JS_EXPORTS += $(srcdir)/mac/platform.js
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT), windows)
+AUTOCFG_JS_EXPORTS += $(srcdir)/win/platform.js
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT), os2)
+AUTOCFG_JS_EXPORTS += $(srcdir)/os2/platform.js
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT), beos)
+AUTOCFG_JS_EXPORTS += $(srcdir)/beos/platform.js
+else
+AUTOCFG_JS_EXPORTS += $(srcdir)/unix/platform.js
+endif
+endif
+endif
+endif
+
+include $(topsrcdir)/config/rules.mk
+

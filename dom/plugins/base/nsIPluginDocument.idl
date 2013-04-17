@@ -1,0 +1,29 @@
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+#include "nsIStreamListener.idl"
+
+[uuid(e4be1d0a-9f24-4d69-bec5-245726ab85fb)]
+interface nsIPluginDocument : nsISupports
+{
+ /**
+  * Sets the stream listener for this plugin document 
+  */
+  void setStreamListener(in nsIStreamListener aStreamListener);
+
+  
+ /**
+  * Causes the plugin to print in full-page mode
+  */
+  void print();
+
+  /**
+   * Check whether the document is planning to handle plug-in instantiation
+   * itself.  If not, then the plugin content node should do it.
+   */
+  // XXXbz once we move plug-in loading to content, this can go away.
+  readonly attribute boolean willHandleInstantiation;
+};

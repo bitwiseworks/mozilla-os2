@@ -1,0 +1,46 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+relativesrcdir = @relativesrcdir@
+
+MOCHITEST_CHROME_FILES =	\
+		CharsetDetectionTests.js \
+		bug9357_text.html \
+		test_bug9357.html \
+		bug171813_text.html \
+		test_bug171813.html \
+		bug306272_text.html \
+		test_bug306272.html \
+		bug421271_text.html \
+		test_bug421271.html \
+		bug426271_text-euc-jp.html \
+		test_bug426271-euc-jp.html \
+		bug426271_text-utf-8.html \
+		test_bug426271-utf-8.html \
+		bug431054_text.html \
+		test_bug431054.html \
+		test_bug431054-japanese.html \
+		bug488426_text.html \
+		test_bug488426.html \
+		bug547487_text.html \
+		test_bug547487.html \
+		bug620106_text.html \
+		test_bug620106.html \
+		bug631751le_text.html \
+		test_bug631751le.html \
+		bug631751be_text.html \
+		test_bug631751be.html \
+		bug638318_text.html \
+		test_bug638318.html \
+		$(NULL)
+
+include $(topsrcdir)/config/rules.mk

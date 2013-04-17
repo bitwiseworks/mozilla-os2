@@ -1,0 +1,155 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+TEST_DIRS += tests
+
+MODULE		= layout
+XPIDL_MODULE	= layout_base
+GRE_MODULE	= 1
+LIBRARY_NAME	= gkbase_s
+LIBXUL_LIBRARY	= 1
+
+
+
+XPIDLSRCS	= \
+		nsIStyleSheetService.idl	\
+		$(NULL)
+
+EXPORTS_NAMESPACES = mozilla
+
+EXPORTS		= \
+		FrameLayerBuilder.h \
+		FramePropertyTable.h \
+		nsArenaMemoryStats.h \
+		nsBidi.h \
+		nsBidiPresUtils.h \
+		nsCaret.h \
+		nsCSSFrameConstructor.h \
+		nsChangeHint.h \
+		nsCompatibility.h \
+		nsDisplayItemTypes.h \
+		nsDisplayList.h \
+		nsFrameManager.h \
+		nsFrameManagerBase.h \
+		nsFrameTraversal.h \
+		nsIFrameTraversal.h \
+		nsILayoutDebugger.h \
+		nsILayoutHistoryState.h \
+		nsIPercentHeightObserver.h  \
+		nsIPresShell.h \
+		nsIReflowCallback.h \
+		nsLayoutUtils.h \
+		nsPresArena.h \
+		nsPresContext.h \
+		nsPresState.h \
+		nsRefreshDriver.h \
+		nsStyleChangeList.h \
+		nsStyleConsts.h \
+		StackArena.h \
+		$(NULL)
+
+EXPORTS_mozilla = \
+  PaintTracker.h \
+  $(NULL)
+
+CPPSRCS		= \
+		FrameLayerBuilder.cpp \
+		MaskLayerImageCache.cpp \
+		FramePropertyTable.cpp \
+		RestyleTracker.cpp \
+		nsCSSColorUtils.cpp \
+		nsCSSFrameConstructor.cpp \
+		nsCSSRendering.cpp \
+		nsCSSRenderingBorders.cpp \
+		nsCaret.cpp \
+		nsChildIterator.cpp \
+		nsCounterManager.cpp \
+		nsDisplayList.cpp \
+		nsDocumentViewer.cpp \
+		nsFrameManager.cpp \
+		nsFrameTraversal.cpp \
+		nsGenConList.cpp \
+		nsLayoutDebugger.cpp \
+		nsLayoutHistoryState.cpp \
+		nsLayoutUtils.cpp \
+		nsPresArena.cpp \
+		nsPresContext.cpp \
+		nsPresShell.cpp \
+		nsQuoteList.cpp \
+		nsRefreshDriver.cpp \
+		nsStyleChangeList.cpp \
+		nsStyleSheetService.cpp \
+		PaintTracker.cpp \
+		StackArena.cpp \
+		$(NULL)
+
+ifndef MOZ_XUL
+XPIDLSRCS  += \
+		nsIBoxObject.idl \
+		$(NULL)
+EXPORTS    += \
+		nsPIBoxObject.h \
+		$(NULL)
+CPPSRCS    += \
+		nsBoxObject.cpp \
+		$(NULL)
+endif
+
+ifdef IBMBIDI
+CPPSRCS		+= \
+		nsBidiPresUtils.cpp \
+		nsBidi.cpp \
+		$(NULL)
+endif                
+
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/rules.mk
+
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+
+LOCAL_INCLUDES += \
+		-I$(srcdir) \
+		-I$(srcdir)/../style \
+		-I$(srcdir)/../generic \
+		-I$(srcdir)/../forms \
+		-I$(srcdir)/../tables \
+		-I$(srcdir)/../printing \
+		-I$(srcdir)/../xul/base/src \
+		-I$(srcdir)/../xul/base/src/tree/src \
+		-I$(srcdir)/../../content/base/src \
+		-I$(srcdir)/../../content/events/src \
+		-I$(srcdir)/../../content/xbl/src \
+		-I$(srcdir)/../../view/src \
+		-I$(srcdir)/../../dom/base \
+		-I$(srcdir)/../../content/html/content/src \
+		-I$(srcdir)/../../content/svg/content/src \
+		-I$(topsrcdir)/xpcom/ds \
+		-I$(srcdir)/../svg/base/src \
+		-I$(srcdir)/../mathml \
+		$(NULL)
+
+CXXFLAGS += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS)
+
+DEFINES += -D_IMPL_NS_LAYOUT
+DEFINES += -DHB_DONT_DEFINE_STDINT
+
+ifndef MOZ_XUL
+nsIBoxObject.idl: %: $(topsrcdir)/layout/xul/base/public/%
+	$(INSTALL) $^ .
+nsPIBoxObject.h: %: $(topsrcdir)/layout/xul/base/public/%
+	$(INSTALL) $^ .
+nsBoxObject.cpp: %: $(topsrcdir)/layout/xul/base/src/%
+	$(INSTALL) $^ .
+
+GARBAGE    += nsIBoxObject.idl nsPIBoxObject.h nsBoxObject.cpp
+endif

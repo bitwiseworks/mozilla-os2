@@ -1,0 +1,64 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface nsIArray;
+interface nsISupportsArray;
+interface nsIDOMCharacterData;
+interface nsIDOMElement;
+interface nsIDOMDocument;
+interface nsIDOMCSSStyleRule;
+interface nsIDOMNode;
+interface nsIDOMNodeList;
+interface nsIDOMFontFaceList;
+interface nsIDOMRange;
+interface nsIDOMCSSStyleSheet;
+
+[scriptable, uuid(f7a37305-a963-4a2a-b951-2c97a6b27fb4)]
+interface inIDOMUtils : nsISupports
+{
+  // CSS utilities
+  nsISupportsArray getCSSStyleRules(in nsIDOMElement aElement, [optional] in DOMString aPseudo);
+  unsigned long getRuleLine(in nsIDOMCSSStyleRule aRule);
+
+  // Returns true if the string names a property that is inherited by default.
+  bool isInheritedProperty(in AString aPropertyName);
+
+  // DOM Node utilities
+  boolean isIgnorableWhitespace(in nsIDOMCharacterData aDataNode);
+  // Returns the "parent" of a node.  The parent of a document node is the
+  // frame/iframe containing that document.  aShowingAnonymousContent says
+  // whether we are showing anonymous content.
+  nsIDOMNode getParentForNode(in nsIDOMNode aNode,
+                              in boolean aShowingAnonymousContent);
+  nsIDOMNodeList getChildrenForNode(in nsIDOMNode aNode,
+                                    in boolean aShowingAnonymousContent);
+  
+  // XBL utilities
+  nsIArray getBindingURLs(in nsIDOMElement aElement);
+
+  // content state utilities
+  unsigned long long getContentState(in nsIDOMElement aElement);
+  void setContentState(in nsIDOMElement aElement, in unsigned long long aState);
+
+  nsIDOMFontFaceList getUsedFontFaces(in nsIDOMRange aRange);
+
+  // pseudo-class style locking methods. aPseudoClass must be a valid pseudo-class
+  // selector string, e.g. ":hover". ":-moz-any-link" and non-event-state
+  // pseudo-classes are ignored.
+  void addPseudoClassLock(in nsIDOMElement aElement, in DOMString aPseudoClass);
+  void removePseudoClassLock(in nsIDOMElement aElement, in DOMString aPseudoClass);
+  bool hasPseudoClassLock(in nsIDOMElement aElement, in DOMString aPseudoClass);
+  void clearPseudoClassLocks(in nsIDOMElement aElement);
+
+  /**
+   * Parse CSS and update the style sheet in place.
+   *
+   * @param DOMCSSStyleSheet aSheet
+   * @param DOMString aInput
+   *        The new source string for the style sheet.
+   */
+  void parseStyleSheet(in nsIDOMCSSStyleSheet aSheet, in DOMString aInput);
+};

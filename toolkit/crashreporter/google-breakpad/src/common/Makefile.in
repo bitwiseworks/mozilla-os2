@@ -1,0 +1,67 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= breakpad_common
+LIBRARY_NAME	= breakpad_common_s
+HOST_LIBRARY_NAME = host_breakpad_common_s
+
+LOCAL_INCLUDES 	= -I$(srcdir)/..
+
+ifeq (,$(filter-out Darwin Linux,$(OS_ARCH)))
+DIRS = dwarf
+endif
+
+CPPSRCS	= \
+  string_conversion.cc \
+  md5.cc \
+  $(NULL)
+
+CSRCS = \
+  convert_UTF.c \
+  $(NULL)
+
+HOST_CPPSRCS = $(CPPSRCS)
+HOST_CPPSRCS += \
+  dwarf_cfi_to_module.cc \
+  dwarf_cu_to_module.cc \
+  dwarf_line_to_module.cc \
+  language.cc \
+  module.cc \
+  stabs_reader.cc \
+  stabs_to_module.cc \
+  $(NULL)
+
+ifdef MOZ_PLATFORM_MAEMO
+# The GCC in scratchbox crashes writing DWARF debug info for language.cc.
+# Since we don't really need debug symbols for the host tools anyway,
+# just get rid of debug options.
+HOST_CXXFLAGS = $(patsubst -g%,,$(CXXFLAGS))
+endif
+
+# This kind of sucks.
+ifeq (Linux,$(OS_ARCH))
+HOST_CXXFLAGS += -DHAVE_A_OUT_H
+endif
+ifeq (Darwin,$(OS_ARCH))
+HOST_CXXFLAGS += -DHAVE_MACH_O_NLIST_H
+endif
+
+HOST_CSRCS = $(CSRCS)
+
+# need static lib
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/rules.mk
+
+# Headers from this directory are included as "common/header.h". Having
+# -I$(srcdir) on the command line makes us use common/memory.h when
+# <memory.h> is included from system headers, which is not intended.
+INCLUDES = $(LOCAL_INCLUDES) -I$(DIST)/include

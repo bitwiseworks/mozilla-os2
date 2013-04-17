@@ -1,0 +1,96 @@
+#filter substitution
+package @ANDROID_PACKAGE_NAME@.tests;
+
+import @ANDROID_PACKAGE_NAME@.*;
+import android.app.Activity;
+import android.util.DisplayMetrics;
+
+public class testWebContentContextMenu extends BaseTest {
+    @Override
+    protected int getTestType() {
+        return TEST_MOCHITEST;
+    }
+
+    public void testWebContentContextMenu() {
+        mActions.expectGeckoEvent("Gecko:Ready").blockForEvent();
+
+        DisplayMetrics dm = new DisplayMetrics();
+        getActivity().getWindowManager().getDefaultDisplay().getMetrics(dm);
+
+        // The link has a 60px height, so let's try to hit the middle
+        float top = mDriver.getGeckoTop() + 30 * dm.density;
+        float left = mDriver.getGeckoLeft() + mDriver.getGeckoWidth() / 2;
+
+        // Load the test page and check for 'Open Link'
+        String url = getAbsoluteUrl("/robocop/robocop_big_link.html");
+        loadUrl(url);
+
+        mSolo.clickLongOnScreen(left, top);
+
+        mAsserter.ok(mSolo.waitForText("Open"), "looking for context menu action", "found 'Open Link'");
+
+        Actions.EventExpecter tabEventExpecter = mActions.expectGeckoEvent("Tab:Added");
+        Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
+        mSolo.clickOnText("Open");
+
+        // Wait for the new tab and page to load
+        tabEventExpecter.blockForEvent();
+        contentEventExpecter.blockForEvent();
+
+        // See tab count
+        Element tabCount = mDriver.findElement(getActivity(), "tabs_count");
+        String tabCountText = null;
+        if (tabCount != null) {
+            tabCountText = tabCount.getText();
+        }
+        mAsserter.is(tabCountText, "2", "Number of tabs has increased");
+
+        // Load the test page again and test for 'Share Link' and 'Bookmark Link'
+        loadUrl(url);
+
+        mSolo.clickLongOnScreen(left, top);
+
+        mAsserter.ok(mSolo.waitForText("Share"), "looking for context menu action", "found 'Share Link'");        
+        mAsserter.ok(mSolo.waitForText("Bookmark"), "looking for context menu action", "found 'Bookmark Link'");
+        mSolo.clickOnText("Bookmark");
+        mAsserter.is(mSolo.waitForText("Bookmark added"), true, "Bookmark added verified");
+
+        // This waitForIdleSync improves reliability of the following loadUrl.
+        // TODO: understand why!
+        getInstrumentation().waitForIdleSync();
+
+        // We know that the link test page points to robocop_blank_01.html, so lets
+        // load it and see if the page is bookmarked
+        url = getAbsoluteUrl("/robocop/robocop_blank_01.html");
+        loadUrl(url);
+
+        // Pause briefly, to ensure that the bookmark addition, above, updates database tables and
+        // completes before checking that the bookmark exists.
+        // TODO: Find a better way to wait for completion of bookmark operations.
+        try { Thread.sleep(2000); } catch(Exception e) {}
+
+        mActions.sendSpecialKey(Actions.SpecialKey.MENU);
+        mSolo.waitForText("Bookmark");
+
+        // TODO: This doesn't work for some reason. We got a 'Bookmark added' and
+        // will check for 'Bookmark removed'
+        mAsserter.todo_is(mSolo.isTextChecked("Bookmark"), true, "Page is bookmarked");
+
+        mSolo.clickOnText("Bookmark");
+        mAsserter.is(mSolo.waitForText("Bookmark removed"), true, "Bookmark removal verified");
+
+        // This waitForIdleSync improves reliability of the following loadUrl.
+        // TODO: understand why!
+        getInstrumentation().waitForIdleSync();
+
+        // Load the mailto test page again and test for allowed menu actions
+        url = getAbsoluteUrl("/robocop/robocop_big_mailto.html");
+        loadUrl(url);
+
+        mSolo.clickLongOnScreen(left, top);
+
+        mAsserter.ok(mSolo.waitForText("Share"), "looking for context menu action", "found 'Share Link'");        
+        mAsserter.ok(!mSolo.waitForText("Open", 0, 1000, false), "looking for context menu action", "did not find 'Open Link'");        
+        mAsserter.ok(!mSolo.waitForText("Bookmark", 0, 1000, false), "looking for context menu action", "did not find 'Bookmark Link'");
+    }
+}

@@ -1,0 +1,114 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = places
+
+XPIDLSRCS = \
+  nsINavHistoryService.idl \
+  $(NULL)
+
+ifdef MOZ_PLACES
+LIBRARY_NAME  = places
+LIBXUL_LIBRARY = 1
+EXPORT_LIBRARY = 1
+MODULE_NAME = nsPlacesModule
+IS_COMPONENT = 1
+
+XPIDLSRCS += \
+  mozIAsyncHistory.idl \
+  mozIAsyncFavicons.idl \
+  mozIAsyncLivemarks.idl \
+  mozIPlacesAutoComplete.idl \
+  mozIColorAnalyzer.idl \
+  nsIAnnotationService.idl \
+  nsIBrowserHistory.idl \
+  nsIFaviconService.idl \
+  nsILivemarkService.idl \
+  nsINavBookmarksService.idl \
+  nsIPlacesImportExportService.idl \
+  nsITaggingService.idl  \
+  nsPIPlacesDatabase.idl \
+  nsPIPlacesHistoryListenersNotifier.idl \
+  $(NULL)
+
+EXPORTS_NAMESPACES = mozilla/places
+
+EXPORTS_mozilla/places = \
+  History.h \
+  Database.h \
+  $(NULL)
+
+CPPSRCS = \
+  nsAnnoProtocolHandler.cpp \
+  nsAnnotationService.cpp \
+  nsFaviconService.cpp \
+  nsNavHistory.cpp \
+  nsNavHistoryQuery.cpp \
+  nsNavHistoryResult.cpp \
+  nsNavBookmarks.cpp \
+  nsMaybeWeakPtr.cpp \
+  nsPlacesModule.cpp \
+  SQLFunctions.cpp \
+  Helpers.cpp \
+  History.cpp \
+  nsPlacesExportService.cpp \
+  AsyncFaviconHelpers.cpp \
+  PlaceInfo.cpp \
+  VisitInfo.cpp \
+  Database.cpp \
+  $(NULL)
+
+LOCAL_INCLUDES += -I$(srcdir)/../build
+
+ifdef MOZ_ANDROID_HISTORY
+CPPSRCS += nsAndroidHistory.cpp
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/docshell/base \
+  -I$(topsrcdir)/content/base/src \
+  $(NULL)
+endif
+
+ifndef MOZ_ANDROID_HISTORY
+EXTRA_COMPONENTS = \
+  toolkitplaces.manifest \
+  nsLivemarkService.js \
+  nsTaggingService.js \
+  nsPlacesExpiration.js \
+  PlacesCategoriesStarter.js \
+  ColorAnalyzer.js \
+  $(NULL)
+
+ifdef MOZ_XUL
+EXTRA_COMPONENTS += nsPlacesAutoComplete.js nsPlacesAutoComplete.manifest
+endif
+
+EXTRA_JS_MODULES = \
+  PlacesDBUtils.jsm \
+  BookmarkHTMLUtils.jsm \
+  ColorAnalyzer_worker.js \
+  ColorConversion.js \
+  ClusterLib.js \
+  $(NULL)
+
+EXTRA_PP_JS_MODULES = \
+  PlacesUtils.jsm \
+  $(NULL)
+
+TEST_DIRS += tests
+endif
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+
+endif
+
+include $(topsrcdir)/config/rules.mk

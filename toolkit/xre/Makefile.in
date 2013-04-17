@@ -1,0 +1,266 @@
+# -*- makefile -*-
+# vim:set ts=8 sw=8 sts=8 noet:
+
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH     = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH     = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+milestone_txt = $(topsrcdir)/config/milestone.txt
+
+MODULE = xulapp
+LIBRARY_NAME = xulapp_s
+LIBXUL_LIBRARY = 1
+
+FORCE_STATIC_LIB = 1
+
+XPIDLSRCS = \
+  nsINativeAppSupport.idl \
+  $(NULL)
+
+ifeq ($(OS_ARCH),WINNT)
+XPIDLSRCS += nsIWinAppHelper.idl
+endif
+
+CPPSRCS = \
+  nsAppRunner.cpp \
+  nsConsoleWriter.cpp \
+  nsXREDirProvider.cpp \
+  nsNativeAppSupportBase.cpp \
+  CreateAppData.cpp \
+  nsSigHandlers.cpp \
+  nsEmbedFunctions.cpp \
+  ProfileReset.cpp \
+  $(NULL)
+
+ifeq ($(MOZ_GL_DEFAULT_PROVIDER),GLX)
+DEFINES += -DUSE_GLX_TEST
+CPPSRCS += glxtest.cpp
+endif
+
+ifdef MOZ_INSTRUMENT_EVENT_LOOP
+CPPSRCS += EventTracer.cpp
+EXPORTS += EventTracer.h
+endif
+
+DEFINES += -DIMPL_XREAPI \
+  -DMOZ_APP_NAME='"$(MOZ_APP_NAME)"' \
+  -DMOZ_APP_VERSION='"$(MOZ_APP_VERSION)"'
+
+ifdef MOZ_UPDATER
+ifneq (android,$(MOZ_WIDGET_TOOLKIT))
+CPPSRCS += nsUpdateDriver.cpp
+DEFINES += -DMOZ_UPDATER
+endif
+endif
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+CPPSRCS += nsNativeAppSupportWin.cpp
+CPPSRCS += nsWindowsDllBlocklist.cpp
+DEFINES += -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE
+EXPORTS += nsWindowsDllInterceptor.h
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
+CMMSRCS = nsNativeAppSupportCocoa.mm
+EXPORTS += MacQuirks.h
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
+CPPSRCS += nsNativeAppSupportOS2.cpp
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+CPPSRCS += nsNativeAppSupportUnix.cpp
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),qt)
+MOCSRCS += moc_nsNativeAppSupportQt.cpp
+CPPSRCS += $(MOCSRCS)
+CPPSRCS += nsNativeAppSupportQt.cpp
+CPPSRCS += nsQAppInstance.cpp
+EXPORTS += nsQAppInstance.h
+else
+CPPSRCS += nsNativeAppSupportDefault.cpp
+endif
+endif
+endif
+endif
+endif
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
+CMMSRCS += MacLaunchHelper.mm
+CMMSRCS += MacApplicationDelegate.mm
+CMMSRCS += MacAutoreleasePool.mm
+CPPSRCS += nsCommandLineServiceMac.cpp
+ENABLE_CXX_EXCEPTIONS = 1
+endif
+
+ifdef MOZ_X11
+CPPSRCS += nsX11ErrorHandler.cpp
+endif
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),android)
+CPPSRCS += nsAndroidStartup.cpp
+DEFINES += -DANDROID_PACKAGE_NAME='"$(ANDROID_PACKAGE_NAME)"'
+endif
+
+SHARED_LIBRARY_LIBS += \
+  ../profile/$(LIB_PREFIX)profile_s.$(LIB_SUFFIX) \
+  $(NULL)
+
+ifdef MOZ_UPDATER
+ifneq (android,$(MOZ_WIDGET_TOOLKIT))
+SHARED_LIBRARY_LIBS += \
+  ../mozapps/update/common/$(LIB_PREFIX)updatecommon.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+endif
+
+ifdef MOZ_ENABLE_XREMOTE
+SHARED_LIBRARY_LIBS += $(DEPTH)/widget/xremoteclient/$(LIB_PREFIX)xremote_client_s.$(LIB_SUFFIX)
+LOCAL_INCLUDES += -I$(topsrcdir)/widget/xremoteclient
+endif
+
+ifdef MOZ_CRASHREPORTER
+SHARED_LIBRARY_LIBS += $(DEPTH)/toolkit/crashreporter/$(LIB_PREFIX)exception_handler_s.$(LIB_SUFFIX)
+ifeq ($(OS_ARCH),WINNT)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/breakpad-windows-libxul/$(LIB_PREFIX)google_breakpad_libxul_s.$(LIB_SUFFIX)
+endif
+
+ifeq ($(OS_ARCH),Darwin)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/$(LIB_PREFIX)minidump_file_writer_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/mac/crash_generation/$(LIB_PREFIX)crash_generation_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/mac/handler/$(LIB_PREFIX)exception_handler_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/$(LIB_PREFIX)breakpad_common_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/mac/$(LIB_PREFIX)breakpad_mac_common_s.$(LIB_SUFFIX)
+endif
+
+ifeq ($(OS_ARCH),Linux)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/linux/crash_generation/$(LIB_PREFIX)crash_generation_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/linux/handler/$(LIB_PREFIX)exception_handler_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/linux/minidump_writer/$(LIB_PREFIX)minidump_writer_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/$(LIB_PREFIX)minidump_file_writer_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/$(LIB_PREFIX)breakpad_common_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/linux/$(LIB_PREFIX)breakpad_linux_common_s.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+
+ifeq ($(OS_ARCH),SunOS)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/solaris/handler/$(LIB_PREFIX)exception_handler_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/$(LIB_PREFIX)minidump_file_writer_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/$(LIB_PREFIX)breakpad_common_s.$(LIB_SUFFIX) \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/solaris/$(LIB_PREFIX)breakpad_solaris_common_s.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+endif
+
+TEST_DIRS += test
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/dom/ipc \
+  -I$(topsrcdir)/toolkit/crashreporter \
+  -I$(topsrcdir)/dom/base \
+  -I$(topsrcdir)/xpcom/build \
+  -I$(topsrcdir)/xpcom/io \
+  $(NULL)
+
+LOCAL_INCLUDES += \
+  -I$(srcdir) \
+  -I$(srcdir)/../profile \
+  -I$(topsrcdir)/config \
+  $(NULL)
+
+CXXFLAGS += $(TK_CFLAGS) $(MOZ_DBUS_CFLAGS) $(MOZ_DBUS_GLIB_CFLAGS)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+CXXFLAGS += $(MOZ_PANGO_CFLAGS)
+endif
+
+DEFINES += \
+  -DOS_TARGET=\"$(OS_TARGET)\" \
+  -DMOZ_WIDGET_TOOLKIT=\"$(MOZ_WIDGET_TOOLKIT)\"
+
+ifdef TARGET_XPCOM_ABI
+DEFINES += \
+  -DTARGET_XPCOM_ABI=\"$(TARGET_XPCOM_ABI)\" \
+  -DTARGET_OS_ABI=\"$(OS_TARGET)_$(TARGET_XPCOM_ABI)\" \
+  $(NULL)
+endif
+
+# Should version be optional or required ?
+TOOLKIT_EM_VERSION=$(shell $(PERL) $(topsrcdir)/config/milestone.pl --topsrcdir=$(topsrcdir))
+$(call warnIfEmpty,TOOLKIT_EM_VERSION)
+
+# Valid if null: {warn,error}IfEmpty
+DEFINES += -DTOOLKIT_EM_VERSION=\"$(TOOLKIT_EM_VERSION)\"
+
+ifdef WRAP_SYSTEM_INCLUDES
+DEFINES += -DWRAP_SYSTEM_INCLUDES
+endif
+
+ifeq ($(OS_ARCH),Linux)
+ifneq (,$(findstring lib64,$(libdir)))
+DEFINES += -DHAVE_USR_LIB64_DIR
+endif
+endif
+
+MOZ_SOURCE_STAMP ?= $(firstword $(shell hg -R $(topsrcdir) parent --template="{node|short}\n" 2>/dev/null))
+ifdef MOZ_SOURCE_STAMP
+
+  INIARGS = --sourcestamp=$(MOZ_SOURCE_STAMP)
+
+  # strip a trailing slash from the repo URL because it's not always present,
+  # and we want to construct a working URL in buildconfig.html
+  SOURCE_REPO := $(firstword $(shell hg --repository $(topsrcdir) showconfig paths.default 2>/dev/null))
+  SOURCE_REPO := $(strip $(SOURCE_REPO))
+  SOURCE_REPO := $(patsubst ssh://%,http://%,$(SOURCE_REPO))
+  SOURCE_REPO := $(patsubst %/,%,$(SOURCE_REPO))
+
+  # command set should change based on revision control use.
+  # warn for now in case (git, bzr, ...) is in use.
+  $(call warnIfEmpty,SOURCE_REPO) 
+
+  # extra sanity check for old versions of hg, no showconfig support
+  ifeq (http,$(patsubst http%,http,$(SOURCE_REPO)))
+    INIARGS += --sourcerepo=$(SOURCE_REPO)
+  endif
+
+endif # MOZ_SOURCE_STAMP
+
+GRE_MILESTONE := $(strip $(lastword $(shell cat $(milestone_txt) 2>/dev/null)))
+GRE_BUILDID   := $(strip $(firstword $(shell cat $(DEPTH)/config/buildid 2>/dev/null)))
+$(call errorIfEmpty,GRE_MILESTONE GRE_BUILDID)
+
+DEFINES += -DGRE_MILESTONE=$(GRE_MILESTONE) -DGRE_BUILDID=$(GRE_BUILDID)
+
+ifdef MOZILLA_OFFICIAL
+DEFINES += -DMOZILLA_OFFICIAL
+endif
+
+DEFINES += -DAPP_VERSION=$(MOZ_APP_VERSION)
+
+DEFINES += -DAPP_ID=$(MOZ_APP_ID)
+
+$(srcdir)/nsAppRunner.cpp: $(DEPTH)/config/buildid $(milestone_txt)
+
+platform.ini: FORCE
+	$(PYTHON) $(srcdir)/make-platformini.py --buildid=$(GRE_BUILDID) $(INIARGS) $(milestone_txt) > $@
+
+GARBAGE += platform.ini
+
+libs:: platform.ini
+	$(INSTALL) $^ $(DIST)/bin
+
+install::
+	$(INSTALL) $(IFLAGS1) $^ $(DESTDIR)$(mozappdir)

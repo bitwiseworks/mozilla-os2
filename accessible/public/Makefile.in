@@ -1,0 +1,50 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH   = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH   = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+DIRS = msaa ia2
+endif
+
+MODULE    = accessibility
+XPIDL_MODULE= accessibility
+GRE_MODULE	= 1
+
+XPIDLSRCS = \
+      nsIAccessibleTypes.idl \
+      nsIAccessibleRetrieval.idl \
+      nsIAccessible.idl \
+      nsIAccessibleApplication.idl \
+      nsIAccessibleRelation.idl \
+      nsIAccessibleRole.idl \
+      nsIAccessibleStates.idl \
+      nsIAccessibleDocument.idl \
+      nsIAccessibleProvider.idl \
+      nsIAccessibleSelectable.idl \
+      nsIAccessibleCursorable.idl \
+      nsIAccessibleEvent.idl \
+      nsIAccessibleEditableText.idl \
+      nsIAccessibleHyperLink.idl \
+      nsIAccessibleHyperText.idl \
+      nsIAccessiblePivot.idl \
+      nsIAccessibleTable.idl \
+      nsIAccessibleText.idl \
+      nsIAccessibleValue.idl \
+      nsIAccessibleImage.idl \
+      nsIXBLAccessible.idl \
+      $(NULL)
+
+EXPORTS		= \
+      nsIAccessibilityService.h \
+      $(NULL)
+
+include $(topsrcdir)/config/rules.mk
+

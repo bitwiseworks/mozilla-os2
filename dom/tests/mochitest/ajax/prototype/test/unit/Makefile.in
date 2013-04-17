@@ -1,0 +1,37 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+relativesrcdir	= @relativesrcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+DIRS = 	\
+	fixtures \
+	tmp \
+	$(NULL)
+
+MOCHITEST_FILES	= \
+	ajax_test.js \
+	array_test.js \
+	base_test.js \
+	dom_test.js \
+	element_mixins_test.js \
+	enumerable_test.js \
+	event_test.js \
+	form_test.js \
+	hash_test.js \
+	number_test.js \
+	position_test.js \
+	range_test.js \
+	selector_test.js \
+	string_test.js \
+	unittest_test.js \
+	$(NULL)
+
+include $(topsrcdir)/config/rules.mk

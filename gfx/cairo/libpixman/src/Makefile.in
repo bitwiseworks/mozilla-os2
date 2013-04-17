@@ -1,0 +1,158 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= libpixman
+LIBRARY_NAME	= mozlibpixman
+LIBXUL_LIBRARY = 1
+
+ifeq ($(OS_TARGET),Android)
+MODULE_OPTIMIZE_FLAGS = -O2
+endif
+
+DEFINES += -DPIXMAN_NO_TLS
+
+# Build MMX code either with VC or with gcc-on-x86
+ifdef _MSC_VER
+ifeq (86,$(findstring 86,$(OS_TEST)))
+ifneq (64,$(findstring 64,$(OS_TEST)))
+USE_MMX=1
+endif
+USE_SSE2=1
+MMX_CFLAGS=
+ifneq (,$(filter 1400 1500, $(_MSC_VER)))
+# MSVC 2005 and 2008 generate code that breaks alignment
+# restrictions in debug mode so always optimize.
+# See bug 640250 for more info.
+SSE2_CFLAGS=-O2
+else
+SSE2_CFLAGS=
+endif
+endif
+ifeq (arm,$(findstring arm,$(OS_TEST)))
+USE_ARM_SIMD_MSVC=1
+endif
+endif
+
+ifdef GNU_CC
+ifeq (86,$(findstring 86,$(OS_TEST)))
+USE_MMX=1
+MMX_CFLAGS=-mmmx -Winline
+ifeq (64,$(findstring 64,$(OS_TEST)))
+USE_SSE2=1
+endif
+ifdef HAVE_GCC_ALIGN_ARG_POINTER
+USE_SSE2=1
+endif
+ifdef USE_SSE2
+SSE2_CFLAGS=-msse -msse2 -Winline
+endif
+ifneq ($(MOZ_WIDGET_TOOLKIT),os2)
+MMX_CFLAGS+=--param inline-unit-growth=10000 --param large-function-growth=10000
+endif
+endif
+ifeq (arm,$(findstring arm,$(OS_TEST)))
+# Apple's arm assembler doesn't support the same syntax as
+# the standard GNU assembler, so use the C fallback paths for now.
+# This may be fixable if clang's ARM/iOS assembler improves into a
+# viable solution in the future.
+ifneq (Darwin,$(OS_ARCH))
+ifdef HAVE_ARM_SIMD
+USE_ARM_SIMD_GCC=1
+endif
+ifdef HAVE_ARM_NEON
+USE_ARM_NEON_GCC=1
+endif
+endif
+endif
+
+endif
+
+
+CSRCS	= \
+	pixman-access.c \
+	pixman-access-accessors.c \
+	pixman-bits-image.c \
+	pixman.c \
+	pixman-combine16.c \
+	pixman-combine32.c \
+	pixman-combine64.c \
+	pixman-conical-gradient.c \
+	pixman-cpu.c \
+	pixman-edge.c \
+	pixman-edge-accessors.c \
+	pixman-fast-path.c \
+	pixman-general.c \
+	pixman-gradient-walker.c \
+	pixman-image.c \
+	pixman-implementation.c \
+	pixman-linear-gradient.c \
+	pixman-matrix.c \
+	pixman-noop.c \
+	pixman-radial-gradient.c \
+	pixman-region16.c \
+	pixman-region32.c \
+	pixman-solid-fill.c \
+	pixman-trap.c \
+	pixman-utils.c \
+	$(NULL)
+
+ifdef USE_MMX
+CSRCS += pixman-mmx.c
+DEFINES += -DUSE_MMX
+endif
+
+ifdef USE_SSE2
+CSRCS += pixman-sse2.c
+DEFINES += -DUSE_SSE -DUSE_SSE2
+endif
+
+ifdef USE_VMX
+CSRCS += pixman-vmx.c
+DEFINES += -DUSE_VMX
+endif
+
+ifdef USE_ARM_SIMD_GCC
+CSRCS += pixman-arm-simd.c
+SSRCS += pixman-arm-simd-asm.S
+DEFINES += -DUSE_ARM_SIMD
+endif
+
+ifdef USE_ARM_NEON_GCC
+CSRCS += pixman-arm-neon.c
+SSRCS += pixman-arm-neon-asm.S
+SSRCS += pixman-arm-neon-asm-bilinear.S
+DEFINES += -DUSE_ARM_NEON
+ARM_NEON_CFLAGS = -mfpu=neon
+endif
+
+EXPORTS		= pixman.h pixman-version.h
+
+LOCAL_INCLUDES	+= -I$(srcdir) -I$(srcdir)/../../cairo/src
+
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/config.mk
+
+include $(topsrcdir)/config/rules.mk
+
+CFLAGS += -DPACKAGE="mozpixman" -D_USE_MATH_DEFINES
+
+# Disable spammy "missing initializer" GCC warning
+ifdef GNU_CC
+CFLAGS += -Wno-missing-field-initializers
+endif # GNU_CC
+
+# special rule for pixman-mmx to get the right cflags
+pixman-mmx.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(MMX_CFLAGS)
+
+pixman-sse2.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(SSE2_CFLAGS)
+
+pixman-arm-neon.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(ARM_NEON_CFLAGS)

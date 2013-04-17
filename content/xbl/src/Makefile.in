@@ -1,0 +1,61 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= content
+LIBRARY_NAME	= gkconxbl_s
+LIBXUL_LIBRARY	= 1
+
+CPPSRCS		= \
+    nsXBLBinding.cpp \
+    nsXBLPrototypeBinding.cpp \
+    nsXBLPrototypeResources.cpp \
+    nsXBLResourceLoader.cpp \
+    nsXBLDocumentInfo.cpp \
+    nsXBLContentSink.cpp \
+    nsXBLProtoImplProperty.cpp \
+    nsXBLProtoImplMethod.cpp \
+    nsXBLProtoImplField.cpp \
+    nsXBLProtoImpl.cpp \
+    nsXBLEventHandler.cpp \
+    nsXBLWindowKeyHandler.cpp \
+    nsXBLPrototypeHandler.cpp \
+    nsXBLService.cpp \
+    nsBindingManager.cpp \
+    nsXBLInsertionPoint.cpp \
+    nsXBLSerialize.cpp \
+		$(NULL)
+
+EXPORTS   = \
+  nsBindingManager.h \
+  nsXBLBinding.h \
+  $(NULL)
+
+include $(topsrcdir)/config/config.mk
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/rules.mk
+
+LOCAL_INCLUDES	= \
+		-I$(srcdir)/../../base/src \
+		-I$(srcdir)/../../html/document/src \
+		-I$(srcdir)/../../xml/document/src \
+		-I$(srcdir)/../../xul/content/src \
+		-I$(srcdir)/../../xul/document/src \
+		-I$(srcdir)/../../events/src \
+		-I$(srcdir)/../../../layout/style \
+		-I$(srcdir)/../../../dom/base \
+		-I$(topsrcdir)/xpcom/ds \
+		$(NULL)
+
+DEFINES += -D_IMPL_NS_LAYOUT

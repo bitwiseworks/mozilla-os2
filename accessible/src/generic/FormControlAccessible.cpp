@@ -1,0 +1,227 @@
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// NOTE: alphabetically ordered
+
+#include "FormControlAccessible.h"
+#include "Role.h"
+
+#include "nsIDOMHTMLFormElement.h"
+#include "nsIDOMHTMLInputElement.h"
+#include "nsIDOMXULElement.h"
+#include "nsIDOMXULControlElement.h"
+
+using namespace mozilla::a11y;
+
+////////////////////////////////////////////////////////////////////////////////
+// ProgressMeterAccessible
+////////////////////////////////////////////////////////////////////////////////
+
+template class mozilla::a11y::ProgressMeterAccessible<1>;
+template class mozilla::a11y::ProgressMeterAccessible<100>;
+
+////////////////////////////////////////////////////////////////////////////////
+// nsISupports
+
+template<int Max>
+NS_IMPL_ADDREF_INHERITED(ProgressMeterAccessible<Max>, LeafAccessible)
+
+template<int Max>
+NS_IMPL_RELEASE_INHERITED(ProgressMeterAccessible<Max>, LeafAccessible)
+
+template<int Max>
+NS_IMPL_QUERY_INTERFACE_INHERITED1(ProgressMeterAccessible<Max>,
+                                   LeafAccessible,
+                                   nsIAccessibleValue)
+
+////////////////////////////////////////////////////////////////////////////////
+// Accessible
+
+template<int Max>
+role
+ProgressMeterAccessible<Max>::NativeRole()
+{
+  return roles::PROGRESSBAR;
+}
+
+template<int Max>
+uint64_t
+ProgressMeterAccessible<Max>::NativeState()
+{
+  uint64_t state = LeafAccessible::NativeState();
+
+  // An undetermined progressbar (i.e. without a value) has a mixed state.
+  nsAutoString attrValue;
+  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue);
+
+  if (attrValue.IsEmpty())
+    state |= states::MIXED;
+
+  return state;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ProgressMeterAccessible<Max>: Widgets
+
+template<int Max>
+bool
+ProgressMeterAccessible<Max>::IsWidget() const
+{
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// nsIAccessibleValue
+
+template<int Max>
+void
+ProgressMeterAccessible<Max>::Value(nsString& aValue)
+{
+  LeafAccessible::Value(aValue);
+  if (!aValue.IsEmpty())
+    return;
+
+  double maxValue = 0;
+  nsresult rv = GetMaximumValue(&maxValue);
+  if (NS_FAILED(rv) || maxValue == 0)
+    return;
+
+  double curValue = 0;
+  GetCurrentValue(&curValue);
+  if (NS_FAILED(rv))
+    return;
+
+  // Treat the current value bigger than maximum as 100%.
+  double percentValue = (curValue < maxValue) ?
+    (curValue / maxValue) * 100 : 100;
+
+  aValue.AppendFloat(percentValue);
+  aValue.AppendLiteral("%");
+}
+
+template<int Max>
+NS_IMETHODIMP
+ProgressMeterAccessible<Max>::GetMaximumValue(double* aMaximumValue)
+{
+  nsresult rv = LeafAccessible::GetMaximumValue(aMaximumValue);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  nsAutoString value;
+  if (mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::max, value)) {
+    nsresult result = NS_OK;
+    *aMaximumValue = value.ToDouble(&result);
+    return result;
+  }
+
+  *aMaximumValue = Max;
+  return NS_OK;
+}
+
+template<int Max>
+NS_IMETHODIMP
+ProgressMeterAccessible<Max>::GetMinimumValue(double* aMinimumValue)
+{
+  nsresult rv = LeafAccessible::GetMinimumValue(aMinimumValue);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  *aMinimumValue = 0;
+  return NS_OK;
+}
+
+template<int Max>
+NS_IMETHODIMP
+ProgressMeterAccessible<Max>::GetMinimumIncrement(double* aMinimumIncrement)
+{
+  nsresult rv = LeafAccessible::GetMinimumIncrement(aMinimumIncrement);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  *aMinimumIncrement = 0;
+  return NS_OK;
+}
+
+template<int Max>
+NS_IMETHODIMP
+ProgressMeterAccessible<Max>::GetCurrentValue(double* aCurrentValue)
+{
+  nsresult rv = LeafAccessible::GetCurrentValue(aCurrentValue);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  nsAutoString attrValue;
+  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue);
+
+  // Return zero value if there is no attribute or its value is empty.
+  if (attrValue.IsEmpty())
+    return NS_OK;
+
+  nsresult error = NS_OK;
+  double value = attrValue.ToDouble(&error);
+  if (NS_FAILED(error))
+    return NS_OK; // Zero value because of wrong markup.
+
+  *aCurrentValue = value;
+  return NS_OK;
+}
+
+template<int Max>
+NS_IMETHODIMP
+ProgressMeterAccessible<Max>::SetCurrentValue(double aValue)
+{
+  return NS_ERROR_FAILURE; // Progress meters are readonly.
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// RadioButtonAccessible
+////////////////////////////////////////////////////////////////////////////////
+
+RadioButtonAccessible::
+  RadioButtonAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+  LeafAccessible(aContent, aDoc)
+{
+}
+
+uint8_t
+RadioButtonAccessible::ActionCount()
+{
+  return 1;
+}
+
+NS_IMETHODIMP
+RadioButtonAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
+{
+  if (aIndex == eAction_Click) {
+    aName.AssignLiteral("select"); 
+    return NS_OK;
+  }
+  return NS_ERROR_INVALID_ARG;
+}
+
+NS_IMETHODIMP
+RadioButtonAccessible::DoAction(uint8_t aIndex)
+{
+  if (aIndex != eAction_Click)
+    return NS_ERROR_INVALID_ARG;
+
+  DoCommand();
+  return NS_OK;
+}
+
+role
+RadioButtonAccessible::NativeRole()
+{
+  return roles::RADIOBUTTON;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// RadioButtonAccessible: Widgets
+
+bool
+RadioButtonAccessible::IsWidget() const
+{
+  return true;
+}

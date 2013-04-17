@@ -1,0 +1,106 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= content
+LIBRARY_NAME	= gkconevents_s
+LIBXUL_LIBRARY  = 1
+FAIL_ON_WARNINGS = 1
+
+EXPORTS		= \
+		nsEventStateManager.h \
+		nsEventListenerManager.h \
+		nsDOMEventTargetHelper.h \
+		nsDOMEvent.h \
+		nsDOMTouchEvent.h \
+		nsDOMUIEvent.h \
+		$(NULL)
+
+CPPSRCS		= \
+		nsEventListenerManager.cpp \
+		nsEventStateManager.cpp \
+		nsDOMEvent.cpp \
+		nsDOMDataContainerEvent.cpp \
+		nsDOMUIEvent.cpp \
+		nsDOMKeyboardEvent.cpp \
+		nsDOMTextEvent.cpp \
+		nsDOMMouseEvent.cpp \
+		nsDOMMouseScrollEvent.cpp \
+		nsDOMDragEvent.cpp \
+		nsDOMMutationEvent.cpp \
+		nsDOMDeviceMotionEvent.cpp \
+		nsDOMBeforeUnloadEvent.cpp \
+		nsDOMXULCommandEvent.cpp \
+		nsDOMCommandEvent.cpp \
+		nsDOMMessageEvent.cpp \
+		nsPaintRequest.cpp \
+		nsPrivateTextRange.cpp \
+		nsXMLEventsManager.cpp \
+		nsXMLEventsElement.cpp \
+		nsAsyncDOMEvent.cpp \
+		nsEventDispatcher.cpp \
+		nsIMEStateManager.cpp \
+		nsContentEventHandler.cpp \
+		nsEventListenerService.cpp \
+		nsDOMProgressEvent.cpp \
+		nsDOMDataTransfer.cpp \
+		nsDOMNotifyPaintEvent.cpp \
+		nsDOMNotifyAudioAvailableEvent.cpp \
+		nsDOMSimpleGestureEvent.cpp \
+		nsDOMMozTouchEvent.cpp \
+		nsDOMEventTargetHelper.cpp \
+		nsDOMScrollAreaEvent.cpp \
+		nsDOMTransitionEvent.cpp \
+		nsDOMAnimationEvent.cpp \
+		nsDOMTouchEvent.cpp \
+		nsDOMCompositionEvent.cpp \
+		DOMWheelEvent.cpp \
+		$(NULL)
+
+ifdef MOZ_B2G_RIL
+CPPSRCS += \
+    nsDOMWifiEvent.cpp \
+    $(NULL)
+endif
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+LOCAL_INCLUDES	+= \
+             -I$(srcdir)/../../base/src \
+             -I$(srcdir)/../../html/content/src \
+             -I$(srcdir)/../../xul/content/src \
+             -I$(srcdir)/../../xml/content/src \
+             -I$(srcdir)/../../../dom/base \
+             -I$(srcdir)/../../../dom/settings \
+             -I$(srcdir)/../../../dom/src/storage \
+             -I$(srcdir)/../../../layout/generic \
+             -I$(srcdir)/../../../layout/xul/base/src \
+             -I$(srcdir)/../../../layout/xul/base/src/tree/src \
+             $(NULL)
+
+ifdef MOZ_B2G_RIL
+LOCAL_INCLUDES += \
+              -I$(srcdir)/../../../dom/wifi \
+              $(NULL)
+endif
+
+DEFINES += -D_IMPL_NS_LAYOUT
+
+ifdef MOZ_JSDEBUGGER
+DEFINES += -DMOZ_JSDEBUGGER
+endif
+
+

@@ -1,0 +1,67 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH=@DEPTH@
+topsrcdir=@top_srcdir@
+srcdir=@srcdir@
+VPATH=@srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = toolkitcomps
+LIBRARY_NAME = toolkitcomps
+SHORT_LIBNAME = tkitcmps
+EXPORT_LIBRARY = 1
+IS_COMPONENT = 1
+MODULE_NAME = nsToolkitCompsModule
+LIBXUL_LIBRARY = 1
+
+EXPORTS = nsToolkitCompsCID.h
+
+CPPSRCS = nsToolkitCompsModule.cpp
+
+include $(topsrcdir)/config/config.mk
+
+LOCAL_INCLUDES = \
+  -I$(srcdir)/../alerts \
+  -I$(srcdir)/../downloads \
+  -I$(srcdir)/../feeds \
+  -I$(srcdir)/../find \
+  -I$(srcdir)/../intl \
+  -I$(srcdir)/../startup \
+  -I$(srcdir)/../statusfilter \
+  -I$(srcdir)/../typeaheadfind \
+  -I$(srcdir)/../url-classifier \
+  -I$(srcdir)/../../xre \
+  $(NULL)
+
+SHARED_LIBRARY_LIBS = \
+  ../alerts/$(LIB_PREFIX)alerts_s.$(LIB_SUFFIX) \
+  ../find/$(LIB_PREFIX)mozfind_s.$(LIB_SUFFIX) \
+  ../typeaheadfind/$(LIB_PREFIX)fastfind_s.$(LIB_SUFFIX) \
+  ../startup/$(LIB_PREFIX)appstartup_s.$(LIB_SUFFIX) \
+  ../statusfilter/$(LIB_PREFIX)mozbrwsr_s.$(LIB_SUFFIX) \
+  ../downloads/$(LIB_PREFIX)download_s.$(LIB_SUFFIX) \
+  ../intl/$(LIB_PREFIX)intl_s.$(LIB_SUFFIX) \
+  $(NULL)
+
+ifndef MOZ_DISABLE_PARENTAL_CONTROLS
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+SHARED_LIBRARY_LIBS += ../parentalcontrols/$(LIB_PREFIX)parentalcontrols_s.$(LIB_SUFFIX)
+LOCAL_INCLUDES += \
+  -I$(srcdir)/../parentalcontrols \
+  $(NULL)
+endif
+endif
+
+ifdef MOZ_URL_CLASSIFIER
+SHARED_LIBRARY_LIBS += ../url-classifier/$(LIB_PREFIX)urlclassifier_s.$(LIB_SUFFIX)
+endif
+
+ifdef MOZ_FEEDS
+SHARED_LIBRARY_LIBS += ../feeds/$(LIB_PREFIX)feed_s.$(LIB_SUFFIX)
+endif
+
+include $(topsrcdir)/config/rules.mk

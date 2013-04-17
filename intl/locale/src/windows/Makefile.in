@@ -1,0 +1,37 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= locale
+LIBRARY_NAME	= platlocale_s
+FORCE_STATIC_LIB	= 1
+LIBXUL_LIBRARY  = 1
+
+
+CPPSRCS		= \
+		nsCollationWin.cpp \
+		nsDateTimeFormatWin.cpp \
+		nsWin32Locale.cpp \
+		nsWinCharset.cpp \
+		$(NULL)
+
+include $(topsrcdir)/config/rules.mk
+
+INCLUDES	+= -I$(srcdir)/..
+
+nsWinCharset.$(OBJ_SUFFIX): wincharset.properties.h
+
+wincharset.properties.h: $(srcdir)/../props2arrays.py wincharset.properties
+	$(PYTHON) $^ $@
+
+GARBAGE += \
+	wincharset.properties.h \
+	$(NULL)

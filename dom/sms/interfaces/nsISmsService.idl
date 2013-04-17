@@ -1,0 +1,30 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface nsIDOMMozSmsMessage;
+
+%{C++
+#define SMS_SERVICE_CID { 0xbada3cb8, 0xa568, 0x4dff, { 0xb5, 0x43, 0x52, 0xbb, 0xb3, 0x14, 0x31, 0x21 } }
+#define SMS_SERVICE_CONTRACTID "@mozilla.org/sms/smsservice;1"
+%}
+
+[scriptable, builtinclass, uuid(00d23a50-6ed1-48b4-b1e9-5987b155e54b)]
+interface nsISmsService : nsISupports
+{
+  boolean        hasSupport();
+  unsigned short getNumberOfMessagesForText(in DOMString text);
+            void send(in DOMString number, in DOMString message,
+                      in long requestId, [optional] in unsigned long long processId);
+
+  [implicit_jscontext]
+  nsIDOMMozSmsMessage createSmsMessage(in long      id,
+                                       in DOMString delivery,
+                                       in DOMString sender,
+                                       in DOMString receiver,
+                                       in DOMString body,
+                                       in jsval     timestamp,
+                                       in bool      read);
+};

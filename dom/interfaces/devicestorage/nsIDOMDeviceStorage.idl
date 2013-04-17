@@ -1,0 +1,41 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+#include "nsIDOMEventTarget.idl"
+interface nsIDOMBlob;
+interface nsIDOMDOMRequest;
+interface nsIDOMDeviceStorageCursor;
+interface nsIDOMDeviceStorageChangeEvent;
+interface nsIDOMEventListener;
+
+dictionary DeviceStorageEnumerationParameters
+{
+  jsval since;
+};
+
+[scriptable, uuid(36f3b16b-a398-4b19-944e-ce299b714725), builtinclass]
+interface nsIDOMDeviceStorage : nsIDOMEventTarget
+{
+    attribute nsIDOMEventListener onchange;
+    nsIDOMDOMRequest add(in nsIDOMBlob aBlob);
+    nsIDOMDOMRequest addNamed(in nsIDOMBlob aBlob, in DOMString aName);
+
+    [implicit_jscontext]
+    nsIDOMDOMRequest get(in jsval aName);
+
+    [implicit_jscontext]
+    nsIDOMDOMRequest getEditable(in jsval aName);
+
+    [implicit_jscontext]
+    nsIDOMDOMRequest delete(in jsval aName);
+
+    [optional_argc, implicit_jscontext]
+    nsIDOMDeviceStorageCursor enumerate([optional] in jsval aName, /* DeviceStorageEnumerationParameters */ [optional] in jsval options);
+
+    [optional_argc, implicit_jscontext]
+    nsIDOMDeviceStorageCursor enumerateEditable([optional] in jsval aName, /* DeviceStorageEnumerationParameters */ [optional] in jsval options);
+
+    nsIDOMDOMRequest stat();
+};

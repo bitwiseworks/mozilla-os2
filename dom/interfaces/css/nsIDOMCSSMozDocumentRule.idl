@@ -1,0 +1,23 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMCSSRule.idl"
+
+/**
+ * Modified version of nsIDOMCSSMediaRule for @-moz-document rules.
+ */
+[scriptable, uuid(4eb9adac-afaf-4b8a-8640-7340863c1587)]
+interface nsIDOMCSSMozDocumentRule : nsIDOMCSSRule
+{
+  readonly attribute nsIDOMCSSRuleList cssRules;
+
+  unsigned long      insertRule(in DOMString rule, 
+                                in unsigned long index)
+                                        raises(DOMException);
+  void               deleteRule(in unsigned long index)
+                                        raises(DOMException);
+
+  // XXX Add access to the URL list.
+};

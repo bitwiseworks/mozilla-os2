@@ -1,0 +1,16 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMEvent.idl"
+
+interface nsIDOMLSInput;
+
+[scriptable, builtinclass, uuid(522fb528-f550-4e0c-8745-f784bba7cfbe)]
+interface nsIDOMLSProgressEvent : nsIDOMEvent
+{
+  readonly attribute nsIDOMLSInput   input;
+  readonly attribute unsigned long   position;
+  readonly attribute unsigned long   totalSize;
+};

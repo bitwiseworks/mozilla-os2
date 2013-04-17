@@ -1,0 +1,50 @@
+# vim:set ts=8 sw=8 sts=8 noet:
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= libmar
+LIBRARY_NAME	= mar
+HOST_LIBRARY_NAME = hostmar
+FORCE_STATIC_LIB = 1
+ifeq ($(OS_ARCH),WINNT)
+USE_STATIC_LIBS = 1
+endif
+
+# This makefile just builds support for reading archives.
+
+
+HOST_CSRCS	= \
+		mar_create.c \
+		mar_extract.c \
+		mar_read.c \
+		$(NULL)
+
+CSRCS		= \
+		$(HOST_CSRCS) \
+		$(NULL)
+
+EXPORTS		= \
+		mar.h \
+		mar_cmdline.h \
+		$(NULL)
+
+include $(topsrcdir)/config/rules.mk
+
+ifdef CROSS_COMPILE
+ifdef HOST_NSPR_MDCPUCFG
+HOST_CFLAGS     += -DMDCPUCFG=$(HOST_NSPR_MDCPUCFG)
+endif
+endif
+
+# The intermediate (.ii/.s) files for host and target can have the same name...
+# disable parallel builds
+.NOTPARALLEL:

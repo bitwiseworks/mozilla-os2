@@ -1,0 +1,183 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+relativesrcdir  = @relativesrcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+# Note: browserElementTestHelpers.js looks at the test's filename to determine
+# whether the test should be OOP.  "_oop_" signals OOP, "_inproc_" signals in
+# process.  Default is OOP.
+
+MOCHITEST_FILES = \
+		file_empty_script.js \
+		file_empty.html \
+		file_focus.html \
+		browserElementTestHelpers.js \
+		test_browserElement_NoAttr.html \
+		test_browserElement_NoPref.html \
+		test_browserElement_NoWhitelist.html \
+		browserElement_LoadEvents.js \
+		test_browserElement_inproc_LoadEvents.html \
+		browserElement_DataURI.js \
+		test_browserElement_inproc_DataURI.html \
+		browserElement_ErrorSecurity.js \
+		test_browserElement_inproc_ErrorSecurity.html \
+		browserElement_Titlechange.js \
+		test_browserElement_inproc_Titlechange.html \
+		browserElement_TopBarrier.js \
+		test_browserElement_inproc_TopBarrier.html \
+		browserElement_AppWindowNamespace.js \
+		test_browserElement_inproc_AppWindowNamespace.html \
+		file_browserElement_AppWindowNamespace.html \
+		browserElement_BrowserWindowNamespace.js \
+		test_browserElement_inproc_BrowserWindowNamespace.html \
+		file_browserElement_BrowserWindowNamespace.html \
+		browserElement_Iconchange.js \
+		test_browserElement_inproc_Iconchange.html \
+		browserElement_GetScreenshot.js \
+		test_browserElement_inproc_GetScreenshot.html \
+		browserElement_SetVisible.js \
+		test_browserElement_inproc_SetVisible.html \
+		browserElement_SetVisibleFrames.js \
+		test_browserElement_inproc_SetVisibleFrames.html \
+		file_browserElement_SetVisibleFrames_Outer.html \
+		file_browserElement_SetVisibleFrames_Inner.html \
+		browserElement_SetVisibleFrames2.js \
+		test_browserElement_inproc_SetVisibleFrames2.html \
+		file_browserElement_SetVisibleFrames2_Outer.html \
+		browserElement_KeyEvents.js \
+		test_browserElement_inproc_KeyEvents.html \
+		browserElement_XFrameOptions.js \
+		test_browserElement_inproc_XFrameOptions.html \
+		file_browserElement_XFrameOptions.sjs \
+		browserElement_XFrameOptionsDeny.js \
+		test_browserElement_inproc_XFrameOptionsDeny.html \
+		file_browserElement_XFrameOptionsDeny.html \
+		browserElement_XFrameOptionsSameOrigin.js \
+		test_browserElement_inproc_XFrameOptionsSameOrigin.html \
+		file_browserElement_XFrameOptionsSameOrigin.html \
+		browserElement_Alert.js \
+		test_browserElement_inproc_Alert.html \
+		browserElement_AlertInFrame.js \
+		test_browserElement_inproc_AlertInFrame.html \
+		file_browserElement_AlertInFrame.html \
+		file_browserElement_AlertInFrame_Inner.html \
+		browserElement_TargetTop.js \
+		test_browserElement_inproc_TargetTop.html \
+		file_browserElement_TargetTop.html \
+		browserElement_ForwardName.js \
+		test_browserElement_inproc_ForwardName.html \
+		file_browserElement_ForwardName.html \
+		browserElement_TargetBlank.js \
+		test_browserElement_inproc_TargetBlank.html \
+		file_browserElement_TargetBlank.html \
+		browserElement_PromptCheck.js \
+		test_browserElement_inproc_PromptCheck.html \
+		browserElement_PromptConfirm.js \
+		test_browserElement_inproc_PromptConfirm.html \
+		browserElement_Close.js \
+		test_browserElement_inproc_Close.html \
+		browserElement_CloseFromOpener.js \
+		test_browserElement_inproc_CloseFromOpener.html \
+		file_browserElement_CloseFromOpener.html \
+		browserElement_OpenWindow.js \
+		test_browserElement_inproc_OpenWindow.html \
+		file_browserElement_Open1.html \
+		file_browserElement_Open2.html \
+		browserElement_OpenWindowInFrame.js \
+		test_browserElement_inproc_OpenWindowInFrame.html \
+		file_browserElement_OpenWindowInFrame.html \
+		browserElement_OpenWindowRejected.js \
+		test_browserElement_inproc_OpenWindowRejected.html \
+		file_browserElement_OpenWindowRejected.html \
+		browserElement_OpenWindowDifferentOrigin.js \
+		test_browserElement_inproc_OpenWindowDifferentOrigin.html \
+		file_browserElement_OpenWindowDifferentOrigin.html \
+		browserElement_OpenNamed.js \
+		test_browserElement_inproc_OpenNamed.html \
+		file_browserElement_OpenNamed.html \
+		file_browserElement_OpenNamed2.html \
+		browserElement_SecurityChange.js \
+		test_browserElement_inproc_SecurityChange.html \
+		file_browserElement_SecurityChange.html \
+		browserElement_BackForward.js \
+		test_browserElement_inproc_BackForward.html \
+	        file_bug741717.sjs \
+		browserElement_Reload.js \
+	        file_bug709759.sjs \
+		browserElement_Stop.js \
+                test_browserElement_inproc_Stop.html \
+                browserElement_ContextmenuEvents.js \
+                test_browserElement_inproc_ContextmenuEvents.html \
+		browserElement_SendEvent.js \
+		test_browserElement_inproc_SendEvent.html \
+		browserElement_ScrollEvent.js \
+		test_browserElement_inproc_ScrollEvent.html \
+		$(NULL)
+
+# Disabled due to https://bugzilla.mozilla.org/show_bug.cgi?id=774100
+#		test_browserElement_inproc_Reload.html \
+
+# OOP tests don't work on Windows (bug 763081) or native-fennec (bug
+# 774939).
+#
+# Both the "inproc" and "oop" versions of OpenMixedProcess open remote frames,
+# so we don't run that test on platforms which don't support OOP tests.
+
+ifneq ($(OS_ARCH),WINNT) #{
+ifndef MOZ_JAVA_COMPOSITOR #{
+MOCHITEST_FILES += \
+		browserElement_OpenMixedProcess.js \
+		file_browserElement_OpenMixedProcess.html \
+		test_browserElement_inproc_OpenMixedProcess.html \
+		test_browserElement_oop_OpenMixedProcess.html \
+		test_browserElement_oop_LoadEvents.html \
+		test_browserElement_oop_DataURI.html \
+		test_browserElement_oop_ErrorSecurity.html \
+		test_browserElement_oop_Titlechange.html \
+		test_browserElement_oop_AppWindowNamespace.html \
+		test_browserElement_oop_BrowserWindowNamespace.html \
+		test_browserElement_oop_TopBarrier.html \
+		test_browserElement_oop_Iconchange.html \
+		test_browserElement_oop_GetScreenshot.html \
+		test_browserElement_oop_SetVisible.html \
+		test_browserElement_oop_SetVisibleFrames.html \
+		test_browserElement_oop_SetVisibleFrames2.html \
+		test_browserElement_oop_KeyEvents.html \
+		test_browserElement_oop_XFrameOptions.html \
+		test_browserElement_oop_XFrameOptionsDeny.html \
+		test_browserElement_oop_XFrameOptionsSameOrigin.html \
+		test_browserElement_oop_Alert.html \
+		test_browserElement_oop_AlertInFrame.html \
+		test_browserElement_oop_TargetTop.html \
+		test_browserElement_oop_ForwardName.html \
+		test_browserElement_oop_TargetBlank.html \
+		test_browserElement_oop_PromptCheck.html \
+		test_browserElement_oop_PromptConfirm.html \
+		test_browserElement_oop_Close.html \
+		test_browserElement_oop_CloseFromOpener.html \
+		test_browserElement_oop_OpenWindow.html \
+		test_browserElement_oop_OpenWindowInFrame.html \
+		test_browserElement_oop_OpenWindowRejected.html \
+		test_browserElement_oop_OpenWindowDifferentOrigin.html \
+		test_browserElement_oop_OpenNamed.html \
+		test_browserElement_oop_SecurityChange.html \
+		test_browserElement_oop_BackForward.html \
+		test_browserElement_oop_Reload.html \
+		test_browserElement_oop_Stop.html \
+                test_browserElement_oop_ContextmenuEvents.html \
+		test_browserElement_oop_SendEvent.html \
+		test_browserElement_oop_ScrollEvent.html \
+		$(NULL)
+endif #}
+endif #}
+
+
+include $(topsrcdir)/config/rules.mk

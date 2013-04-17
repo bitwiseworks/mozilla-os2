@@ -1,0 +1,46 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: sw=2 ts=8 et :
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PLayers;
+
+using mozilla::layers::LayersBackend;
+using mozilla::null_t;
+
+namespace mozilla {
+namespace layers {
+
+/**
+ * The PCompositor protocol is used to manage communication between
+ * the main thread and the compositor thread context. It's primary
+ * purpose is to manage the PLayers sub protocol.
+ */
+// This should really be 'sync', but we're using 'rpc' as a workaround
+// for Bug 716631.
+rpc protocol PCompositor
+{
+  // A Compositor manages a single Layer Manager (PLayers)
+  manages PLayers;
+
+parent:  
+
+  // The child is about to be destroyed, so perform any necessary cleanup.
+  sync WillStop();
+
+  // Clean up in preparation for own destruction.
+  sync Stop();
+
+  // Pause/resume the compositor. These are intended to be used on mobile, when
+  // the compositor needs to pause/resume in lockstep with the application.
+  sync Pause();
+  sync Resume();
+
+  sync PLayers(LayersBackend backendHint, uint64_t id)
+    returns (LayersBackend backend, int32_t maxTextureSize);
+};
+
+} // layers
+} // mozilla

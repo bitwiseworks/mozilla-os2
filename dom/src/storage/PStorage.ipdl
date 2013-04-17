@@ -1,0 +1,68 @@
+/* -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 8 -*- */
+/* vim: set sw=4 ts=8 et tw=80 ft=cpp : */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PContent;
+
+using mozilla::null_t;
+
+namespace mozilla {
+namespace dom {
+
+struct ItemData
+{
+  nsString value;
+  bool secure;
+};
+
+// A cross-process GetValue result -- either null, or containing the parameters
+// with which to initialize an nsIDOMStorageItem.
+union StorageItem
+{
+  null_t;
+  ItemData;
+};
+
+// This protocol is little more than a thin wrapper around the DOMStorageBase
+// class in nsDOMStorage.h.  The child implementation simply forwards the
+// arguments for any given call to the parent, and returns the result.
+sync protocol PStorage
+{
+  manager PContent;
+
+parent:
+  __delete__();
+
+  Init(bool useDB, bool canUseChromePersist, bool sessionOnly, bool isPrivate,
+       nsCString domain, nsCString scopeDBKey, nsCString quotaDomainDBKey,
+       nsCString quotaETLDplus1DomainDBKey, uint32_t storageType);
+  
+  sync GetKeys(bool callerSecure)
+      returns (nsString[] keys);
+  sync GetLength(bool callerSecure, bool sessionOnly)
+      returns (uint32_t length, nsresult rv);
+  sync GetKey(bool callerSecure, bool sessionOnly, uint32_t index)
+      returns (nsString key, nsresult rv);
+  sync GetValue(bool callerSecure, bool sessionOnly, nsString key)
+      returns (StorageItem item, nsresult rv);
+  sync SetValue(bool callerSecure, bool sessionOnly, nsString key, nsString data)
+      returns (nsString oldValue, nsresult rv);
+  sync RemoveValue(bool callerSecure, bool sessionOnly, nsString key)
+      returns (nsString oldValue, nsresult rv);
+  sync Clear(bool callerSecure, bool sessionOnly)
+      returns (int32_t oldCount, nsresult rv);
+
+  sync GetDBValue(nsString key)
+      returns (nsString value, bool secure, nsresult rv);
+  sync SetDBValue(nsString key, nsString value, bool secure)
+      returns (nsresult rv);
+  sync SetSecure(nsString key, bool secure)
+      returns (nsresult rv);
+
+  UpdatePrivateState(bool enabled);
+};
+
+}
+}

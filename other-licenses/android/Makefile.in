@@ -1,0 +1,62 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE           = android
+LIBRARY_NAME     = android
+FORCE_STATIC_LIB = 1
+
+CSRCS =
+
+ifdef MOZ_OLD_LINKER
+DEFINES += \
+  -DLINKER_DEBUG=0 \
+  -DLINKER_TEXT_BASE=0xB0001000 \
+  -DLINKER_AREA_SIZE=0x01000000 \
+  $(NULL)
+
+ifeq ($(CPU_ARCH),arm)
+DEFINES += -DANDROID_ARM_LINKER
+else
+ifeq ($(CPU_ARCH),x86)
+DEFINES += -DANDROID_X86_LINKER
+endif
+endif
+
+CSRCS += \
+  ba.c \
+  debugger.c \
+  dlfcn.c \
+  linker.c \
+  linker_format.c \
+  rt.c \
+  $(NULL)
+endif
+
+CSRCS += \
+  ev_streams.c \
+  ev_timers.c \
+  getaddrinfo.c \
+  ns_name.c \
+  ns_netint.c \
+  ns_parse.c \
+  ns_print.c \
+  ns_samedomain.c \
+  ns_ttl.c \
+  res_comp.c \
+  res_data.c \
+  res_debug.c \
+  res_init.c \
+  res_mkquery.c \
+  res_send.c \
+  res_state.c \
+  $(NULL)
+
+include $(topsrcdir)/config/rules.mk

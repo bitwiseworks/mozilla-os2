@@ -1,0 +1,119 @@
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsITransfer.idl"
+
+interface nsIURI;
+interface nsIFile;
+interface nsIObserver;
+interface nsICancelable;
+interface nsIWebProgressListener;
+interface nsIMIMEInfo;
+
+/**
+ * Represents a download object.
+ *
+ * @note This object is no longer updated once it enters a completed state.
+ *       Completed states are the following:  
+ *       nsIDownloadManager::DOWNLOAD_FINISHED  
+ *       nsIDownloadManager::DOWNLOAD_FAILED  
+ *       nsIDownloadManager::DOWNLOAD_CANCELED 
+ *       nsIDownloadManager::DOWNLOAD_BLOCKED_PARENTAL 
+ *       nsIDownloadManager::DOWNLOAD_DIRTY 
+ *       nsIDownloadManager::DOWNLOAD_BLOCKED_POLICY 
+ */
+[scriptable, uuid(c891111e-92a6-47b8-bc46-874ebb61ac9d)]
+interface nsIDownload : nsITransfer {
+    
+    /**
+     * The target of a download is always a file on the local file system.
+     */
+    readonly attribute nsIFile targetFile;
+
+    /**
+     * The percentage of transfer completed.
+     * If the file size is unknown it'll be -1 here.
+     */
+    readonly attribute long percentComplete;
+
+    /**
+     * The amount of bytes downloaded so far.
+     */
+    readonly attribute long long amountTransferred;
+
+    /**
+     * The size of file in bytes.
+     * Unknown size is represented by -1.
+     */
+    readonly attribute long long size;
+    
+    /**
+     * The source of the transfer.
+     */
+    readonly attribute nsIURI source;
+    
+    /**
+     * The target of the transfer.
+     */
+    readonly attribute nsIURI target;
+ 
+    /**
+     * Object that can be used to cancel the download.
+     * Will be null after the download is finished.
+     */
+    readonly attribute nsICancelable cancelable;
+
+    /**
+     * The user-readable description of the transfer.
+     */
+    readonly attribute AString displayName;
+
+    /**
+     * The time a transfer was started.
+     */
+    readonly attribute long long startTime;
+
+    /**
+     * The speed of the transfer in bytes/sec.
+     */
+    readonly attribute double speed;
+
+    /**
+     * Optional. If set, it will contain the target's relevant MIME information.
+     * This includes its MIME Type, helper app, and whether that helper should be
+     * executed.
+     */
+    readonly attribute nsIMIMEInfo MIMEInfo;
+
+    /**
+     * The id of the download that is stored in the database.
+     */
+    readonly attribute unsigned long id;
+
+    /**
+     * The state of the download.
+     * @see nsIDownloadManager and nsIXPInstallManagerUI
+     */
+    readonly attribute short state;
+
+    /**
+     * The referrer uri of the download.  This is only valid for HTTP downloads,
+     * and can be null.
+     */
+    readonly attribute nsIURI referrer;
+
+    /**
+     * Indicates if the download can be resumed after being paused or not.  This
+     * is only the case if the download is over HTTP/1.1 or FTP and if the
+     * server supports it.
+     */
+    readonly attribute boolean resumable;
+};
+
+%{C++
+// {E3FA9D0A-1DD1-11B2-BDEF-8C720B597445}
+#define NS_DOWNLOAD_CID \
+    { 0xe3fa9d0a, 0x1dd1, 0x11b2, { 0xbd, 0xef, 0x8c, 0x72, 0x0b, 0x59, 0x74, 0x45 } }
+%}

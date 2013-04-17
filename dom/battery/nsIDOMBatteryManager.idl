@@ -1,0 +1,21 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMEventTarget.idl"
+
+interface nsIDOMEventListener;
+
+[scriptable, builtinclass, uuid(03c6dd20-7efd-4640-b958-c0ce11b9aadf)]
+interface nsIDOMBatteryManager : nsIDOMEventTarget
+{
+  readonly attribute double     level;
+  readonly attribute boolean    charging;
+  readonly attribute double     dischargingTime;
+  readonly attribute double     chargingTime;
+
+  attribute nsIDOMEventListener onlevelchange;
+  attribute nsIDOMEventListener onchargingchange;
+  attribute nsIDOMEventListener ondischargingtimechange;
+  attribute nsIDOMEventListener onchargingtimechange;
+};

@@ -1,0 +1,20 @@
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIProtocolHandler.idl"
+
+interface nsIChannel;
+interface nsIURI;
+interface nsIProxyInfo;
+
+[scriptable, uuid(0a24fed4-1dd2-11b2-a75c-9f8b9a8f9ba7)]
+interface nsIProxiedProtocolHandler : nsIProtocolHandler
+{
+    /** Create a new channel with the given proxyInfo
+     *
+     */
+    nsIChannel newProxiedChannel(in nsIURI uri, in nsIProxyInfo proxyInfo);
+};
+

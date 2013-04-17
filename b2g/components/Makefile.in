@@ -1,0 +1,35 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH      = @DEPTH@
+topsrcdir  = @top_srcdir@
+srcdir     = @srcdir@
+VPATH      = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = B2GComponents
+XPIDL_MODULE = B2GComponents
+
+XPIDLSRCS = \
+        b2g.idl \
+        $(NULL)
+
+EXTRA_PP_COMPONENTS = \
+        ActivitiesGlue.js \
+        AlertsService.js \
+        B2GComponents.manifest \
+        CameraContent.js \
+        ContentHandler.js \
+        ContentPermissionPrompt.js \
+        DirectoryProvider.js \
+        MozKeyboard.js \
+        ProcessGlobal.js \
+        $(NULL)
+
+ifdef MOZ_UPDATER
+EXTRA_PP_COMPONENTS += UpdatePrompt.js
+endif
+
+include $(topsrcdir)/config/rules.mk

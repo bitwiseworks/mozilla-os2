@@ -1,0 +1,27 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+
+interface nsIDOMEventListener;
+interface nsIDOMDesktopNotification;
+
+
+[scriptable, uuid(CCEA6185-0A3D-45AB-9058-1004DD4B8C50)]
+interface nsIDOMDesktopNotificationCenter : nsISupports
+{
+  nsIDOMDesktopNotification createNotification(in DOMString title,
+                                               in DOMString description,
+                                               [optional] in DOMString iconURL);
+};
+
+
+[scriptable, uuid(9131FD07-A7DB-4B3A-A98B-6D9F3746682F)]
+interface nsIDOMDesktopNotification : nsISupports
+{
+  void show();
+
+  attribute nsIDOMEventListener onclick;
+  attribute nsIDOMEventListener onclose;
+};

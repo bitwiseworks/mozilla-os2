@@ -1,0 +1,89 @@
+== default-size.html default-size-ref.html
+== size-1.html size-1-ref.html
+
+== empty-transaction-1.html empty-transaction-1-ref.html
+
+== image-rendering-test.html image-rendering-ref.html
+== image-shadow.html image-shadow-ref.html
+
+asserts-if(cocoaWidget,0-2) == size-change-1.html size-change-1-ref.html
+
+!= text-ltr-left.html text-blank.html
+!= text-ltr-right.html text-blank.html
+!= text-rtl-left.html text-blank.html
+!= text-rtl-right.html text-blank.html
+
+== text-ltr-start.html text-ltr-left.html
+== text-ltr-end.html text-ltr-right.html
+!= text-ltr-left.html text-ltr-right.html
+== text-rtl-start.html text-rtl-right.html
+== text-rtl-end.html text-rtl-left.html
+!= text-rtl-left.html text-rtl-right.html
+
+== text-ltr-left.html text-rtl-left.html
+
+== text-ltr-alignment-test.html text-ltr-alignment-ref.html
+== text-rtl-alignment-test.html text-rtl-alignment-ref.html
+
+== text-horzline-with-bottom.html text-horzline.html
+== text-horzline-with-top.html text-horzline.html
+
+!= text-big-stroke.html text-blank.html
+!= text-big-stroke.html text-big-fill.html
+
+== text-context-state-test.html text-context-state-ref.html
+== text-font-inherit.html text-big-fill.html
+== text-space-replace-test.html text-space-replace-ref.html
+
+== text-no-frame-test.html text-no-frame-ref.html
+== text-no-frame-2-test.html text-not-in-doc-ref.html
+== text-not-in-doc-test.html text-not-in-doc-ref.html
+
+== text-bidi-ltr-test.html text-bidi-ltr-ref.html
+!= text-bidi-ltr-test.html text-bidi-ltr-notref.html # for bug 698185
+== text-bidi-rtl-test.html text-bidi-rtl-ref.html
+
+fails-if(Android) != text-font-lang.html text-font-lang-notref.html
+
+== text-measure.html text-measure-ref.html
+
+== strokeText-path.html strokeText-path-ref.html
+
+# azure quartz uses CGDrawLinearGradient instead of DrawShading
+# so we have less control over degenerate behaviour as tested by this
+# test
+fails-if(azureQuartz) == linear-gradient-1a.html linear-gradient-1-ref.html
+
+# this passes with cairo on 10.7 and 10.8 but not with azure for reasons unknown
+fails-if(OSX==10.5||OSX==10.6||(azureQuartz&&(OSX==10.7||OSX==10.8))) == linear-gradient-1b.html linear-gradient-1-ref.html
+
+== zero-dimensions.html zero-dimensions-ref.html
+
+== evenodd-fill-sanity.html data:text/html,<body>Pass
+!= evenodd-fill-1.html nonzero-fill-1.html
+== evenodd-fill-1.html evenodd-fill-ref.html
+== evenodd-fill-2.html evenodd-fill-ref.html
+== evenodd-fill-3.html nonzero-fill-2.html
+
+== dash-sanity.html data:text/html,<body>Pass
+fuzzy-if(azureSkia,9,470) random-if(Android) == dash-1.html dash-1-ref.svg  # Bug 668412 (really is android-specific, not IPC-specific)
+
+== ctm-sanity.html data:text/html,<body>Pass
+fails == ctm-singular-sanity.html data:text/html,<body>Pass  # Bug 612033
+== ctm-1.html ctm-1-ref.html
+
+fails-if(OSX==10.5||OSX==10.6) == 672646-alpha-radial-gradient.html 672646-alpha-radial-gradient-ref.html # Bug 673333
+== 674003-alpha-radial-gradient-superlum.html 674003-alpha-radial-gradient-superlum-ref.html
+
+!= 693610-1.html 693610-1-notref.html # bug 693610: multiple glyph runs should not be overprinted
+
+== 726951-shadow-clips.html 726951-shadow-clips-ref.html
+
+== transformed-clip.html transformed-clip-ref.html
+== transformed-gradient.html transformed-gradient-ref.html
+== transformed-path.html transformed-path.html
+
+== 749467-1.html 749467-1-ref.html
+
+# You get a little bit of rounding fuzz on OSX from transforming the paths between user space and device space
+fuzzy-if(azureQuartz,2,113) fuzzy-if(d2d,12,17) == 784573-1.html 784573-1-ref.html

@@ -1,0 +1,50 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= xuldoc
+LIBRARY_NAME	= gkconxuldoc_s
+LIBXUL_LIBRARY	= 1
+
+
+CPPSRCS		= nsXULControllers.cpp
+
+ifdef MOZ_XUL
+CPPSRCS		+= \
+		nsXULCommandDispatcher.cpp \
+		nsXULContentSink.cpp \
+		nsXULDocument.cpp \
+		nsXULPrototypeCache.cpp \
+		nsXULPrototypeDocument.cpp \
+		$(NULL)
+endif
+
+# we don't want the shared lib, but we want to force the creation of a
+# static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/rules.mk
+
+LOCAL_INCLUDES	= -I$(srcdir)/../../../base/src \
+		  -I$(srcdir)/../../content/src \
+		  -I$(srcdir)/../../templates/src \
+		  -I$(srcdir)/../../../../layout/base \
+		  -I$(srcdir)/../../../../layout/generic \
+		  -I$(srcdir)/../../../../layout/style \
+		  -I$(srcdir)/../../../../layout/xul/base/src \
+		  -I$(srcdir)/../../../xml/document/src \
+		  -I$(srcdir)/../../../xbl/src \
+		  -I$(srcdir)/../../../events/src \
+		  -I$(topsrcdir)/xpcom/ds \
+		  -I$(topsrcdir)/dom/base \
+		  $(NULL)
+
+DEFINES += -D_IMPL_NS_LAYOUT

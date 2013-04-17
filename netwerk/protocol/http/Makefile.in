@@ -1,0 +1,106 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH     = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH     = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE         = necko
+LIBRARY_NAME   = nkhttp_s
+LIBXUL_LIBRARY = 1
+XPIDL_MODULE   = necko_http
+GRE_MODULE     = 1
+FORCE_STATIC_LIB = 1
+
+EXPORTS_NAMESPACES = mozilla/net
+
+SDK_XPIDLSRCS = \
+  nsIHttpChannel.idl \
+  nsIHttpHeaderVisitor.idl \
+  $(NULL)
+
+XPIDLSRCS = \
+  nsIHttpActivityObserver.idl \
+  nsIHttpAuthManager.idl \
+  nsIHttpAuthenticator.idl \
+  nsIHttpChannelInternal.idl \
+  nsIHttpEventSink.idl \
+  nsIHttpProtocolHandler.idl \
+  nsIHttpChannelAuthProvider.idl \
+  nsIHttpAuthenticableChannel.idl \
+  nsIHttpChannelChild.idl \
+  $(NULL)
+
+EXPORTS_mozilla/net = \
+  HttpBaseChannel.h \
+  $(NULL)
+
+EXPORTS_mozilla/net += \
+  HttpChannelParent.h \
+  HttpChannelChild.h  \
+  PHttpChannelParams.h \
+  $(NULL)
+
+EXPORTS = \
+  nsHttpResponseHead.h \
+  nsHttpHeaderArray.h \
+  nsHttp.h \
+  nsHttpAtomList.h \
+  $(NULL)
+
+CPPSRCS = \
+  nsHttp.cpp \
+  nsHttpHeaderArray.cpp \
+  nsHttpConnectionInfo.cpp \
+  nsHttpConnection.cpp \
+  nsHttpConnectionMgr.cpp \
+  nsHttpRequestHead.cpp \
+  nsHttpResponseHead.cpp \
+  nsHttpChunkedDecoder.cpp \
+  nsHttpAuthCache.cpp \
+  nsHttpAuthManager.cpp \
+  nsHttpBasicAuth.cpp \
+  nsHttpDigestAuth.cpp \
+  nsHttpNTLMAuth.cpp \
+  nsHttpTransaction.cpp \
+  nsHttpHandler.cpp \
+  HttpBaseChannel.cpp \
+  nsHttpChannel.cpp \
+  nsHttpPipeline.cpp \
+  nsHttpActivityDistributor.cpp \
+  nsHttpChannelAuthProvider.cpp \
+  HttpChannelParent.cpp \
+  HttpChannelChild.cpp \
+  HttpChannelParentListener.cpp \
+  NullHttpTransaction.cpp \
+  ASpdySession.cpp \
+  SpdySession2.cpp \
+  SpdyStream2.cpp \
+  SpdySession3.cpp \
+  SpdyStream3.cpp \
+  ConnectionDiagnostics.cpp \
+  $(NULL)
+
+LOCAL_INCLUDES = \
+  -I$(srcdir)/../../base/src \
+  -I$(topsrcdir)/xpcom/ds \
+  -I$(topsrcdir)/content/base/src \
+  -I$(topsrcdir)/content/events/src \
+  $(NULL)
+
+EXTRA_JS_MODULES = \
+  UserAgentOverrides.jsm \
+  $(NULL)
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+DEFINES += -DIMPL_NS_NET
+
+XPIDL_FLAGS += -I$(topsrcdir)/netwerk/base/public

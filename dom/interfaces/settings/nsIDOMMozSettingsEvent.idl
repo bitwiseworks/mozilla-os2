@@ -1,0 +1,25 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMEvent.idl"
+interface nsIVariant;
+
+[scriptable, builtinclass, uuid(109d5b5c-48b2-4d10-a881-72dcf4c27969)]
+interface nsIDOMMozSettingsEvent : nsIDOMEvent
+{
+  readonly attribute DOMString  settingName;
+  readonly attribute nsIVariant settingValue;
+
+  [noscript] void initMozSettingsEvent(in DOMString aType,
+                                       in boolean aCanBubble,
+                                       in boolean aCancelable,
+                                       in DOMString aSettingName,
+                                       in nsIVariant aSettingValue);
+};
+
+dictionary MozSettingsEventInit : EventInit
+{
+  DOMString  settingName;
+  nsIVariant settingValue;
+};

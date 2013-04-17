@@ -1,0 +1,38 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= widget
+LIBRARY_NAME	= widget_shared
+LIBXUL_LIBRARY  = 1
+
+
+DEFINES += \
+  -D_IMPL_NS_WIDGET \
+  $(NULL)
+
+ifdef MOZ_X11
+PARALLEL_DIRS  = x11
+endif
+
+CPPSRCS		= \
+		WidgetUtils.cpp \
+		nsShmImage.cpp \
+		$(NULL)
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+CXXFLAGS	+= $(TK_CFLAGS)

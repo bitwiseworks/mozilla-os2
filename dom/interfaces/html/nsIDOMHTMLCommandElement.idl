@@ -1,0 +1,28 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMHTMLElement.idl"
+
+/**
+ * The nsIDOMHTMLCommandElement interface is the interface to a HTML
+ * <command> element.
+ *
+ * For more information on this interface, please see
+ * http://www.whatwg.org/specs/web-apps/current-work/#the-command-element
+ *
+ * @status UNDER_DEVELOPMENT
+ */
+
+[scriptable, uuid(A6963C8F-6475-4631-B7E0-41DD7DC8F388)]
+interface nsIDOMHTMLCommandElement : nsIDOMHTMLElement
+{
+           attribute DOMString        type;
+           attribute DOMString        label;
+           attribute DOMString        icon;
+           attribute boolean          disabled;
+           attribute boolean          defaultChecked;
+           attribute boolean          checked;
+           attribute DOMString        radiogroup;
+};
