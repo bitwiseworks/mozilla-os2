@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+<!DOCTYPE overlay SYSTEM "chrome://pippki/locale/certManager.dtd">
+
+<overlay id="certViewerOverlay" 
+         xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" 
+         xmlns:cert="http://netscape.com/rdf-cert#" 
+         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+<vbox class="box-padded" id="general_info">
+  <vbox id="verify_info_box">
+    <label id="verify_pending" value="&certmgr.pending.label;"/>
+    <label class="header" id="verified"/>
+  </vbox>
+  <separator class="groove"/>
+  <vbox flex="1">
+    <grid> 
+      <columns>
+        <column/>
+        <column/>
+      </columns>
+      <rows>
+        <row>
+          <label class="header" value="&certmgr.subjectinfo.label;"/>
+          <spacer/>
+          <spacer/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.cn;"/> 
+          <label id="commonname"/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.o;"/> 
+          <label id="organization"/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.ou;"/> 
+          <label id="orgunit"/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.serialnumber;"/> 
+          <label id="serialnumber"/>
+        </row>
+        <row>
+          <separator class="thin"/>
+          <spacer/>
+        </row>
+        <row>
+          <label class="header" value="&certmgr.issuerinfo.label;"/>
+          <spacer/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.cn;"/> 
+          <label id="issuercommonname"/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.o;"/> 
+          <label id="issuerorganization"/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.ou;"/> 
+          <label id="issuerorgunit"/>
+        </row>
+        <row>
+          <separator class="thin"/>
+          <spacer/>
+        </row>
+        <row>
+          <label class ="header" value="&certmgr.validity.label;"/>
+          <spacer/>
+        </row>
+        <row>
+          <label value="&certmgr.issued;"/>
+          <label id="validitystart"/>
+        </row>
+        <row>
+          <label value="&certmgr.expires;"/>
+          <label id="validityend"/>
+        </row>
+        <row>
+          <separator class="thin"/>
+          <spacer/>
+        </row>
+        <row>
+          <label class="header" value="&certmgr.fingerprints.label;"/>
+          <spacer/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.sha1fingerprint;"/> 
+          <label id="sha1fingerprint"/>
+        </row>
+        <row>
+          <label value="&certmgr.certdetail.md5fingerprint;"/> 
+          <label id="md5fingerprint"/>
+        </row>
+      </rows>
+    </grid>
+  </vbox>
+</vbox>
+</overlay>

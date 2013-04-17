@@ -1,0 +1,90 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= layout
+LIBRARY_NAME	= gkxulbase_s
+LIBXUL_LIBRARY	= 1
+
+
+
+ifdef MOZ_XUL
+PARALLEL_DIRS = tree/public tree/src grid
+endif
+
+CPPSRCS		= \
+		nsScrollBoxFrame.cpp \
+		nsRootBoxFrame.cpp \
+		nsBox.cpp \
+		nsBoxFrame.cpp \
+		nsBoxLayoutState.cpp \
+		nsSprocketLayout.cpp \
+		nsStackFrame.cpp \
+		nsStackLayout.cpp \
+		nsBoxLayout.cpp \
+		nsScrollbarFrame.cpp \
+		nsScrollbarButtonFrame.cpp \
+		nsButtonBoxFrame.cpp \
+		nsSliderFrame.cpp \
+		nsRepeatService.cpp \
+		nsXULTooltipListener.cpp \
+		$(NULL)
+
+ifdef MOZ_XUL
+CPPSRCS		+= \
+		nsScrollBoxObject.cpp \
+		nsContainerBoxObject.cpp \
+		nsMenuBoxObject.cpp \
+		nsPopupBoxObject.cpp \
+		nsListBoxObject.cpp \
+		nsBoxObject.cpp \
+		nsImageBoxFrame.cpp \
+		nsDocElementBoxFrame.cpp \
+		nsLeafBoxFrame.cpp \
+		nsTextBoxFrame.cpp \
+		nsGroupBoxFrame.cpp \
+		nsSplitterFrame.cpp \
+		nsDeckFrame.cpp \
+		nsProgressMeterFrame.cpp \
+		nsMenuPopupFrame.cpp \
+		nsMenuFrame.cpp \
+		nsMenuBarFrame.cpp \
+		nsMenuBarListener.cpp \
+		nsPopupSetFrame.cpp \
+		nsTitleBarFrame.cpp \
+		nsResizerFrame.cpp \
+		nsListBoxBodyFrame.cpp \
+		nsListItemFrame.cpp \
+		nsListBoxLayout.cpp \
+		nsXULLabelFrame.cpp \
+		nsXULPopupManager.cpp \
+		$(NULL)
+
+endif
+
+include $(topsrcdir)/config/config.mk
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/rules.mk
+
+LOCAL_INCLUDES	= \
+		-I$(srcdir) \
+		-I$(srcdir)/../../../base \
+		-I$(srcdir)/../../../../content/base/src \
+		-I$(srcdir)/../../../../content/events/src \
+		-I$(srcdir)/../../../generic \
+		-I$(srcdir)/../../../style \
+		$(NULL)
+
+DEFINES += -D_IMPL_NS_LAYOUT
+

@@ -1,0 +1,20 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+[scriptable, builtinclass, uuid(fc58ba6e-70de-4550-aa1e-790ecc19cf98)]
+interface nsIDOMMozSmsMessage : nsISupports
+{
+  // TODO: we should add SENT and RECEIVED DOMString constants, see bug 443316.
+
+  readonly attribute long      id;
+  readonly attribute DOMString delivery;  // Should be "sent" or "received".
+  readonly attribute DOMString sender;
+  readonly attribute DOMString receiver;
+  readonly attribute DOMString body;
+  [implicit_jscontext]
+  readonly attribute jsval     timestamp; // jsval is for Date.
+  readonly attribute boolean   read;
+};

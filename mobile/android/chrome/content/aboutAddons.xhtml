@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd" [
+<!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd" >
+%brandDTD;
+<!ENTITY % globalDTD SYSTEM "chrome://global/locale/global.dtd" >
+%globalDTD;
+<!ENTITY % aboutDTD SYSTEM "chrome://browser/locale/aboutAddons.dtd" >
+%aboutDTD;
+]>
+
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>&aboutAddons.title2;</title>
+  <meta name="viewport" content="width=480; initial-scale=.6667; user-scalable=0" />
+  <link rel="icon" type="image/png" href="chrome://branding/content/favicon32.png" />
+  <link rel="stylesheet" href="chrome://browser/skin/aboutAddons.css" type="text/css"/>
+  <style>
+    .hide-on-enable,
+    .show-on-error,
+    .show-on-uninstall,
+    .show-on-install,
+    .show-on-restart,
+    div[isDisabled="true"] .hide-on-disable {
+      display: none;
+    }
+    
+    div[error] .show-on-error,
+    div[opType="needs-restart"] .show-on-restart,
+    div[opType="needs-uninstall"] .show-on-uninstall,
+    div[opType="needs-install"] .show-on-install,
+    div[opType="needs-enable"] .show-on-enable,
+    div[opType="needs-disable"] .show-on-disable,
+    div[isDisabled="true"] .show-on-disable {
+      display: -moz-box;
+    }
+    
+    div[opType="needs-restart"] .hide-on-restart,
+    div[opType="needs-uninstall"] .hide-on-uninstall,
+    div[isDisabled="true"][opType="needs-uninstall"],
+    div[opType="needs-install"] .hide-on-install,
+    div[opType="needs-enable"] .hide-on-enable,
+    div[opType="needs-disable"] .hide-on-disable {
+      display: none;
+    }
+  </style>
+</head>
+
+<body dir="&locale.dir;" onload="init();" onunload="uninit();">
+  <div id="addons-header">
+    <div>
+      <div>&aboutAddons.header2;</div>
+      <img src="chrome://browser/skin/images/addons-amo-hdpi.png" pref="extensions.getAddons.browseAddons" onclick="openLink(this);"/>
+    </div>
+  </div>
+  <div id="addons-list" style="display: none;">
+  </div>
+
+  <div id="addons-details" style="display: none">
+    <div class="addon-item">
+      <img class="favicon"/>
+      <div class="inner">
+        <div class="details">
+          <div class="tag"></div>
+          <div class="title"></div>
+          <div class="version"></div>
+        </div>
+        <div class="description-full"></div>
+      </div>
+      <div class="status status-uninstalled show-on-uninstall"></div>
+      <div class="buttons">
+        <button id="enable-btn" class="show-on-disable hide-on-enable hide-on-uninstall" onclick="Addons.enable();">&addonAction.enable;</button>
+        <button id="disable-btn" class="show-on-enable hide-on-disable hide-on-uninstall" onclick="Addons.disable();">&addonAction.disable;</button>
+        <button id="uninstall-btn" class="hide-on-uninstall" onclick="Addons.uninstall();">&addonAction.uninstall;</button>
+        <button id="cancel-btn" class="show-on-uninstall" onclick="Addons.cancelUninstall();">&addonAction.undo;</button>
+      </div>
+      <div class="options-header">&aboutAddons.options;</div>
+      <div class="options-box"></div>
+    </div>
+  </div>
+
+  <script type="application/javascript;version=1.8" src="chrome://browser/content/aboutAddons.js"></script>
+</body>
+</html>

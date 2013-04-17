@@ -1,0 +1,45 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+PLATFORM_DIR = atk
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+PLATFORM_DIR = \
+  msaa \
+  windows \
+  $(null)
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
+PLATFORM_DIR += mac
+else
+PLATFORM_DIR += other
+endif
+endif
+endif
+
+DIRS += $(PLATFORM_DIR)
+
+DIRS += \
+  base \
+  generic \
+  html \
+  jsat \
+  xpcom \
+  xforms \
+  $(null)
+
+ifdef MOZ_XUL
+DIRS +=   xul
+endif
+
+include $(topsrcdir)/config/rules.mk

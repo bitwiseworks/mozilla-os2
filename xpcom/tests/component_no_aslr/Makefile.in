@@ -1,0 +1,48 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+LIBRARY_NAME	= testcompnoaslr
+IS_COMPONENT	= 1
+CPPSRCS	= TestComponent.cpp
+NO_DIST_INSTALL = 1
+FORCE_SHARED_LIB = 1
+
+include $(topsrcdir)/config/config.mk
+
+MANIFEST_FILE = testcompnoaslr.manifest
+
+EXTRA_DSO_LDOPTS = \
+		$(DIST)/lib/$(LIB_PREFIX)xpcomglue_s.$(LIB_SUFFIX) \
+		$(XPCOM_FROZEN_LDOPTS) \
+		$(NSPR_LIBS) \
+		$(NULL)
+
+# Need to link with CoreFoundation on Mac
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+EXTRA_DSO_LDOPTS += \
+		$(TK_LIBS) \
+		$(NULL)
+endif
+
+include $(topsrcdir)/config/rules.mk
+
+LDFLAGS := $(filter-out -DYNAMICBASE,$(LDFLAGS)) -DYNAMICBASE:NO
+
+DEFINES += -DLIBRARY_FILENAME="$(SHARED_LIBRARY)"
+
+unittestlocation = xpcom/tests/unit
+
+libs:: $(SHARED_LIBRARY)
+	$(INSTALL) $^ $(testxpcobjdir)/$(unittestlocation)
+
+libs:: $(MANIFEST_FILE)
+	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(DEFINES) $(ACDEFINES) $(XULPPFLAGS) $< > $(testxpcobjdir)/$(unittestlocation)/$(<F)

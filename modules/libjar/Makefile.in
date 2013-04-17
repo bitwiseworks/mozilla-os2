@@ -1,0 +1,42 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+include $(srcdir)/objs.mk
+
+DIRS   =
+
+ifdef MOZ_ZIPWRITER
+DIRS  += zipwriter
+endif
+
+ifdef ENABLE_TESTS
+TOOL_DIRS += test
+endif
+
+
+MODULE		= jar
+LIBRARY_NAME	= jar$(VERSION_NUMBER)
+EXPORT_LIBRARY = 1
+IS_COMPONENT	= 1
+MODULE_NAME	= nsJarModule
+GRE_MODULE	= 1
+LIBXUL_LIBRARY = 1
+
+
+CPPSRCS		= $(MODULES_LIBJAR_LCPPSRCS)
+
+XPIDLSRCS	= $(MODULES_LIBJAR_LXPIDLSRCS)
+
+EXPORTS		= $(MODULES_LIBJAR_LEXPORTS)
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk

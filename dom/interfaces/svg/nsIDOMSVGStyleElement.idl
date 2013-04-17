@@ -1,0 +1,20 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMSVGElement.idl"
+
+[scriptable, uuid(53DA8F96-E2F0-45AC-B8AE-3CACC5981383)]
+interface nsIDOMSVGStyleElement
+  : nsIDOMSVGElement
+{
+  attribute DOMString         xmlspace;
+                       // raises DOMException on setting
+  attribute DOMString         type;
+                       // raises DOMException on setting
+  attribute DOMString         media;
+                       // raises DOMException on setting
+  attribute DOMString         title;
+                       // raises DOMException on setting
+};

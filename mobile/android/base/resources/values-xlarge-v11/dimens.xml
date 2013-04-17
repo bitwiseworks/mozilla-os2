@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<resources>
+
+    <dimen name="abouthome_gutter_small">20dp</dimen>
+    <dimen name="abouthome_gutter_large">40dp</dimen>
+    <dimen name="abouthome_icon_crop">0dp</dimen>
+    <dimen name="awesomebar_header_row_height">24dp</dimen>
+    <dimen name="awesomebar_row_height">66dp</dimen>
+    <dimen name="awesomebar_tab_transparency_height">46dp</dimen>
+    <dimen name="browser_toolbar_height">56dp</dimen>
+    <dimen name="local_tab_row_height">150dp</dimen>
+    <dimen name="remote_tab_child_row_height">48dp</dimen>
+    <dimen name="remote_tab_group_row_height">28dp</dimen>
+    <dimen name="tabs_counter_size">26sp</dimen>
+
+</resources>

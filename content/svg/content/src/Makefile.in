@@ -1,0 +1,161 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= content
+LIBRARY_NAME	= gkcontentsvg_s
+LIBXUL_LIBRARY	= 1
+FAIL_ON_WARNINGS	= 1
+
+CPPSRCS		= \
+		DOMSVGAnimatedLengthList.cpp \
+		DOMSVGAnimatedNumberList.cpp \
+		DOMSVGAnimatedTransformList.cpp \
+		DOMSVGLength.cpp \
+		DOMSVGLengthList.cpp \
+		DOMSVGMatrix.cpp \
+		DOMSVGNumber.cpp \
+		DOMSVGNumberList.cpp \
+		DOMSVGPathSeg.cpp \
+		DOMSVGPathSegList.cpp \
+		DOMSVGPoint.cpp \
+		DOMSVGPointList.cpp \
+		DOMSVGStringList.cpp \
+		DOMSVGTests.cpp \
+		DOMSVGTransform.cpp \
+		DOMSVGTransformList.cpp \
+		nsDOMSVGZoomEvent.cpp \
+		nsDOMSVGEvent.cpp \
+		nsSVGAElement.cpp \
+		nsSVGAltGlyphElement.cpp \
+		nsSVGAngle.cpp \
+		nsSVGBoolean.cpp \
+		nsSVGCircleElement.cpp \
+		nsSVGClass.cpp \
+		nsSVGClipPathElement.cpp \
+		nsSVGDataParser.cpp \
+		nsSVGDefsElement.cpp \
+		nsSVGDescElement.cpp \
+		nsSVGElement.cpp \
+		nsSVGElementFactory.cpp \
+		nsSVGEllipseElement.cpp \
+		nsSVGEnum.cpp \
+		nsSVGFeatures.cpp \
+		nsSVGFilterElement.cpp \
+		nsSVGFilters.cpp \
+		nsSVGForeignObjectElement.cpp \
+		nsSVGGElement.cpp \
+		nsSVGGradientElement.cpp \
+		nsSVGGraphicElement.cpp \
+		nsSVGImageElement.cpp \
+		nsSVGInteger.cpp \
+		nsSVGIntegerPair.cpp \
+		nsSVGLength2.cpp \
+		nsSVGLineElement.cpp \
+		nsSVGMarkerElement.cpp \
+		nsSVGMaskElement.cpp \
+		nsSVGMetadataElement.cpp \
+		nsSVGNumber2.cpp \
+		nsSVGNumberPair.cpp \
+		nsSVGPathDataParser.cpp \
+		nsSVGPathElement.cpp \
+		nsSVGPathGeometryElement.cpp \
+		nsSVGPatternElement.cpp \
+		nsSVGPolyElement.cpp \
+		nsSVGPolygonElement.cpp \
+		nsSVGPolylineElement.cpp \
+		nsSVGScriptElement.cpp \
+		nsSVGString.cpp \
+		nsSVGStylableElement.cpp \
+		nsSVGRect.cpp \
+		nsSVGRectElement.cpp \
+		nsSVGSVGElement.cpp \
+		nsSVGStopElement.cpp \
+		nsSVGStyleElement.cpp \
+		nsSVGSwitchElement.cpp \
+		nsSVGSymbolElement.cpp \
+		nsSVGTSpanElement.cpp \
+		nsSVGTextContentElement.cpp \
+		nsSVGTextElement.cpp \
+		nsSVGTextPathElement.cpp \
+		nsSVGTextPositioningElement.cpp \
+		nsSVGTitleElement.cpp \
+		nsSVGUnknownElement.cpp \
+		nsSVGUseElement.cpp \
+		nsSVGViewBox.cpp \
+		nsSVGViewElement.cpp \
+		SVGAnimatedLengthList.cpp \
+		SVGAnimatedNumberList.cpp \
+		SVGAnimatedPathSegList.cpp \
+		SVGAnimatedPointList.cpp \
+		SVGAnimatedPreserveAspectRatio.cpp \
+		SVGAnimatedTransformList.cpp \
+		SVGFragmentIdentifier.cpp \
+		SVGLength.cpp \
+		SVGLengthList.cpp \
+		SVGNumberList.cpp \
+		SVGPathData.cpp \
+		SVGPathSegUtils.cpp \
+		SVGPointList.cpp \
+		SVGStringList.cpp \
+		SVGTransform.cpp \
+		SVGTransformList.cpp \
+		SVGTransformListParser.cpp \
+		nsSVGAnimateElement.cpp \
+		nsSVGAnimateTransformElement.cpp \
+		nsSVGAnimateMotionElement.cpp \
+		nsSVGAnimationElement.cpp \
+		nsSVGMpathElement.cpp \
+		nsSVGSetElement.cpp \
+		SVGAttrValueWrapper.cpp \
+		SVGIntegerPairSMILType.cpp \
+		SVGLengthListSMILType.cpp \
+		SVGMotionSMILType.cpp \
+		SVGMotionSMILAttr.cpp \
+		SVGMotionSMILAnimationFunction.cpp \
+		SVGMotionSMILPathUtils.cpp \
+		SVGNumberListSMILType.cpp \
+		SVGNumberPairSMILType.cpp \
+		SVGOrientSMILType.cpp \
+		SVGPathSegListSMILType.cpp \
+		SVGPointListSMILType.cpp \
+		SVGTransformListSMILType.cpp \
+		SVGViewBoxSMILType.cpp \
+		$(NULL)
+
+include $(topsrcdir)/config/config.mk
+
+# we don't want the shared lib, but we want to force the creation of a static lib.
+FORCE_STATIC_LIB = 1
+
+EXPORTS =  			\
+	nsSVGFeatures.h            \
+	nsSVGRect.h                \
+	SVGAttrValueWrapper.h      \
+	$(NULL)
+
+include $(topsrcdir)/config/rules.mk
+
+INCLUDES += 	\
+		-I$(srcdir)/../../../xml/content/src \
+		-I$(srcdir)/../../../../dom \
+		-I$(srcdir)/../../../base/src \
+		-I$(srcdir)/../../../../layout/generic \
+		-I$(srcdir)/../../../../layout/xul/base/src \
+		-I$(srcdir)/../../../../layout/svg/base/src \
+		-I$(srcdir)/../../../../layout/style \
+		-I$(srcdir)/../../../events/src \
+		-I$(srcdir)/../../../html/content/src \
+		-I$(topsrcdir)/content/xbl/src \
+		-I$(srcdir)/../../../smil \
+		$(NULL)
+
+DEFINES += -D_IMPL_NS_LAYOUT

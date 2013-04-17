@@ -1,0 +1,40 @@
+/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+/* vim: set ts=2 et sw=2 tw=40: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMEventTarget.idl"
+#include "nsIDOMDOMError.idl"
+
+interface nsIDOMEventListener;
+
+[scriptable, builtinclass, uuid(d902afb1-2e1d-412e-bfa3-cb6a9453a4db)]
+interface nsIDOMTelephonyCall : nsIDOMEventTarget
+{
+  readonly attribute DOMString number;
+
+  readonly attribute DOMString state;
+
+  readonly attribute nsIDOMDOMError error;
+
+  void answer();
+  void hangUp();
+  void hold();
+  void resume();
+
+  attribute nsIDOMEventListener onstatechange;
+
+  attribute nsIDOMEventListener ondialing;
+  attribute nsIDOMEventListener onalerting;
+  attribute nsIDOMEventListener onbusy;
+  attribute nsIDOMEventListener onconnecting;
+  attribute nsIDOMEventListener onconnected;
+  attribute nsIDOMEventListener ondisconnecting;
+  attribute nsIDOMEventListener ondisconnected;
+  attribute nsIDOMEventListener onholding;
+  attribute nsIDOMEventListener onheld;
+  attribute nsIDOMEventListener onresuming;
+
+  attribute nsIDOMEventListener onerror;
+};

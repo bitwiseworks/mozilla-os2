@@ -1,0 +1,38 @@
+/* -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 8 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PPluginInstance;
+
+include "mozilla/plugins/PluginMessageUtils.h";
+
+using mozilla::plugins::Buffer;
+using NPError;
+using NPReason;
+
+namespace mozilla {
+namespace plugins {
+
+/**
+ * PPluginStream represents an NPStream sent from the plugin to the browser.
+ */
+
+rpc protocol PPluginStream
+{
+  manager PPluginInstance;
+
+parent:
+  rpc NPN_Write(Buffer data) returns (int32_t written);
+
+both:
+  /**
+   * ~PPluginStream is for both NPN_DestroyStream and NPP_DestroyStream.
+   * @param artificial True when the stream is closed as a by-product of
+   *                        some other call (such as a failure in NPN_Write).
+   */
+  rpc __delete__(NPReason reason, bool artificial);
+};
+
+} // namespace plugins
+} // namespace mozilla

@@ -1,0 +1,77 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+
+DEPTH     = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH     = @srcdir@
+
+CHROME_DEPS = buildconfig.html
+
+include $(DEPTH)/config/autoconf.mk
+
+DEFINES += \
+  -Dtarget="$(target)" \
+  -Dac_configure_args="$(ac_configure_args)" \
+  -DCC="$(CC)" \
+  -DCC_VERSION="$(CC_VERSION)" \
+  -DCFLAGS="$(CFLAGS)" \
+  -DCXX="$(CXX)" \
+  -DCXX_VERSION="$(CXX_VERSION)" \
+  -DCXXFLAGS="$(CXXFLAGS)" \
+  -DCPPFLAGS="$(CPPFLAGS)" \
+  -DMOZ_APP_NAME=$(MOZ_APP_NAME) \
+  -DMOZ_BUILD_APP=$(MOZ_BUILD_APP) \
+  $(NULL)
+
+MOZ_SOURCE_STAMP ?= $(shell hg -R $(topsrcdir) parent --template="{node|short}\n" 2>/dev/null)
+ifdef MOZ_SOURCE_STAMP
+DEFINES += -DSOURCE_CHANGESET="$(MOZ_SOURCE_STAMP)"
+endif
+
+ifeq (Android,$(OS_TARGET))
+DEFINES += -DANDROID_PACKAGE_NAME=$(ANDROID_PACKAGE_NAME)
+endif
+
+# strip a trailing slash from the repo URL because it's not always present,
+# and we want to construct a working URL in buildconfig.html
+# make+shell+sed = awful
+_dollar=$$
+SOURCE_REPO := $(shell cd $(topsrcdir) && hg showconfig paths.default 2>/dev/null | head -n1 | sed -e "s/^ssh:/http:/" -e "s/\/$(_dollar)//" )
+# extra sanity check for old versions of hg
+# that don't support showconfig
+ifeq (http,$(patsubst http%,http,$(SOURCE_REPO)))
+DEFINES += -DSOURCE_REPO="$(SOURCE_REPO)"
+endif
+
+BUILD_HOSTNAME = $(shell hostname -s || hostname)
+DEFINES += -DBUILD_HOSTNAME="$(BUILD_HOSTNAME)"
+
+ifdef MOZ_TOOLKIT_SEARCH
+DEFINES += -DMOZ_TOOLKIT_SEARCH
+endif
+
+TEST_DIRS += tests
+
+EXTRA_JS_MODULES = \
+  debug.js \
+  Geometry.jsm \
+  InlineSpellChecker.jsm \
+  PopupNotifications.jsm \
+  Dict.jsm \
+  PageMenu.jsm \
+  PropertyListUtils.jsm \
+  PrivateBrowsingUtils.jsm \
+  Task.jsm \
+  $(NULL)
+
+EXTRA_PP_JS_MODULES = \
+  LightweightThemeConsumer.jsm \
+  Services.jsm \
+  WindowDraggingUtils.jsm \
+  $(NULL)
+
+include $(topsrcdir)/config/rules.mk

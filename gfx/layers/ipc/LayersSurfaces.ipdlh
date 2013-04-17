@@ -1,0 +1,86 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PGrallocBuffer;
+
+include "gfxipc/ShadowLayerUtils.h";
+
+using gfx3DMatrix;
+using gfxIntSize;
+using gfxPoint;
+using gfxRGBA;
+using nsIntPoint;
+using nsIntRect;
+using nsIntRegion;
+using nsIntSize;
+using mozilla::gfxContentType;
+using mozilla::GraphicsFilterType;
+using mozilla::layers::FrameMetrics;
+using mozilla::layers::MagicGrallocBufferHandle;
+using mozilla::layers::SurfaceDescriptorX11;
+using mozilla::null_t;
+using mozilla::WindowsHandle;
+using mozilla::gl::SharedTextureHandle;
+using mozilla::gl::TextureImage::TextureShareType;
+
+namespace mozilla {
+namespace layers {
+
+union MaybeMagicGrallocBufferHandle {
+  MagicGrallocBufferHandle;
+  null_t;
+};
+
+struct SurfaceDescriptorD3D10 {
+  WindowsHandle handle;
+};
+
+struct SharedTextureDescriptor {
+  TextureShareType shareType;
+  SharedTextureHandle handle;
+  nsIntSize size;
+  bool inverted;
+};
+
+struct SurfaceDescriptorGralloc {
+  PGrallocBuffer buffer;
+
+  /**
+   * We can have one source producing gralloc buffers and sharing them
+   * with another source that may also produce its own gralloc buffers.
+   * This happens for camera preview buffers sent to video code.  When
+   * that happens, the producer can mark the buffer as "external" to
+   * prevent its consumer from mistakenly freeing the buffer.
+   */
+  bool external;
+};
+
+struct SharedImageID {
+  uint64_t id;
+};
+
+union SurfaceDescriptor {
+  Shmem;
+  SurfaceDescriptorD3D10;
+  SurfaceDescriptorGralloc;
+  SurfaceDescriptorX11;
+  SharedTextureDescriptor;
+};
+
+struct YUVImage {
+  Shmem Ydata;
+  Shmem Udata;
+  Shmem Vdata;
+  nsIntRect picture;
+};
+
+union SharedImage {
+  SurfaceDescriptor;
+  YUVImage;
+  SharedImageID;
+  null_t;
+};
+
+} // namespace
+} // namespace

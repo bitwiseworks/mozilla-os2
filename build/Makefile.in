@@ -1,0 +1,267 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = build
+
+ifeq (,$(filter WINNT OS2,$(OS_ARCH)))
+DIRS		= unix
+endif
+
+ifeq (WINNT,$(OS_ARCH))
+DIRS = win32
+endif
+
+ifdef STLPORT_SOURCES
+DIRS += stlport
+endif
+
+DIRS += pgo
+
+ifeq (android,$(MOZ_WIDGET_TOOLKIT))
+TEST_DIRS += mobile/sutagent/android \
+          mobile/sutagent/android/watcher \
+          mobile/sutagent/android/ffxcp \
+          mobile/sutagent/android/fencp \
+          mobile/robocop \
+          $(NULL)
+endif
+
+ifdef MOZ_APP_BASENAME
+DIST_FILES = $(srcdir)/application.ini
+
+ifneq (android,$(MOZ_WIDGET_TOOLKIT))
+ifdef MOZ_UPDATER
+DIST_FILES += update-settings.ini
+endif
+endif
+
+ifdef LIBXUL_SDK
+GRE_MILESTONE = $(shell $(PYTHON) $(topsrcdir)/config/printconfigsetting.py $(LIBXUL_DIST)/bin/platform.ini Build Milestone)
+APP_INI_DEPS = $(LIBXUL_DIST)/bin/platform.ini
+else
+GRE_MILESTONE = $(shell tail -n 1 $(topsrcdir)/config/milestone.txt 2>/dev/null || tail -1 $(topsrcdir)/config/milestone.txt)
+APP_INI_DEPS = $(topsrcdir)/config/milestone.txt
+endif
+
+APP_BUILDID := $(shell cat $(DEPTH)/config/buildid)
+APP_INI_DEPS += $(DEPTH)/config/buildid
+
+DEFINES += -DGRE_MILESTONE=$(GRE_MILESTONE) -DAPP_BUILDID=$(APP_BUILDID)
+
+DEFINES += -DMOZ_APP_VERSION="$(MOZ_APP_VERSION)"
+APP_INI_DEPS += $(DEPTH)/config/autoconf.mk
+
+MOZ_SOURCE_STAMP := $(firstword $(shell cd $(topsrcdir)/$(MOZ_BUILD_APP)/.. && hg parent --template="{node|short}\n" 2>/dev/null))
+ifdef MOZ_SOURCE_STAMP
+DEFINES += -DMOZ_SOURCE_STAMP="$(MOZ_SOURCE_STAMP)"
+endif
+
+_dollar=$$
+SOURCE_REPO := $(shell cd $(topsrcdir)/$(MOZ_BUILD_APP)/.. && hg showconfig paths.default 2>/dev/null | head -n1 | sed -e "s/^ssh:/http:/" -e "s/\/$(_dollar)//" )
+ifdef SOURCE_REPO
+DEFINES += -DMOZ_SOURCE_REPO="$(SOURCE_REPO)"
+endif
+
+DEFINES += \
+  -DMOZ_APP_BASENAME="$(MOZ_APP_BASENAME)" \
+  -DMOZ_APP_VENDOR="$(MOZ_APP_VENDOR)" \
+  -DMOZ_APP_ID="$(MOZ_APP_ID)" \
+  -DMAR_CHANNEL_ID="$(MAR_CHANNEL_ID)" \
+  -DACCEPTED_MAR_CHANNEL_IDS="$(ACCEPTED_MAR_CHANNEL_IDS)" \
+  $(NULL)
+
+ifdef MOZ_APP_PROFILE
+DEFINES += -DMOZ_APP_PROFILE="$(MOZ_APP_PROFILE)"
+endif
+
+ifdef MOZILLA_OFFICIAL
+DEFINES += -DMOZILLA_OFFICIAL
+endif
+
+ifdef MOZ_PROFILE_MIGRATOR
+DEFINES += -DMOZ_PROFILE_MIGRATOR
+endif
+
+ifdef MOZ_EXTENSION_MANAGER
+DEFINES += -DMOZ_EXTENSION_MANAGER
+endif
+
+endif
+
+include $(topsrcdir)/config/rules.mk
+
+# we install to _leaktest/
+TARGET_DEPTH = ..
+include $(srcdir)/automation-build.mk
+
+_LEAKTEST_DIR = $(DEPTH)/_leaktest
+GARBAGE_DIRS += $(_LEAKTEST_DIR)
+
+_LEAKTEST_FILES =    \
+		automation.py \
+		automationutils.py \
+		leaktest.py \
+		bloatcycle.html \
+		$(topsrcdir)/build/pgo/server-locations.txt \
+		$(topsrcdir)/build/pgo/favicon.ico \
+		$(topsrcdir)/build/pgo/blueprint/sample.html \
+		$(topsrcdir)/build/pgo/blueprint/elements.html \
+		$(topsrcdir)/build/pgo/blueprint/forms.html \
+		$(topsrcdir)/build/pgo/blueprint/grid.html \
+		$(topsrcdir)/build/pgo/blueprint/test.jpg \
+		$(topsrcdir)/build/pgo/blueprint/test-small.jpg \
+		$(topsrcdir)/build/pgo/blueprint/valid.png \
+		$(topsrcdir)/build/pgo/blueprint/screen.css \
+		$(topsrcdir)/build/pgo/blueprint/print.css \
+		$(topsrcdir)/build/pgo/blueprint/grid.png \
+		$(topsrcdir)/build/pgo/blueprint/fancytype-screen.css \
+		$(NULL)
+
+leaktest.py: leaktest.py.in
+	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $^ > $@
+	chmod +x $@
+GARBAGE += leaktest.py
+
+ifdef MOZ_APP_BASENAME
+$(FINAL_TARGET)/application.ini: $(APP_INI_DEPS)
+
+ifdef MOZ_APP_STATIC_INI
+application.ini.h: appini_header.py $(FINAL_TARGET)/application.ini
+	$(PYTHON) $^ > $@
+export:: application.ini.h
+GARBAGE += application.ini.h
+endif
+endif
+
+libs:: $(_LEAKTEST_FILES)
+	$(INSTALL) $^ $(_LEAKTEST_DIR)
+
+ifdef MOZ_VALGRIND
+_VALGRIND_DIR = $(DEPTH)/_valgrind
+GARBAGE_DIRS += $(_VALGRIND_DIR)
+
+_VALGRIND_FILES = \
+		$(topsrcdir)/build/valgrind/i686-redhat-linux-gnu.sup \
+		$(topsrcdir)/build/valgrind/x86_64-redhat-linux-gnu.sup \
+		$(NULL)
+
+libs:: $(_VALGRIND_FILES)
+	$(INSTALL) $^ $(_VALGRIND_DIR)
+endif
+
+ifdef ENABLE_TESTS
+libs:: $(topsrcdir)/tools/rb/fix_stack_using_bpsyms.py
+	$(INSTALL) $< $(DIST)/bin
+
+# Unit tests for ManifestParser
+check::
+	$(PYTHON) $(topsrcdir)/config/pythonpath.py -I$(srcdir) \
+	  $(srcdir)/tests/test.py
+
+ifeq ($(OS_ARCH),Darwin)
+libs:: $(topsrcdir)/tools/rb/fix-macosx-stack.pl
+	$(INSTALL) $< $(DIST)/bin
+libs:: $(topsrcdir)/tools/rb/fix_macosx_stack.py
+	$(INSTALL) $< $(DIST)/bin
+
+# Basic unit tests for some stuff in the unify script
+check::
+# build x64/i386 binaries, and unify them
+	rm -f unify-test-x64 unify-test-i386 unify-test-universal
+	$(HOST_CC) -arch x86_64 $(srcdir)/unify-test.c -o unify-test-x64
+	$(HOST_CC) -arch i386 $(srcdir)/unify-test.c -o unify-test-i386
+	@if ! $(srcdir)/macosx/universal/unify ./unify-test-x64 ./unify-test-i386 \
+          ./unify-test-universal; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary!"; \
+          false; \
+        fi
+	@if test ! -f ./unify-test-universal; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary!"; \
+          false; \
+        fi
+	@if ! file -b ./unify-test-universal | head -n1 | grep -q "^Mach-O universal binary"; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary!"; \
+          false; \
+        else \
+          echo "TEST-PASS | build/ | unify produced a universal binary!"; \
+        fi
+# try building an x86-64 binary. if that succeeds, try unifying it
+# with an i386 binary
+	rm -f unify-test-x86_64 unify-test-universal-64
+	-$(HOST_CC) -arch x86_64 $(srcdir)/unify-test.c -o unify-test-x86_64
+	@if test -f ./unify-test-x86_64; then \
+          if ! $(srcdir)/macosx/universal/unify ./unify-test-x86_64 ./unify-test-i386 \
+            ./unify-test-universal-64; then \
+            echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary with a 64-bit input!"; \
+            false; \
+          fi; \
+          if test ! -f ./unify-test-universal-64; then \
+            echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary with a 64-bit input!"; \
+            false; \
+          fi; \
+          if ! file -b ./unify-test-universal-64 | head -n1 | grep -q "^Mach-O universal binary"; then \
+            echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary with a 64-bit input!"; \
+            false; \
+          else \
+            echo "TEST-PASS | build/ | unify produced a universal binary with a 64-bit input!"; \
+          fi \
+        fi
+# try unifying two identical Java class files
+	rm -f unifytesta.class unifytestb.class unifytestc.class
+	cp $(srcdir)/unifytest.class ./unifytesta.class
+	cp $(srcdir)/unifytest.class ./unifytestb.class
+	@if ! $(srcdir)/macosx/universal/unify ./unifytesta.class ./unifytestb.class \
+          ./unifytestc.class; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify a Java class file!"; \
+          false; \
+        fi
+	@if test ! -f ./unifytestc.class; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify a Java class file!"; \
+          false; \
+        fi
+	@if ! diff -q ./unifytesta.class ./unifytestc.class; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify a Java class file!"; \
+          false; \
+        else \
+          echo "TEST-PASS | build/ | unify unified a Java class file!"; \
+        fi
+# try unifying some files that differ only in line ordering
+	rm -rf unify-sort-test
+	mkdir unify-sort-test unify-sort-test/a unify-sort-test/b
+	printf "lmn\nabc\nxyz\n" > unify-sort-test/a/file.foo
+	printf "xyz\nlmn\nabc" > unify-sort-test/b/file.foo
+	printf "lmn\nabc\nxyz\n" > unify-sort-test/expected-result
+	@if ! $(srcdir)/macosx/universal/unify --unify-with-sort "\.foo$$" \
+          ./unify-sort-test/a ./unify-sort-test/b \
+          ./unify-sort-test/c; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify files with differing line ordering!"; \
+          false; \
+        fi
+	@if ! diff -q ./unify-sort-test/expected-result ./unify-sort-test/c/file.foo; then \
+          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify files with differing line ordering!"; \
+          false; \
+        else \
+          echo "TEST-PASS | build/ | unify unified files with differing line ordering!"; \
+        fi
+endif
+
+ifeq ($(OS_ARCH),Linux)
+libs:: $(topsrcdir)/tools/rb/fix-linux-stack.pl
+	$(INSTALL) $< $(DIST)/bin
+endif
+
+GARBAGE += $(srcdir)/automationutils.pyc
+
+# Test for ConfigStatus.py
+check::
+	$(PYTHON) $(srcdir)/tests/unit-ConfigStatus.py
+endif # ENABLE_TESTS

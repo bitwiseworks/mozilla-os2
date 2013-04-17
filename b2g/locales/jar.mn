@@ -1,0 +1,16 @@
+#filter substitution
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+
+@AB_CD@.jar:
+% locale browser @AB_CD@ %locale/@AB_CD@/browser/
+  locale/@AB_CD@/browser/about.dtd                (%chrome/about.dtd)
+  locale/@AB_CD@/browser/aboutCertError.dtd       (%chrome/aboutCertError.dtd)
+  locale/@AB_CD@/browser/notification.dtd         (%chrome/notification.dtd)
+  locale/@AB_CD@/browser/webapps.dtd              (%chrome/webapps.dtd)
+  locale/@AB_CD@/browser/phishing.dtd             (%chrome/phishing.dtd)
+
+* locale/@AB_CD@/browser/netError.dtd             (%chrome/overrides/netError.dtd)
+% override chrome://global/locale/netError.dtd    chrome://browser/locale/netError.dtd

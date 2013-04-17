@@ -1,0 +1,190 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH       = @DEPTH@
+topsrcdir   = @top_srcdir@
+srcdir      = @srcdir@
+VPATH       = \
+  $(srcdir) \
+  $(srcdir)/basic \
+  $(srcdir)/opengl \
+  $(srcdir)/d3d9 \
+  $(srcdir)/d3d10 \
+  $(srcdir)/ipc \
+  $(NULL)
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE         = thebes
+LIBRARY_NAME   = layers
+LIBXUL_LIBRARY = 1
+FORCE_STATIC_LIB = 1
+
+DEFINES += -DIMPL_THEBES
+ifdef MOZ_DEBUG
+DEFINES += -DD3D_DEBUG_INFO
+endif
+
+EXPORTS = \
+        BasicLayers.h \
+        BasicTiledThebesLayer.h \
+        BasicImplData.h \
+        GonkIOSurfaceImage.h \
+        FrameMetrics.h \
+        CompositorChild.h \
+        CompositorParent.h \
+        ImageContainer.h \
+        ImageLayers.h \
+        ImageTypes.h \
+        Layers.h \
+        LayersTypes.h \
+        LayerManagerOGLShaders.h \
+        LayerManagerOGL.h \
+        LayerManagerOGLProgram.h \
+        LayerSorter.h \
+        ReadbackLayer.h \
+        ShadowLayersManager.h \
+        SharedTextureImage.h \
+        TexturePoolOGL.h \
+        $(NULL)
+
+CPPSRCS = \
+        BasicImages.cpp \
+        BasicLayerManager.cpp \
+        BasicCanvasLayer.cpp \
+        BasicColorLayer.cpp \
+        BasicContainerLayer.cpp \
+        BasicImageLayer.cpp \
+        BasicLayersImpl.cpp \
+        BasicThebesLayer.cpp \
+        BasicBuffers.cpp \
+        BasicTiledThebesLayer.cpp \
+        ImageContainer.cpp \
+        Layers.cpp \
+        RenderTrace.cpp \
+        ReadbackProcessor.cpp \
+        ThebesLayerBuffer.cpp \
+        CanvasLayerOGL.cpp \
+        ColorLayerOGL.cpp \
+        ContainerLayerOGL.cpp \
+        ImageLayerOGL.cpp \
+        LayerManagerOGL.cpp \
+        ThebesLayerOGL.cpp \
+        TiledThebesLayerOGL.cpp \
+        ReusableTileStoreOGL.cpp \
+        LayerManagerOGLProgram.cpp \
+        LayerSorter.cpp \
+        ImageLayers.cpp \
+        TexturePoolOGL.cpp \
+        $(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+ifdef MOZ_ENABLE_D3D9_LAYER
+EXPORTS += \
+        LayerManagerD3D9.h \
+        DeviceManagerD3D9.h \
+        $(NULL)
+
+CPPSRCS += \
+        LayerManagerD3D9.cpp \
+        ThebesLayerD3D9.cpp \
+        ContainerLayerD3D9.cpp \
+        ImageLayerD3D9.cpp \
+        ColorLayerD3D9.cpp \
+        CanvasLayerD3D9.cpp \
+        ShadowBufferD3D9.cpp \
+        DeviceManagerD3D9.cpp \
+        Nv3DVUtils.cpp \
+        $(NULL)
+endif
+ifdef MOZ_ENABLE_D3D10_LAYER
+EXPORTS += \
+        LayerManagerD3D10.h \
+        ReadbackManagerD3D10.h \
+        $(NULL)
+
+CPPSRCS += \
+        CanvasLayerD3D10.cpp \
+        ColorLayerD3D10.cpp \
+        ContainerLayerD3D10.cpp \
+        ImageLayerD3D10.cpp \
+        LayerManagerD3D10.cpp \
+        ReadbackManagerD3D10.cpp \
+	ShadowLayerUtilsD3D10.cpp \
+        ThebesLayerD3D10.cpp \
+        $(NULL)
+endif
+endif
+
+EXPORTS_NAMESPACES = gfxipc mozilla/layers
+EXPORTS_gfxipc = ShadowLayerUtils.h
+EXPORTS_mozilla/layers =\
+        AsyncPanZoomController.h \
+        Axis.h \
+        CompositorCocoaWidgetHelper.h \
+        CompositorChild.h \
+        CompositorParent.h \
+        GeckoContentController.h \
+        GestureEventListener.h \
+        ImageBridgeChild.h \
+        ImageBridgeParent.h \
+        ImageContainerChild.h \
+        ImageContainerParent.h \
+        ShadowLayers.h \
+        ShadowLayersChild.h \
+        ShadowLayersParent.h \
+        ShadowLayersManager.h \
+        RenderTrace.h \
+        SharedImageUtils.h \
+        $(NULL)
+
+CPPSRCS += \
+        AsyncPanZoomController.cpp \
+        Axis.cpp \
+        CompositorCocoaWidgetHelper.cpp \
+        CompositorChild.cpp \
+        CompositorParent.cpp \
+        GestureEventListener.cpp \
+        ImageBridgeChild.cpp \
+        ImageBridgeParent.cpp \
+        ImageContainerChild.cpp \
+        ImageContainerParent.cpp \
+        ShadowLayers.cpp \
+        ShadowLayerChild.cpp \
+        ShadowLayersChild.cpp \
+        ShadowLayerParent.cpp \
+        ShadowLayersParent.cpp \
+        $(NULL)
+
+ifdef MOZ_X11 #{
+EXPORTS_mozilla/layers += ShadowLayerUtilsX11.h
+CPPSRCS += ShadowLayerUtilsX11.cpp
+endif #}
+
+ifdef MOZ_ENABLE_D3D10_LAYER
+EXPORTS_mozilla/layers += ShadowLayerUtilsD3D10.h
+DEFINES	+= -DMOZ_ENABLE_D3D10_LAYER
+endif
+
+# NB: Gralloc is available on other platforms that use the android GL
+# libraries, but only Gonk is able to use it reliably because Gecko
+# has full system permissions there.
+ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
+EXPORTS_mozilla/layers += ShadowLayerUtilsGralloc.h
+CPPSRCS += \
+        ShadowLayerUtilsGralloc.cpp \
+        GrallocImages.cpp \
+        $(NULL)
+endif
+
+include $(topsrcdir)/config/rules.mk
+
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+
+LOCAL_INCLUDES += \
+        -I$(topsrcdir)/content/events/src \
+        $(NULL)
+
+CXXFLAGS += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS) $(TK_CFLAGS)

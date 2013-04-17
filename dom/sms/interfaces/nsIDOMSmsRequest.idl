@@ -1,0 +1,10 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMDOMRequest.idl"
+
+[scriptable, builtinclass, uuid(f77caa0f-d957-40b4-b1c6-195ebaace60c)]
+interface nsIDOMMozSmsRequest : nsIDOMDOMRequest
+{
+};

@@ -1,0 +1,75 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = telemetry
+XPIDL_MODULE = telemetry
+MODULE_NAME = telemetry
+GRE_MODULE = 1
+
+LIBXUL_LIBRARY = 1
+EXPORT_LIBRARY = 1
+IS_COMPONENT = 1
+
+LIBRARY_NAME = telemetry
+
+EXPORTS_NAMESPACES = mozilla
+
+EXPORTS_mozilla = \
+  Telemetry.h \
+  ProcessedStack.h \
+  TelemetryHistogramEnums.h \
+  $(NULL)
+
+XPIDLSRCS = \
+  nsITelemetry.idl \
+  $(NULL)
+
+EXTRA_COMPONENTS = \
+  TelemetryPing.manifest \
+  TelemetryPing.js \
+  $(NULL)
+
+EXTRA_JS_MODULES = \
+  TelemetryStopwatch.jsm \
+  $(NULL)
+
+CPPSRCS = \
+  Telemetry.cpp \
+  $(NULL)
+
+EXTRA_DSO_LDOPTS += \
+  $(MOZ_COMPONENT_LIBS) \
+  $(MOZ_JS_LIBS) \
+  $(NULL)
+
+TEST_DIRS += tests
+
+ifdef MOZILLA_OFFICIAL
+DEFINES += -DMOZILLA_OFFICIAL
+endif
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+
+histograms_file := $(srcdir)/Histograms.json
+histogram_enum_file := TelemetryHistogramEnums.h
+histogram_data_file := TelemetryHistogramData.inc
+
+$(histogram_enum_file): $(histograms_file) $(srcdir)/gen-histogram-enum.py
+	$(PYTHON) $(srcdir)/gen-histogram-enum.py $< > $@
+$(histogram_data_file): $(histograms_file) $(srcdir)/gen-histogram-data.py
+	$(PYTHON) $(srcdir)/gen-histogram-data.py $< > $@
+
+Telemetry.$(OBJ_SUFFIX): $(histogram_data_file)
+
+GARBAGE += $(histogram_data_file) $(histogram_enum_file)

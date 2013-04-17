@@ -1,0 +1,34 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+relativesrcdir	= @relativesrcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+DIRS	= \
+	offset \
+	$(NULL)
+
+MOCHITEST_FILES	= \
+	cow.jpg \
+	dashboard.xml \
+	iframe.html \
+	json_assigned_obj.js \
+	json_obj.js \
+	name.html \
+	test.html \
+	test.js \
+	test2.html \
+	test3.html \
+	testrunner.js \
+	testsuite.css \
+	with_fries.xml \
+	$(NULL)
+
+include $(topsrcdir)/config/rules.mk

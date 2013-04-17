@@ -1,0 +1,124 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<html>
+<head>
+<script type="application/javascript">
+  var strBundleService = Components.classes["@mozilla.org/intl/stringbundle;1"].getService(Components.interfaces.nsIStringBundleService);
+  var pluginsbundle = strBundleService.createBundle("chrome://global/locale/plugins.properties");
+  var regionbundle = strBundleService.createBundle("chrome://global-region/locale/region.properties");
+
+  document.writeln("<title>" + pluginsbundle.GetStringFromName("title_label") + "<\/title>");
+</script>
+<link rel="stylesheet" type="text/css" href="chrome://global/content/plugins.css">
+<link rel="stylesheet" type="text/css" href="chrome://global/skin/plugins.css">
+</head>
+<body>
+<div id="outside">
+<script type="application/javascript">
+
+  function setDirection() {
+    var frame = document.getElementById("directionDetector");
+    var direction = frame.contentDocument
+                         .defaultView
+                         .window
+                         .getComputedStyle(frame.contentDocument.getElementById("target"), "")
+                         .getPropertyValue("direction");
+    document.body.removeChild(frame);
+    document.dir = direction;
+  }
+
+  function setupDirection() {
+    var frame = document.createElement("iframe");
+    frame.setAttribute("id", "directionDetector");
+    frame.setAttribute("src", "chrome://global/content/directionDetector.html");
+    frame.setAttribute("width", "0");
+    frame.setAttribute("height", "0");
+    frame.setAttribute("style", "visibility: hidden;");
+    frame.setAttribute("onload", "setDirection();");
+    document.body.appendChild(frame);
+  }
+  setupDirection();
+
+  /* JavaScript to enumerate and display all installed plug-ins
+
+   * First, refresh plugins in case anything has been changed recently in
+   * prefs: (The "false" argument tells refresh not to reload or activate
+   * any plug-ins that would be active otherwise.  In contrast, one would
+   * use "true" in the case of ASD instead of restarting)
+   */
+  navigator.plugins.refresh(false);
+
+
+  var numPlugins = navigator.plugins.length;
+
+  if (numPlugins > 0)
+    document.writeln("<h1 id=\"plugs\">" + pluginsbundle.GetStringFromName("enabledplugins_label") + "<\/h1>");
+  else
+    document.writeln("<h1 id=\"noplugs\">" + pluginsbundle.GetStringFromName("nopluginsareenabled_label") + "<\/h1>");
+
+  document.writeln("<div id=\"findmore\">" + pluginsbundle.GetStringFromName("findmore_label") + " ");
+  document.writeln("<a href=\"" + regionbundle.GetStringFromName("more_plugins_url") + "\">" + regionbundle.GetStringFromName("more_plugins_label") + "<\/a>.");
+  document.writeln("<\/div>");
+
+  document.writeln("<div id=\"findpluginupdates\">" + pluginsbundle.GetStringFromName("findpluginupdates_label") + " ");
+  document.writeln("<a href=\"" + regionbundle.GetStringFromName("pluginupdates_url") + "\">" + regionbundle.GetStringFromName("pluginupdates_label") + "<\/a>.");
+  document.writeln("<\/div>");
+
+  document.writeln("<div id=\"installhelp\">" + pluginsbundle.GetStringFromName("installhelp_label") + " ");
+  document.writeln("<a href=\"" + regionbundle.GetStringFromName("plugindoc_url") + "\">" + regionbundle.GetStringFromName("plugindoc_label") + "<\/a>.");
+  document.writeln("<\/div><hr>");
+
+  for (var i = 0; i < numPlugins; i++)
+  {
+    var plugin = navigator.plugins[i];
+
+    if (plugin)
+    {
+      document.write("<h2 class=\"plugname\">");
+      document.write(plugin.name);
+      document.writeln("<\/h2>");
+
+      document.writeln("<dl><dd><span class=\"label\">" + pluginsbundle.GetStringFromName("file_label") + "<\/span> ");
+      document.write(plugin.filename);
+      document.writeln("<\/dd><dd><span class=\"label\">" + pluginsbundle.GetStringFromName("version_label") + "<\/span> ");
+      document.write(plugin.version);
+      document.writeln("<\/dd><dd>");
+      document.write(plugin.description);
+      document.writeln("<\/dd><\/dl>");
+
+      document.writeln("<table border=\"1\" class=\"contenttable\">");
+      document.writeln("<thead>");
+      document.writeln("<tr><th class=\"type\">" + pluginsbundle.GetStringFromName("mimetype_label") + "<\/th>");
+      document.writeln("<th class=\"desc\">" + pluginsbundle.GetStringFromName("description_label") + "<\/th>");
+      document.writeln("<th class=\"suff\">" + pluginsbundle.GetStringFromName("suffixes_label") + "<\/th>");
+      document.writeln("<\/tr><\/thead>");
+      document.writeln("<tbody>");
+
+      var numTypes = plugin.length;
+      var mimetype;
+      for (var j = 0; j < numTypes; j++)
+      {
+        mimetype = plugin[j];
+
+        if (mimetype)
+        {
+          document.writeln("<tr>");
+          document.writeln("<td>" + mimetype.type + "<\/td>");
+          document.writeln("<td>" + mimetype.description + "<\/td>");
+          document.writeln("<td>" + mimetype.suffixes + "<\/td>");
+          document.writeln("<\/tr>");
+        }
+      }
+
+      document.write("<\/tbody>");
+      document.write("<\/table>");
+    }
+  }
+</script>
+</div>
+</body>
+</html>

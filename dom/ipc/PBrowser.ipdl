@@ -1,0 +1,385 @@
+/* -*- Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 8 -*- */
+/* vim: set sw=4 ts=8 et tw=80 ft=cpp : */
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PBlob;
+include protocol PContent;
+include protocol PContentDialog;
+include protocol PDocumentRenderer;
+include protocol PContentPermissionRequest;
+include protocol PRenderFrame;
+include protocol POfflineCacheUpdate;
+include protocol PIndexedDB;
+include DOMTypes;
+include URIParams;
+
+include "gfxMatrix.h";
+include "FrameMetrics.h";
+include "IPC/nsGUIEventIPC.h";
+include "mozilla/dom/TabMessageUtils.h";
+include "mozilla/dom/PermissionMessageUtils.h";
+include "mozilla/layout/RenderFrameUtils.h";
+
+using IPC::Principal;
+using gfxMatrix;
+using gfxRect;
+using gfxSize;
+using mozilla::layers::LayersBackend;
+using mozilla::layers::FrameMetrics;
+using mozilla::layout::ScrollingBehavior;
+using mozilla::WindowsHandle;
+using nscolor;
+using nsCompositionEvent;
+using nsIMEUpdatePreference;
+using nsIntPoint;
+using nsIntRect;
+using nsIntSize;
+using nsKeyEvent;
+using nsMouseEvent;
+using nsMouseScrollEvent;
+using mozilla::widget::WheelEvent;
+using nsQueryContentEvent;
+using nsRect;
+using nsSelectionEvent;
+using nsTextEvent;
+using nsTouchEvent;
+using RemoteDOMEvent;
+
+namespace mozilla {
+namespace dom {
+
+rpc protocol PBrowser
+{
+    manager PContent;
+
+    manages PContentDialog;
+    manages PDocumentRenderer;
+    manages PContentPermissionRequest;
+    manages PRenderFrame;
+    manages POfflineCacheUpdate;
+    manages PIndexedDB;
+
+both:
+    AsyncMessage(nsString aMessage, ClonedMessageData aData);
+
+parent:
+    /**
+     * When child sends this message, parent should move focus to
+     * the next or previous focusable element.
+     */
+    MoveFocus(bool forward);
+
+    Event(RemoteDOMEvent aEvent);
+
+    rpc CreateWindow() returns (PBrowser window);
+
+    sync SyncMessage(nsString aMessage, ClonedMessageData aData)
+      returns (nsString[] retval);
+
+    /**
+     * The IME sequence number (seqno) parameter is used to make sure
+     * that a notification is discarded if it arrives at the chrome process
+     * too late. If the notification is late and we accept it, we will have
+     * an out-of-date view of the content process, which means events that we
+     * dispatch based on this out-of-date view will be wrong also.
+     * (see Bug 599550 and Bug 591047 comments 44, 50, and 54)
+     *
+     * Chrome increments seqno and includes it in each IME event sent to
+     * content, and content sends its current seqno back to chrome with each
+     * notification. A notification is up-to-date only if the content
+     * seqno is the same as the current chrome seqno, meaning no additional
+     * event was sent to content before the notification was received
+     *
+     * On blur, chrome returns the current seqno to content, and content
+     * uses it to discard subsequent events until the content seqno and
+     * chrome seqno-on-blur match again. These events, meant for the blurred
+     * textfield, are discarded to prevent events going to the wrong target
+     */
+
+    /**
+     * Notifies chrome that there is a focus change involving an editable
+     * object (input, textarea, document, contentEditable. etc.)
+     *
+     *  focus        PR_TRUE if editable object is receiving focus
+     *               PR_FALSE if losing focus
+     *  preference   Native widget preference for IME updates
+     *  seqno        Current seqno value on the chrome side
+     */
+    sync NotifyIMEFocus(bool focus)
+      returns (nsIMEUpdatePreference preference, uint32_t seqno);
+
+    /**
+     * Notifies chrome that there has been a change in text content
+     * One call can encompass both a delete and an insert operation
+     * Only called when NotifyIMEFocus returns PR_TRUE for mWantUpdates
+     *
+     *  offset       Starting offset of the change
+     *  end          Ending offset of the range deleted
+     *  newEnd       New ending offset after insertion
+     *
+     *  for insertion, offset == end
+     *  for deletion, offset == newEnd
+     */
+    NotifyIMETextChange(uint32_t offset, uint32_t end, uint32_t newEnd);
+
+    /**
+     * Notifies chrome that there has been a change in selection
+     * Only called when NotifyIMEFocus returns PR_TRUE for mWantUpdates
+     *
+     *  seqno        Current seqno value on the content side
+     *  anchor       Offset where the selection started
+     *  focus        Offset where the caret is
+     */
+    NotifyIMESelection(uint32_t seqno, uint32_t anchor, uint32_t focus);
+
+    /**
+     * Notifies chrome to refresh its text cache 
+     * Only called when NotifyIMEFocus returns PR_TRUE for mWantHints
+     *
+     *  text         The entire content of the text field
+     */
+    NotifyIMETextHint(nsString text);
+
+    /**
+     * Instructs chrome to end any pending composition
+     *
+     *  cancel       PR_TRUE if composition should be cancelled
+     *  composition  Text to commit before ending the composition
+     *
+     *  if cancel is PR_TRUE,
+     *    widget should return empty string for composition
+     *  if cancel is PR_FALSE,
+     *    widget should return the current composition text
+     */
+    sync EndIMEComposition(bool cancel) returns (nsString composition);
+
+    sync GetInputContext() returns (int32_t IMEEnabled, int32_t IMEOpen);
+
+    SetInputContext(int32_t IMEEnabled,
+                    int32_t IMEOpen,
+                    nsString type,
+                    nsString inputmode,
+                    nsString actionHint,
+                    int32_t cause,
+                    int32_t focusChange);
+
+    /**
+     * Gets the DPI of the screen corresponding to this browser.
+     */
+    sync GetDPI() returns (float value);
+
+    /**
+     * Return native data of root widget
+     */
+    sync GetWidgetNativeData() returns (WindowsHandle value);
+
+    SetCursor(uint32_t value);
+    SetBackgroundColor(nscolor color);
+
+    /**
+     * Initiates an asynchronous request for permission for the
+     * provided principal.
+     *
+     * @param aType
+     *   The type of permission to request.
+     * @param aPrincipal
+     *   The principal of the request.
+     *
+     * NOTE: The principal is untrusted in the parent process. Only
+     *       principals that can live in the content process should
+     *       provided.
+     */
+    PContentPermissionRequest(nsCString aType, Principal principal);
+
+    PContentDialog(uint32_t aType, nsCString aName, nsCString aFeatures,
+                   int32_t[] aIntParams, nsString[] aStringParams);
+
+    /**
+     * Create a layout frame (encapsulating a remote layer tree) for
+     * the page that is currently loaded in the <browser>.
+     */
+    sync PRenderFrame()
+        returns (ScrollingBehavior scrolling,
+                 LayersBackend backend, int32_t maxTextureSize, uint64_t layersId);
+
+    /** 
+     * Starts an offline application cache update.
+     * @param manifestURI
+     *   URI of the manifest to fetch, the application cache group ID
+     * @param documentURI
+     *   URI of the document that referred the manifest
+     * @param clientID
+     *   The group cache version identifier to use
+     * @param stickDocument
+     *   True if the update was initiated by a document load that referred
+     *   a manifest.
+     *   False if the update was initiated by applicationCache.update() call.
+     *
+     *   Tells the update to carry the documentURI to a potential separate 
+     *   update of implicit (master) items.
+     *
+     *   Why this argument? If the document was not found in an offline cache 
+     *   before load and refers a manifest and this manifest itself has not 
+     *   been changed since the last fetch, we will not do the application 
+     *   cache group update. But we must cache the document (identified by the
+     *   documentURI). This argument will ensure that a previously uncached 
+     *   document will get cached and that we don't re-cache a document that 
+     *   has already been cached (stickDocument=false).
+     */
+    POfflineCacheUpdate(URIParams manifestURI, URIParams documentURI,
+                        nsCString clientID, bool stickDocument);
+
+    sync PIndexedDB(nsCString asciiOrigin)
+        returns (bool allowed);
+
+    /**
+     * window.open from inside <iframe mozbrowser> is special.  When the child
+     * process calls window.open, it creates a new PBrowser (in its own
+     * process), then calls BrowserFrameOpenWindow on it.
+     *
+     * The parent process gets a chance to accept or reject the window.open
+     * call, and windowOpened is set to true if we ended up going through with
+     * the window.open.
+     *
+     * @param opener the PBrowser whose content called window.open.
+     */
+    sync BrowserFrameOpenWindow(PBrowser opener, nsString aURL,
+                                nsString aName, nsString aFeatures)
+      returns (bool windowOpened);
+
+    /**
+     * Instructs the TabParent to forward a request to zoom to a rect given in
+     * CSS pixels. This rect is relative to the document.
+     */
+    ZoomToRect(gfxRect aRect);
+
+    /**
+     * We know for sure that content has either preventDefaulted or not
+     * preventDefaulted. This applies to an entire batch of touch events. It is
+     * expected that, if there are any DOM touch listeners, touch events will be
+     * batched and only processed for panning and zooming if content does not
+     * preventDefault.
+     */
+    ContentReceivedTouch(bool aPreventDefault);
+
+    __delete__();
+
+child:
+    /**
+     * Notify the remote browser that it has been Show()n on this
+     * side, with the given |visibleRect|.  This message is expected
+     * to trigger creation of the remote browser's "widget".
+     *
+     * |Show()| and |Move()| take IntSizes rather than Rects because
+     * content processes always render to a virtual <0, 0> top-left
+     * point.
+     */
+    Show(nsIntSize size);
+
+    LoadURL(nsCString uri);
+
+    UpdateDimensions(nsRect rect, nsIntSize size);
+
+    UpdateFrame(FrameMetrics frame);
+
+    /**
+     * Requests handling of a double tap. |point| is in CSS pixels, relative to
+     * the scroll offset. This message is expected to round-trip back to
+     * ZoomToRect() with a rect indicating where we should zoom to.
+     */
+    HandleDoubleTap(nsIntPoint point);
+
+    /**
+     * Sending an activate message moves focus to the child.
+     */
+    Activate();
+
+    Deactivate();
+
+    /**
+     * @see nsIDOMWindowUtils sendMouseEvent.
+     */
+    MouseEvent(nsString aType,
+               float aX,
+               float aY,
+               int32_t aButton,
+               int32_t aClickCount,
+               int32_t aModifiers,
+               bool aIgnoreRootScrollFrame);
+
+    RealMouseEvent(nsMouseEvent event);
+    RealKeyEvent(nsKeyEvent event);
+    MouseWheelEvent(WheelEvent event);
+    RealTouchEvent(nsTouchEvent event);
+    // We use a separate message for touchmove events only to apply
+    // compression to them.
+    RealTouchMoveEvent(nsTouchEvent event) compress;
+
+    /**
+     * @see nsIDOMWindowUtils sendKeyEvent.
+     */
+    KeyEvent(nsString aType,
+             int32_t aKeyCode,
+             int32_t aCharCode,
+             int32_t aModifiers,
+             bool aPreventDefault);
+
+    CompositionEvent(nsCompositionEvent event);
+
+    TextEvent(nsTextEvent event);
+
+    SelectionEvent(nsSelectionEvent event);
+
+    /**
+     * Activate event forwarding from client to parent.
+     */
+    ActivateFrameEvent(nsString aType, bool capture);
+
+    LoadRemoteScript(nsString aURL);
+
+    /**
+     * Create a asynchronous request to render whatever document is
+     * loaded in the child when this message arrives.  When the
+     * request finishes, PDocumentRenderer:__delete__ is sent back to
+     * this side to notify completion.
+     *
+     * |documentRect| is the area of the remote document to draw,
+     * transformed by |transform|.  The rendered area will have the
+     * default background color |bgcolor|.  |renderFlags| are the
+     * nsIPresShell::RenderDocument() flags to use on the remote side,
+     * and if true, |flushLayout| will do just that before rendering
+     * the document.  The rendered image will be of size |renderSize|.
+     */
+    PDocumentRenderer(nsRect documentRect, gfxMatrix transform,
+                      nsString bgcolor,
+                      uint32_t renderFlags, bool flushLayout,
+                      nsIntSize renderSize);
+
+    /**
+     * Sent by the chrome process when it no longer wants this remote
+     * <browser>.  The child side cleans up in response, then
+     * finalizing its death by sending back __delete__() to the
+     * parent.
+     */
+    Destroy();
+
+/*
+ * FIXME: write protocol!
+
+state LIVE:
+    send LoadURL goto LIVE;
+//etc.
+    send Destroy goto DYING;
+
+state DYING:
+    discard send blah;
+// etc.
+    recv __delete__;
+ */
+};
+
+}
+}

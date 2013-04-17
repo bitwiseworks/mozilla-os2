@@ -1,0 +1,40 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE           = skia_npapi
+LIBRARY_NAME     = skia_npapi
+LIBXUL_LIBRARY   = 1
+EXPORT_LIBRARY   = 1
+
+DEFINES += \
+  -DSK_BUILD_FOR_ANDROID_NDK \
+  $(NULL)
+
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/dom/plugins/base \
+  -I$(topsrcdir)/dom/plugins/base/android \
+  -I$(topsrcdir)/gfx/skia/include/core \
+  -I$(topsrcdir)/gfx/skia/include/config \
+  -I$(topsrcdir)/gfx/gl \
+  $(NULL)
+
+
+CPPSRCS = \
+  SkANP.cpp \
+  ANPCanvas.cpp \
+  ANPPaint.cpp \
+  ANPPath.cpp \
+  ANPTypeface.cpp \
+  $(NULL)
+
+EXPORTS = SkANP.h
+
+include $(topsrcdir)/config/rules.mk

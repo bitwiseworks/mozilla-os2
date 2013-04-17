@@ -1,0 +1,102 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+#include "nsIDOMEventTarget.idl"
+
+interface nsIDOMDOMRequest;
+interface nsIArray;
+
+[scriptable, uuid(9583b825-46b1-4e8f-bb48-9fed660a95e6)]
+interface mozIDOMApplication  : nsISupports
+{
+  readonly attribute jsval manifest;
+  readonly attribute DOMString manifestURL;
+  readonly attribute jsval receipts; /* an array of strings */
+  readonly attribute DOMString origin;
+  readonly attribute DOMString installOrigin;
+  readonly attribute unsigned long long installTime;
+
+  /* 
+   * The current progress when downloading an offline cache.
+   */
+  readonly attribute double progress;
+
+  /*
+   * The application status :
+   * "installed"   : The app is in the registry, but we have no offline cache.
+   * "downlading"  : We are downloading the offline cache.
+   * "cached"      : We are done with the offline cache download.
+   * "cache-error" : An error occured while downloading the offline-cache.
+   */
+  readonly attribute DOMString status;
+
+  /*
+   * fires a nsIDOMApplicationEvent when a change in appcache download or status happens
+   */
+  attribute nsIDOMEventListener onprogress;
+
+  /* startPoint will be used when several launch_path exists for an app */
+  nsIDOMDOMRequest launch([optional] in DOMString startPoint);
+  nsIDOMDOMRequest uninstall();
+};
+
+[scriptable, uuid(4c36ca48-841e-4d5a-8c46-dda14ac633ca)]
+interface mozIDOMApplicationMgmt : nsISupports
+{
+  /**
+   * the request will return the all the applications installed. Only accessible
+   * to privileged callers.
+   */
+  nsIDOMDOMRequest getAll();
+
+  /**
+   * the request will return the applications acquired from all origins but
+   * which are not launchable (e.g. by not being natively installed), or null.
+   */
+  nsIDOMDOMRequest getNotInstalled();
+
+  /**
+   * event listener to get notified of application installs. Only settable by
+   * privileged callers.
+   * the event will be a mozIDOMApplicationEvent
+   */
+  attribute nsIDOMEventListener oninstall;
+
+  /**
+   * event listener to get notified of application uninstalls. Only settable by
+   * privileged callers.
+   * the event will be a mozIDOMApplicationEvent
+   */
+  attribute nsIDOMEventListener onuninstall;
+};
+
+[scriptable, uuid(dd9a044c-1073-4d2b-a17d-c9b5834b3420)]
+interface mozIDOMApplicationRegistry : nsISupports
+{
+  /**
+   * Install a web app.
+   *
+   * @param manifestUrl : the URL of the webapps manifest.
+   * @param parameters  : A structure with optional information.
+   *                      {
+   *                       receipts: ...    Will be used to specify the payment receipts for this installation.
+   *                       categories: ...  Will be used to specify the categories of the webapp.
+   *                      }
+   * @returns           : A DOMRequest object, returning the app object in |result| if install succeeds.
+   */
+  nsIDOMDOMRequest install(in DOMString manifestUrl, [optional] in jsval parameters);
+
+  /**
+   * the request will return the application currently installed, or null.
+   */
+  nsIDOMDOMRequest getSelf();
+
+  /**
+   * the request will return the applications installed from this origin, or null.
+   */
+  nsIDOMDOMRequest getInstalled();
+
+  readonly attribute mozIDOMApplicationMgmt mgmt;
+};

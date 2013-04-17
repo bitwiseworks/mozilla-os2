@@ -1,0 +1,137 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+FAIL_ON_WARNINGS := 1
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = dom
+
+EXPORTS_NAMESPACES = mozilla
+
+EXPORTS_mozilla = \
+  PluginLibrary.h \
+  $(NULL)
+
+EXPORTS_NAMESPACES = mozilla mozilla/plugins
+
+EXPORTS_mozilla/plugins = \
+  BrowserStreamChild.h \
+  BrowserStreamParent.h \
+  ChildAsyncCall.h \
+  ChildTimer.h \
+  NPEventOSX.h \
+  NPEventWindows.h \
+  NPEventUnix.h \
+  NPEventAndroid.h \
+  PluginIdentifierChild.h \
+  PluginIdentifierParent.h \
+  PluginInstanceChild.h \
+  PluginInstanceParent.h \
+  PluginMessageUtils.h \
+  PluginModuleChild.h \
+  PluginModuleParent.h \
+  PluginProcessParent.h \
+  PluginScriptableObjectChild.h \
+  PluginScriptableObjectParent.h \
+  PluginScriptableObjectUtils.h \
+  PluginScriptableObjectUtils-inl.h \
+  PluginInstanceChild.h \
+  PluginInstanceParent.h \
+  PluginUtilsOSX.h \
+  AStream.h \
+  BrowserStreamChild.h \
+  BrowserStreamParent.h \
+  PluginStreamChild.h \
+  PluginStreamParent.h \
+  PluginMessageUtils.h \
+  PluginProcessParent.h \
+  PluginProcessChild.h \
+  StreamNotifyChild.h \
+  StreamNotifyParent.h \
+  $(NULL)
+
+MODULE           = dom
+LIBRARY_NAME     = domplugins_s
+LIBXUL_LIBRARY   = 1
+FORCE_STATIC_LIB = 1
+EXPORT_LIBRARY = 1
+
+ifeq ($(MOZ_ENABLE_QT),1)
+MOCSRCS = \
+  moc_NestedLoopTimer.cpp \
+  $(NULL)
+
+QTSRCS = \
+  NestedLoopTimer.cpp \
+  $(NULL)
+endif
+
+CPPSRCS = \
+  $(MOCSRCS) \
+  $(QTSRCS) \
+  ChildAsyncCall.cpp \
+  ChildTimer.cpp \
+  PluginMessageUtils.cpp \
+  PluginIdentifierChild.cpp \
+  PluginIdentifierParent.cpp \
+  PluginInstanceChild.cpp \
+  PluginInstanceParent.cpp \
+  PluginModuleChild.cpp \
+  PluginModuleParent.cpp \
+  PluginProcessChild.cpp \
+  PluginProcessParent.cpp \
+  PluginScriptableObjectChild.cpp \
+  PluginScriptableObjectParent.cpp \
+  BrowserStreamChild.cpp \
+  BrowserStreamParent.cpp \
+  PluginStreamChild.cpp \
+  PluginStreamParent.cpp \
+  $(NULL)
+
+ifeq (WINNT,$(OS_ARCH))
+CPPSRCS += \
+  COMMessageFilter.cpp \
+  PluginSurfaceParent.cpp \
+  $(NULL)
+
+EXPORTS_mozilla/plugins += \
+  PluginSurfaceParent.h \
+  $(NULL)
+endif
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+DIRS += \
+    interpose \
+    $(NULL)
+
+CMMSRCS   += \
+    PluginUtilsOSX.mm \
+    PluginInterposeOSX.mm \
+    $(NULL)
+
+EXPORTS_mozilla/plugins += \
+    PluginInterposeOSX.h \
+    $(NULL)
+endif
+
+LOCAL_INCLUDES = \
+  -I$(srcdir)/../base \
+  -I$(topsrcdir)/xpcom/base/ \
+  $(NULL)
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+
+include $(topsrcdir)/config/rules.mk
+
+CXXFLAGS += $(TK_CFLAGS)
+
+DEFINES += -DFORCE_PR_LOG
+
+CXXFLAGS += $(MOZ_CAIRO_CFLAGS)

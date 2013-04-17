@@ -1,0 +1,34 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+
+DEPTH     = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH     = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+ifdef MOZ_XUL
+ifeq (,$(filter android qt os2 cocoa windows,$(MOZ_WIDGET_TOOLKIT)))
+MODULE = filepicker
+LIBRARY_NAME = fileview
+SHORT_LIBNAME = fileview
+EXPORT_LIBRARY = 1
+IS_COMPONENT = 1
+MODULE_NAME = nsFileViewModule
+LIBXUL_LIBRARY = 1
+XPIDLSRCS = \
+  nsIFileView.idl \
+  $(NULL)
+CPPSRCS = \
+  nsFileView.cpp \
+  $(NULL)
+EXTRA_COMPONENTS = nsFilePicker.js
+EXTRA_PP_COMPONENTS = nsFilePicker.manifest
+endif
+endif
+
+include $(topsrcdir)/config/rules.mk

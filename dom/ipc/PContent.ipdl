@@ -1,0 +1,329 @@
+/* -*- Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 8 -*- */
+/* vim: set sw=4 ts=8 et tw=80 ft=cpp : */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PAudio;
+include protocol PBlob;
+include protocol PBrowser;
+include protocol PCompositor;
+include protocol PCrashReporter;
+include protocol PExternalHelperApp;
+include protocol PDeviceStorageRequest;
+include protocol PHal;
+include protocol PIndexedDB;
+include protocol PMemoryReportRequest;
+include protocol PNecko;
+include protocol PSms;
+include protocol PStorage;
+include protocol PTestShell;
+include DOMTypes;
+include URIParams;
+
+include "mozilla/chrome/RegistryMessageUtils.h";
+include "mozilla/net/NeckoMessageUtils.h";
+include "mozilla/dom/TabMessageUtils.h";
+
+include "nsGeoPositionIPCSerialiser.h";
+
+using GeoPosition;
+using PrefTuple;
+
+using ChromePackage;
+using ResourceMapping;
+using OverrideMapping;
+using IPC::Permission;
+using mozilla::null_t;
+using mozilla::void_t;
+using mozilla::dom::NativeThreadId;
+using gfxIntSize;
+
+namespace mozilla {
+namespace dom {
+
+// Data required to clone an existing DOMStorageImpl in the parent
+struct StorageClone
+{
+    // Existing cross-process storage actor to clone
+    PStorage actor;
+    // Result of calling IsCallerSecure() in the child
+    bool callerSecure;
+};
+
+// When creating a new PStorage protocol, an existing one can be
+// cloned (see nsDOMStorage2::Clone)
+union StorageConstructData
+{
+    null_t;
+    StorageClone;
+};
+
+struct FontListEntry {
+    nsString  familyName;
+    nsString  faceName;
+    nsCString filepath;
+    uint16_t  weight;
+    int16_t   stretch;
+    uint8_t   italic;
+    uint8_t   index;
+};
+
+struct DeviceStorageStatParams
+{
+  nsString fullpath;
+};
+
+struct DeviceStorageAddParams
+{
+  PBlob blob;
+  nsString name;
+  nsString fullpath;
+};
+
+struct DeviceStorageGetParams
+{
+  nsString name;
+  nsString fullpath;
+};
+
+struct DeviceStorageDeleteParams
+{
+  nsString fullpath;
+};
+
+struct DeviceStorageEnumerationParams
+{
+  nsString fullpath;
+  uint64_t since;
+};
+
+union DeviceStorageParams
+{
+  DeviceStorageAddParams;
+  DeviceStorageGetParams;
+  DeviceStorageDeleteParams;
+  DeviceStorageEnumerationParams;
+  DeviceStorageStatParams;
+};
+
+struct SlicedBlobConstructorParams
+{
+  PBlob source;
+  uint64_t begin;
+  uint64_t end;
+  nsString contentType;
+};
+
+struct MysteryBlobConstructorParams
+{
+  // Nothing is known about this type of blob.
+};
+
+union BlobConstructorParams
+{
+  NormalBlobConstructorParams;
+  FileBlobConstructorParams;
+  SlicedBlobConstructorParams;
+  MysteryBlobConstructorParams;
+};
+
+union AppId {
+  uint32_t;
+  nullable PBrowser;
+};
+
+union PrefValue {
+  nsCString;
+  int32_t;
+  bool;
+};
+
+union MaybePrefValue {
+  PrefValue;
+  null_t;
+};
+
+struct PrefSetting {
+  nsCString name;
+  MaybePrefValue defaultValue;
+  MaybePrefValue userValue;
+};
+
+rpc protocol PContent
+{
+    parent opens PCompositor;
+
+    manages PAudio;
+    manages PBlob;
+    manages PBrowser;
+    manages PCrashReporter;
+    manages PDeviceStorageRequest;
+    manages PExternalHelperApp;
+    manages PHal;
+    manages PIndexedDB;
+    manages PMemoryReportRequest;
+    manages PNecko;
+    manages PSms;
+    manages PStorage;
+    manages PTestShell;
+
+both:
+    // Depending on exactly how the new browser is being created, it might be
+    // created from either the child or parent process!
+    //
+    // The child creates the PBrowser as part of
+    // TabChild::BrowserFrameProvideWindow, and the parent creates the
+    // PBrowser as part of ContentParent::CreateTab.
+    //
+    // When the parent constructs a PBrowser, the app ID handed to the
+    // child side is trusted.  In that case, |appId| is uint32_t.
+    // However, when the child side constructs a PBrowser, for
+    // window.open(), the parent must validate the app ID used on the
+    // parent side.  To do so, the child process must pass a valid
+    // PBrowser as its |AppId|.
+    async PBrowser(uint32_t chromeFlags, bool isBrowserElement, AppId appId);
+
+    async PBlob(BlobConstructorParams params);
+
+child:
+    PMemoryReportRequest();
+
+    PTestShell();
+
+    /**
+     * Tell the content process some attributes of itself.  This is
+     * the first message received by content processes after startup.
+     *
+     * |id| is a unique ID among all subprocesses.  When |isForApp &&
+     * isForBrowser|, we're loading <browser> for an app.  When
+     * |isForBrowser|, we're loading <browser>.  When |!isForApp &&
+     * !isForBrowser|, we're probably loading <xul:browser remote>.
+     */
+    SetProcessAttributes(uint64_t id, bool isForApp, bool isForBrowser);
+
+    RegisterChrome(ChromePackage[] packages, ResourceMapping[] resources,
+                   OverrideMapping[] overrides, nsCString locale);
+
+    async SetOffline(bool offline);
+
+    async NotifyVisited(URIParams uri);
+
+    PreferenceUpdate(PrefSetting pref);
+
+    NotifyAlertsObserver(nsCString topic, nsString data);
+
+    GeolocationUpdate(GeoPosition somewhere);
+
+    // nsIPermissionManager messages
+    AddPermission(Permission permission);
+
+    ScreenSizeChanged(gfxIntSize size);
+
+    FlushMemory(nsString reason);
+
+    GarbageCollect();
+    CycleCollect();
+    
+    /**
+     * Start accessibility engine in content process.
+     */
+    ActivateA11y();
+
+    AppInfo(nsCString version, nsCString buildID);
+
+    // Notify child that last-pb-context-exited notification was observed
+    LastPrivateDocShellDestroyed();
+
+    FilePathUpdate(nsString filepath, nsCString reasons);
+
+    FileSystemUpdate(nsString fsName, nsString mountPoint, int32_t fsState);
+
+parent:
+    PAudio(int32_t aNumChannels, int32_t aRate, int32_t aFormat);
+
+    PDeviceStorageRequest(DeviceStorageParams params);
+
+    sync PCrashReporter(NativeThreadId tid, uint32_t processType);
+
+    PHal();
+
+    PIndexedDB();
+
+    PNecko();
+
+    PSms();
+    
+    PStorage(StorageConstructData data);
+
+    // Services remoting
+
+    async StartVisitedQuery(URIParams uri);
+    async VisitURI(URIParams uri, OptionalURIParams referrer, uint32_t flags);
+    async SetURITitle(URIParams uri, nsString title);
+    
+    // filepicker remoting
+    sync ShowFilePicker(int16_t mode, int16_t selectedType, bool addToRecentDocs,
+                        nsString title, nsString defaultFile, nsString defaultExtension,
+                        nsString[] filters, nsString[] filterNames)
+        returns (nsString[] files, int16_t retValue, nsresult result);
+
+    async LoadURIExternal(URIParams uri);
+
+    // PrefService message
+    sync ReadPrefsArray() returns (PrefSetting[] prefs);
+
+    sync ReadFontList() returns (FontListEntry[] retValue);
+
+    sync SyncMessage(nsString aMessage, ClonedMessageData aData)
+      returns (nsString[] retval);
+
+    ShowAlertNotification(nsString imageUrl, 
+                          nsString title, 
+                          nsString text, 
+                          bool textClickable,
+                          nsString cookie,
+                          nsString name);
+
+    PExternalHelperApp(OptionalURIParams uri, nsCString aMimeContentType,
+                       nsCString aContentDisposition, bool aForceSave,
+                       int64_t aContentLength, OptionalURIParams aReferrer);
+
+    AddGeolocationListener();
+    RemoveGeolocationListener();
+
+    ConsoleMessage(nsString message);
+    ScriptError(nsString message, nsString sourceName, nsString sourceLine,
+                uint32_t lineNumber, uint32_t colNumber, uint32_t flags,
+                nsCString category); 
+
+    // nsIPermissionManager messages
+    sync ReadPermissions() returns (Permission[] permissions);
+
+    // These clipboard methods are only really used on Android since
+    // the clipboard is not available in the content process.
+    SetClipboardText(nsString text, bool isPrivateData, int32_t whichClipboard);
+    sync GetClipboardText(int32_t whichClipboard)
+        returns (nsString text);
+    EmptyClipboard();
+    sync ClipboardHasText()
+        returns (bool hasText);
+
+    sync GetSystemColors(uint32_t colorsCount)
+        returns (uint32_t[] colors);
+
+    sync GetIconForExtension(nsCString aFileExt, uint32_t aIconSize)
+        returns (uint8_t[] bits);
+
+    sync GetShowPasswordSetting()
+        returns (bool showPassword);
+
+    // Notify the parent of the presence or absence of private docshells
+    PrivateDocShellsExist(bool aExist);
+
+both:
+     AsyncMessage(nsString aMessage, ClonedMessageData aData);
+};
+
+}
+}

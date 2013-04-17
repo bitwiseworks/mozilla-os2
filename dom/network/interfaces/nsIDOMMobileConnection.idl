@@ -1,0 +1,330 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMEventTarget.idl"
+
+interface nsIDOMEventListener;
+interface nsIDOMDOMRequest;
+interface nsIDOMMozMobileConnectionInfo;
+interface nsIDOMMozMobileNetworkInfo;
+interface nsIDOMMozMobileCellInfo;
+
+[scriptable, builtinclass, uuid(e7309c47-9a2e-4e12-84ab-f8f39214eaba)]
+interface nsIDOMMozMobileConnection : nsIDOMEventTarget
+{
+  /**
+   * Indicates the state of the device's ICC card.
+   *
+   * Possible values: null, 'absent', 'pinRequired', 'pukRequired',
+   * 'networkLocked', 'ready'.
+   */
+  readonly attribute DOMString cardState;
+
+  /**
+   * Information about the voice connection.
+   */
+  readonly attribute nsIDOMMozMobileConnectionInfo voice;
+
+  /**
+   * Information about the data connection.
+   */
+  readonly attribute nsIDOMMozMobileConnectionInfo data;
+
+  /**
+   * The selection mode of the voice and data networks.
+   *
+   * Possible values: null (unknown), 'automatic', 'manual'
+   */
+  readonly attribute DOMString networkSelectionMode;
+
+  /**
+   * Search for available networks.
+   *
+   * If successful, the request's onsuccess will be called, and the request's
+   * result will be an array of nsIDOMMozMobileNetworkInfo.
+   *
+   * Otherwise, the request's onerror will be called, and the request's error
+   * will be either 'RadioNotAvailable', 'RequestNotSupported',
+   * or 'GenericFailure'.
+   */
+  nsIDOMDOMRequest getNetworks();
+
+  /**
+   * Manually selects the passed in network, overriding the radio's current
+   * selection.
+   *
+   * If successful, the request's onsuccess will be called.
+   * Note: If the network was actually changed by this request,
+   * the 'voicechange' and 'datachange' events will also be fired.
+   *
+   * Otherwise, the request's onerror will be called, and the request's error
+   * will be either 'RadioNotAvailable', 'RequestNotSupported',
+   * 'IllegalSIMorME', or 'GenericFailure'
+   */
+  nsIDOMDOMRequest selectNetwork(in nsIDOMMozMobileNetworkInfo network);
+
+  /**
+   * Tell the radio to automatically select a network.
+   *
+   * If successful, the request's onsuccess will be called.
+   * Note: If the network was actually changed by this request, the
+   * 'voicechange' and 'datachange' events will also be fired.
+   *
+   * Otherwise, the request's onerror will be called, and the request's error
+   * will be either 'RadioNotAvailable', 'RequestNotSupported',
+   * 'IllegalSIMorME', or 'GenericFailure'
+   */
+  nsIDOMDOMRequest selectNetworkAutomatically();
+
+  /**
+   * Find out about the status of an ICC lock (e.g. the PIN lock).
+   *
+   * @param lockType
+   *        Identifies the lock type, e.g. "pin" for the PIN lock.
+   *
+   * @return a DOM Request.
+   *         The request's result will be an object containing
+   *         information about the specified lock's status,
+   *         e.g. {lockType: "pin", enabled: true}.
+   */
+  nsIDOMDOMRequest getCardLock(in DOMString lockType);
+
+  /**
+   * Unlock a card lock.
+   *
+   * @param info
+   *        An object containing the information necessary to unlock
+   *        the given lock. At a minimum, this object must have a
+   *        "lockType" attribute which specifies the type of lock, e.g.
+   *        "pin" for the PIN lock. Other attributes are dependent on
+   *        the lock type.
+   *
+   * Examples:
+   *
+   * (1) Unlocking the PIN:
+   *
+   *   unlockCardLock({lockType: "pin",
+   *                   pin: "..."});
+   *
+   * (2) Unlocking the PUK and supplying a new PIN:
+   *
+   *   unlockCardLock({lockType: "puk",
+   *                   puk: "...",
+   *                   newPin: "..."});
+   *
+   * @return a nsIDOMDOMRequest.
+   *         The request's result will be an object containing
+   *         information about the unlock operation.
+   *
+   * Examples:
+   *
+   * (1) Unlocking failed:
+   *
+   *     {
+   *       lockType:   "pin",
+   *       result:     false,
+   *       retryCount: 2
+   *     }
+   *
+   * (2) Unlocking succeeded:
+   *
+   *     {
+   *       lockType:  "pin",
+   *       result:    true
+   *     }
+   */
+  nsIDOMDOMRequest unlockCardLock(in jsval info);
+
+  /**
+   * Modify the state of a card lock.
+   *
+   * @param info
+   *        An object containing information about the lock and
+   *        how to modify its state. At a minimum, this object
+   *        must have a "lockType" attribute which specifies the
+   *        type of lock, e.g. "pin" for the PIN lock. Other
+   *        attributes are dependent on the lock type.
+   *
+   * Examples:
+   *
+   * (1) Disabling the PIN lock:
+   *
+   *   setCardLock({lockType: "pin",
+   *                pin: "...",
+   *                enabled: false});
+   *
+   * (2) Changing the PIN:
+   *
+   *   setCardLock({lockType: "pin",
+   *                pin: "...",
+   *                newPin: "..."});
+   *
+   * @return a nsIDOMDOMRequest.
+   *         The request's result will be an object containing
+   *         information about the operation.
+   *
+   * Examples:
+   *
+   * (1) Enabling/Disabling card lock failed or change card lock failed.
+   *
+   *     {
+   *       lockType: "pin",
+   *       result: false,
+   *       retryCount: 2
+   *     }
+   *
+   * (2) Enabling/Disabling card lock succeed or change card lock succeed.
+   *
+   *     {
+   *       lockType: "pin",
+   *       result: true
+   *     }
+   */
+  nsIDOMDOMRequest setCardLock(in jsval info);
+
+  /**
+   * Send a USSD message.
+   *
+   * The network reply will be reported via onussdreceived event.
+   *
+   * The 'success' event for the request means the USSD message has been sent
+   * successfully.
+   */
+  nsIDOMDOMRequest sendUSSD(in DOMString ussd);
+
+  /**
+   * Cancel the current USSD session if one exists.
+   */
+  nsIDOMDOMRequest cancelUSSD();
+
+  /**
+   * The 'cardstatechange' event is notified when the 'cardState' attribute
+   * changes value.
+   */
+  attribute nsIDOMEventListener oncardstatechange;
+
+  /**
+   * The 'voicechange' event is notified whenever the voice connection object
+   * changes.
+   */
+  attribute nsIDOMEventListener onvoicechange;
+
+  /**
+   * The 'datachange' event is notified whenever the data connection object
+   * changes values.
+   */
+  attribute nsIDOMEventListener ondatachange;
+
+  /**
+   * The 'ussdreceived' event is notified whenever a new USSD message is
+   * received.
+   */
+  attribute nsIDOMEventListener onussdreceived;
+};
+
+[scriptable, uuid(5ea0e4a9-4684-40da-9930-8ebb61d187f3)]
+interface nsIDOMMozMobileConnectionInfo : nsISupports
+{
+  /**
+   * State of the connection.
+   *
+   * Possible values: 'notSearching', 'searching', 'denied', 'registered'.
+   * null if the state is unknown.
+   */
+  readonly attribute DOMString state;
+
+  /**
+   * Indicates whether the connection is ready. This may be different 
+   */
+  readonly attribute bool connected;
+
+  /**
+   * Indicates whether only emergency calls are possible.
+   *
+   * This flag is only relevant to voice connections and when 'connected' is
+   * false.
+   */
+  readonly attribute bool emergencyCallsOnly;
+
+  /**
+   * Indicates whether the connection is going through a foreign operator
+   * (roaming) or not.
+   */
+  readonly attribute bool roaming;
+
+  /**
+   * Network operator
+   */
+  readonly attribute nsIDOMMozMobileNetworkInfo network;
+
+  /**
+   * Type of connection.
+   *
+   * Possible values: 'gsm', 'cdma', gprs', 'edge', 'umts', 'hsdpa', 'evdo0',
+   * 'evdoa', 'evdob', etc.
+   */
+  readonly attribute DOMString type;
+
+  /**
+   * Signal strength in dBm, or null if no service is available.
+   */
+  readonly attribute jsval signalStrength;
+
+  /**
+   * Signal strength, represented linearly as a number between 0 (weakest
+   * signal) and 100 (full signal).
+   */
+  readonly attribute jsval relSignalStrength;
+
+  /**
+   * Cell location.
+   */
+  readonly attribute nsIDOMMozMobileCellInfo cell;
+
+};
+
+[scriptable, uuid(3bd866c7-98a5-4ef4-a464-c22d8cc6b992)]
+interface nsIDOMMozMobileNetworkInfo: nsISupports
+{
+  /**
+   * Short name of the network operator
+   */
+  readonly attribute DOMString shortName;
+
+  /**
+   * Long name of the network operator
+   */
+  readonly attribute DOMString longName;
+
+  /**
+   * Mobile Country Code (MCC) of the network operator
+   */
+  readonly attribute unsigned short mcc;
+
+  /**
+   * Mobile Network Code (MNC) of the network operator
+   */
+  readonly attribute unsigned short mnc;
+
+  /**
+   * State of this network operator.
+   *
+   * Possible values: 'available', 'connected', 'forbidden', or null (unknown)
+   */
+  readonly attribute DOMString state;
+};
+
+[scriptable, uuid(aa546788-4f34-488b-8c3e-2786e02ab992)]
+interface nsIDOMMozMobileCellInfo: nsISupports
+{
+  /**
+   * Mobile Location Area Code (LAC) for GSM/WCDMA networks.
+   */
+  readonly attribute unsigned short gsmLocationAreaCode;
+
+  /**
+   * Mobile Cell ID for GSM/WCDMA networks.
+   */
+  readonly attribute unsigned long gsmCellId;
+};

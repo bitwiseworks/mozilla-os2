@@ -1,0 +1,29 @@
+; This Source Code Form is subject to the terms of the Mozilla Public
+; License, v. 2.0. If a copy of the MPL was not distributed with this
+; file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+LIBRARY mozglue.dll
+
+EXPORTS
+#ifdef MOZ_MEMORY
+  ; symbols that are actually useful
+  malloc=je_malloc
+  calloc=je_calloc
+  realloc=je_realloc
+  free=je_free
+  posix_memalign=je_posix_memalign
+  strndup=je_strndup
+  strdup=je_strdup
+  _strdup=je_strdup
+  wcsdup=je_wcsdup
+  _wcsdup=je_wcsdup
+  malloc_usable_size=je_malloc_usable_size
+#ifdef MOZ_JEMALLOC
+  je_nallocm
+#else
+  je_malloc_good_size
+#endif
+  jemalloc_stats
+  ; A hack to work around the CRT (see giant comment in Makefile.in)
+  frex=je_dumb_free_thunk
+#endif

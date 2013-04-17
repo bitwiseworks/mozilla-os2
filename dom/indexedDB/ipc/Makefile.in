@@ -1,0 +1,52 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+relativesrcdir = @relativesrcdir@
+VPATH = @srcdir@
+FAIL_ON_WARNINGS := 1
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = dom
+LIBRARY_NAME = dom_indexeddb_ipc_s
+LIBXUL_LIBRARY = 1
+FORCE_STATIC_LIB = 1
+
+EXPORTS_NAMESPACES = mozilla/dom/indexedDB
+
+CPPSRCS += \
+  IndexedDBChild.cpp \
+  IndexedDBParent.cpp \
+  $(NULL)
+
+EXPORTS_mozilla/dom/indexedDB = SerializationHelpers.h
+
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/dom/indexedDB \
+  -I$(topsrcdir)/content/events/src \
+  $(NULL)
+
+DEFINES += -D_IMPL_NS_LAYOUT
+
+MOCHITEST_FILES = test_ipc.html
+
+# Need to enable these tests sometime soon.
+#XPCSHELL_TESTS = unit
+
+# We're copying tests from another directory so this check is wrong for us.
+#NO_XPCSHELL_MANIFEST_CHECK = 1
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+# Copy all the normal xpcshell tests from the regular unit directory.
+copy-xpcshell-tests:
+	$(call install_cmd,$(wildcard $(topsrcdir)/dom/indexedDB/test/unit/test_*.js) \
+		$(testxpcobjdir)/$(relativesrcdir)/$(XPCSHELL_TESTS))
+
+libs-xpcshell-tests: copy-xpcshell-tests

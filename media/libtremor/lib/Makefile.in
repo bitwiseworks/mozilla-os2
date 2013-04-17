@@ -1,0 +1,40 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH  = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir  = @srcdir@
+VPATH  = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE  = tremor
+LIBRARY_NAME = tremor
+FORCE_STATIC_LIB= 1
+LOCAL_INCLUDES += -I$(topsrcdir)/media/libtremor/include/tremor
+
+CSRCS  = \
+  tremor_block.c \
+  tremor_codebook.c \
+  tremor_floor1.c \
+  tremor_floor0.c \
+  tremor_info.c \
+  tremor_mapping0.c \
+  tremor_mdct.c \
+  tremor_registry.c \
+  tremor_res012.c \
+  tremor_sharedbook.c \
+  tremor_synthesis.c \
+  tremor_window.c \
+  $(NULL) 
+
+ifeq ($(OS_ARCH),AIX)
+DEFINES += -Dalloca=__alloca
+endif
+
+ifeq (arm_1_, $(TARGET_CPU)_$(GNU_CC)_$(MOZ_THUMB2))
+DEFINES += -D_ARM_ASSEM_
+endif
+
+include $(topsrcdir)/config/rules.mk

@@ -1,0 +1,26 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+
+[scriptable, uuid(1a38762b-4da5-4f61-80fb-9317e198cb92)]
+interface nsIDOMDocumentXBL : nsISupports
+{
+  /**
+   * See the MDC documentation for what these methods do.
+   */
+  nsIDOMNodeList        getAnonymousNodes(in nsIDOMElement elt);
+  nsIDOMElement         getAnonymousElementByAttribute(in nsIDOMElement elt,
+                                                       in DOMString attrName,
+                                                       in DOMString attrValue);
+
+  void                  addBinding(in nsIDOMElement elt,
+                                   in DOMString bindingURL);
+  void                  removeBinding(in nsIDOMElement elt,
+                                      in DOMString bindingURL);
+
+  nsIDOMElement         getBindingParent(in nsIDOMNode node);
+  void                  loadBindingDocument(in DOMString documentURL);
+};

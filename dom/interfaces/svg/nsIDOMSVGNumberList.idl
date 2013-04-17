@@ -1,0 +1,31 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+
+interface nsIDOMSVGNumber;
+
+[scriptable, uuid(8e303812-38b4-4780-9f8c-9ddbfcb26c81)]
+interface nsIDOMSVGNumberList : nsISupports
+{ 
+  readonly attribute unsigned long numberOfItems;
+  readonly attribute unsigned long length;  // synonym for numberOfItems
+
+  void clear();
+          // raises(nsIDOMDOMException);
+  nsIDOMSVGNumber initialize(in nsIDOMSVGNumber newItem );
+                    // raises(nsIDOMDOMException, nsIDOMSVGException);
+  nsIDOMSVGNumber getItem(in unsigned long index);
+                    // raises(nsIDOMDOMException);
+  [getter,noscript,notxpcom,nostdcall] nsIDOMSVGNumber getItemAt(in unsigned long index);
+  nsIDOMSVGNumber insertItemBefore(in nsIDOMSVGNumber newItem, in unsigned long index);
+                    // raises(nsIDOMDOMException, nsIDOMSVGException);
+  nsIDOMSVGNumber replaceItem(in nsIDOMSVGNumber newItem, in unsigned long index);
+                    // raises(nsIDOMDOMException, nsIDOMSVGException);
+  nsIDOMSVGNumber removeItem(in unsigned long index);
+                    // raises(nsIDOMDOMException);
+  nsIDOMSVGNumber appendItem(in nsIDOMSVGNumber newItem);
+                    // raises(nsIDOMDOMException, nsIDOMSVGException);
+};

@@ -1,0 +1,12 @@
+setup.py:python/simplejson-2.1.1:develop
+setup.py:testing/mozbase/manifestdestiny:develop
+setup.py:testing/mozbase/mozinfo:develop
+setup.py:testing/mozbase/mozinstall:develop
+setup.py:testing/mozbase/mozlog:develop
+setup.py:testing/mozbase/mozprocess:develop
+setup.py:testing/mozbase/mozprofile:develop
+setup.py:testing/mozbase/mozrunner:develop
+setup.py:python/blessings:develop
+setup.py:python/mozbuild:develop
+mozilla.pth:build
+mozilla.pth:config

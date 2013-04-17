@@ -1,0 +1,68 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+relativesrcdir  = @relativesrcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = crashreporter_test
+XPCSHELL_TESTS = unit unit_ipc
+
+LIBRARY_NAME = testcrasher
+NO_DIST_INSTALL = 1
+
+FORCE_SHARED_LIB = 1
+
+VPATH += \
+  $(srcdir)/../google-breakpad/src/processor/ \
+  $(srcdir)/../google-breakpad/src/common/ \
+  $(topsrcdir)/build/ \
+  $(NULL)
+
+CPPSRCS = \
+  nsTestCrasher.cpp \
+  dumputils.cpp \
+  basic_code_modules.cc \
+  logging.cc \
+  minidump.cc \
+  pathname_stripper.cc \
+  $(NULL)
+
+LOCAL_INCLUDES += \
+  -I$(XPIDL_GEN_DIR) \
+  -I$(srcdir)/../google-breakpad/src/ \
+  $(NULL)
+EXTRA_DSO_LIBS += xpcom
+EXTRA_DSO_LDOPTS += $(LIBS_DIR) $(MOZ_COMPONENT_LIBS) $(XPCOM_GLUE_LDOPTS)
+
+EXTRA_JS_MODULES = CrashTestUtils.jsm
+
+ifneq (mobile,$(MOZ_BUILD_APP))
+MOCHITEST_BROWSER_FILES = \
+  browser/head.js \
+  browser/crashreport.sjs \
+  browser/browser_aboutCrashes.js \
+  browser/browser_bug471404.js \
+  browser/browser_aboutCrashesResubmit.js \
+  $(NULL)
+endif
+
+include $(topsrcdir)/config/rules.mk
+
+DEFINES += -DSHARED_LIBRARY=$(SHARED_LIBRARY) -DNOMINMAX
+
+ifneq (mobile,$(MOZ_BUILD_APP))
+libs::  $(MOCHITEST_BROWSER_FILES)
+	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)/browser
+endif
+
+libs:: $(SHARED_LIBRARY) $(EXTRA_JS_MODULES)
+	$(INSTALL) $^ $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit/
+	$(INSTALL) $^ $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit_ipc/
+

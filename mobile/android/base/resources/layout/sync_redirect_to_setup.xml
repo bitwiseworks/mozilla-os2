@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  style="@style/SyncLayout" >
+  <TextView
+      style="@style/SyncTop"
+      android:id="@+id/redirect_top"
+      android:text="@string/sync_title_redirect_to_set_up_sync" />
+  <TextView
+    style="@style/SyncTextItem"
+    android:layout_below="@id/redirect_top"
+    android:layout_above="@+id/redirect_bottom"
+    android:padding="20dp"
+    android:text="@string/sync_text_redirect_to_set_up_sync" />
+  <LinearLayout
+    android:id="@id/redirect_bottom"
+    style="@style/SyncBottom"
+    android:orientation="horizontal" >
+
+    <Button
+      style="@style/SyncButton"
+      android:onClick="redirectToSetupHandler"
+      android:text="@string/sync_button_set_up_sync" />
+    <Button
+      style="@style/SyncButton"
+      android:onClick="cancelClickHandler"
+      android:text="@string/sync_button_cancel" />
+  </LinearLayout>
+</RelativeLayout>

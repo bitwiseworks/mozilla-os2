@@ -1,0 +1,16 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "domstubs.idl"
+
+interface nsIDOMPaintRequest;
+
+[scriptable, uuid(01627136-fdd8-44b4-aac0-7d613608a3d4)]
+interface nsIDOMPaintRequestList : nsISupports
+{
+  readonly attribute unsigned long length;
+  [getter,forward(getItemAt)] nsIDOMPaintRequest        item(in unsigned long index);
+  [noscript,notxpcom,nostdcall] nsIDOMPaintRequest getItemAt(in unsigned long index);
+};

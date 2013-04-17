@@ -1,0 +1,54 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= imglib2
+LIBRARY_NAME	= imglib2_s
+FORCE_STATIC_LIB = 1
+MODULE_NAME	= nsImageLib2Module
+GRE_MODULE	= 1
+LIBXUL_LIBRARY  = 1
+
+
+CPPSRCS		= \
+			Image.cpp \
+			Decoder.cpp \
+			DiscardTracker.cpp \
+			RasterImage.cpp \
+			SVGDocumentWrapper.cpp \
+			VectorImage.cpp \
+			imgFrame.cpp \
+			imgLoader.cpp    \
+			imgRequest.cpp   \
+			imgRequestProxy.cpp \
+			imgTools.cpp \
+			imgStatusTracker.cpp \
+			$(NULL)
+
+# We need to instantiate the decoders
+LOCAL_INCLUDES += -I$(topsrcdir)/image/decoders
+
+# Because SVGDocumentWrapper.cpp includes "nsSVGSVGElement.h"
+LOCAL_INCLUDES += \
+			-I$(topsrcdir)/content/svg/content/src \
+			-I$(topsrcdir)/content/base/src \
+			$(NULL)
+
+# Because VectorImage.cpp includes nsSVGUtils.h and nsSVGEffects.h
+LOCAL_INCLUDES += -I$(topsrcdir)/layout/svg/base/src
+
+include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+
+# Because imgFrame.cpp includes "cairo.h"
+CXXFLAGS += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS)
+
+

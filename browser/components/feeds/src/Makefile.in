@@ -1,0 +1,38 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = browser_feeds
+LIBRARY_NAME = browser_feeds_s
+
+FORCE_STATIC_LIB = 1
+USE_STATIC_LIBS = 1
+
+DEFINES += \
+	-DMOZ_APP_NAME=$(MOZ_APP_NAME) \
+	-DMOZ_MACBUNDLE_NAME=$(MOZ_MACBUNDLE_NAME) \
+	$(NULL)
+
+EXTRA_COMPONENTS = \
+  BrowserFeeds.manifest \
+	FeedConverter.js \
+	WebContentConverter.js \
+  $(NULL)
+
+EXTRA_PP_COMPONENTS = \
+	FeedWriter.js \
+	$(NULL)
+
+
+CPPSRCS = nsFeedSniffer.cpp
+
+LOCAL_INCLUDES = -I$(srcdir)/../../build
+
+include $(topsrcdir)/config/rules.mk

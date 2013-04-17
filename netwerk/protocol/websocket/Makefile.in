@@ -1,0 +1,52 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH     = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH     = @srcdir@
+FAIL_ON_WARNINGS = 1
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE         = necko
+LIBRARY_NAME   = nkwebsocket_s
+LIBXUL_LIBRARY = 1
+XPIDL_MODULE   = necko_websocket
+GRE_MODULE     = 1
+FORCE_STATIC_LIB = 1
+
+EXPORTS_NAMESPACES = mozilla/net
+
+XPIDLSRCS = \
+  nsIWebSocketChannel.idl \
+  nsIWebSocketListener.idl \
+  $(NULL)
+
+CPPSRCS = \
+  WebSocketChannel.cpp \
+  WebSocketChannelParent.cpp \
+  WebSocketChannelChild.cpp \
+  BaseWebSocketChannel.cpp \
+  $(NULL)
+
+EXPORTS_mozilla/net = \
+  WebSocketChannel.h \
+  WebSocketChannelParent.h \
+  WebSocketChannelChild.h \
+  BaseWebSocketChannel.h \
+  $(NULL)
+
+LOCAL_INCLUDES = \
+  -I$(srcdir)/../../base/src \
+  -I$(topsrcdir)/content/base/src \
+  -I$(topsrcdir)/content/events/src \
+  -I$(topsrcdir)/xpcom/ds \
+  $(NULL)
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+DEFINES += -DIMPL_NS_NET

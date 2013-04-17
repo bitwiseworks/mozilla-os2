@@ -1,0 +1,366 @@
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#ifndef nsNPAPIPluginInstance_h_
+#define nsNPAPIPluginInstance_h_
+
+#include "nsCOMPtr.h"
+#include "nsTArray.h"
+#include "nsPIDOMWindow.h"
+#include "nsITimer.h"
+#include "nsIPluginTagInfo.h"
+#include "nsIURI.h"
+#include "nsIChannel.h"
+#include "nsInterfaceHashtable.h"
+#include "nsHashKeys.h"
+#ifdef MOZ_WIDGET_ANDROID
+#include "nsAutoPtr.h"
+#include "nsIRunnable.h"
+#include "GLContext.h"
+#include "nsSurfaceTexture.h"
+#include <map>
+class PluginEventRunnable;
+class SharedPluginTexture;
+#endif
+
+#include "mozilla/TimeStamp.h"
+#include "mozilla/PluginLibrary.h"
+
+struct JSObject;
+
+class nsPluginStreamListenerPeer; // browser-initiated stream class
+class nsNPAPIPluginStreamListener; // plugin-initiated stream class
+class nsIPluginInstanceOwner;
+class nsIOutputStream;
+
+#if defined(OS_WIN)
+const NPDrawingModel kDefaultDrawingModel = NPDrawingModelSyncWin;
+#elif defined(MOZ_X11)
+const NPDrawingModel kDefaultDrawingModel = NPDrawingModelSyncX;
+#elif defined(XP_MACOSX)
+#ifndef NP_NO_QUICKDRAW
+const NPDrawingModel kDefaultDrawingModel = NPDrawingModelQuickDraw;
+#else
+const NPDrawingModel kDefaultDrawingModel = NPDrawingModelCoreGraphics;
+#endif
+#else
+const NPDrawingModel kDefaultDrawingModel = static_cast<NPDrawingModel>(0);
+#endif
+
+class nsNPAPITimer
+{
+public:
+  NPP npp;
+  uint32_t id;
+  nsCOMPtr<nsITimer> timer;
+  void (*callback)(NPP npp, uint32_t timerID);
+  bool inCallback;
+};
+
+class nsNPAPIPluginInstance : public nsISupports
+{
+private:
+  typedef mozilla::PluginLibrary PluginLibrary;
+
+public:
+  NS_DECL_ISUPPORTS
+
+  nsresult Initialize(nsNPAPIPlugin *aPlugin, nsIPluginInstanceOwner* aOwner, const char* aMIMEType);
+  nsresult Start();
+  nsresult Stop();
+  nsresult SetWindow(NPWindow* window);
+  nsresult NewStreamFromPlugin(const char* type, const char* target, nsIOutputStream* *result);
+  nsresult Print(NPPrint* platformPrint);
+  nsresult HandleEvent(void* event, int16_t* result);
+  nsresult GetValueFromPlugin(NPPVariable variable, void* value);
+  nsresult GetDrawingModel(int32_t* aModel);
+  nsresult IsRemoteDrawingCoreAnimation(bool* aDrawing);
+  nsresult GetJSObject(JSContext *cx, JSObject** outObject);
+  bool ShouldCache();
+  nsresult IsWindowless(bool* isWindowless);
+  nsresult AsyncSetWindow(NPWindow* window);
+  nsresult GetImageContainer(ImageContainer **aContainer);
+  nsresult GetImageSize(nsIntSize* aSize);
+  nsresult NotifyPainted(void);
+  nsresult UseAsyncPainting(bool* aIsAsync);
+  nsresult SetBackgroundUnknown();
+  nsresult BeginUpdateBackground(nsIntRect* aRect, gfxContext** aContext);
+  nsresult EndUpdateBackground(gfxContext* aContext, nsIntRect* aRect);
+  nsresult IsTransparent(bool* isTransparent);
+  nsresult GetFormValue(nsAString& aValue);
+  nsresult PushPopupsEnabledState(bool aEnabled);
+  nsresult PopPopupsEnabledState();
+  nsresult GetPluginAPIVersion(uint16_t* version);
+  nsresult InvalidateRect(NPRect *invalidRect);
+  nsresult InvalidateRegion(NPRegion invalidRegion);
+  nsresult GetMIMEType(const char* *result);
+  nsresult GetJSContext(JSContext* *outContext);
+  nsresult GetOwner(nsIPluginInstanceOwner **aOwner);
+  nsresult SetOwner(nsIPluginInstanceOwner *aOwner);
+  nsresult ShowStatus(const char* message);
+  nsresult InvalidateOwner();
+#if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
+  nsresult HandleGUIEvent(const nsGUIEvent& anEvent, bool* handled);
+#endif
+
+  nsNPAPIPlugin* GetPlugin();
+
+  nsresult GetNPP(NPP * aNPP);
+
+  NPError SetWindowless(bool aWindowless);
+
+  NPError SetTransparent(bool aTransparent);
+
+  NPError SetWantsAllNetworkStreams(bool aWantsAllNetworkStreams);
+
+  NPError SetUsesDOMForCursor(bool aUsesDOMForCursor);
+  bool UsesDOMForCursor();
+
+  void SetDrawingModel(NPDrawingModel aModel);
+  void RedrawPlugin();
+#ifdef XP_MACOSX
+  void SetEventModel(NPEventModel aModel);
+#endif
+
+#ifdef MOZ_WIDGET_ANDROID
+  void NotifyForeground(bool aForeground);
+  void NotifyOnScreen(bool aOnScreen);
+  void MemoryPressure();
+  void NotifyFullScreen(bool aFullScreen);
+  void NotifySize(nsIntSize size);
+
+  nsIntSize CurrentSize() { return mCurrentSize; }
+
+  bool IsOnScreen() {
+    return mOnScreen;
+  }
+
+  uint32_t GetANPDrawingModel() { return mANPDrawingModel; }
+  void SetANPDrawingModel(uint32_t aModel);
+
+  void* GetJavaSurface();
+
+  void PostEvent(void* event);
+
+  // These are really mozilla::dom::ScreenOrientation, but it's
+  // difficult to include that here
+  uint32_t FullScreenOrientation() { return mFullScreenOrientation; }
+  void SetFullScreenOrientation(uint32_t orientation);
+
+  void SetWakeLock(bool aLock);
+
+  mozilla::gl::GLContext* GLContext();
+  
+  // For ANPOpenGL
+  class TextureInfo {
+  public:
+    TextureInfo() :
+      mTexture(0), mWidth(0), mHeight(0), mInternalFormat(0)
+    {
+    }
+
+    TextureInfo(GLuint aTexture, int32_t aWidth, int32_t aHeight, GLuint aInternalFormat) :
+      mTexture(aTexture), mWidth(aWidth), mHeight(aHeight), mInternalFormat(aInternalFormat)
+    {
+    }
+
+    GLuint mTexture;
+    int32_t mWidth;
+    int32_t mHeight;
+    GLuint mInternalFormat;
+  };
+
+  TextureInfo LockContentTexture();
+  void ReleaseContentTexture(TextureInfo& aTextureInfo);
+
+  // For ANPNativeWindow
+  void* AcquireContentWindow();
+
+  mozilla::gl::SharedTextureHandle CreateSharedHandle();
+
+  // For ANPVideo
+  class VideoInfo {
+  public:
+    VideoInfo(nsSurfaceTexture* aSurfaceTexture) :
+      mSurfaceTexture(aSurfaceTexture)
+    {
+    }
+
+    ~VideoInfo()
+    {
+      mSurfaceTexture = nullptr;
+    }
+
+    nsRefPtr<nsSurfaceTexture> mSurfaceTexture;
+    gfxRect mDimensions;
+  };
+
+  void* AcquireVideoWindow();
+  void ReleaseVideoWindow(void* aWindow);
+  void SetVideoDimensions(void* aWindow, gfxRect aDimensions);
+
+  void GetVideos(nsTArray<VideoInfo*>& aVideos);
+
+  void SetInverted(bool aInverted);
+  bool Inverted() { return mInverted; }
+#endif
+
+  nsresult NewStreamListener(const char* aURL, void* notifyData,
+                             nsNPAPIPluginStreamListener** listener);
+
+  nsNPAPIPluginInstance();
+  virtual ~nsNPAPIPluginInstance();
+
+  // To be called when an instance becomes orphaned, when
+  // it's plugin is no longer guaranteed to be around.
+  void Destroy();
+
+  // Indicates whether the plugin is running normally.
+  bool IsRunning() {
+    return RUNNING == mRunning;
+  }
+  bool HasStartedDestroying() {
+    return mRunning >= DESTROYING;
+  }
+
+  // Indicates whether the plugin is running normally or being shut down
+  bool CanFireNotifications() {
+    return mRunning == RUNNING || mRunning == DESTROYING;
+  }
+
+  // return is only valid when the plugin is not running
+  mozilla::TimeStamp StopTime();
+
+  // cache this NPAPI plugin
+  void SetCached(bool aCache);
+
+  already_AddRefed<nsPIDOMWindow> GetDOMWindow();
+
+  nsresult PrivateModeStateChanged(bool aEnabled);
+
+  nsresult GetDOMElement(nsIDOMElement* *result);
+
+  nsNPAPITimer* TimerWithID(uint32_t id, uint32_t* index);
+  uint32_t      ScheduleTimer(uint32_t interval, NPBool repeat, void (*timerFunc)(NPP npp, uint32_t timerID));
+  void          UnscheduleTimer(uint32_t timerID);
+  NPError       PopUpContextMenu(NPMenu* menu);
+  NPBool        ConvertPoint(double sourceX, double sourceY, NPCoordinateSpace sourceSpace, double *destX, double *destY, NPCoordinateSpace destSpace);
+
+
+  nsTArray<nsNPAPIPluginStreamListener*> *StreamListeners();
+
+  nsTArray<nsPluginStreamListenerPeer*> *FileCachedStreamListeners();
+
+  nsresult AsyncSetWindow(NPWindow& window);
+
+  void URLRedirectResponse(void* notifyData, NPBool allow);
+
+  NPError InitAsyncSurface(NPSize *size, NPImageFormat format,
+                           void *initData, NPAsyncSurface *surface);
+  NPError FinalizeAsyncSurface(NPAsyncSurface *surface);
+  void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed);
+
+  // Called when the instance fails to instantiate beceause the Carbon
+  // event model is not supported.
+  void CarbonNPAPIFailure();
+
+protected:
+
+  nsresult GetTagType(nsPluginTagType *result);
+  nsresult GetAttributes(uint16_t& n, const char*const*& names,
+                         const char*const*& values);
+  nsresult GetParameters(uint16_t& n, const char*const*& names,
+                         const char*const*& values);
+  nsresult GetMode(int32_t *result);
+
+  // check if this is a Java applet and affected by bug 750480
+  void CheckJavaC2PJSObjectQuirk(uint16_t paramCount,
+                                 const char* const* names,
+                                 const char* const* values);
+
+  // The structure used to communicate between the plugin instance and
+  // the browser.
+  NPP_t mNPP;
+
+  NPDrawingModel mDrawingModel;
+
+#ifdef MOZ_WIDGET_ANDROID
+  uint32_t mANPDrawingModel;
+
+  friend class PluginEventRunnable;
+
+  nsTArray<nsCOMPtr<PluginEventRunnable>> mPostedEvents;
+  void PopPostedEvent(PluginEventRunnable* r);
+  void OnSurfaceTextureFrameAvailable();
+
+  uint32_t mFullScreenOrientation;
+  bool mWakeLocked;
+  bool mFullScreen;
+  bool mInverted;
+
+  nsRefPtr<SharedPluginTexture> mContentTexture;
+  nsRefPtr<nsSurfaceTexture> mContentSurface;
+#endif
+
+  enum {
+    NOT_STARTED,
+    RUNNING,
+    DESTROYING,
+    DESTROYED
+  } mRunning;
+
+  // these are used to store the windowless properties
+  // which the browser will later query
+  bool mWindowless;
+  bool mTransparent;
+  bool mCached;
+  bool mUsesDOMForCursor;
+
+public:
+  // True while creating the plugin, or calling NPP_SetWindow() on it.
+  bool mInPluginInitCall;
+
+  nsXPIDLCString mFakeURL;
+
+private:
+  nsNPAPIPlugin* mPlugin;
+
+  nsTArray<nsNPAPIPluginStreamListener*> mStreamListeners;
+
+  nsTArray<nsPluginStreamListenerPeer*> mFileCachedStreamListeners;
+
+  nsTArray<PopupControlState> mPopupStates;
+
+  char* mMIMEType;
+
+  // Weak pointer to the owner. The owner nulls this out (by calling
+  // InvalidateOwner()) when it's no longer our owner.
+  nsIPluginInstanceOwner *mOwner;
+
+  nsTArray<nsNPAPITimer*> mTimers;
+
+  // non-null during a HandleEvent call
+  void* mCurrentPluginEvent;
+
+  // Timestamp for the last time this plugin was stopped.
+  // This is only valid when the plugin is actually stopped!
+  mozilla::TimeStamp mStopTime;
+
+  bool mUsePluginLayersPref;
+#ifdef MOZ_WIDGET_ANDROID
+  void EnsureSharedTexture();
+  nsSurfaceTexture* CreateSurfaceTexture();
+
+  std::map<void*, VideoInfo*> mVideos;
+  bool mOnScreen;
+
+  nsIntSize mCurrentSize;
+#endif
+
+  // is this instance Java and affected by bug 750480?
+  bool mHaveJavaC2PJSObjectQuirk;
+};
+
+#endif // nsNPAPIPluginInstance_h_

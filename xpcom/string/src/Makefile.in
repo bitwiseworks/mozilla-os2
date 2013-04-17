@@ -1,0 +1,56 @@
+# vim:set ts=8 sw=8 sts=8 noet:
+# 
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= string
+LIBRARY_NAME	= string_s
+MOZILLA_INTERNAL_API = 1
+
+
+CPPSRCS		=				\
+		nsDependentString.cpp		\
+		nsDependentSubstring.cpp	\
+		nsPromiseFlatString.cpp		\
+		nsReadableUtils.cpp		\
+		nsSubstring.cpp			\
+		nsSubstringTuple.cpp		\
+		nsString.cpp			\
+		nsStringComparator.cpp		\
+		nsStringObsolete.cpp		\
+		$(NULL)
+
+# we don't want the shared lib, but we want to force the creation of a
+# static lib.
+FORCE_STATIC_LIB = 1
+
+
+# Are we targeting x86 or x86-64?  If so, compile the SSE2 functions for
+# nsUTF8Utils.cpp.
+ifneq (,$(INTEL_ARCHITECTURE))
+CPPSRCS += nsUTF8UtilsSSE2.cpp
+endif
+
+include $(topsrcdir)/config/rules.mk
+
+ifneq (,$(INTEL_ARCHITECTURE))
+# gcc requires -msse2 on nsUTF8UtilsSSE2.cpp since it uses SSE2 intrinsics.
+# (See bug 585538 comment 12.)
+ifdef GNU_CC
+nsUTF8UtilsSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
+endif
+
+ifdef SOLARIS_SUNPRO_CXX
+nsUTF8UtilsSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-xarch=sse2 -xO4
+endif
+endif
+
+DEFINES		+= -D_IMPL_NS_COM

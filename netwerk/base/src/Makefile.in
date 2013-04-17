@@ -1,0 +1,125 @@
+# vim:set ts=8 sw=8 sts=8 noet:
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= necko
+LIBRARY_NAME	= neckobase_s
+LIBXUL_LIBRARY  = 1
+
+EXPORTS = \
+		nsMIMEInputStream.h \
+		nsURLHelper.h \
+		$(NULL)
+
+CPPSRCS		= \
+		nsTransportUtils.cpp \
+		nsAsyncStreamCopier.cpp \
+		nsAsyncRedirectVerifyHelper.cpp \
+		nsAuthInformationHolder.cpp \
+		nsBaseChannel.cpp \
+		nsBaseContentStream.cpp \
+		nsBufferedStreams.cpp \
+		nsChannelClassifier.cpp \
+		nsDirectoryIndexStream.cpp \
+		nsDownloader.cpp \
+		nsFileStreams.cpp \
+		nsIncrementalDownload.cpp \
+		nsInputStreamChannel.cpp \
+		nsInputStreamPump.cpp \
+		nsStreamTransportService.cpp \
+		nsIOService.cpp \
+		nsLoadGroup.cpp \
+		nsMIMEInputStream.cpp \
+		nsProtocolProxyService.cpp \
+		nsProxyInfo.cpp \
+		nsPACMan.cpp \
+		nsRequestObserverProxy.cpp \
+		nsSimpleStreamListener.cpp \
+		nsSimpleURI.cpp \
+		nsSimpleNestedURI.cpp \
+		nsStandardURL.cpp \
+		nsSocketTransport2.cpp \
+		nsSocketTransportService2.cpp \
+		nsServerSocket.cpp \
+		nsStreamListenerTee.cpp \
+		nsStreamLoader.cpp \
+		nsSyncStreamListener.cpp \
+		nsUnicharStreamLoader.cpp \
+		nsURIChecker.cpp \
+		nsURLHelper.cpp \
+		nsURLParsers.cpp \
+		nsNetAddr.cpp \
+		nsNetStrings.cpp \
+		nsBase64Encoder.cpp \
+		nsSerializationHelper.cpp \
+		nsDNSPrefetch.cpp \
+		RedirectChannelRegistrar.cpp \
+		nsPreloadedStream.cpp \
+		nsStreamListenerWrapper.cpp \
+		$(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
+	CPPSRCS += nsURLHelperOS2.cpp
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+	CPPSRCS += nsURLHelperWin.cpp
+	CPPSRCS += nsNativeConnectionHelper.cpp
+	CPPSRCS += nsAutodialWin.cpp
+else
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+	CPPSRCS += nsURLHelperOSX.cpp
+else
+	CPPSRCS += nsURLHelperUnix.cpp
+endif
+endif
+endif
+
+ifdef MOZ_PLATFORM_MAEMO
+	CPPSRCS += nsNativeConnectionHelper.cpp
+ifdef MOZ_ENABLE_LIBCONIC
+	CPPSRCS += nsAutodialMaemo.cpp
+	LOCAL_INCLUDES += -I$(srcdir)/../../system/maemo
+endif
+ifdef MOZ_ENABLE_QTNETWORK
+	CPPSRCS += nsAutodialQt.cpp
+	LOCAL_INCLUDES += -I$(srcdir)/../../system/qt
+	OS_INCLUDES += $(MOZ_QT_CFLAGS)
+endif
+endif
+
+EXTRA_COMPONENTS = \
+		$(srcdir)/nsProxyAutoConfig.js \
+		$(srcdir)/nsProxyAutoConfig.manifest \
+		$(NULL)
+
+EXTRA_JS_MODULES = \
+		NetUtil.jsm \
+		$(NULL)
+
+# we don't want the shared lib, but we want to force the creation of a
+# static lib.
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+ifeq ($(OS_TARGET),Android)
+# this works around a "branch out of range" error when compiling this file opt
+nsURLParsers.$(OBJ_SUFFIX): MOZ_OPTIMIZE_FLAGS=
+endif
+
+DEFINES += -DIMPL_NS_NET
+
+ifdef MOZ_ENABLE_LIBCONIC
+	OS_INCLUDES += $(GLIB_CFLAGS) $(LIBCONIC_CFLAGS)
+endif

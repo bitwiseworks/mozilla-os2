@@ -1,0 +1,28 @@
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMEvent.idl"
+
+/**
+ * The nsIDOMProgressEvent is used in the media elements (<video> and <audio>
+ * to inform of the progress of the media download. It is currently undefined
+ * in the HTML5 specification. This implementation is a placeholder until
+ * the specification is complete and is compatible with the WebKit ProgressEvent.
+ */
+
+[scriptable, builtinclass, uuid(c5b7ec31-b846-4a9f-b81e-859e76a74f6b)]
+interface nsIDOMProgressEvent : nsIDOMEvent
+{
+  readonly attribute boolean lengthComputable;
+  readonly attribute unsigned long long loaded;
+  readonly attribute unsigned long long total;
+  void initProgressEvent(in DOMString typeArg,
+                         in boolean canBubbleArg,
+                         in boolean cancelableArg,
+                         in boolean lengthComputableArg,
+                         in unsigned long long loadedArg,
+                         in unsigned long long totalArg);
+};

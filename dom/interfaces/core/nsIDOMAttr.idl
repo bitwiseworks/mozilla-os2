@@ -1,0 +1,29 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMNode.idl"
+
+/**
+ * The nsIDOMAttr interface represents an attribute in an "Element" object. 
+ * Typically the allowable values for the attribute are defined in a document 
+ * type definition.
+ * 
+ * For more information on this interface please see 
+ * http://www.w3.org/TR/DOM-Level-2-Core/
+ */
+
+[scriptable, uuid(03da4bc9-1b9a-41dc-a1a4-32414d48d704)]
+interface nsIDOMAttr : nsIDOMNode
+{
+  readonly attribute DOMString            name;
+  readonly attribute boolean              specified;
+           attribute DOMString            value;
+                                            // raises(DOMException) on setting
+
+  // Introduced in DOM Level 2:
+  readonly attribute  nsIDOMElement       ownerElement;
+
+  readonly attribute boolean              isId;
+};

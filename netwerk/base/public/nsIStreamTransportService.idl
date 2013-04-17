@@ -1,0 +1,97 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface nsITransport;
+interface nsIInputStream;
+interface nsIOutputStream;
+
+/**
+ * This service read/writes a stream on a background thread.
+ *
+ * Use this service to transform any blocking stream (e.g., file stream)
+ * into a fully asynchronous stream that can be read/written without 
+ * blocking the main thread.
+ */
+[scriptable, uuid(51CAC889-ABC6-4948-97A3-4F135A6E7630)]
+interface nsIStreamTransportService : nsISupports
+{
+    /**
+     * CreateInputTransport
+     *
+     * @param aStream
+     *        The input stream that will be read on a background thread.
+     *        This stream must implement "blocking" stream semantics.
+     * @param aStartOffset
+     *        The input stream will be read starting from this offset.  Pass
+     *        -1 to read from the current stream offset.  NOTE: this parameter
+     *        is ignored if the stream does not support nsISeekableStream.
+     * @param aReadLimit
+     *        This parameter limits the number of bytes that will be read from
+     *        the input stream.  Pass -1 to read everything.
+     * @param aCloseWhenDone
+     *        Specify this flag to have the input stream closed once its
+     *        contents have been completely read.
+     *
+     * @return nsITransport instance.
+     */
+    nsITransport createInputTransport(in nsIInputStream aStream,
+                                      in long long aStartOffset,
+                                      in long long aReadLimit,
+                                      in boolean aCloseWhenDone);
+
+    /**
+     * CreateOutputTransport
+     *
+     * @param aStream
+     *        The output stream that will be written to on a background thread.
+     *        This stream must implement "blocking" stream semantics.
+     * @param aStartOffset
+     *        The output stream will be written starting at this offset.  Pass
+     *        -1 to write to the current stream offset.  NOTE: this parameter
+     *        is ignored if the stream does not support nsISeekableStream.
+     * @param aWriteLimit
+     *        This parameter limits the number of bytes that will be written to
+     *        the output stream.  Pass -1 for unlimited writing.
+     * @param aCloseWhenDone
+     *        Specify this flag to have the output stream closed once its
+     *        contents have been completely written.
+     *
+     * @return nsITransport instance.
+     */
+    nsITransport createOutputTransport(in nsIOutputStream aStream,
+                                       in long long aStartOffset,
+                                       in long long aWriteLimit,
+                                       in boolean aCloseWhenDone);
+
+    /**
+     * Raise the maximum number of active threads by one.
+     *
+     * Calling this method won't create any additional thread synchronously.
+     * It will be only created when it's needed (lazily).
+     *
+     * Used by mozilla::dom::file::FileService to increase the maximum number
+     * of active threads in the thread pool for asynchronous file IO.
+     */
+    void raiseThreadLimit();
+
+    /**
+     * Lower the maximum number of active threads by one.
+     * lowerThreadLimit() should be always paired with raiseThreadLimit().
+     *
+     * Calling this method won't destroy any already running thread
+     * synchronously. It will be only destroyed when it's done with
+     * currently running event.
+     *
+     * This will never lower the maximum number of active threads beyond
+     * the internal limit.
+     *
+     * @throws NS_ERROR_UNEXPECTED
+     *         When trying to lower the maximum number of active threads
+     *         beyond the internal limit (for example in the case of badly
+     *         nested calls)
+     */
+    void lowerThreadLimit();
+};

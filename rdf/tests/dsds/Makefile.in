@@ -1,0 +1,48 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= rdf
+MOZILLA_INTERNAL_API = 1
+
+
+
+LIBRARY_NAME	= rdfdsds
+IS_COMPONENT	= 1
+
+CPPSRCS		= \
+		nsRDFDataSourceDS.cpp \
+		nsRDFDataSourceFactory.cpp \
+		$(NULL)
+
+SAMPLES_DIR	= $(DIST)/bin/res/samples/rdf
+
+RESOURCE_SAMPLES = \
+		DataSourceViewer.xul \
+		DataSourceViewer.css \
+		$(NULL)
+
+EXTRA_DSO_LDOPTS = \
+		-L$(DIST)/bin \
+		$(XPCOM_LIBS) \
+		$(NSPR_LIBS) \
+		$(NULL)
+
+include $(topsrcdir)/config/rules.mk
+
+GARBAGE		+= $(addprefix $(SAMPLES_DIR)/, $(RESOURCE_SAMPLES))
+
+libs::
+	$(INSTALL) $(addprefix $(srcdir)/,$(RESOURCE_SAMPLES)) $(SAMPLES_DIR)
+
+install:: $(RESOURCE_SAMPLES)
+	$(SYSINSTALL) $(IFLAGS1) $^ $(DESTDIR)$(mozappdir)/res/samples/rdf
+

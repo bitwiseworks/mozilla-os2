@@ -1,0 +1,22 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+LIBRARY_NAME = plugin_child_interpose
+FORCE_SHARED_LIB = 1
+DIST_INSTALL     = 1
+
+CMMSRCS = $(LIBRARY_NAME).mm plugin_child_quirks.mm
+
+EXTRA_DSO_LDOPTS += \
+  -framework Carbon \
+  $(NULL)
+
+include $(topsrcdir)/config/rules.mk

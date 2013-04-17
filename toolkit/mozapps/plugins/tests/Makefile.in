@@ -1,0 +1,50 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = test_plugins
+relativesrcdir  = @relativesrcdir@
+TESTROOT = $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)
+USE_STATIC_LIBS = 1
+
+ifneq (mobile,$(MOZ_BUILD_APP))
+_BROWSER_FILES = \
+  $(warning browser_bug435788.js has been disabled due to leaks - see bug 751100) \
+  pfs_bug435788_1.rdf \
+  pfs_bug435788_2.rdf \
+  GoodExtension.xpi \
+  BadExtension.xpi \
+  $(NULL)
+endif
+
+CPPSRCS = \
+  GoodPlugin.cpp \
+  BadPlugin.cpp \
+  $(NULL)
+
+SIMPLE_PROGRAMS = $(CPPSRCS:.cpp=$(BIN_SUFFIX))
+
+PROGRAMS = $(SIMPLE_PROGRAMS:%$(BIN_SUFFIX)=$(TESTROOT)/%)
+
+include $(topsrcdir)/config/rules.mk
+
+$(PROGRAMS) $(_BROWSER_FILES): $(TESTROOT)
+$(TESTROOT):
+	$(NSINSTALL) -D $@
+
+$(PROGRAMS): $(TESTROOT)/% : %$(BIN_SUFFIX)
+	cp $< $@
+
+ifneq (mobile,$(MOZ_BUILD_APP))
+libs::
+	$(INSTALL) $(foreach f,$(_BROWSER_FILES),"$(srcdir)/$f") $(TESTROOT)
+
+libs:: $(PROGRAMS)
+endif

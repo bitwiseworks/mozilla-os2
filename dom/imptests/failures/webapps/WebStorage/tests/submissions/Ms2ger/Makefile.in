@@ -1,0 +1,21 @@
+DEPTH = @DEPTH@
+
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+relativesrcdir = @relativesrcdir@
+
+DIRS = \
+  $(NULL)
+
+include $(DEPTH)/config/autoconf.mk
+
+MOCHITEST_FILES = \
+  test_missing_arguments.html.json \
+  test_storage_local_in_js.html.json \
+  test_storage_local_removeitem_js.html.json \
+  test_storage_session_in_js.html.json \
+  test_storage_session_removeitem_js.html.json \
+  $(NULL)
+
+include $(topsrcdir)/config/rules.mk

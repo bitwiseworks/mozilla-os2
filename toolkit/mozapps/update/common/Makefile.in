@@ -1,0 +1,44 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE = libupdatecommon
+LIBRARY_NAME = updatecommon
+FORCE_STATIC_LIB =1
+LIBXUL_LIBRARY = 1
+ifeq ($(OS_ARCH),WINNT)
+USE_STATIC_LIBS = 1
+endif
+
+CPPSRCS = \
+  updatelogging.cpp \
+  readstrings.cpp \
+  $(NULL)
+
+EXPORTS = updatelogging.h \
+  updatedefines.h \
+  readstrings.h \
+  $(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+CPPSRCS += updatehelper.cpp \
+  uachelper.cpp \
+  pathhash.cpp \
+  $(NULL)
+
+EXPORTS = updatehelper.h \
+  updatehelper.cpp \
+  uachelper.h \
+  pathhash.h \
+  $(NULL)
+endif
+
+include $(topsrcdir)/config/rules.mk
+

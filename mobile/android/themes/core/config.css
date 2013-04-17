@@ -1,0 +1,39 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+html {
+  font-size: 24px;
+}
+
+input,
+button {
+  font-size: 28px;
+  padding: 5px;
+}
+
+#filter-container {
+  display: -moz-box;
+  -moz-box-align: center;
+}
+
+#new-pref-container {
+  margin: 10px 0;
+}
+
+.pref-item {
+  padding-top: 10px;
+  border-top: 1px solid #ccc;
+}
+
+.pref-item[default="false"] {
+  font-weight: bold;
+}
+
+.pref-item > * {
+  margin-bottom: 10px;
+}
+
+.modify-pref-button {
+  margin-right: 10px;
+}

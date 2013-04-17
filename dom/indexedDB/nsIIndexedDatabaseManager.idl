@@ -1,0 +1,68 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface nsIURI;
+
+[scriptable, function, uuid(ef1795ec-7050-4658-b80f-0e48cbe1d64b)]
+interface nsIIndexedDatabaseUsageCallback : nsISupports
+{
+  /**
+   *
+   */
+  void onUsageResult(in nsIURI aURI,
+                     in unsigned long long aUsage,
+                     in unsigned long long aFileUsage);
+};
+
+[scriptable, builtinclass, uuid(02256aa7-70d8-473f-bf3b-8cb35d28fd75)]
+interface nsIIndexedDatabaseManager : nsISupports
+{
+  /**
+   * Schedules an asynchronous callback that will return the total amount of
+   * disk space being used by databases for the given origin.
+   *
+   * @param aURI
+   *        The URI whose usage is being queried.
+   * @param aCallback
+   *        The callback that will be called when the usage is available.
+   */
+  void getUsageForURI(in nsIURI aURI,
+                      in nsIIndexedDatabaseUsageCallback aCallback);
+
+  /**
+   * Cancels an asynchronous usage check initiated by a previous call to
+   * getUsageForURI().
+   *
+   * @param aURI
+   *        The URI whose usage is being queried.
+   * @param aCallback
+   *        The callback that will be called when the usage is available.
+   */
+  void cancelGetUsageForURI(in nsIURI aURI,
+                            in nsIIndexedDatabaseUsageCallback aCallback);
+
+
+  /**
+   * Removes all databases stored for the given URI. The files may not be
+   * deleted immediately depending on prohibitive concurrent operations.
+   *
+   * @param aURI
+   *        The URI whose databases are to be cleared.
+   */
+  void clearDatabasesForURI(in nsIURI aURI);
+
+  /**
+   * Defines indexedDB and IDBKeyrange with its static functions on 
+   * aObject and initializes DOM exception providers if needed.
+   *
+   * @param aObject
+   *        The object, indexedDB and IDBKeyrange should be defined on.
+   */
+  [implicit_jscontext]
+  void initWindowless(in jsval aObject);
+};

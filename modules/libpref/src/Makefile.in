@@ -1,0 +1,58 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= pref
+LIBRARY_NAME	= pref
+EXPORT_LIBRARY = 1
+IS_COMPONENT	= 1
+MODULE_NAME	= nsPrefModule
+GRE_MODULE	= 1
+LIBXUL_LIBRARY = 1
+
+CPPSRCS		= \
+			  nsPrefBranch.cpp	\
+			  nsPrefsFactory.cpp	\
+			  prefapi.cpp \
+			  prefread.cpp \
+			  Preferences.cpp	\
+			 $(NULL)
+
+DEFINES += -DOS_ARCH=$(OS_ARCH) \
+           -DMOZ_WIDGET_TOOLKIT=$(MOZ_WIDGET_TOOLKIT) \
+           $(NULL)
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+GARBAGE		+= $(addprefix $(DIST)/bin/defaults/pref/, \
+			mailnews.js editor.js \
+			aix.js unix.js winpref.js os2prefs.js)
+
+GARBAGE		+= greprefs.js
+
+GREPREF_FILES = $(topsrcdir)/netwerk/base/public/security-prefs.js $(srcdir)/init/all.js
+
+# Optimizer bug with GCC 3.2.2 on OS/2
+ifeq ($(OS_ARCH), OS2)
+nsPrefService.$(OBJ_SUFFIX): nsPrefService.cpp
+	$(REPORT_BUILD)
+	@$(MAKE_DEPS_AUTO_CXX)
+	$(ELOG) $(CCC) $(OUTOPTION)$@ -c $(COMPILE_CXXFLAGS:-O2=-O1) $(_VPATH_SRCS)
+endif
+
+
+greprefs.js: $(GREPREF_FILES)
+	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(PREF_PPFLAGS) $(DEFINES) $(ACDEFINES) $(XULPPFLAGS) $^ > $@
+
+libs:: greprefs.js
+	$(INSTALL) $^ $(DIST)/bin/

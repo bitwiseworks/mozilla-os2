@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html class="reftest-wait">
+  <head>
+    <style type="text/css">
+      input {
+          -webkit-transition: all 200ms ease-in-out;
+          -moz-transition: all 200ms ease-in-out;
+          transition: all 200ms ease-in-out;
+      }
+      input:focus {
+          -webkit-transform: scale(1.05);
+          -moz-transform: scale(1.05);
+          transform: scale(1.05);
+      }
+    </style>
+    <script>
+      function boom() {
+        var i = document.querySelector("input");
+        i.addEventListener("transitionend", function() {
+          i.removeEventListener("transitionend", arguments.callee, true);
+          i.value = "test";
+          i.getClientRects();
+          i.value = "";
+          i.getClientRects();
+          i.addEventListener("transitionend", function() {
+            i.removeEventListener("transitionend", arguments.callee, true);
+            i.getClientRects();
+            document.documentElement.removeAttribute("class");
+          }, true);
+          i.blur();
+          i.getClientRects();
+        }, true);
+        i.focus();
+        i.getClientRects();
+      }
+    </script>
+  </head>
+  <body onload="boom()">
+    <input type="text" placeholder="foo">
+  </body>
+</html>

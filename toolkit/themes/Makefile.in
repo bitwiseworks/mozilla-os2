@@ -1,0 +1,41 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH     = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir    = @srcdir@
+VPATH     = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+# Theme Selection
+#
+# MacOS X                 Pinstripe (toolkit/themes/pinstripe)
+# Windows                 Winstripe (toolkit/themes/winstripe)
+# GNOME/Linux             Winstripe (toolkit/themes/winstripe) + 
+#                         GNOMEStripe overrides (toolkit/themes/gnomestripe)
+# OS/2                    Winstripe (toolkit/themes/winstripe) + 
+#                         PMStripe overrides (toolkit/themes/pmstripe)
+# faststripe              Winstripe + faststripe (no native theme components)
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+DIRS	= pinstripe
+else
+
+DIRS	= winstripe
+
+ifneq (,$(filter gtk2 qt,$(MOZ_WIDGET_TOOLKIT)))
+DIRS    += gnomestripe
+endif
+ifneq (,$(filter os2,$(MOZ_WIDGET_TOOLKIT)))
+DIRS += pmstripe/global
+endif
+ifdef MOZ_THEME_FASTSTRIPE
+DIRS += faststripe/global
+endif
+
+endif
+
+include $(topsrcdir)/config/rules.mk
+

@@ -1,0 +1,36 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= necko
+XPIDL_MODULE	= necko_strconv
+GRE_MODULE	= 1
+
+XPIDLSRCS	= \
+		nsIStreamConverter.idl \
+		nsIStreamConverterService.idl \
+		mozITXTToHTMLConv.idl \
+		nsITXTToHTMLConv.idl \
+		nsIDirIndex.idl \
+		nsIDirIndexListener.idl \
+		$(NULL)
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+XPIDLSRCS += \
+		nsIAppleFileDecoder.idl \
+		$(NULL)
+endif
+
+include $(topsrcdir)/config/rules.mk
+
+DEFINES += -DIMPL_NS_NET
+
+XPIDL_FLAGS += -I$(topsrcdir)/netwerk/base/public

@@ -1,0 +1,72 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+MODULE		= widget
+LIBRARY_NAME	= wdgtos2
+EXPORT_LIBRARY	= 1
+IS_COMPONENT	= 1
+RESFILE		= widget.res
+MODULE_NAME	= nsWidgetOS2Module
+GRE_MODULE	= 1
+LIBXUL_LIBRARY = 1
+
+
+CPPSRCS		= \
+		nsAppShell.cpp \
+		nsBidiKeyboard.cpp \
+		nsClipboard.cpp \
+		nsFilePicker.cpp \
+		os2FrameWindow.cpp \
+		nsLookAndFeel.cpp \
+		nsOS2Uni.cpp \
+		nsPrintOS2.cpp \
+		nsSound.cpp \
+		nsWidgetFactory.cpp \
+		nsWindow.cpp \
+		nsDragService.cpp \
+		nsScreenOS2.cpp	\
+		nsScreenManagerOS2.cpp \
+		nsDeviceContextSpecOS2.cpp \
+		nsPrintOptionsOS2.cpp \
+		nsRwsService.cpp \
+		nsIdleServiceOS2.cpp \
+		$(NULL)
+
+SHARED_LIBRARY_LIBS = \
+	../xpwidgets/$(LIB_PREFIX)xpwidgets_s.$(LIB_SUFFIX) \
+	$(NULL)
+
+include $(topsrcdir)/config/rules.mk
+
+CXXFLAGS += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS)
+
+DEFINES		+= -D_IMPL_NS_WIDGET
+
+DEFINES += -DUSE_OS2_TOOLKIT_HEADERS
+
+DEFINES += -DMOZ_APP_DISPLAYNAME=\"$(MOZ_APP_DISPLAYNAME)\"
+
+LOCAL_INCLUDES	= -I. -I$(srcdir)/../xpwidgets -I$(srcdir)
+
+install-readme:	README.$(MOZ_APP_NAME)
+ifneq (,$(filter-out xulrunner sunbird,$(MOZ_APP_NAME)))
+	cp -f $^ $(DIST)/bin/README.txt
+endif
+
+libs::	install-readme
+	$(INSTALL) $(srcdir)/MozSounds.cmd $(DIST)/bin/
+
+export::
+	test -d ./res || mkdir ./res
+	test -f ./res/aliasb.ptr || cp $(srcdir)/res/*.* ./res
+
+

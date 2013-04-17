@@ -1,0 +1,234 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+"use strict";
+
+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+
+const NETWORKMANAGER_CONTRACTID = "@mozilla.org/network/manager;1";
+const NETWORKMANAGER_CID =
+  Components.ID("{33901e46-33b8-11e1-9869-f46d04d25bcc}");
+const NETWORKINTERFACE_CONTRACTID = "@mozilla.org/network/interface;1";
+const NETWORKINTERFACE_CID =
+  Components.ID("{266c3edd-78f0-4512-8178-2d6fee2d35ee}");
+
+const DEFAULT_PREFERRED_NETWORK_TYPE = Ci.nsINetworkInterface.NETWORK_TYPE_WIFI;
+
+const TOPIC_INTERFACE_STATE_CHANGED  = "network-interface-state-changed";
+const TOPIC_INTERFACE_REGISTERED     = "network-interface-registered";
+const TOPIC_INTERFACE_UNREGISTERED   = "network-interface-unregistered";
+const TOPIC_DEFAULT_ROUTE_CHANGED    = "network-default-route-changed";
+
+const MANUAL_PROXY_CONFIGURATION = 1;
+
+const DEBUG = false;
+
+/**
+ * This component watches for network interfaces changing state and then
+ * adjusts routes etc. accordingly.
+ */
+function NetworkManager() {
+  this.networkInterfaces = {};
+  Services.obs.addObserver(this, TOPIC_INTERFACE_STATE_CHANGED, true);
+
+  debug("Starting worker.");
+  this.worker = new ChromeWorker("resource://gre/modules/net_worker.js");
+  this.worker.onmessage = function onmessage(event) {
+    this.handleWorkerMessage(event.data);
+  }.bind(this);
+  this.worker.onerror = function onerror(event) {
+    debug("Received error from worker: " + event.filename +
+          ":" + event.lineno + ": " + event.message + "\n");
+    // Prevent the event from bubbling any further.
+    event.preventDefault();
+  };
+}
+NetworkManager.prototype = {
+  classID:   NETWORKMANAGER_CID,
+  classInfo: XPCOMUtils.generateCI({classID: NETWORKMANAGER_CID,
+                                    contractID: NETWORKMANAGER_CONTRACTID,
+                                    classDescription: "Network Manager",
+                                    interfaces: [Ci.nsINetworkManager]}),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsINetworkManager,
+                                         Ci.nsISupportsWeakReference,
+                                         Ci.nsIObserver,
+                                         Ci.nsIWorkerHolder]),
+
+  // nsIWorkerHolder
+
+  worker: null,
+
+  // nsIObserver
+
+  observe: function observe(subject, topic, data) {
+    if (topic != TOPIC_INTERFACE_STATE_CHANGED) {
+      return;
+    }
+    let network = subject.QueryInterface(Ci.nsINetworkInterface);
+    debug("Network '" + network.name + "' changed state to " + network.state);
+    switch (network.state) {
+      case Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED:
+      case Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED:
+        this.setAndConfigureActive();
+        break;
+    }
+  },
+
+  // nsINetworkManager
+
+  registerNetworkInterface: function registerNetworkInterface(network) {
+    if (!(network instanceof Ci.nsINetworkInterface)) {
+      throw Components.Exception("Argument must be nsINetworkInterface.",
+                                 Cr.NS_ERROR_INVALID_ARG);
+    }
+    if (network.name in this.networkInterfaces) {
+      throw Components.Exception("Network with that name already registered!",
+                                 Cr.NS_ERROR_INVALID_ARG);
+    }
+    this.networkInterfaces[network.name] = network;
+    this.setAndConfigureActive();
+    Services.obs.notifyObservers(network, TOPIC_INTERFACE_REGISTERED, null);
+    debug("Network '" + network.name + "' registered.");
+  },
+
+  unregisterNetworkInterface: function unregisterNetworkInterface(network) {
+    if (!(network instanceof Ci.nsINetworkInterface)) {
+      throw Components.Exception("Argument must be nsINetworkInterface.",
+                                 Cr.NS_ERROR_INVALID_ARG);
+    }
+    if (!(network.name in this.networkInterfaces)) {
+      throw Components.Exception("No network with that name registered.",
+                                 Cr.NS_ERROR_INVALID_ARG);
+    }
+    delete this.networkInterfaces[network.name];
+    this.setAndConfigureActive();
+    Services.obs.notifyObservers(network, TOPIC_INTERFACE_UNREGISTERED, null);
+    debug("Network '" + network.name + "' unregistered.");
+  },
+
+  networkInterfaces: null,
+
+  _preferredNetworkType: DEFAULT_PREFERRED_NETWORK_TYPE,
+  get preferredNetworkType() {
+    return this._preferredNetworkType;
+  },
+  set preferredNetworkType(val) {
+    if ([Ci.nsINetworkInterface.NETWORK_TYPE_WIFI,
+         Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE,
+         Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_MMS].indexOf(val) == -1) {
+      throw "Invalid network type";
+    }
+    this._preferredNetworkType = val;
+  },
+
+  active: null,
+  _overriddenActive: null,
+
+  overrideActive: function overrideActive(network) {
+    this._overriddenActive = network;
+    this.setAndConfigureActive();
+  },
+
+  // Helpers
+
+  handleWorkerMessage: function handleWorkerMessage(message) {
+    debug("NetworkManager received message from worker: " + JSON.stringify(message));
+  },
+
+  /**
+   * Determine the active interface and configure it.
+   */
+  setAndConfigureActive: function setAndConfigureActive() {
+    debug("Evaluating whether active network needs to be changed.");
+    let oldActive = this.active;
+
+    if (this._overriddenActive) {
+      debug("We have an override for the active network: " +
+            this._overriddenActive.name);
+      // The override was just set, so reconfigure the network.
+      if (this.active != this._overriddenActive) {
+        this.active = this._overriddenActive;
+        this.setDefaultRouteAndDNS(oldActive);
+      }
+      return;
+    }
+
+    // If the active network is already of the preferred type, nothing to do.
+    if (this.active &&
+        this.active.state == Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED &&
+        this.active.type == this._preferredNetworkType) {
+      debug("Active network is already our preferred type. Not doing anything.");
+      return;
+    }
+
+    // Find a suitable network interface to activate.
+    this.active = null;
+    for each (let network in this.networkInterfaces) {
+      if (network.state != Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED) {
+        continue;
+      }
+      this.active = network;
+      if (network.type == this.preferredNetworkType) {
+        debug("Found our preferred type of network: " + network.name);
+        break;
+      }
+    }
+    if (this.active) {
+      this.setDefaultRouteAndDNS(oldActive);
+    }
+  },
+
+  setDefaultRouteAndDNS: function setDefaultRouteAndDNS(oldInterface) {
+    debug("Going to change route and DNS to " + this.active.name);
+    let options = {
+      cmd: this.active.dhcp ? "runDHCPAndSetDefaultRouteAndDNS" : "setDefaultRouteAndDNS",
+      ifname: this.active.name,
+      oldIfname: (oldInterface && oldInterface != this.active) ? oldInterface.name : null
+    };
+    this.worker.postMessage(options);
+    this.setNetworkProxy();
+  },
+
+  setNetworkProxy: function setNetworkProxy() {
+    try {
+      if (!this.active.httpProxyHost || this.active.httpProxyHost == "") {
+        // Sets direct connection to internet.
+        Services.prefs.clearUserPref("network.proxy.type");
+        Services.prefs.clearUserPref("network.proxy.share_proxy_settings");
+        Services.prefs.clearUserPref("network.proxy.http");
+        Services.prefs.clearUserPref("network.proxy.http_port");
+        debug("No proxy support for " + this.active.name + " network interface.");
+        return;
+      }
+
+      debug("Going to set proxy settings for " + this.active.name + " network interface.");
+      // Sets manual proxy configuration.
+      Services.prefs.setIntPref("network.proxy.type", MANUAL_PROXY_CONFIGURATION);
+      // Do not use this proxy server for all protocols.
+      Services.prefs.setBoolPref("network.proxy.share_proxy_settings", false);
+      Services.prefs.setCharPref("network.proxy.http", this.active.httpProxyHost);
+      let port = this.active.httpProxyPort == "" ? 8080 : this.active.httpProxyPort;
+      Services.prefs.setIntPref("network.proxy.http_port", port);
+    } catch (ex) {
+       debug("Exception " + ex + ". Unable to set proxy setting for "
+             + this.active.name + " network interface.");
+       return;
+    }
+  },
+};
+
+const NSGetFactory = XPCOMUtils.generateNSGetFactory([NetworkManager]);
+
+
+let debug;
+if (DEBUG) {
+  debug = function (s) {
+    dump("-*- NetworkManager: " + s + "\n");
+  };
+} else {
+  debug = function (s) {};
+}

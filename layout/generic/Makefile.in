@@ -1,0 +1,157 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH		= @DEPTH@
+topsrcdir	= @top_srcdir@
+srcdir		= @srcdir@
+VPATH		= @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+TEST_DIRS += test
+
+MODULE		= layout
+LIBRARY_NAME	= gkgeneric_s
+LIBXUL_LIBRARY	= 1
+
+
+
+EXPORTS		= \
+		nsQueryFrame.h \
+		nsFrameIdList.h \
+		nsFrameList.h \
+		nsCanvasFrame.h \
+		nsHTMLParts.h \
+		nsHTMLReflowMetrics.h \
+		nsHTMLReflowState.h \
+		nsIAnonymousContentCreator.h \
+		nsIFrame.h \
+		nsIFrameUtil.h \
+		nsILineIterator.h \
+		nsIObjectFrame.h \
+		nsIPageSequenceFrame.h \
+		nsIScrollableFrame.h \
+		ScrollbarActivity.h \
+		nsIStatefulFrame.h \
+		nsFrameSelection.h \
+		nsSubDocumentFrame.h \
+		Selection.h \
+		nsObjectFrame.h \
+		$(NULL)
+
+EXPORTS_NAMESPACES = mozilla/layout mozilla
+
+EXPORTS_mozilla/layout = \
+		FrameChildList.h \
+		$(NULL)
+
+EXPORTS_mozilla = \
+		Selection.h \
+		$(NULL)
+
+CPPSRCS		= \
+		FrameChildList.cpp \
+		nsAbsoluteContainingBlock.cpp \
+		nsBRFrame.cpp \
+		nsBlockFrame.cpp \
+		nsBlockReflowContext.cpp \
+		nsBlockReflowState.cpp \
+		nsBulletFrame.cpp \
+		nsColumnSetFrame.cpp \
+		nsContainerFrame.cpp \
+		nsFirstLetterFrame.cpp \
+		nsFloatManager.cpp \
+		nsFontInflationData.cpp \
+		nsFrame.cpp \
+		nsFrameList.cpp \
+		nsFrameSetFrame.cpp \
+		nsFrameUtil.cpp \
+		nsGfxScrollFrame.cpp \
+		nsHTMLCanvasFrame.cpp \
+		nsCanvasFrame.cpp \
+		nsHTMLReflowMetrics.cpp \
+		nsHTMLReflowState.cpp \
+		nsImageFrame.cpp \
+		nsImageMap.cpp \
+		nsInlineFrame.cpp \
+		nsIntervalSet.cpp \
+		nsLeafFrame.cpp \
+		nsLineBox.cpp \
+		nsLineLayout.cpp \
+		nsObjectFrame.cpp \
+		nsPageContentFrame.cpp \
+		nsPageFrame.cpp \
+		nsPlaceholderFrame.cpp \
+		ScrollbarActivity.cpp \
+		nsSelection.cpp \
+		nsSimplePageSequence.cpp \
+		nsSplittableFrame.cpp \
+		nsSubDocumentFrame.cpp \
+		nsTextFrameThebes.cpp \
+		nsTextFrameUtils.cpp \
+		TextOverflow.cpp \
+		nsTextRunTransformations.cpp \
+		nsViewportFrame.cpp \
+		$(NULL)
+
+ifdef MOZ_FLEXBOX
+CPPSRCS		+= \
+		nsFlexContainerFrame.cpp \
+		$(NULL)
+endif
+
+ifdef MOZ_MEDIA
+CPPSRCS		+= \
+		nsVideoFrame.cpp \
+		$(NULL)
+endif
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+CMMSRCS		+= \
+		nsPluginUtilsOSX.mm \
+		$(NULL)
+endif
+
+RESOURCES_HTML = \
+		$(srcdir)/folder.png \
+		$(NULL)
+
+FORCE_STATIC_LIB = 1
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+LOCAL_INCLUDES += \
+		-I$(srcdir) \
+		-I$(srcdir)/../base \
+		-I$(srcdir)/../forms \
+		-I$(srcdir)/../style \
+		-I$(srcdir)/../tables \
+		-I$(srcdir)/../xul/base/src \
+		-I$(srcdir)/../../content/xul/content/src \
+		-I$(srcdir)/../../content/base/src \
+		-I$(srcdir)/../../content/html/content/src \
+		-I$(srcdir)/../../dom/base \
+		-I$(srcdir)/../../dom/plugins/base \
+		-I$(srcdir)/../svg/base/src \
+		$(MOZ_CAIRO_CFLAGS) \
+		$(MOZ_PIXMAN_CFLAGS) \
+		$(NULL)
+
+ifdef MOZ_ENABLE_GTK2
+CXXFLAGS += $(MOZ_GTK2_CFLAGS)
+endif
+
+ifdef MOZ_ENABLE_QT
+CXXFLAGS += $(MOZ_QT_CFLAGS)
+endif
+
+libs::
+	$(INSTALL) $(RESOURCES_HTML) $(DIST)/bin/res/html
+
+install::
+	$(SYSINSTALL) $(IFLAGS1) $(RESOURCES_HTML) $(DESTDIR)$(mozappdir)/res/html
+
+DEFINES += -D_IMPL_NS_LAYOUT

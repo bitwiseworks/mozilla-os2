@@ -1,0 +1,19 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMSVGTextContentElement.idl"
+
+interface nsIDOMSVGAnimatedLengthList;
+interface nsIDOMSVGAnimatedNumberList;
+
+[scriptable, uuid(5D04C053-DB94-468E-BFD6-588569851A6B)]
+interface nsIDOMSVGTextPositioningElement : nsIDOMSVGTextContentElement
+{ 
+  readonly attribute nsIDOMSVGAnimatedLengthList x;
+  readonly attribute nsIDOMSVGAnimatedLengthList y;
+  readonly attribute nsIDOMSVGAnimatedLengthList dx;
+  readonly attribute nsIDOMSVGAnimatedLengthList dy;
+  readonly attribute nsIDOMSVGAnimatedNumberList rotate;
+};
