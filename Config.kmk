@@ -1,0 +1,50 @@
+## @file
+# Global Project Configuration File
+#
+
+#------------------------------------------------------------------------------
+# Global definitions
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# Tools
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# Common libraries referenced by components
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# Templates
+#------------------------------------------------------------------------------
+
+TEMPLATE_Cxx            = C/C++ sources
+TEMPLATE_Cxx_TOOL       = GXX3OMF
+TEMPLATE_Cxx_INCS       =
+TEMPLATE_Cxx_DEFS       =
+TEMPLATE_Cxx_LDFLAGS    = -Zlinker '"DISABLE 1121"'
+
+# generate .sym files but don't put them in a separate dir
+TEMPLATE_Cxx_LD_DEBUG       = split
+TEMPLATE_Cxx_DEBUG_STAGE    = nul
+
+TEMPLATE_Bin                = DLL or EXE
+TEMPLATE_Bin_EXTENDS        = Cxx
+
+#------------------------------------------------------------------------------
+# Other Stuff
+#------------------------------------------------------------------------------
+
+#
+# Include a site-specific config for local overrides
+#
+ifndef LOCALCFG
+ LOCALCFG := $(wildcard $(PATH_ROOT)/LocalConfig.kmk)
+ ifneq ($(LOCALCFG),)
+  include $(LOCALCFG)
+ endif
+endif
+
+#------------------------------------------------------------------------------
+# Post-processing
+#------------------------------------------------------------------------------

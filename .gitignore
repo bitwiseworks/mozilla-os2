@@ -48,3 +48,6 @@ parser/html/java/javaparser/
 
 # Python stuff installed at build-time
 *.egg-info/
+
+# kBuild local configuration
+LocalConfig.kmk
