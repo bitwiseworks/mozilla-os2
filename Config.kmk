@@ -6,6 +6,8 @@
 # Global definitions
 #------------------------------------------------------------------------------
 
+MOZILLA_CONFIG_H = $(PATH_OBJ)/mozilla-config.h
+
 #------------------------------------------------------------------------------
 # Tools
 #------------------------------------------------------------------------------
@@ -21,7 +23,10 @@
 TEMPLATE_Cxx            = C/C++ sources
 TEMPLATE_Cxx_TOOL       = GXX3OMF
 TEMPLATE_Cxx_INCS       =
+TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H)
+TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H)
 TEMPLATE_Cxx_DEFS       =
+TEMPLATE_Cxx_DEPS       = $(MOZILLA_CONFIG_H)
 TEMPLATE_Cxx_LDFLAGS    = -Zlinker '"DISABLE 1121"'
 
 # generate .sym files but don't put them in a separate dir
@@ -30,6 +35,25 @@ TEMPLATE_Cxx_DEBUG_STAGE    = nul
 
 TEMPLATE_Bin                = DLL or EXE
 TEMPLATE_Bin_EXTENDS        = Cxx
+
+#------------------------------------------------------------------------------
+# Explicit rules
+#------------------------------------------------------------------------------
+
+MOZILLA_CONFIG_GEN_H = $(PATH_OBJ)/mozilla-config.gen.h
+
+$$(MOZILLA_CONFIG_GEN_H):
+	%$(call MSG_GENERATE,,$@)
+	$(QUIET)kmk_echo "#include \"$(PATH_ROOT)/mozilla-config.os2.h\"" > $@
+
+$$(MOZILLA_CONFIG_H): $(PATH_ROOT)/mozilla-config.h.in $$(MOZILLA_CONFIG_GEN_H)
+	%$(call MSG_GENERATE,,$@)
+	$(QUIET)$(SED) -e "s/@ALLDEFINES@/\#include \"$(notdir $(MOZILLA_CONFIG_GEN_H))\"/" < $< > $@
+
+OTHER_CLEAN += $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
+
+clean-mozilla-config:
+	$(RM) $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
 
 #------------------------------------------------------------------------------
 # Other Stuff
