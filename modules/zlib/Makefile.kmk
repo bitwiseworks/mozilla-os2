@@ -1,0 +1,13 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+#
+# Include sub-makefiles.
+#
+include $(PATH_SUB_CURRENT)/src/Makefile.kmk
+
+include $(FILE_KBUILD_SUB_FOOTER)

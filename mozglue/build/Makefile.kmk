@@ -1,0 +1,14 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+LIBRARIES += mozglue
+
+mozglue_TEMPLATE    = Cxx
+mozglue_SOURCES     = \
+	dummy.cpp
+
+include $(FILE_KBUILD_SUB_FOOTER)
