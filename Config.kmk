@@ -6,7 +6,9 @@
 # Global definitions
 #------------------------------------------------------------------------------
 
-MOZILLA_CONFIG_H = $(PATH_OBJ)/mozilla-config.h
+MOZILLA_CONFIG_H    = $(PATH_OBJ)/mozilla-config.h
+XPCOM_CONFIG_H 	    = $(PATH_OBJ)/xpcom/xpcom-config.h
+XPCOM_PRIVATE_H     = $(PATH_OBJ)/xpcom/xpcom-private.h
 
 #------------------------------------------------------------------------------
 # Tools
@@ -35,7 +37,7 @@ TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H) \
                           -Wno-invalid-offsetof -Wno-variadic-macros -Wcast-align \
                           -fno-exceptions -fno-strict-aliasing -fno-rtti
 TEMPLATE_Cxx_DEFS       = XP_OS2 NO_X11 MOZILLA_CLIENT
-TEMPLATE_Cxx_DEPS       = $(MOZILLA_CONFIG_H)
+TEMPLATE_Cxx_DEPS       = $(MOZILLA_CONFIG_H) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 
 TEMPLATE_Cxx_CFLAGS.release     = -O2 -fomit-frame-pointer
 TEMPLATE_Cxx_CXXFLAGS.release   = -O2 -fomit-frame-pointer
@@ -74,9 +76,22 @@ $$(MOZILLA_CONFIG_H): $(PATH_ROOT)/mozilla-config.h.in $$(MOZILLA_CONFIG_GEN_H)
 	$(QUIET)$(SED) -e "s/@ALLDEFINES@/\#include \"$(notdir $(MOZILLA_CONFIG_GEN_H))\"/" < $< > $@
 
 OTHER_CLEAN += $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
-
 clean-mozilla-config:
 	$(RM) $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
+
+$$(XPCOM_CONFIG_H): $(PATH_ROOT)/xpcom/xpcom-config.os2.h | $$(call DIRDEP,$$(dir $$@))
+	%$(call MSG_GENERATE,,$@)
+	$(QUIET)$(CP) $< $@
+
+$$(XPCOM_PRIVATE_H): $(PATH_ROOT)/xpcom/xpcom-private.os2.h | $$(call DIRDEP,$$(dir $$@))
+	%$(call MSG_GENERATE,,$@)
+	$(QUIET)$(CP) $< $@
+
+BLDDIRS += $(call DIRDEP,$(dir $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)))
+#$(error =$(call DIRDEP,$(dir $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)))=)
+OTHER_CLEAN += $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
+clean-xpcom-config:
+	$(RM) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 
 #------------------------------------------------------------------------------
 # Other Stuff
