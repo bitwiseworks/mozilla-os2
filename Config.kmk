@@ -22,12 +22,30 @@ MOZILLA_CONFIG_H = $(PATH_OBJ)/mozilla-config.h
 
 TEMPLATE_Cxx            = C/C++ sources
 TEMPLATE_Cxx_TOOL       = GXX3OMF
-TEMPLATE_Cxx_INCS       =
-TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H)
-TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H)
-TEMPLATE_Cxx_DEFS       =
+TEMPLATE_Cxx_INCS       = $(PATH_STAGE)/include
+TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H) \
+                          -Wall -Wpointer-arith -Wdeclaration-after-statement \
+                          -Werror=return-type -Wtype-limits -Wempty-body \
+                          -Wno-unused -Wno-overlength-strings -Wcast-align \
+                          -fno-strict-aliasing
+TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H) \
+                          -Wall -Wpointer-arith -Woverloaded-virtual \
+                          -Werror=return-type -Wtype-limits -Wempty-body \
+                          -Wctor-dtor-privacy -Wno-overlength-strings \
+                          -Wno-invalid-offsetof -Wno-variadic-macros -Wcast-align \
+                          -fno-exceptions -fno-strict-aliasing -fno-rtti
+TEMPLATE_Cxx_DEFS       = XP_OS2 NO_X11 MOZILLA_CLIENT
 TEMPLATE_Cxx_DEPS       = $(MOZILLA_CONFIG_H)
-TEMPLATE_Cxx_LDFLAGS    = -Zlinker '"DISABLE 1121"'
+
+TEMPLATE_Cxx_CFLAGS.release     = -O2 -fomit-frame-pointer
+TEMPLATE_Cxx_CXXFLAGS.release   = -O2 -fomit-frame-pointer
+TEMPLATE_Cxx_DEFS.release       = NDEBUG TRIMMED
+TEMPLATE_Cxx_LDFLAGS.release    =
+
+TEMPLATE_Cxx_CFLAGS.debug       = -fno-omit-frame-pointer
+TEMPLATE_Cxx_CXXFLAGS.debug     = -fno-omit-frame-pointer
+TEMPLATE_Cxx_DEFS.debug         = DEBUG _DEBUG TRACING
+TEMPLATE_Cxx_LDFLAGS.debug      = -fno-inline
 
 # generate .sym files but don't put them in a separate dir
 TEMPLATE_Cxx_LD_DEBUG       = split
@@ -35,6 +53,11 @@ TEMPLATE_Cxx_DEBUG_STAGE    = nul
 
 TEMPLATE_Bin                = DLL or EXE
 TEMPLATE_Bin_EXTENDS        = Cxx
+TEMPLATE_Bin_LDFLAGS        = -Zmap -Zlinker /ST:0x100000 -Zhigh-mem
+
+ifn1of ($(EMXOMFLD_TYPE),WLINK wlink)
+TEMPLATE_Bin_LDFLAGS       += -Zlinker '"DISABLE 1121"'
+endif
 
 #------------------------------------------------------------------------------
 # Explicit rules
@@ -42,7 +65,7 @@ TEMPLATE_Bin_EXTENDS        = Cxx
 
 MOZILLA_CONFIG_GEN_H = $(PATH_OBJ)/mozilla-config.gen.h
 
-$$(MOZILLA_CONFIG_GEN_H):
+$$(MOZILLA_CONFIG_GEN_H): | $$(call DIRDEP,$$(dir $$@))
 	%$(call MSG_GENERATE,,$@)
 	$(QUIET)kmk_echo "#include \"$(PATH_ROOT)/mozilla-config.os2.h\"" > $@
 
