@@ -20,11 +20,41 @@ LOCAL_CONFIG_PRE =
 # Global definitions
 #------------------------------------------------------------------------------
 
+MOZ_BUILD_APP      ?= browser
+
+SHELL_CONFIG_VARS = \
+	MOZILLA_VERSION MOZILLA_UAVERSION FIREFOX_VERSION \
+	MOZ_APP_BASENAME MOZ_APP_VENDOR \
+	MOZ_UPDATER MOZ_PHOENIX MOZ_CHROME_FILE_FORMAT \
+	MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS MOZ_SERVICES_SYNC \
+	MOZ_APP_VERSION MOZ_BRANDING_DIRECTORY MOZ_OFFICIAL_BRANDING_DIRECTORY MOZ_APP_ID \
+	ACCEPTED_MAR_CHANNEL_IDS MAR_CHANNEL_ID MOZ_PROFILE_MIGRATOR \
+	MOZ_EXTENSION_MANAGER MOZ_APP_STATIC_INI MOZ_WEBAPP_RUNTIME MOZ_MEDIA_NAVIGATOR
+
 FILE_SUB_FOOTER     = $(PATH_ROOT)/config/footer.kmk
+CACHED_CONFIG       = $(PATH_OBJ)/CachedConfig.kmk
 
 MOZILLA_CONFIG_H    = $(PATH_OBJ)/mozilla-config.h
 XPCOM_CONFIG_H 	    = $(PATH_OBJ)/xpcom/xpcom-config.h
 XPCOM_PRIVATE_H     = $(PATH_OBJ)/xpcom/xpcom-private.h
+BUILDID             = $(PATH_OBJ)/buildid
+
+#
+# Include cached build settings.
+#
+ifn1of (configure, $(MAKECMDGOALS))
+ -include $(CACHED_CONFIG)
+ ifeq ($(CACHED_CONFIG_INCLUDED),)
+  $(error Please run 'kmk configure' to prepare build settings)
+ else # ifeq ($(CACHED_CONFIG_INCLUDED),)
+#
+# Cached build settings sanity checks.
+#
+ ifeq ($(FIREFOX_VERSION),)
+  $(error FIREFOX_VERSION is unexpectedly blank)
+ endif
+ endif # ifeq ($(CACHED_CONFIG_INCLUDED),)
+endif # ifn1of (configure, $(MAKECMDGOALS))
 
 #------------------------------------------------------------------------------
 # Tools
@@ -107,6 +137,49 @@ BLDDIRS += $(call DIRDEP,$(dir $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)))
 OTHER_CLEAN += $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 clean-xpcom-config:
 	$(RM) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
+
+$$(BUILDID): | $$(call DIRDEP,$$(dir $$@))
+ifdef MOZ_BUILD_DATE
+	printf "%s" $(MOZ_BUILD_DATE) > $@
+else
+	$(PYTHON) $(PATH_ROOT)/toolkit/xre/make-platformini.py --print-buildid > $@
+endif
+
+BLDDIRS += $(call DIRDEP,$(dir $(BUILDID)))
+OTHER_CLEAN += $(BUILDID)
+clean-buildid:
+	$(RM) $(BUILDID)
+
+#
+# Configure target prepares cached settings by putting them to a dedicated
+# .kmk file that is included by Config.kmk. It is intended for variables that
+# require running other programs (like text processors) to get their values
+# so they will slow down the build process if evaluated each time kmk is run.
+#
+.PHONY: configure
+configure: | $$(call DIRDEP,$$(dir $$(CACHED_CONFIG)))
+	$(QUIET)$(ECHO) Obtaining and saving build settings to $(CACHED_CONFIG)...
+	$(QUIET)$(RM) -f $(CACHED_CONFIG)
+
+	$(QUIET)$(SHELL) -c ' \
+	\
+MOZILLA_VERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) 2>nul` ; \
+MOZILLA_UAVERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) -uaversion 2>nul` ; \
+FIREFOX_VERSION=`cat $(PATH_ROOT)/browser/config/version.txt` ; \
+	\
+	test -f $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh && . $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh ; \
+	\
+	$(APPEND_EXT) -n $(CACHED_CONFIG) \
+		$(foreach var, $(SHELL_CONFIG_VARS), "$(var) ?= $$$(var)") \
+'
+
+	$(QUIET)$(CAT) $(CACHED_CONFIG)
+
+	$(QUIET)$(APPEND) $(CACHED_CONFIG) 'CACHED_CONFIG_INCLUDED := 1'
+	$(QUIET)$(ECHO) Done.
+
+BLDDIRS += $(call DIRDEP,$(dir $(CACHED_CONFIG)))
+OTHER_CLEAN += $(CACHED_CONFIG)
 
 #------------------------------------------------------------------------------
 # Footer
