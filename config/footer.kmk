@@ -1,0 +1,27 @@
+## @file
+# Global footer makefile
+#
+# This gets included in every Makefile.kmk instead of the default kBuild footer
+# $(FILE_KBUILD_SUB_FOOTER) in order to perform extra processing.
+#
+
+ifeq ($(_SUB_MAKEFILE_STACK),)
+
+#
+# This is the include from the top-most makefile, most processing goes here.
+# --------------------------------------------------------------------------
+#
+
+else # ifeq ($(_SUB_MAKEFILE_STACK),)
+
+#
+# This is an include from a sub-makefile.
+# ---------------------------------------
+#
+
+endif # ifeq ($(_SUB_MAKEFILE_STACK),)
+
+#
+# Include the default kBuild footer.
+#
+include $(FILE_KBUILD_SUB_FOOTER)

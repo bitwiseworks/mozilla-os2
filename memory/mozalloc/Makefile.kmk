@@ -28,4 +28,4 @@ mozalloc_Exports_SOURCES  = \
 # Make sure exported headers are installed before compiling the module
 mozalloc_DEPS += $(mozalloc_Exports_1_TARGET)
 
-include $(FILE_KBUILD_SUB_FOOTER)
+include $(FILE_SUB_FOOTER)

@@ -14,4 +14,4 @@ include $(PATH_SUB_CURRENT)/modules/zlib/Makefile.kmk
 include $(PATH_SUB_CURRENT)/mozglue/Makefile.kmk
 include $(PATH_SUB_CURRENT)/memory/mozalloc/Makefile.kmk
 
-include $(FILE_KBUILD_SUB_FOOTER)
+include $(FILE_SUB_FOOTER)

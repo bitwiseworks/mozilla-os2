@@ -6,6 +6,8 @@
 # Global definitions
 #------------------------------------------------------------------------------
 
+FILE_SUB_FOOTER     = $(PATH_ROOT)/config/footer.kmk
+
 MOZILLA_CONFIG_H    = $(PATH_OBJ)/mozilla-config.h
 XPCOM_CONFIG_H 	    = $(PATH_OBJ)/xpcom/xpcom-config.h
 XPCOM_PRIVATE_H     = $(PATH_OBJ)/xpcom/xpcom-private.h

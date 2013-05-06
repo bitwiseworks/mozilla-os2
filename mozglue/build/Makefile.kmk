@@ -11,4 +11,4 @@ mozglue_TEMPLATE    = Cxx
 mozglue_SOURCES     = \
 	dummy.cpp
 
-include $(FILE_KBUILD_SUB_FOOTER)
+include $(FILE_SUB_FOOTER)

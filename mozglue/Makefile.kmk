@@ -10,4 +10,4 @@ include $(KBUILD_PATH)/subheader.kmk
 #
 include $(PATH_SUB_CURRENT)/build/Makefile.kmk
 
-include $(FILE_KBUILD_SUB_FOOTER)
+include $(FILE_SUB_FOOTER)
