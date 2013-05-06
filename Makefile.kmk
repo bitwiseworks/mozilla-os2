@@ -9,6 +9,8 @@ include $(KBUILD_PATH)/subheader.kmk
 # Include sub-makefiles.
 #
 
+include $(PATH_SUB_CURRENT)/build/Makefile.kmk
+
 include $(PATH_SUB_CURRENT)/mfbt/Makefile.kmk
 include $(PATH_SUB_CURRENT)/modules/zlib/Makefile.kmk
 include $(PATH_SUB_CURRENT)/mozglue/Makefile.kmk
