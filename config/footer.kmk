@@ -12,6 +12,42 @@ ifeq ($(_SUB_MAKEFILE_STACK),)
 # --------------------------------------------------------------------------
 #
 
+##
+# Deals with one source from _PP_SOURCES of INSTALLS targets by
+# preprocessing it withn Preprocessor.py and adding to _SOURCES.
+#
+# The following variables are recongnized on the source:
+# - _DEFS: list of defines passed to Preprocessor.py.
+# - _DEPS: list of dependencies for the target.
+#
+define def_installs_pp_src
+
+local tgt := $$($(target)_0_OUTDIR)/$(notdir $(src))
+local srcsrc := $(abspathex $(src),$($(target)_DEFPATH))
+
+$(tgt): DEFS := $($(src)_DEFS)
+$(tgt): $(srcsrc) $($(src)_DEPS) | $$(call DIRDEP,$$(dir $$@))
+	%$(call MSG_GENERATE,,$@)
+	$(QUIET)$(PYTHON) $(PATH_ROOT)/config/Preprocessor.py $(addprefix -D,$(DEFS)) $< > $@
+
+$(eval OTHER_CLEAN += $(tgt))
+
+$(eval $(target)_SOURCES += $(tgt))
+
+endef # def_installs_pp_src
+
+##
+# Deals with one INSTALLS target (wrt _PP_SOURCES).
+#
+define def_installs_pp_sources
+
+$(foreach src,$($(target)_PP_SOURCES),$(evalval def_installs_pp_src))
+
+endef # def_installs_pp_sources
+
+$(foreach target,$(INSTALLS),$(evalval def_installs_pp_sources))
+
+
 else # ifeq ($(_SUB_MAKEFILE_STACK),)
 
 #
