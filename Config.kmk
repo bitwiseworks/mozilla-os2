@@ -3,6 +3,20 @@
 #
 
 #------------------------------------------------------------------------------
+# Header
+#------------------------------------------------------------------------------
+
+#
+# Include site-specific configuration for local definitions.
+#
+ifndef LOCAL_CONFIG
+ LOCAL_CONFIG = $(wildcard $(PATH_ROOT)/LocalConfig.kmk)
+endif
+LOCAL_CONFIG_PRE = 1
+include $(LOCAL_CONFIG)
+LOCAL_CONFIG_PRE =
+
+#------------------------------------------------------------------------------
 # Global definitions
 #------------------------------------------------------------------------------
 
@@ -90,25 +104,15 @@ $$(XPCOM_PRIVATE_H): $(PATH_ROOT)/xpcom/xpcom-private.os2.h | $$(call DIRDEP,$$(
 	$(QUIET)$(CP) $< $@
 
 BLDDIRS += $(call DIRDEP,$(dir $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)))
-#$(error =$(call DIRDEP,$(dir $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)))=)
 OTHER_CLEAN += $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 clean-xpcom-config:
 	$(RM) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 
 #------------------------------------------------------------------------------
-# Other Stuff
+# Footer
 #------------------------------------------------------------------------------
 
 #
-# Include a site-specific config for local overrides
+# Include site-specific configuration for local overrides.
 #
-ifndef LOCALCFG
- LOCALCFG := $(wildcard $(PATH_ROOT)/LocalConfig.kmk)
- ifneq ($(LOCALCFG),)
-  include $(LOCALCFG)
- endif
-endif
-
-#------------------------------------------------------------------------------
-# Post-processing
-#------------------------------------------------------------------------------
+include $(LOCAL_CONFIG)
