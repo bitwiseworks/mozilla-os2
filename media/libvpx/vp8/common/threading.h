@@ -33,6 +33,11 @@
 #define pthread_getspecific(ts_key) TlsGetValue(ts_key)
 #define pthread_setspecific(ts_key, value) TlsSetValue(ts_key, (void *)value)
 #define pthread_self() GetCurrentThreadId()
+
+#else
+#ifdef __OS2__
+/* this is a no-op until OS/2 threading support is added */
+
 #else
 #ifdef __APPLE__
 #include <mach/mach_init.h>
@@ -52,6 +57,7 @@
 #define THREAD_FUNCTION_RETURN void *
 #define THREAD_SPECIFIC_INDEX pthread_key_t
 #define ts_key_create(ts_key, destructor) pthread_key_create (&(ts_key), destructor);
+#endif
 #endif
 
 /* Syncrhronization macros: Win32 and Pthreads */
