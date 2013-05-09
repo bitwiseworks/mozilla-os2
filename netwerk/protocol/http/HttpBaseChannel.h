@@ -8,6 +8,10 @@
 #ifndef mozilla_net_HttpBaseChannel_h
 #define mozilla_net_HttpBaseChannel_h
 
+#ifndef MOZ_IPC
+#include "prio.h"
+#endif
+
 #include "nsHttp.h"
 #include "nsAutoPtr.h"
 #include "nsHashPropertyBag.h"
