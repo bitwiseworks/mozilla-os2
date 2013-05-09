@@ -52,6 +52,11 @@
 #include <float.h>
 #include <windows.h>
 #define getpid _getpid
+#elif defined(XP_OS2)
+#include <process.h>
+#include <float.h>
+#define INCL_DOS
+#include <os2.h>
 #else
 #include <unistd.h>
 #include <pthread.h>
@@ -2881,6 +2886,9 @@ static bool enableFPExceptions(NPObject* npobj, const NPVariant* args, uint32_t 
 #if defined(XP_WIN) && defined(_M_IX86)
   _control87(0, _MCW_EM);
   return true;
+#elif defined(XP_OS2)
+  _control87(0, MCW_EM);
+  return true;
 #else
   return false;
 #endif
@@ -3069,7 +3077,7 @@ timerTest(NPObject* npobj, const NPVariant* args, uint32_t argCount, NPVariant* 
   return id->timerID[event.timerIdSchedule] != 0;
 }
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
 void
 ThreadProc(void* cookie)
 #else
@@ -3082,7 +3090,7 @@ ThreadProc(void* cookie)
   InstanceData* id = static_cast<InstanceData*>(npp->pdata);
   id->asyncTestPhase = 1;
   NPN_PluginThreadAsyncCall(npp, asyncCallback, (void*)npobj);
-#ifndef XP_WIN
+#if !defined(XP_WIN) && !defined(XP_OS2)
   return NULL;
 #endif
 }
@@ -3099,6 +3107,9 @@ asyncCallback(void* cookie)
     case 0:
 #ifdef XP_WIN
       if (_beginthread(ThreadProc, 0, (void*)npobj) == -1)
+        id->asyncCallbackResult = false;
+#elif defined(XP_OS2)
+      if (_beginthread(ThreadProc, 0, 0xf0000, (void*)npobj) == -1)
         id->asyncCallbackResult = false;
 #else
       pthread_t tid;
@@ -3202,6 +3213,8 @@ FinishGCRace(void* closure)
 
 #ifdef XP_WIN
   Sleep(5000);
+#elif defined(XP_OS2)
+  DosSleep(5000);
 #else
   sleep(5);
 #endif
@@ -3261,6 +3274,9 @@ hangPlugin(NPObject* npobj, const NPVariant* args, uint32_t argCount,
 #ifdef XP_WIN
   Sleep(100000000);
     Sleep(100000000);
+#elif defined(XP_OS2)
+  DosSleep(100000000);
+    DosSleep(100000000);
 #else
   pause();
     pause();
