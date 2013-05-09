@@ -60,7 +60,9 @@
 #navigator-toolbox > toolbar:not(:-moz-lwtheme) {
   -moz-appearance: none;
   border-style: none;
+%ifdef XP_WIN
   background-color: -moz-Dialog;
+%endif
 }
 
 %ifdef WINSTRIPE_AERO
