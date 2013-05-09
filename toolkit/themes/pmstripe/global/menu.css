@@ -107,7 +107,7 @@ menubar > menu {
   margin-bottom: 0;
 }
 
-menubar > menu[_moz-menuactive="true"][open="true"] {
+menubar > menu[_moz-menuactive="true"] {
   color: -moz-MenuBarHoverText;
   background-color: -moz-MenuHover;
 }
@@ -121,7 +121,7 @@ menubar > menu:-moz-lwtheme:not([disabled="true"]) {
   color: inherit !important;
 }
 
-menubar > menu:-moz-lwtheme[_moz-menuactive="true"][open="true"] {
+menubar > menu:-moz-lwtheme[_moz-menuactive="true"] {
   color: HighlightText !important;
   text-shadow: none;
 }
@@ -146,7 +146,7 @@ popup > menuitem {
   padding-bottom: 2px;
 }
 
-menu[_moz-menuactive="true"][open="true"],
+menu[_moz-menuactive="true"],
 menuitem[_moz-menuactive="true"] {
   background: -moz-MenuHover;
   color: -moz-MenuHoverText;
