@@ -13,6 +13,14 @@
 #include "nsISupportsArray.h"
 #include "nsString.h"
 
+// used to fix ShowPrintPrompt() bug when printing mail/news messages
+#include "nsPIDOMWindow.h"
+#include "nsIDocShell.h"
+#include "nsIDocShellTreeItem.h"
+#include "nsIDocShellTreeOwner.h"
+#include "nsIBaseWindow.h"
+#include "nsIWidget.h"
+
 // Printing Progress Includes
 #include "nsPrintProgress.h"
 #include "nsPrintProgressParams.h"
@@ -88,6 +96,42 @@ nsPrintingPromptService::ShowPrintDialog(nsIDOMWindow *parent, nsIWebBrowserPrin
       return rv;
 
     block->SetInt(0, 0);
+
+    // nsWindowWatcher->OpenWindow() will fail if |aParent| is an invisible
+    // window with no chrome.  When printing mailnews messages, |aParent|
+    // fits that description.  As a workaround, this tests for its visibility
+    // and zeroes it out if invisible, causing DoDialog() to reset it to
+    // the active window.  This is typically the main mailnews window which
+    // is what we wanted anyway.  If there is no active window, the dialog
+    // will still be shown but it won't be modal.
+
+    if (parent) {
+      nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(parent);
+      if (window) {
+        nsIDocShell *docshell = window->GetDocShell();
+        if (docshell) {
+          nsCOMPtr<nsIDocShellTreeItem> treeItem = do_QueryInterface(docshell);
+          if (treeItem) {
+            nsCOMPtr<nsIDocShellTreeOwner> parentTreeOwner;
+            treeItem->GetTreeOwner(getter_AddRefs(parentTreeOwner));
+            if (parentTreeOwner) {
+              nsCOMPtr<nsIBaseWindow> parentWindow = do_QueryInterface(parentTreeOwner);
+              if (parentWindow) {
+                nsCOMPtr<nsIWidget> parentWidget;
+                parentWindow->GetMainWidget(getter_AddRefs(parentWidget));
+                if (parentWidget) {
+                  bool parentVisible = true;
+                  parentWidget->IsVisible(parentVisible);
+                  if (!parentVisible)
+                    parent = 0;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     return DoDialog(parent, block, webBrowserPrint, printSettings, kPrintDialogURL);
 }
 
