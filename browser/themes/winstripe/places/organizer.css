@@ -50,9 +50,11 @@
   border: 1px solid transparent;
 }
 
+%ifndef XP_OS2
 #placesMenu > menu[_moz-menuactive="true"] {
   background-color: transparent;
 }
+%endif
 
 #placesMenu > menu:hover {
   border-color: ThreeDHighlight ThreeDShadow ThreeDShadow ThreeDHighlight;
