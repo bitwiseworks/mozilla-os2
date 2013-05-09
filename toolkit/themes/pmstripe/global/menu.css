@@ -11,7 +11,8 @@
 /* ::::: menu/menuitem ::::: */
 
 menu,
-menuitem {
+menuitem,
+.splitmenu-menuitem {
   -moz-appearance: menuitem;
   -moz-box-align: center;
   -moz-margin-start: 2px !important;
@@ -30,9 +31,12 @@ menuitem[default="true"] {
   font-weight: bold;
 }
 
-menu[disabled="true"], menuitem[disabled="true"],
+menu[disabled="true"],
+menuitem[disabled="true"],
+.splitmenu-menuitem[disabled="true"],
 menu[_moz-menuactive="true"][disabled="true"],
-menuitem[_moz-menuactive="true"][disabled="true"] {
+menuitem[_moz-menuactive="true"][disabled="true"]
+.splitmenu-menuitem[_moz-menuactive="true"][disabled="true"] {
   color: GrayText;
 }
 
@@ -84,6 +88,13 @@ menuitem.spell-suggestion {
 .menu-iconic-icon {
   max-width: 16px;
   max-height: 16px;
+}
+
+menu.menu-iconic > .menu-iconic-left,
+menuitem.menuitem-iconic > .menu-iconic-left,
+.splitmenu-menuitem[iconic="true"] > .menu-iconic-left {
+  -moz-appearance: menuimage;
+  padding-top: 2px;
 }
 
 /* ..... menu arrow box ..... */
@@ -147,7 +158,8 @@ popup > menuitem {
 }
 
 menu[_moz-menuactive="true"],
-menuitem[_moz-menuactive="true"] {
+menuitem[_moz-menuactive="true"],
+.splitmenu-menuitem[_moz-menuactive="true"] {
   background: -moz-MenuHover;
   color: -moz-MenuHoverText;
 }
