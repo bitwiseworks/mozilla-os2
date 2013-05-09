@@ -64,6 +64,9 @@ static const unsigned char OC_FZIG_ZAG_SSE2[128]={
 void oc_state_accel_init_x86(oc_theora_state *_state){
   oc_state_accel_init_c(_state);
   _state->cpu_flags=oc_cpu_flags_get();
+# if defined(__OS2__)
+  _state->cpu_flags&=~(OC_CPU_X86_SSE2|OC_CPU_X86_PNI);
+#endif
 # if defined(OC_STATE_USE_VTABLE)
   if(_state->cpu_flags&OC_CPU_X86_MMX){
     _state->opt_vtable.frag_copy=oc_frag_copy_mmx;
