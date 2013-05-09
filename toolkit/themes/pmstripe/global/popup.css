@@ -2,16 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* ===== popup.css ===================================================
-  == Styles used by the XUL popup element.
-  ======================================================================= */
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
 /* ::::: menupopup ::::: */
 
 menupopup,
-popup,
 panel {
   -moz-appearance: menupopup;
   border: 2px solid;
@@ -22,17 +18,79 @@ panel {
   padding: 1px;
   background-color: Menu;
   min-width: 1px;
+  color:MenuText;
 }
+
 menupopup {
   border-top: 1px solid;
   -moz-border-top-colors: ThreeDHighlight;
 }
 
-menupopup > menu > menupopup,
-popup > menu > menupopup {
+menupopup > menu > menupopup {
  /* align submenus */
   -moz-margin-start: 2px;
   margin-top: 2px;
+}
+
+panel[type="arrow"] {
+  -moz-appearance: none;
+  background: transparent;
+  border: none;
+  -moz-transition: opacity 300ms;
+}
+
+panel[type="arrow"][side="top"],
+panel[type="arrow"][side="bottom"] {
+  margin-left: -23px;
+  margin-right: -23px;
+}
+
+panel[type="arrow"][side="left"],
+panel[type="arrow"][side="right"] {
+  margin-top: -23px;
+  margin-bottom: -23px;
+}
+
+.panel-arrowcontent {
+  border-radius: 6px;
+  padding: 10px;
+  color: -moz-DialogText;
+  background: -moz-Dialog;
+  border: 1px solid ThreeDShadow;
+}
+
+.panel-arrow[side="top"],
+.panel-arrow[side="bottom"] {
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-vertical.svg");
+  position: relative;
+  margin-left: 6px;
+  margin-right: 6px;
+}
+
+.panel-arrow[side="top"] {
+  margin-bottom: -1px;
+}
+
+.panel-arrow[side="bottom"] {
+  -moz-transform: scaleY(-1);
+  margin-top: -1px;
+}
+
+.panel-arrow[side="left"],
+.panel-arrow[side="right"] {
+  list-style-image: url("chrome://global/skin/arrow/panelarrow-horizontal.svg");
+  position: relative;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.panel-arrow[side="left"] {
+  margin-right: -1px;
+}
+
+.panel-arrow[side="right"] {
+  -moz-transform: scaleX(-1);
+  margin-left: -1px;
 }
 
 /* ::::: tooltip ::::: */

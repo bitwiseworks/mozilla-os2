@@ -150,9 +150,7 @@ menubar > menu:-moz-lwtheme[_moz-menuactive="true"] {
 /* ::::: menu/menuitems in popups ::::: */
 
 menupopup > menu,
-popup > menu,
-menupopup > menuitem,
-popup > menuitem {
+menupopup > menuitem {
   max-width: 42em;
   padding-bottom: 2px;
 }
