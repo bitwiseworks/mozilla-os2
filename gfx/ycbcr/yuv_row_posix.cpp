@@ -258,7 +258,7 @@ void LinearScaleYUVToRGB32Row(const uint8* y_buf,
 );
 }
 
-#elif defined(MOZILLA_MAY_SUPPORT_SSE) && defined(ARCH_CPU_X86_32) && !defined(__PIC__)
+#elif defined(MOZILLA_MAY_SUPPORT_SSE) && defined(ARCH_CPU_X86_32) && !defined(__PIC__) && !defined(XP_OS2)
 
 // PIC version is slower because less registers are available, so
 // non-PIC is used on platforms where it is possible.
@@ -564,7 +564,7 @@ void LinearScaleYUVToRGB32Row(const uint8* y_buf,
                              width, source_dx);
 }
 
-#elif defined(MOZILLA_MAY_SUPPORT_SSE) && defined(ARCH_CPU_X86_32) && defined(__PIC__)
+#elif defined(MOZILLA_MAY_SUPPORT_SSE) && defined(ARCH_CPU_X86_32) && defined(__PIC__) || defined(XP_OS2)
 
 void PICConvertYUVToRGB32Row_SSE(const uint8* y_buf,
                                  const uint8* u_buf,
@@ -575,7 +575,7 @@ void PICConvertYUVToRGB32Row_SSE(const uint8* y_buf,
 
   asm(
   ".text\n"
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_OS2)
 "_PICConvertYUVToRGB32Row_SSE:\n"
 #else
 "PICConvertYUVToRGB32Row_SSE:\n"
@@ -628,7 +628,7 @@ void PICConvertYUVToRGB32Row_SSE(const uint8* y_buf,
 "2:"
   "popa\n"
   "ret\n"
-#if !defined(XP_MACOSX)
+#if !defined(XP_MACOSX) && !defined(XP_OS2)
   ".previous\n"
 #endif
 );
@@ -658,7 +658,7 @@ void PICScaleYUVToRGB32Row_SSE(const uint8* y_buf,
 
   asm(
   ".text\n"
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_OS2)
 "_PICScaleYUVToRGB32Row_SSE:\n"
 #else
 "PICScaleYUVToRGB32Row_SSE:\n"
@@ -725,7 +725,7 @@ void PICScaleYUVToRGB32Row_SSE(const uint8* y_buf,
 "2:"
   "popa\n"
   "ret\n"
-#if !defined(XP_MACOSX)
+#if !defined(XP_MACOSX) && !defined(XP_OS2)
   ".previous\n"
 #endif
 );
@@ -756,7 +756,7 @@ void PICLinearScaleYUVToRGB32Row_SSE(const uint8* y_buf,
 
   asm(
   ".text\n"
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_OS2)
 "_PICLinearScaleYUVToRGB32Row_SSE:\n"
 #else
 "PICLinearScaleYUVToRGB32Row_SSE:\n"
@@ -863,7 +863,7 @@ void PICLinearScaleYUVToRGB32Row_SSE(const uint8* y_buf,
   "movd %mm1, (%ebp)\n"
   "popa\n"
   "ret\n"
-#if !defined(XP_MACOSX)
+#if !defined(XP_MACOSX) && !defined(XP_OS2)
   ".previous\n"
 #endif
 );

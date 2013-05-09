@@ -54,7 +54,7 @@ CPPSRCS += yuv_row_win.cpp \
            $(NULL)
 endif
 else
-ifneq (,$(filter Linux SunOS Darwin DragonFly FreeBSD NetBSD OpenBSD, $(OS_ARCH)))
+ifneq (,$(filter Linux SunOS Darwin DragonFly FreeBSD NetBSD OpenBSD OS2, $(OS_ARCH)))
 CPPSRCS += yuv_row_posix.cpp \
            $(NULL)
 else
