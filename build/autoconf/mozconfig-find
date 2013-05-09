@@ -15,7 +15,7 @@
 topsrcdir=$1
 
 abspath() {
-  if uname -s | grep -q MINGW; then
+  if uname -s | grep -q 'MINGW\|OS\/2'; then
     # We have no way to figure out whether we're in gmake or pymake right
     # now. gmake gives us Unix-style paths while pymake gives us Windows-style
     # paths, so attempt to handle both.
@@ -35,7 +35,7 @@ abspath() {
   echo `pwd`/$1
 }
 
-if [ -n "$MOZCONFIG" ] && ! [ -f "$MOZCONFIG" ]; then
+if [ -n "$MOZCONFIG" ] && [ ! -f "$MOZCONFIG" ]; then
   echo "Specified MOZCONFIG \"$MOZCONFIG\" does not exist!" 1>&2
   exit 1
 fi
