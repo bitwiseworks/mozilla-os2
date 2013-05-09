@@ -22,6 +22,8 @@
 %define ABI_IS_32BIT 1
 %elifidn __OUTPUT_FORMAT__,win32
 %define ABI_IS_32BIT 1
+%elifidn __OUTPUT_FORMAT__,obj
+%define ABI_IS_32BIT 1
 %else
 %define ABI_IS_32BIT 0
 %endif
@@ -328,3 +330,10 @@ section .note.GNU-stack noalloc noexec nowrite progbits
 section .text
 %endif
 
+; OMF needs special handling to ensure everything is in the same segment
+; and that the segment is 32 bit.
+%ifidn __OUTPUT_FORMAT__,obj
+%define SECTION_RODATA section .text
+section .text align=16 use32 class=CODE
+group CGROUP text
+%endif

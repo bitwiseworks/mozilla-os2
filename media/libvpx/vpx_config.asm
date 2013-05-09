@@ -10,4 +10,6 @@
 %include "vpx_config_x86-win32-vs8.asm"
 %elifidn __OUTPUT_FORMAT__,x64
 %include "vpx_config_x86_64-win64-vs8.asm"
+%elifidn __OUTPUT_FORMAT__,obj
+%include "vpx_config_x86-os2-gcc.asm"
 %endif
