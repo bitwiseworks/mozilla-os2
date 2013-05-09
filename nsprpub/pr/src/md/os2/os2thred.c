@@ -238,6 +238,11 @@ _PR_MD_SET_PRIORITY(_MDThread *thread, PRThreadPriority newPri)
 }
 
 void
+_PR_MD_SET_CURRENT_THREAD_NAME(const char *name)
+{
+}
+
+void
 _PR_MD_CLEAN_THREAD(PRThread *thread)
 {
     APIRET rv;
