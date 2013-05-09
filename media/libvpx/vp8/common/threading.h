@@ -36,7 +36,24 @@
 
 #else
 #ifdef __OS2__
-/* this is a no-op until OS/2 threading support is added */
+#include <InnoTekLIBC/thread.h>
+#include <InnoTekLIBC/FastInfoBlocks.h>
+#define INCL_DOS
+#include <os2.h>
+#include "os2_semaphore.h"
+#define THREAD_FUNCTION void *
+#define THREAD_FUNCTION_RETURN void *
+#define THREAD_SPECIFIC_INDEX int
+#define pthread_t int
+#define pthread_attr_t int
+#define pthread_create(thhandle,attr,thfunc,tharg) (int)((*thhandle = _beginthread(((void (*)(void*))thfunc), 0, 0x10000, (tharg))) == -1)
+#define pthread_join(thread, result) (DosWaitThread((PTID)(&(thread)), DCWW_WAIT))
+#define pthread_detach(thread)
+#define pthread_cancel(thread) DosKillThread((TID)thread)
+#define ts_key_create(ts_key, destructor) {ts_key = __libc_TLSAlloc();}
+#define pthread_getspecific(ts_key) __libc_TLSGet(ts_key)
+#define pthread_setspecific(ts_key, value) __libc_TLSSet(ts_key, value)
+#define pthread_self() fibGetTid()
 
 #else
 #ifdef __APPLE__
@@ -80,9 +97,13 @@
 #define sem_destroy(sem) semaphore_destroy(mach_task_self(),*sem)
 #define thread_sleep(nms) /* { struct timespec ts;ts.tv_sec=0; ts.tv_nsec = 1000*nms;nanosleep(&ts, NULL);} */
 #else
+#ifdef __OS2__
+#define thread_sleep(nms) DosSleep(nms)
+#else
 #include <unistd.h>
 #include <sched.h>
 #define thread_sleep(nms) sched_yield();/* {struct timespec ts;ts.tv_sec=0; ts.tv_nsec = 1000*nms;nanosleep(&ts, NULL);} */
+#endif
 #endif
 /* Not Windows. Assume pthreads */
 

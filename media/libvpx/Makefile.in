@@ -147,6 +147,13 @@ CSRCS += \
   yv12extend.c \
   $(NULL)
 
+ifeq ($(OS_ARCH),OS2)
+DEFINES += -DTYPE_BOOL
+CSRCS += \
+  os2_semaphore.c \
+  $(NULL)
+endif
+
 ifdef MOZ_VP8_ERROR_CONCEALMENT
 CSRCS += \
   error_concealment.c \
