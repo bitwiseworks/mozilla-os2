@@ -33,21 +33,13 @@
  *
  * Contributor(s):
  *     Peter Weilbacher <mozilla@Weilbacher.org>
- *     Rich Walsh <dragtext@e-vertise.com>
+ *     Rich Walsh <rich@e-vertise.com>
  */
 
 #ifndef _CAIRO_OS2_H_
 #define _CAIRO_OS2_H_
 
-#define INCL_DOS
-#define INCL_DOSSEMAPHORES
-#define INCL_DOSERRORS
-#define INCL_WIN
-#define INCL_GPI
-
 #include "cairo.h"
-
-#include <os2.h>
 
 CAIRO_BEGIN_DECLS
 
@@ -61,45 +53,58 @@ cairo_os2_fini (void);
 
 #if CAIRO_HAS_OS2_SURFACE
 
-cairo_public cairo_surface_t *
-cairo_os2_surface_create (HPS hps_client_window,
-                          int width,
-                          int height);
+typedef struct _cairo_os2_surface cairo_os2_surface_t;
 
 cairo_public cairo_surface_t *
-cairo_os2_surface_create_for_window (HWND hwnd_client_window,
-                                     int  width,
-                                     int  height);
+cairo_os2_surface_create (cairo_format_t  format,
+                          int             width,
+                          int             height);
 
-cairo_public void
-cairo_os2_surface_set_hwnd (cairo_surface_t *surface,
-                            HWND             hwnd_client_window);
+cairo_public cairo_surface_t *
+cairo_os2_surface_create_for_window (HWND  hwnd,
+                                     int   width,
+                                     int   height);
 
-cairo_public int
-cairo_os2_surface_set_size (cairo_surface_t *surface,
-                            int              new_width,
-                            int              new_height,
-                            int              timeout);
+cairo_public cairo_surface_t *
+cairo_os2_surface_create_null_surface (HPS  hps,
+                                       int  width,
+                                       int  height);
 
-cairo_public void
-cairo_os2_surface_refresh_window (cairo_surface_t *surface,
-                                  HPS              hps_begin_paint,
-                                  PRECTL           prcl_begin_paint_rect);
+cairo_public cairo_status_t
+cairo_os2_surface_paint_window (cairo_os2_surface_t *surface,
+                                HPS                  hps,
+                                RECTL               *rect,
+                                int                  count);
 
-cairo_public void
-cairo_os2_surface_set_manual_window_refresh (cairo_surface_t *surface,
-                                             cairo_bool_t     manual_refresh);
+cairo_public cairo_status_t
+cairo_os2_surface_paint_bitmap (cairo_os2_surface_t *surface,
+                                HPS                  hps,
+                                RECTL               *src,
+                                RECTL               *dst,
+                                int                  count,
+                                BOOL                 use24bpp);
+
+cairo_public cairo_status_t
+cairo_os2_surface_get_hps (cairo_os2_surface_t *surface,
+                           HPS                 *hps);
+
+cairo_public cairo_status_t
+cairo_os2_surface_set_hps (cairo_os2_surface_t *surface,
+                           HPS                  hps);
+
+cairo_public cairo_status_t
+cairo_os2_surface_set_hwnd (cairo_os2_surface_t *surface,
+                            HWND                 hwnd);
+
+cairo_public cairo_status_t
+cairo_os2_surface_set_size (cairo_os2_surface_t *surface,
+                            int                  width,
+                            int                  height,
+                            int                  copy);
 
 cairo_public cairo_bool_t
-cairo_os2_surface_get_manual_window_refresh (cairo_surface_t *surface);
-
-cairo_public cairo_status_t
-cairo_os2_surface_get_hps (cairo_surface_t *surface,
-                           HPS             *hps);
-
-cairo_public cairo_status_t
-cairo_os2_surface_set_hps (cairo_surface_t *surface,
-                           HPS              hps);
+cairo_os2_surface_enable_dive (cairo_bool_t enable,
+                               cairo_bool_t hide_pointer);
 
 #else  /* CAIRO_HAS_OS2_SURFACE */
 # error Cairo was not compiled with support for the OS/2 backend
@@ -108,3 +113,4 @@ cairo_os2_surface_set_hps (cairo_surface_t *surface,
 CAIRO_END_DECLS
 
 #endif /* _CAIRO_OS2_H_ */
+

@@ -34,6 +34,7 @@
  *	Owen Taylor <otaylor@redhat.com>
  *	Stuart Parmenter <stuart@mozilla.com>
  *	Vladimir Vukicevic <vladimir@pobox.com>
+ *  Rich Walsh <rich@e-vertise.com>
  */
 
 /* This file should include code that is system-specific, not
@@ -94,4 +95,132 @@ DllMain (HINSTANCE hinstDLL,
 
 #endif
 #endif
+
+#ifdef __OS2__
+
+#include <float.h>
+#if CAIRO_HAS_FC_FONT
+#include <fontconfig/fontconfig.h>
+#endif
+
+cairo_public void
+cairo_os2_init (void);
+cairo_public void
+cairo_os2_fini (void);
+
+static int cairo_os2_init_count = 0;
+
+/**
+ * DLL Initialization/Termination functions -
+ * not used when Cairo is statically linked.
+ *
+ **/
+
+#ifdef BUILD_CAIRO_DLL
+
+#ifdef __WATCOMC__
+unsigned _System
+LibMain (unsigned hmod,
+         unsigned termination)
+{
+    if (termination) {
+        cairo_os2_fini ();
+        return 1;
+    }
+
+    cairo_os2_init ();
+    return 1;
+}
+
+#else
+
+#include <emx/startup.h>
+
+unsigned long _System
+_DLL_InitTerm (unsigned long hmod,
+               unsigned long termination)
+{
+    if (termination) {
+        cairo_os2_fini ();
+        __ctordtorTerm ();
+        _CRT_term ();
+        return 1;
+    }
+
+    if (_CRT_init ())
+        return 0;
+    __ctordtorInit ();
+
+    cairo_os2_init ();
+    return 1;
+}
+#endif /* __WATCOMC__ */
+
+#endif /* BUILD_CAIRO_DLL */
+
+/**
+ * cairo_os2_init:
+ * System-specific initialization.
+ *
+ * This is called automatically if Cairo is built as a DLL, but must be
+ * explicitly invoked if Cairo is used as a statically linked library.
+ *
+ * Since: 1.4
+ **/
+
+cairo_public void
+cairo_os2_init (void)
+{
+    unsigned short usCW;
+
+    cairo_os2_init_count++;
+    if (cairo_os2_init_count > 1)
+        return;
+
+    /* Workaround a bug in some OS/2 PM API calls that
+     * modify the FPU Control Word but fail to restore it.
+     */
+    usCW = _control87 (0, 0);
+    usCW = usCW | EM_INVALID | 0x80;
+    _control87 (usCW, MCW_EM | 0x80);
+
+#if CAIRO_HAS_FC_FONT
+    FcInit ();
+#endif
+
+    CAIRO_MUTEX_INITIALIZE ();
+}
+
+
+/**
+ * cairo_os2_init:
+ * System-specific finalization.
+ *
+ * This is called automatically if Cairo is built as a DLL, but must be
+ * explicitly invoked if Cairo is used as a statically linked library.
+ *
+ * Since: 1.4
+ **/
+
+cairo_public void
+cairo_os2_fini (void)
+{
+    if (!cairo_os2_init_count)
+        return;
+    cairo_os2_init_count--;
+    if (cairo_os2_init_count)
+        return;
+
+#if CAIRO_HAS_FC_FONT
+#if HAVE_FCFINI
+    FcFini ();
+#endif
+#endif
+
+    CAIRO_MUTEX_FINALIZE ();
+
+    cairo_debug_reset_static_data ();
+}
+
+#endif /* __OS2__ */
 
