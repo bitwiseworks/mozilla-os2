@@ -363,6 +363,7 @@ void InitDIVEStatus()
   if (xr) {
     xr->GetInSafeMode(&disable);
     if (disable) {
+      printf("DIVE is disabled - in safe-mode\n");
       return;
     }
   }
@@ -378,6 +379,12 @@ void InitDIVEStatus()
       sDiveHidePtr = FALSE;
     }
 
+    if (!sUseDive)
+      printf("DIVE is disabled - MOZ_ACCELERATED=%s\n", env);
+    else
+      printf("DIVE forced on by MOZ_ACCELERATED=%s - pointer will%s be hidden\n",
+             env, (sDiveHidePtr ? "" : " not"));
+
     return;
   }
 
@@ -389,7 +396,10 @@ void InitDIVEStatus()
     if (PrfQueryProfileString(HINI_USERPROFILE, "PANORAMA", "VBEShadowBuffer",
                               0, str, sizeof(str)) && !strcmp(str, "0")) {
       sUseDive = TRUE;
+      printf("Video driver is Panorama - shadow-buffer is disabled\n");
     }
+    else
+      printf("DIVE is disabled - Panorama's shadow-buffer is enabled\n");
 
     return;
   }
@@ -399,6 +409,7 @@ void InitDIVEStatus()
   // If the driver isn't SNAP, use DIVE but hide the pointer
   // when writing to the framebuffer.
   if (DosQueryModuleHandle("SDDGREXT", &hmod)) {
+    printf("Video driver is neither SNAP nor Panorama - mouse ptr will be hidden\n");
     return;
   }
 
@@ -411,12 +422,16 @@ void InitDIVEStatus()
 
   // First, do a sanity check to ensure vman.dll is loaded.  The hmod returned
   // isn't usable, so reload it, then get the address of VMIENTRY().
-  if (DosQueryModuleHandle("VMAN", &hmod) ||
-      DosLoadModule(buffer, sizeof(buffer), "VMAN", &hmod)) {
-    return;
+  ULONG rc = DosQueryModuleHandle("VMAN", &hmod);
+  if (!rc)
+    rc = DosLoadModule(buffer, sizeof(buffer), "VMAN", &hmod);
+  if (!rc) {
+    rc = DosQueryProcAddr(hmod, 1, 0, (PFN*)&pEntry);
+    if (rc)
+      DosFreeModule(hmod);
   }
-  if (DosQueryProcAddr(hmod, 1, 0, (PFN*)&pEntry)) {
-    DosFreeModule(hmod);
+  if (rc) {
+    printf("Video driver is SNAP, unable to test VMAN - mouse ptr will be hidden\n");
     return;
   }
 
@@ -444,17 +459,22 @@ void InitDIVEStatus()
   WinShowPointer(HWND_DESKTOP, FALSE);
 
   // Set the dummy pointer.
-  ULONG rc = pEntry(0, VMI_CMD_SETPTR, &hwi, &hwo);
+  rc = pEntry(0, VMI_CMD_SETPTR, &hwi, &hwo);
 
   // Restore the original pointer, show it, then unload vman.dll.
   WinSetPointer(HWND_DESKTOP, hptr);
   WinShowPointer(HWND_DESKTOP, TRUE);
   DosFreeModule(hmod);
 
+  printf("VMI_CMD_SETPTR - rc= %lx  ulStatus= %lx\n", rc, hwo.ulStatus);
+
   // If the setptr call succeeded & SNAP didn't set the sw pointer flag,
   // then we can skip hiding the pointer when writing to the framebuffer.
   if (!rc && !(hwo.ulStatus & POINTER_SOFTWARE))
     sDiveHidePtr = FALSE;
+
+  printf("Video driver is SNAP - mouse ptr will%s be hidden\n",
+         (sDiveHidePtr ? "" : " not"));
 }
 
 //-----------------------------------------------------------------------------
@@ -467,6 +487,7 @@ void SetDIVEStatus()
   if (!sUseDive) {
     if (sDiveEnabled) {
       gfxOS2Surface::EnableDIVE(false, false);
+      printf("DIVE was enabled but shouldn't have been - disabling it now\n");
     }
     return;
   }
@@ -496,7 +517,10 @@ void SetDIVEStatus()
   sUseDive = gfxOS2Surface::EnableDIVE(true, sDiveHidePtr);
   if (sUseDive) {
     sDiveEnabled = true;
+    printf("Changing DIVE from enabled to disabled - 'layers.acceleration.disabled' is TRUE\n");
   }
+  else
+    printf("Unable to enable DIVE - it will not be used for this session\n");
 }
 
 //-----------------------------------------------------------------------------

@@ -735,10 +735,20 @@ cairo_os2_surface_enable_dive (cairo_bool_t enable,
 #ifdef OS2_DYNAMIC_DIVE
     if (!dive_loaded) {
         dive_loaded = TRUE;
-        if (!_cairo_os2_surface_load_dive ())
+        if (!_cairo_os2_surface_load_dive ()) {
+            printf ("_init_dive:  _load_dive() failed\n");
             return FALSE;
+        }
+        printf ("_init_dive:  _load_dive() succeeded\n");
     }
 #endif
+
+    /* This is for testing 24bpp GPI mode. */
+    if (getenv("MOZ_USE24BPP")) {
+        display_use24bpp = TRUE;
+        printf ("_init_dive:  forcing 24-bit GPI mode\n");
+        return FALSE;
+    }
 
     memset (&dive_caps, 0, sizeof(dive_caps));
     memset (dive_fmts, 0, sizeof(dive_fmts));
@@ -748,8 +758,10 @@ cairo_os2_surface_enable_dive (cairo_bool_t enable,
 
     /* Get the driver's DIVE capabilities. */
     rc = DiveQueryCaps (&dive_caps, DIVE_BUFFER_SCREEN);
-    if (rc)
+    if (rc) {
+        printf ("_init_dive:  DiveQueryCaps - rc= %x\n", rc);
         return FALSE;
+    }
 
     /* Only 32-bit (BGR4) and 24-bit (BGR3) color modes
      * are supported.  If the mode is anything else, exit.
@@ -759,8 +771,10 @@ cairo_os2_surface_enable_dive (cairo_bool_t enable,
     if (dive_caps.fccColorEncoding != FOURCC_BGR4) {
         if (dive_caps.fccColorEncoding == FOURCC_BGR3)
             display_use24bpp = TRUE;
-        else
+        else {
+            printf ("_init_dive:  incompatible screen format - %s\n", msg);
             return FALSE;
+        }
     }
 
     dive_height = dive_caps.ulVerticalResolution;
@@ -768,8 +782,12 @@ cairo_os2_surface_enable_dive (cairo_bool_t enable,
 
     /* Open a DIVE instance and get the address of the frame buffer. */
     rc = DiveOpen(&dive_handle, FALSE, (void*)&dive_scrnbuf);
-    if (rc)
+    if (rc) {
+        printf ("_init_dive:  DiveOpen - rc= %x\n", rc);
         return FALSE;
+    }
+    printf ("_init_dive:  hDive= %lx  scrn= %p  format= %s\n",
+            dive_handle, (void*)dive_scrnbuf, msg);
 
     /* Success. */
     dive_hideptr = hide_pointer;
@@ -1231,6 +1249,7 @@ _cairo_os2_surface_paint_32bpp (cairo_os2_surface_t *surface,
         /* paint */
         if (GpiDrawBits (hps, surface->data, &bmi,
                          4, aPtl, ROP_SRCCOPY, BBO_IGNORE) != GPI_OK) {
+            printf ("%p  GpiDrawBits for 32bpp\n", (void*)surface);
             status = _cairo_error (CAIRO_STATUS_WRITE_ERROR);
             break;
         }
@@ -1348,6 +1367,7 @@ _cairo_os2_surface_paint_24bpp (cairo_os2_surface_t *surface,
             pchBuffer = _cairo_os2_surface_alloc (bufSize);
             if (!pchBuffer) {
                 status = _cairo_error (CAIRO_STATUS_NO_MEMORY);
+                printf ("%p  _cairo_os2_surface_alloc for 24bpp\n", (void*)surface);
                 break;
             }
         }
@@ -1374,6 +1394,7 @@ _cairo_os2_surface_paint_24bpp (cairo_os2_surface_t *surface,
         /* paint */
         if (GpiDrawBits (hps, pchBuffer, &bmi,
                          4, aPtl, ROP_SRCCOPY, BBO_IGNORE) != GPI_OK) {
+            printf ("%p  GpiDrawBits for 24bpp\n", (void*)surface);
             status = _cairo_error (CAIRO_STATUS_WRITE_ERROR);
             break;
         }
@@ -1429,13 +1450,15 @@ _cairo_os2_surface_paint_dive (cairo_os2_surface_t *surface,
 
     /* Get the visible region for this window;  if not visible, exit. */
     rgnVisible = GpiCreateRegion (hps, 0, 0);
-    if (!rgnVisible)
+    if (!rgnVisible) {
+        printf ("%p  GpiCreateRegion for visible\n", (void*)surface);
         goto done;
-
+    }
     rc = WinQueryVisibleRegion (surface->hwnd, rgnVisible);
-    if (rc == RGN_ERROR)
+    if (rc == RGN_ERROR) {
+        printf ("%p  WinQueryVisibleRegion\n", (void*)surface);
         goto done;
-
+    }
     if (rc == RGN_NULL) {
         status = CAIRO_STATUS_SUCCESS;
         goto done;
@@ -1445,13 +1468,15 @@ _cairo_os2_surface_paint_dive (cairo_os2_surface_t *surface,
      * visible region to produce the series of rects that will be painted.
      */
     rgnPaint = GpiCreateRegion (hps, count, rect);
-    if (!rgnPaint)
+    if (!rgnPaint) {
+        printf ("%p  GpiCreateRegion for paint\n", (void*)surface);
         goto done;
-
+    }
     rc = GpiCombineRegion (hps, rgnVisible, rgnPaint, rgnVisible, CRGN_AND);
-    if (rc == RGN_ERROR)
+    if (rc == RGN_ERROR) {
+        printf ("%p  GpiCombineRegion\n", (void*)surface);
         goto done;
-
+    }
     if (rc == RGN_NULL) {
         status = CAIRO_STATUS_SUCCESS;
         goto done;
@@ -1465,17 +1490,21 @@ _cairo_os2_surface_paint_dive (cairo_os2_surface_t *surface,
     rgnrect.crcReturned = 0;
     rgnrect.ulDirection = RECTDIR_LFRT_TOPBOT;
 
-    if (!GpiQueryRegionRects (hps, rgnVisible, 0, &rgnrect, 0))
+    if (!GpiQueryRegionRects (hps, rgnVisible, 0, &rgnrect, 0)) {
+        printf ("%p  GpiQueryRegionRects for cnt\n", (void*)surface);
         goto done;
-
+    }
     rectPaint = (RECTL*)malloc (rgnrect.crcReturned * sizeof(RECTL));
-    if (!rectPaint)
+    if (!rectPaint) {
+        printf ("%p  malloc for rectPaint\n", (void*)surface);
         goto done;
-
+    }
     rgnrect.crc = rgnrect.crcReturned;
     rgnrect.crcReturned = 0;
-    if (!GpiQueryRegionRects (hps, rgnVisible, 0, &rgnrect, rectPaint))
+    if (!GpiQueryRegionRects (hps, rgnVisible, 0, &rgnrect, rectPaint)) {
+        printf ("%p  GpiQueryRegionRects for rectPaint\n", (void*)surface);
         goto done;
+    }
 
     /* Get the window's position in screen coordinates. */
     WinQueryWindowRect (surface->hwnd, &rectWnd);
@@ -1488,6 +1517,8 @@ _cairo_os2_surface_paint_dive (cairo_os2_surface_t *surface,
     /* Get access to the frame buffer */
     rc = DiveAcquireFrameBuffer (dive_handle, &rectWnd);
     if (rc) {
+        printf("%p  DiveAcquireFrameBuffer - rc= %x\n",
+               (void*)surface, rc);
         _cairo_os2_surface_dive_error ();
         goto done;
     }
@@ -1549,6 +1580,8 @@ _cairo_os2_surface_paint_dive (cairo_os2_surface_t *surface,
     /* Release the frame buffer */
     rc = DiveDeacquireFrameBuffer (dive_handle);
     if (rc) {
+        printf("%p  DiveDeacquireFrameBuffer - rc= %x\n",
+               (void*)surface, rc);
         _cairo_os2_surface_dive_error ();
         goto done;
     }
