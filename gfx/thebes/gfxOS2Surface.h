@@ -6,43 +6,58 @@
 #ifndef GFX_OS2_SURFACE_H
 #define GFX_OS2_SURFACE_H
 
-#include "gfxASurface.h"
-
-#define INCL_GPIBITMAPS
+#define INCL_WIN
 #include <os2.h>
-#include <cairo-os2.h>
+#include "gfxASurface.h"
 
 class THEBES_API gfxOS2Surface : public gfxASurface {
 
 public:
-    // constructor used to create a memory surface of given size
+    // constructor for an os2Image surface -
+    // the surface is only used by Cairo and not by PM
     gfxOS2Surface(const gfxIntSize& aSize,
-                  gfxASurface::gfxImageFormat aImageFormat);
-    // constructor for surface connected to an onscreen window
+                  gfxASurface::gfxImageFormat aFormat);
+
+    // constructor for an os2Window surface
     gfxOS2Surface(HWND aWnd);
-    // constructor for surface connected to a printing device context
+
+    // constructor for an os2Print surface
     gfxOS2Surface(HDC aDC, const gfxIntSize& aSize);
+
+    // constructor for an as-yet-unwrapped os2Image surface
+    gfxOS2Surface(cairo_surface_t *csurf);
+
     virtual ~gfxOS2Surface();
 
-    // Special functions that only make sense for the OS/2 port of cairo:
-
-    // Update the cairo surface.
-    // While gfxOS2Surface keeps track of the presentation handle itself,
-    // use the one from WinBeginPaint() here.
-    void Refresh(RECTL *aRect, HPS aPS);
-
-    // Reset the cairo surface to the given size.
-    int Resize(const gfxIntSize& aSize);
-
-    HPS GetPS();
     virtual const gfxIntSize GetSize() const { return mSize; }
 
+    // invoked on os2Window surfaces to update the screen -
+    // it uses the HPS provided by WinBeginPaint()
+    void Refresh(RECTL *aRect, int aCount, HPS aPS);
+
+    // invoked on os2Window surfaces to adjust the cairo_os2_surface's
+    // size when the window's size changes
+    int Resize(const gfxIntSize& aSize);
+
+    // invoked on os2Print surfaces to get the associated PS
+    HPS GetPS();
+
+    // enable/disable DIVE (direct access to the video framebuffer)
+    static bool EnableDIVE(bool aEnable, bool aHidePointer);
+
 private:
-    HWND mWnd; // non-null if created through the HWND constructor
-    HDC mDC; // memory device context
-    HPS mPS; // presentation space connected to window or memory device
-    HBITMAP mBitmap; // bitmap for initialization of memory surface
-    gfxIntSize mSize; // current size of the surface
+    typedef enum {
+        os2Null     = 0,
+        os2Image    = 1,
+        os2Window   = 2,
+        os2Print    = 3
+    } os2SurfaceType;
+
+    HWND           mWnd;      // window associated with the surface
+    HDC            mDC;       // device context
+    HPS            mPS;       // presentation space associated with HDC
+    gfxIntSize     mSize;     // current size of the surface
+    os2SurfaceType mSurfType; // type of surface
 };
 
 #endif /* GFX_OS2_SURFACE_H */

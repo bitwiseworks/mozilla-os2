@@ -39,10 +39,12 @@
 #include "nsHashKeys.h"
 #include "nsIRollupListener.h"
 #include "nsIScreenManager.h"
+#include "nsIXULRuntime.h"
 #include "nsOS2Uni.h"
 #include "nsTHashtable.h"
 #include "nsGkAtoms.h"
 #include "wdgtos2rc.h"
+#include <ddi.h>
 #include "nsIDOMWheelEvent.h"
 #include "mozilla/Preferences.h"
 #include <os2im.h>
@@ -132,6 +134,11 @@ using namespace mozilla::widget;
 // name of the window class used to clip plugins
 #define kClipWndClass   "nsClipWnd"
 
+// from gradd.h (slightly modified) - used by InitDIVEStatus()
+#define VMI_CMD_SETPTR      11
+typedef ULONG (_System FNVMIENTRY)(ULONG, ULONG, PVOID, PVOID);
+typedef FNVMIENTRY* PFNVMIENTRY;
+
 //-----------------------------------------------------------------------------
 // Debug
 
@@ -163,9 +170,15 @@ static POINTS       sLastButton1Down = {0,0};
 // set when any nsWindow is being dragged over
 static uint32_t     sDragStatus = 0;
 
+// DIVE status - can it be used & is it enabled
+static bool       sUseDive = false;
+static bool       sDiveEnabled = false;
+static bool       sDiveHidePtr = true;
+
 #ifdef DEBUG_FOCUS
   int currentWindowIdentifier = 0;
 #endif
+
 // IME stuffs
 static HMODULE sIm32Mod = NULLHANDLE;
 static APIRET (APIENTRY *spfnImGetInstance)(HWND, PHIMI);
@@ -177,6 +190,8 @@ static APIRET (APIENTRY *spfnImRequestIME)(HIMI, ULONG, ULONG, ULONG);
 
 //-----------------------------------------------------------------------------
 static uint32_t     WMChar2KeyCode(MPARAM mp1, MPARAM mp2);
+static void         InitDIVEStatus();
+static void         SetDIVEStatus();
 
 //=============================================================================
 //  nsWindow Create / Destroy
@@ -200,9 +215,13 @@ nsWindow::nsWindow() : nsBaseWidget()
   mCssCursorHPtr      = 0;
   mThebesSurface      = 0;
   mIsComposing        = false;
+
   if (!gOS2Flags) {
     InitGlobals();
   }
+
+  // Update DIVE status each time a widget is created.
+  SetDIVEStatus();
 }
 
 //-----------------------------------------------------------------------------
@@ -245,6 +264,9 @@ nsWindow::~nsWindow()
     delete mFrame;
     mFrame = 0;
   }
+
+  // Update DIVE status each time a widget is destroyed.
+  SetDIVEStatus();
 }
 
 //-----------------------------------------------------------------------------
@@ -325,7 +347,158 @@ void InitIME()
       sIm32Mod = NULLHANDLE;
     }
   }
+
+  InitDIVEStatus();
 }
+
+//-----------------------------------------------------------------------------
+// Determine whether to use DIVE
+
+static
+void InitDIVEStatus()
+{
+  // Don't use DIVE if we're in safe-mode.
+  bool disable = false;
+  nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
+  if (xr) {
+    xr->GetInSafeMode(&disable);
+    if (disable) {
+      return;
+    }
+  }
+
+  // If MOZ_ACCELERATED is set to any value except '1' or '2', force DIVE off.
+  const char *env = getenv("MOZ_ACCELERATED");
+  if (env) {
+    if (*env == '1') {
+      sUseDive = TRUE;
+    }
+    else if (*env == '2') {
+      sUseDive = TRUE;
+      sDiveHidePtr = FALSE;
+    }
+
+    return;
+  }
+
+  // Don't use DIVE if the Panorama video driver is in use
+  // unless its shadow buffer is turned off.
+  HMODULE hmod;
+  if (!DosQueryModuleHandle("PANOGREX", &hmod)) {
+    char      str[8];
+    if (PrfQueryProfileString(HINI_USERPROFILE, "PANORAMA", "VBEShadowBuffer",
+                              0, str, sizeof(str)) && !strcmp(str, "0")) {
+      sUseDive = TRUE;
+    }
+
+    return;
+  }
+
+  sUseDive = TRUE;
+
+  // If the driver isn't SNAP, use DIVE but hide the pointer
+  // when writing to the framebuffer.
+  if (DosQueryModuleHandle("SDDGREXT", &hmod)) {
+    return;
+  }
+
+  // SNAP usually - but not always - uses a hardware mouse pointer that doesn't
+  // have to be hidden when writing to the framebuffer.  Find out by setting a
+  // dummy mouse pointer & see if returns the POINTER_SOFTWARE flag.
+
+  PFNVMIENTRY pEntry;
+  BYTE        buffer[16];
+
+  // First, do a sanity check to ensure vman.dll is loaded.  The hmod returned
+  // isn't usable, so reload it, then get the address of VMIENTRY().
+  if (DosQueryModuleHandle("VMAN", &hmod) ||
+      DosLoadModule(buffer, sizeof(buffer), "VMAN", &hmod)) {
+    return;
+  }
+  if (DosQueryProcAddr(hmod, 1, 0, (PFN*)&pEntry)) {
+    DosFreeModule(hmod);
+    return;
+  }
+
+  memset(buffer, 0, sizeof(buffer));
+
+  // Describe a very small pointer (4x4)
+  HWSETPTRIN  hwi;
+  hwi.ulLength = sizeof(hwi);
+  hwi.pbANDMask = &buffer[0];
+  hwi.pbXORMask = &buffer[sizeof(buffer)/2];
+  hwi.pbBits = 0;
+  hwi.ulBpp = 1;
+  hwi.ulWidth = 4;
+  hwi.ulHeight = 4;
+  hwi.ptlHotspot.x = 0;
+  hwi.ptlHotspot.y = 0;
+
+  // The result will be returned here.
+  HWSETPTROUT hwo;
+  hwo.ulLength = sizeof(hwo);
+  hwo.ulStatus = 0;
+
+  // Get the current pointer, then hide it for cosmetic reasons.
+  HPOINTER  hptr = WinQueryPointer(HWND_DESKTOP);
+  WinShowPointer(HWND_DESKTOP, FALSE);
+
+  // Set the dummy pointer.
+  ULONG rc = pEntry(0, VMI_CMD_SETPTR, &hwi, &hwo);
+
+  // Restore the original pointer, show it, then unload vman.dll.
+  WinSetPointer(HWND_DESKTOP, hptr);
+  WinShowPointer(HWND_DESKTOP, TRUE);
+  DosFreeModule(hmod);
+
+  // If the setptr call succeeded & SNAP didn't set the sw pointer flag,
+  // then we can skip hiding the pointer when writing to the framebuffer.
+  if (!rc && !(hwo.ulStatus & POINTER_SOFTWARE))
+    sDiveHidePtr = FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// Determine whether to enable DIVE
+
+static
+void SetDIVEStatus()
+{
+  // If DIVE shouldn't be enabled, disable it if needed then exit.
+  if (!sUseDive) {
+    if (sDiveEnabled) {
+      gfxOS2Surface::EnableDIVE(false, false);
+    }
+    return;
+  }
+
+  // See if the user has set the pref to disable acceleration.
+  bool disable = false;
+  nsCOMPtr<nsIPrefBranch2> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
+  if (prefs) {
+    prefs->GetBoolPref("layers.acceleration.disabled", &disable);
+  }
+
+  // If the current state doesn't match the disable flag, we're OK.
+  if (sDiveEnabled != disable) {
+    return;
+  }
+
+  // The current state is enabled but the flag is set to disable.
+  if (disable) {
+    gfxOS2Surface::EnableDIVE(false, false);
+    sDiveEnabled = false;
+    return;
+  }
+
+  // The current state is disabled but DIVE should be enabled.  If this
+  // fails (e.g. because we're in an 8- or 16-bit color mode), permanently
+  // disable DIVE.
+  sUseDive = gfxOS2Surface::EnableDIVE(true, sDiveHidePtr);
+  if (sUseDive) {
+    sDiveEnabled = true;
+  }
+}
+
 //-----------------------------------------------------------------------------
 // Release Module-level variables.
 
@@ -1977,7 +2150,7 @@ bool nsWindow::OnPaint()
 {
   HPS    hPS;
   HPS    hpsDrag;
-  HRGN   hrgn;
+  HRGN   hrgn = 0;
   nsEventStatus eventStatus = nsEventStatus_eIgnore;
 
 #ifdef DEBUG_PAINT
@@ -2030,7 +2203,7 @@ do {
   // Even if there is no callback to update the content (unlikely)
   // we still want to update the screen with whatever's available.
   if (!mEventCallback) {
-    mThebesSurface->Refresh(&rcl, hPS);
+    mThebesSurface->Refresh(&rcl, 1, hPS);
     break;
   }
 
@@ -2039,39 +2212,48 @@ do {
   InitEvent(event);
   nsRefPtr<gfxContext> thebesContext = new gfxContext(mThebesSurface);
 
-  // Intersect the update region with the paint rectangle to clip areas
-  // that aren't visible (e.g. offscreen or covered by another window).
-  HRGN hrgnPaint;
-  hrgnPaint = GpiCreateRegion(hPS, 1, &rcl);
-  if (hrgnPaint) {
-    GpiCombineRegion(hPS, hrgn, hrgn, hrgnPaint, CRGN_AND);
-    GpiDestroyRegion(hPS, hrgnPaint);
-  }
+  // Decide whether to display the entire update rectangle or
+  // just the individual rects that comprise the update region.
+  // Display the entire area if any of these are true:
+  // - the region has a single rect (the most common situation);
+  // - the region has more than 10 rects (very uncommon);
+  // - the region rects cover 80% or more of the update rect (common).
 
-  // See how many rects comprise the update region.  If there are 8
-  // or fewer, update them individually.  If there are more or the call
-  // failed, update the bounding rectangle returned by WinBeginPaint().
-  #define MAX_CLIPRECTS 8
-  RGNRECT rgnrect = { 1, MAX_CLIPRECTS, 0, RECTDIR_LFRT_TOPBOT };
-  RECTL   arect[MAX_CLIPRECTS];
-  RECTL*  pr = arect;
+  #define MAX_CLIPRECTS 10
+  bool    useRegion = false;
+  uint32  ndx;
+  RECTL*    pr;
+  RECTL     arect[MAX_CLIPRECTS];
+  RGNRECT   rgnrect = { 1, 1024, 0, RECTDIR_LFRT_TOPBOT };
 
-  if (!GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, 0) ||
-      rgnrect.crcReturned > MAX_CLIPRECTS) {
-    rgnrect.crcReturned = 1;
-    arect[0] = rcl;
-  } else {
+  if (GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, 0) &&
+      rgnrect.crcReturned > 1 && rgnrect.crcReturned <= MAX_CLIPRECTS) {
+    rgnrect.crc = MAX_CLIPRECTS;
     GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, arect);
+
+    useRegion = true;
+    int32  rgnArea = 0;
+    int32  rclArea = (rcl.xRight - rcl.xLeft) * (rcl.yTop - rcl.yBottom) * 4 / 5;
+    for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
+      rgnArea += (pr->xRight - pr->xLeft) * (pr->yTop - pr->yBottom);
+      if (rgnArea >= rclArea) {
+        useRegion = false;
+        break;
+      }
+    }
   }
 
-  // Create clipping regions for the event & the Thebes context.
+  if (!useRegion) {
+    arect[0] = rcl;
+    rgnrect.crcReturned = 1;
+  }
+
+  // Establish a clipping region for the event and for Thebes.
   thebesContext->NewPath();
-  for (uint32_t i = 0; i < rgnrect.crcReturned; i++, pr++) {
+  for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
     event.region.Or(event.region, 
-                    nsIntRect(pr->xLeft,
-                              mBounds.height - pr->yTop,
-                              pr->xRight - pr->xLeft,
-                              pr->yTop - pr->yBottom));
+                    nsIntRect(pr->xLeft, mBounds.height - pr->yTop,
+                              pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
 
     thebesContext->Rectangle(gfxRect(pr->xLeft,
                                      mBounds.height - pr->yTop,
@@ -2093,14 +2275,8 @@ do {
     break;
   }
 
-  // Paint the surface, then use Refresh() to blit each rect to the screen.
-  thebesContext->PopGroupToSource();
-  thebesContext->SetOperator(gfxContext::OPERATOR_SOURCE);
-  thebesContext->Paint();
-  pr = arect;
-  for (uint32_t i = 0; i < rgnrect.crcReturned; i++, pr++) {
-    mThebesSurface->Refresh(pr, hPS);
-  }
+  // Have Thebes display the rectangle(s).
+  mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
 
 } while (0);
 
@@ -3273,4 +3449,3 @@ bool nsWindow::DispatchScrollEvent(ULONG msg, MPARAM mp1, MPARAM mp2)
 }
 
 //=============================================================================
-

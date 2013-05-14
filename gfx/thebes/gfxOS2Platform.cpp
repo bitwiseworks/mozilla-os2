@@ -3,11 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <os2.h>
+
 #include "gfxOS2Platform.h"
 #include "gfxOS2Surface.h"
 #include "gfxImageSurface.h"
 #include "gfxOS2Fonts.h"
 #include "nsTArray.h"
+#include "nsServiceManagerUtils.h"
 
 #include "gfxFontconfigUtils.h"
 //#include <fontconfig/fontconfig.h>
@@ -19,15 +22,8 @@ gfxFontconfigUtils *gfxOS2Platform::sFontconfigUtils = nullptr;
 
 gfxOS2Platform::gfxOS2Platform()
 {
-#ifdef DEBUG_thebes
-    printf("gfxOS2Platform::gfxOS2Platform()\n");
-#endif
-    // this seems to be reasonably early in the process and only once,
-    // so it's a good place to initialize OS/2 cairo stuff
     cairo_os2_init();
-#ifdef DEBUG_thebes
-    printf("  cairo_os2_init() was called\n");
-#endif
+
     if (!sFontconfigUtils) {
         sFontconfigUtils = gfxFontconfigUtils::GetFontconfigUtils();
     }
@@ -35,43 +31,37 @@ gfxOS2Platform::gfxOS2Platform()
 
 gfxOS2Platform::~gfxOS2Platform()
 {
-#ifdef DEBUG_thebes
-    printf("gfxOS2Platform::~gfxOS2Platform()\n");
-#endif
     gfxFontconfigUtils::Shutdown();
     sFontconfigUtils = nullptr;
 
-    // clean up OS/2 cairo stuff
+    // Clean up cairo_os2 sruff.
+    cairo_os2_surface_enable_dive(false, false);
     cairo_os2_fini();
-#ifdef DEBUG_thebes
-    printf("  cairo_os2_fini() was called\n");
-#endif
 }
 
 already_AddRefed<gfxASurface>
 gfxOS2Platform::CreateOffscreenSurface(const gfxIntSize& aSize,
-                                       gfxASurface::gfxContentType contentType)
+                                       gfxASurface::gfxContentType acontentType)
 {
-#ifdef DEBUG_thebes_2
-    printf("gfxOS2Platform::CreateOffscreenSurface(%d/%d, %d)\n",
-           aSize.width, aSize.height, aImageFormat);
-#endif
-    gfxASurface *newSurface = nullptr;
+    gfxASurface::gfxImageFormat format =
+        gfxASurface::FormatFromContent(aContentType);
+    int stride =
+        cairo_format_stride_for_width(static_cast<cairo_format_t>(format),
+                                      aSize.width);
 
-    // we only ever seem to get aImageFormat=0 or ImageFormatARGB32 but
-    // I don't really know if we need to differ between ARGB32 and RGB24 here
-    if (contentType == gfxASurface::CONTENT_COLOR_ALPHA ||
-        contentType == gfxASurface::CONTENT_COLOR)
-    {
-        newSurface = new gfxOS2Surface(aSize, OptimalFormatForContent(contentType));
-    } else if (contentType == gfxASurface::CONTENT_ALPHA) {
-        newSurface = new gfxImageSurface(aSize, OptimalFormatForContent(contentType));
+    // To avoid memory fragmentation, return a standard image surface
+    // for small images (32x32x4 or 64x64x1).  Their bitmaps will be
+    // be allocated from libc's heap rather than system memory.
+
+    gfxASurface* surf;
+    if (stride * aSize.height <= 4096) {
+        surf = new gfxImageSurface(aSize, format);
     } else {
-        return nullptr;
+        surf = new gfxOS2Surface(aSize, format);
     }
 
-    NS_IF_ADDREF(newSurface);
-    return newSurface;
+    NS_IF_ADDREF(surf);
+    return surf;
 }
 
 nsresult

@@ -6,9 +6,6 @@
 #ifndef GFX_OS2_PLATFORM_H
 #define GFX_OS2_PLATFORM_H
 
-#define INCL_GPIBITMAPS
-#include <os2.h>
-
 #include "gfxPlatform.h"
 #include "gfxOS2Fonts.h"
 #include "gfxFontUtils.h"
