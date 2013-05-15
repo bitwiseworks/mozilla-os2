@@ -506,7 +506,8 @@ cairo_os2_surface_get_hps (cairo_os2_surface_t *surface,
     if (unlikely (!surface || !hps))
         return _cairo_error (CAIRO_STATUS_NULL_POINTER);
 
-    if (cairo_surface_get_type (&surface->base) != CAIRO_SURFACE_TYPE_OS2)
+    if (cairo_surface_get_type (&surface->base) != CAIRO_SURFACE_TYPE_OS2 &&
+        cairo_surface_get_type (&surface->base) != CAIRO_SURFACE_TYPE_OS2_PRINTING)
         return _cairo_error (CAIRO_STATUS_SURFACE_TYPE_MISMATCH);
 
     *hps = surface->hps;
@@ -537,7 +538,8 @@ cairo_os2_surface_set_hps (cairo_os2_surface_t *surface,
     if (unlikely (!surface))
         return _cairo_error (CAIRO_STATUS_NULL_POINTER);
 
-    if (cairo_surface_get_type (&surface->base) != CAIRO_SURFACE_TYPE_OS2)
+    if (cairo_surface_get_type (&surface->base) != CAIRO_SURFACE_TYPE_OS2 &&
+        cairo_surface_get_type (&surface->base) != CAIRO_SURFACE_TYPE_OS2_PRINTING)
         return _cairo_error (CAIRO_STATUS_SURFACE_TYPE_MISMATCH);
 
     surface->hps = hps;

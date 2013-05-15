@@ -2,7 +2,7 @@
 /* cairo - a vector graphics library with display and print output
  *
  * Copyright (c) 2005-2006 netlabs.org
- * Copyright (c) 2010 Rich Walsh
+ * Copyright (c) 2010-2011 Rich Walsh
  *
  * This library is free software; you can redistribute it and/or
  * modify it either under the terms of the GNU Lesser General Public
@@ -41,6 +41,7 @@
 #define CAIRO_OS2_PRIVATE_H
 
 #include "cairoint.h"
+#include "cairo-surface-clipper-private.h"
 
 /**
  * Unpublished API:
@@ -85,7 +86,8 @@ typedef ULONG (APIENTRY *DiveDeacquire_t)(ULONG);
 
 typedef enum _cairo_os2_subtype {
     CAIRO_OS2_SUBTYPE_NULL = 0,
-    CAIRO_OS2_SUBTYPE_IMAGE
+    CAIRO_OS2_SUBTYPE_IMAGE,
+    CAIRO_OS2_SUBTYPE_PRINT
 } cairo_os2_subtype_t;
 
 /**
@@ -138,6 +140,15 @@ typedef struct _cairo_os2_surface {
     unsigned char          *data;
     cairo_surface_t        *image;
 
+    /* printing surface data */
+    cairo_bool_t            path_empty;
+    cairo_bool_t            has_ctm;
+    cairo_bool_t            has_gpi_ctm;
+    cairo_matrix_t          ctm;
+    cairo_matrix_t          gpi_ctm;
+    cairo_surface_clipper_t clipper;
+    cairo_paginated_mode_t  paginated_mode;
+    cairo_surface_t *       paginated_surf;
 } cairo_os2_surface_t;
 
 #endif /* CAIRO_OS2_PRIVATE_H */

@@ -106,6 +106,11 @@ cairo_public cairo_bool_t
 cairo_os2_surface_enable_dive (cairo_bool_t enable,
                                cairo_bool_t hide_pointer);
 
+cairo_surface_t *
+cairo_os2_printing_surface_create (HPS  hps,
+                                   int  width,
+                                   int  height);
+
 #else  /* CAIRO_HAS_OS2_SURFACE */
 # error Cairo was not compiled with support for the OS/2 backend
 #endif /* CAIRO_HAS_OS2_SURFACE */
