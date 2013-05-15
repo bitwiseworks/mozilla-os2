@@ -144,7 +144,12 @@ typedef struct PRIPv6Addr PRIPv6Addr;
 
 union PRNetAddr {
     struct {
+#if defined(XP_OS2) && !defined(TCPV40HDRS)
+        PRUint8 len;
+        PRUint8 family;
+#else
         PRUint16 family;                /* address family (0x00ff maskable) */
+#endif
 #ifdef XP_BEOS
         char data[10];                  /* Be has a smaller structure */
 #else
@@ -152,7 +157,12 @@ union PRNetAddr {
 #endif
     } raw;
     struct {
+#if defined(XP_OS2) && !defined(TCPV40HDRS)
+        PRUint8 len;
+        PRUint8 family;
+#else    
         PRUint16 family;                /* address family (AF_INET) */
+#endif
         PRUint16 port;                  /* port number */
         PRUint32 ip;                    /* The actual 32 bits of address */
 #ifdef XP_BEOS
@@ -162,7 +172,12 @@ union PRNetAddr {
 #endif
     } inet;
     struct {
+#if defined(XP_OS2) && !defined(TCPV40HDRS)
+        PRUint8 len;
+        PRUint8 family;
+#else
         PRUint16 family;                /* address family (AF_INET6) */
+#endif
         PRUint16 port;                  /* port number */
         PRUint32 flowinfo;              /* routing information */
         PRIPv6Addr ip;                  /* the actual 128 bits of address */
@@ -170,7 +185,12 @@ union PRNetAddr {
     } ipv6;
 #if defined(XP_UNIX) || defined(XP_OS2)
     struct {                            /* Unix domain socket address */
+#if defined(XP_OS2) && !defined(TCPV40HDRS)
+        PRUint8 len;
+        PRUint8 family;
+#else
         PRUint16 family;                /* address family (AF_UNIX) */
+#endif
 #ifdef XP_OS2
         char path[108];                 /* null-terminated pathname */
                                         /* bind fails if size is not 108. */
