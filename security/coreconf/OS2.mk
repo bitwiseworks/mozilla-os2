@@ -32,8 +32,6 @@ FILTER			= emxexp -o
 # GCC for OS/2 currently predefines these, but we don't want them
 DEFINES 		+= -Uunix -U__unix -U__unix__
 
-DEFINES			+= -DTCPV40HDRS
-
 ifeq ($(MOZ_OS2_HIGH_MEMORY),1)
 HIGHMEM_LDFLAG          = -Zhigh-mem
 endif

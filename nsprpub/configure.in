@@ -2464,7 +2464,6 @@ tools are selected during the Xcode/Developer Tools installation.])
     AC_DEFINE(XP_OS2)
     AC_DEFINE(XP_PC)
     AC_DEFINE(BSD_SELECT)
-    AC_DEFINE(TCPV40HDRS)
     LIB_SUFFIX=lib
     DLL_SUFFIX=dll
     RC=rc.exe
