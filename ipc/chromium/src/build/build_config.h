@@ -23,6 +23,8 @@
 #define OS_OPENBSD 1
 #elif defined(_WIN32)
 #define OS_WIN 1
+#elif defined(__OS2__)
+#define OS_OS2 1
 #else
 #error Please add support for your platform in build/build_config.h
 #endif

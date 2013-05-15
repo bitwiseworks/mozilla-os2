@@ -102,7 +102,7 @@ bool IsWprintfFormatPortable(const wchar_t* format);
 
 #if defined(OS_WIN)
 #include "base/string_util_win.h"
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_OS2)
 #include "base/string_util_posix.h"
 #else
 #error Define string operations appropriately for your platform
