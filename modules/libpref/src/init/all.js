@@ -2893,6 +2893,10 @@ pref("ui.panel.default_level_parent", false);
 
 pref("mousewheel.system_scroll_override_on_root_content.enabled", false);
 
+// As OS/2 does not currently support Web Fonts we need this pref set to
+// False to stop crashes in the font matching code
+pref("gfx.downloadable_fonts.enabled", false);
+
 # OS2
 #endif
 
