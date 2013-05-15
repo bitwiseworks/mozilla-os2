@@ -1,0 +1,512 @@
+===============================================================================
+-- M o z i l l a   R e a d   M e ----------------------------------------------
+===============================================================================
+
+* This Read Me file contains information about installing and using
+  the OS/2 builds of Firefox, Seamonkey, and Thunderbird.
+
+* These applications are subject to the terms detailed in the license
+  agreement accompanying them.
+
+* Community support for the Mozilla applications is available through
+  the newsgroups 'mozilla.dev.ports.os2' or 'comp.os.os2.apps'.
+  Messages posted to other forums may not be seen by the developers.
+  For additional resources, see the "Links" section below.
+
+
+===============================================================================
+-- Contents -------------------------------------------------------------------
+===============================================================================
+
+*  Installation
+
+*  Compatibility Warning
+
+*  Starting the App
+
+*  OS/2 Add-ons
+
+*  Environment Variables
+
+*  Fonts
+
+*  Printing
+
+*  Video
+
+*  Troubleshooting
+
+*  Known Problems
+
+*  Links
+
+*  System Requirements
+
+
+===============================================================================
+-- Installation ---------------------------------------------------------------
+===============================================================================
+
+1. UNZIP the archive into any directory you wish.  This will create a
+      subdirectory with the same name as the program.  For example:
+         unzip firefox-5.0.en-US.os2.zip -d x:\mozilla.org
+      will install Firefox in x:\mozilla.org\firefox.
+
+   !! If you already have a directory with the same name from an older
+      installation, rename it first (e.g. 'firefox-old').  Do not let
+      the new version install on top of the old one.
+
+2. CHOOSE a directory where the Mozilla applications can store their
+      profile data, then add a line like this to config.sys:
+         SET MOZILLA_HOME=x:\mozilla.org
+      The first time you run any Mozilla app, it will create a 'mozilla'
+      subdirectory where your customized settings are saved.
+
+   !! Without "SET MOZILLA_HOME=", the 'mozilla' subdirectory will be
+      created in the same directory as the program itself.  This can
+      make it very hard to upgrade to new versions without deleting
+      your customized settings.
+
+3. INSTALL 'libc065.dll' into one of the directories on your "LIBPATH"
+      (e.g. 'x:\os2\dll').  You can download a zip from:
+         ftp://ftp.netlabs.org/pub/gcc/libc-0.6.5-csd5.zip
+
+4. Optional: Use mozinst to create icons on desktop.
+   http://hobbes.nmsu.edu/h-search.php?key=mozinst
+
+5. Optional: you may want to install some of the items listed in the
+      "OS/2 Add-ons" section below to improve the app's performance.
+
+
+===============================================================================
+-- Compatibility Warning ------------------------------------------------------
+===============================================================================
+
+After using Firefox v4.0, Seamonkey v2.1, or Thunderbird v3.4 (or any later
+version) your History and Cookies databases (places.sqlite & cookies.sqlite)
+will NOT be compatible with earlier versions (i.e. FF3.6, SM2.0, or TB3.1).
+A REXX script is available to restore compatibility.
+
+* To preserve compatibility BEFORE running the new version:
+  - download 'dbrestore.zip' from
+      ftp://ftp.netlabs.org/incoming/mozilla/dbrestore.zip
+    or
+      http://e-vertise.com/warpzilla/dbrestore.zip
+  - unzip it into your profile directory
+  - make backups of places.sqlite and cookies.sqlite
+
+* To restore compatibilty BEFORE running an earlier version:
+  - run the script from your profile directory.
+
+* To restore compatibilty AFTER running an earlier version
+  (i.e. you forgot to run the script before):
+  - look for 'places.sqlite.corrupt' and 'cookies.sqlite.corrupt' in your
+    profile directory,   If they appear to be the right size, remove the
+    '.corrupt' extension after deleting the newly-created versions.
+  - run the script
+  - if your history and cookies aren't restored, use your backup copies.
+
+
+===============================================================================
+-- Starting Firefox / Seamonkey / Thunderbird ---------------------------------
+===============================================================================
+
+If this is the only Mozilla application you use, then all you need is a
+simple program object.
+
+However, if you run two or more of these apps at the same time, you may
+encounter dll conflicts.  If you can open any one of these apps by itself,
+but can't open a second one while the first is still running, this is the
+likely cause.  An entry in popuplog.os2 reporting a 'SYS2070' error for
+the program that failed to start will confirm the problem.
+
+The solution for dll conflicts is "SET LIBPATHSTRICT=T".  There are several
+ways to set this:
+
+* modify your program object:
+    Path and file name: *
+    Parameters:         /c set LIBPATHSTRICT=T & seamonkey.exe "%*"
+    Working directory:  x:\mozilla.org\seamonkey
+
+* create a .cmd file:
+    x:
+    cd mozilla.org\thunderbird
+    SET LIBPATHSTRICT=T
+    start thunderbird
+
+* use Run! <http://hobbes.nmsu.edu/h-search.php?key=run!>:
+    Copy 'run!.exe' into the program's directory, then rename it as:
+      'firefox!L.exe', or 'seamonkey!L.exe', or 'thunderbird!L.exe'
+    Now, change your program object start it rather than the original exe.
+    (Use 'LK' instead of 'L' if you want the icon to show it's "in-use".)
+
+Note:  For best performance of most browser plugins, you may want
+       to omit LIBPATHSTRICT for your primary browser and only set
+       it for your other Mozilla apps.
+
+
+===============================================================================
+-- OS/2 Add-ons ---------------------------------------------------------------
+===============================================================================
+
+* Workplace Sans - TrueType Font
+    Mozilla no longer supports bitmap fonts like WarpSans, so its menus
+    and dialogs may not look very "OS/2-like'.  To fix this, you may want
+    to install Alex Taylor's 'Workplace Sans', a TrueType font inspired
+    by WarpSans.  The app will use it by default if it's available.
+    Many users prefer the bitmapped version as it looks cleaner at small
+    point sizes.
+       http://users.socis.ca/~ataylo00/creative/fonts/workplace/#wpsu
+
+* RWS - WPS Integration
+    With RWS, you can open downloads using their default WPS association
+    and have the app display the correct icon in file listings & dialogs.
+    For example, when you download a WPI file, the download dialog will
+    display WarpIn's icon, and offer to open it using WarpIn so you can
+    install it directly from the browser.
+        http://hobbes.nmsu.edu/h-search.php?key=rws08dll
+
+* Exceptq - Crash Reporting
+    If the app crashes, Exceptq will beep and then create an exception
+    report containing details of the crash.  You can send these reports
+    to the developers at <crash@e-vertise.com>.
+        http://hobbes.nmsu.edu/h-search.php?&key=exceptq
+
+* ConfigApps & Internet Application Integration - Set Default Browser
+    These two utilities make it easier to set your default browser,
+    email program, newsreader, etc.
+    - ConfigApps
+        http://hobbes.nmsu.edu//h-search.php?key=configapps
+    - Internet Application Integration
+        http://7cities.net/~mckinnis/os2/
+
+* Doodle ScreenSaver - Intelligent Timing for Internal Cleanups
+    When Doodle's Screen Saver (DSSaver) v1.8 or later is installed,
+    the app can determine how long the user has been inactive.  This
+    allows it to suspend reloads of "Live Bookmarks" and perform cleanup
+    operations during idle periods rather than while you're browsing.
+        ftp://ftp.netlabs.org/pub/dssaver/
+
+
+===============================================================================
+-- Environment Variables ------------------------------------------------------
+===============================================================================
+
+These can go in config.sys or the .cmd file you use to start the program.
+
+* MOZILLA_HOME=[path]  (recommended)
+    As noted above, this controls where the 'mozilla' subdirectory
+    containing your profile (personal settings and data) is located.
+    For example:  if you specify "SET MOZILLA_HOME=x:\mozilla.org",
+    then your profiles will be stored in 'x:\mozilla.org\mozilla'.
+
+* MOZ_PLUGIN_PATH=[path]
+    This lets you specify a global directory for plugins like Flash
+    and Acrobat Reader so that all Mozilla apps can access them.
+    For example:  "SET MOZ_PLUGIN_PATH=x:\mozilla.org\plugins"
+    Note that _you_ will have to create the 'plugins' subdirectory
+    and install your plugins into it.
+    Without this environment variable %MOZILLA_HOME%\Mozilla\Plugins
+    can be used.
+
+The following are intended to fix problems, not enhance performance.
+Very few users have any need for any of these:
+
+* NSPR_OS2_NO_HIRES_TIMER=1
+    This tells the app not to use OS/2's high resolution timer.  Don't
+    set this unless other applications using the high resolution timer
+    (e.g. multimedia apps) act strangely.
+
+* SET MOZ_ACCELERATED=0
+    Disable DIVE (accelerated video) support.  Try this if the app fails
+    to start or the display is corrupted.
+
+* MOZ_NO_REMOTE=1
+    This permits you to run multiple copies of the same app at the same
+    time (provided you have separate profiles for each copy).
+    Also works as a parameter, eg Firefox -no-remote
+
+* MOZ_NO_RWS=1
+    This disables the WPS-integration features provided by RWS.
+
+* SET NSPR_NO_EXCEPTQ=1
+    This disables Exceptq for the Mozilla apps without disabling it for
+    other programs that use it.
+
+
+===============================================================================
+-- Fonts ----------------------------------------------------------------------
+===============================================================================
+
+* Mozilla apps use an internal font engine that offers antialiasing
+  and the ability to search multiple fonts for the correct glyph.
+  However, it only supports TrueType & Type1 fonts.  OS/2 bitmap fonts
+  like WarpSans, System Proportional, etc, are NOT supported.  Users
+  are encouraged to install Alex Taylor's "Workplace Sans" TrueType
+  font to restore an "OS/2 look-and-feel" to menus and dialogs.
+  Note: Currently OS/2 versions do not support @font-face
+
+* The apps' built-in antialiasing can be controlled via two preference
+  settings.  Type "about:config" into the Address Bar, then press Enter
+  (for Thunderbird, use the 'Config Editor' on the 'Advanced' page of its
+  Options dialog).  If the following preferences aren't listed, you can
+  add them by right-clicking any item and selecting "New" from the menu.
+
+  - gfx.os2.font.antialiasing (Boolean)
+    This preference controls whether antialiasing is enabled; the default
+    value is "true".
+
+  - gfx.os2.font.hinting (Integer)
+    This controls the hinting level.  It can range from 0 (no hinting)
+    to 3 (full hinting);  the default value is 2.  Font hinting improves
+    the contrast of displayed text, but may produce poor results for
+    certain characters of some fonts, most notably the OS/2 version of
+    "Times New Roman".
+
+  Note:  you may need to restart the application to see your changes.
+
+* Fonts that contain special characters in their names (like Asian
+  Unicode font names) may not display correctly in the list of fonts
+  in the Options panel.
+
+
+===============================================================================
+-- Printing -------------------------------------------------------------------
+===============================================================================
+
+This version offers printing support using both native drivers and the
+app's built-in PDF and Postscript generators.
+
+* Native Driver Support
+    All native printer drivers should work and all features offered by
+    the driver should be supported.
+
+* Built-in PDF Support
+    PDF files can be created by selecting any printer, then checking
+    'Print to file',  When the file dialog appears, give the file's
+    name a ".pdf" extension.
+
+* Built-in Postscript Support
+    Mozilla's built-in Postscript support provides an alternative to
+    using the native PSCRIPT drivers.  If you use CUPS or plan to
+    direct Postscript output to file for further processing, you may
+    want to use this feature.  There are two ways to enable it.
+
+    = Always =
+    This method may produce better quality output than the native PS
+    driver if you use CUPS.  After performing the one-time setup below,
+    select a printer associated with a native PS driver, then press 'OK'.
+
+    Setup:
+    - enter "about:config" in the browser's address bar, press Enter
+      (for Thunderbird, use the 'Config Editor' in the Options dialog)
+    - look for the entry "print.os2.postscript.use_builtin"
+    - if it exists, doubleclick on it to change it to "true"
+    - if the entry doesn't exist, add it:
+      o  click MB2 on any item in the preferences listing
+      o  select 'New->Boolean' from the popup menu
+      o  enter "print.os2.postscript.use_builtin" (no quotes), press OK
+      o  select "true", press OK
+
+    = As Needed =
+    Use this method to create Postscript files for further processing
+    without having to add or change the "use_builtin" setting:
+    - select a non-Postscript printer (see below)
+    - check 'Print to file', then press 'OK'
+    - when the file dialog appears, give the filename a ".ps" extension
+
+    !! With either method, the native driver isn't used to create the
+       print job, so most of its optional settings (e.g. duplexing)
+       are ignored.  Only its Orientation (portrait/landscape) and
+       Resolution (dpi) settings are used.  For print-to-file usage,
+       choose a non-Postscript printer that has suitable DPI settings.
+       (e.g. the HP Laserjet 2100 driver offers 300, 600, & 1200 dpi).
+
+
+===============================================================================
+-- Video ----------------------------------------------------------------------
+===============================================================================
+
+Users of the SNAP and GenGradd video drivers running in full-color mode
+will automatically experience improved video performance thanks to the
+applications' use of DIVE.  Currently, the Panorama video driver is not
+supported if its "shadow buffer" option is enabled.
+
+* DIVE Support
+    DIVE lets an app bypass PM's graphics subsystem and write directly to
+    your video card's memory.  This improves display speed but can cause
+    problems on some systems.
+
+    Use any one of the following to disable DIVE:
+    - uncheck "Use hardware acceleration when available" on the Options
+      dialog's 'Advanced->General' tab.
+    - start the app in "safe mode" (use "/safe-mode" on the command line)
+    - add "SET MOZ_ACCELERATED=0" to config.sys.
+
+* Mouse Pointer Issues
+    If the mouse pointer disappears when starting the app, you can use
+    "SET MOZ_ACCELERATED=1" to override automatic detection of how your
+    video driver displays the pointer.  If it flickers when scrolling a
+    page, you may want to try "SET MOZ_ACCELERATED=2".
+
+
+===============================================================================
+-- Troubleshooting ------------------------------------------------------------
+===============================================================================
+
+The following may help resolve problems that were known at the time this
+ReadMe was written.  Additional community support is available through
+the newsgroups 'mozilla.dev.ports.os2' or 'comp.os.os2.apps'.  Messages
+posted to other forums may not be seen by the developers.
+
+* Program won't start
+    If other Mozilla apps are open, close them, then retry.  If it can
+    now start, see the "Starting Firefox/Seamonkey/Thunderbird" section.
+
+* Program crashes when the first window appears
+    If you see the outline of the window, then it crashes, see the
+    "Video" section for info on disabling DIVE.
+
+* Program crashes or hangs when downloading files, viewing file listings,
+    loading message attachments or dragging with the mouse.
+    Try adding "SET MOZ_NO_RWS=1" to the environment.
+
+* Program crashes randomly
+    Restart the app in "safe mode" (use "/safe-mode" on the command line).
+    If it appears to be stable in safe-mode, a plugin may be the cause.
+    Disable all plugins, then restart normally.  If it remains stable,
+    reenable one plugin at a time until the problem returns.
+
+* Program beeps several times then crashes
+    The beeps simply indicate that Exceptq is installed and is creating
+    a trap report to help identify the cause of the crash.  Since Exceptq
+    isn't activated until a crash occurs, it isn't the cause of the crash.
+
+* Continuous 100% CPU usage
+    If you use OS/2's "Comet Cursor" feature, try turning it off.
+    Try adding "SET NSPR_OS2_NO_HIRES_TIMER=1" to the environment.
+
+* User-interface (buttons, address bar, etc.) is missing or corrupted
+    Shutdown the program, then open the directory containing its profile.
+    Delete 'XUL.mfl' and the directory named 'startupCache, then restart.
+
+    Note:  To find your profile, select Help->Troubleshooting Information
+    from the main menu.  On the page that appears, find the line labelled
+    "Profile Directory" then press the button next to it.  After the folder
+    opens, be sure to close the app before changing or deleting anything.
+
+* Other problems
+    First, try the solution for "User-interface is missing or corrupted"
+    above.  If that doesn't work, try creating a new profile.  The easiest
+    way is change the path in your "MOZILLA_HOME" environment variable when
+    the app isn't running, then restart it.  If this fixes the problem, try
+    copying files from your original profile to the new one until the issue
+    reappears.  The first file to try is "prefs.js".
+
+    If you can identify which file is the cause, restore your original
+    "MOZILLA_HOME" path.  Rename the problem file so Mozilla can't find
+    it, then restart the app.  Mozilla should create a new version of the
+    file you've hidden, and with any luck, the problem should be solved.
+
+
+===============================================================================
+-- Known Problems -------------------------------------------------------------
+===============================================================================
+
+  Cross-platform problems are usually listed in the release notes of each
+  milestone release.
+
+  Fonts with names containing special characters (like Asian Unicode names)
+  will not display correctly in the list of fonts in the Options panel.
+
+  Mozilla apps will beep when copying more than 64 kB of text to the clipboard.
+  This is to alert users that many applications (most notably the system
+  editor, EPM, and applications running in VIO windows) cannot paste more
+  than this.
+
+  Other known problems can be found by following the link "Current Open
+  Warpzilla Bugs" on the OS/2 Mozilla page <http://www.mozilla.org/ports/os2/>.
+
+
+===============================================================================
+-- Links ----------------------------------------------------------------------
+===============================================================================
+
+* Official Releases
+    http://www.mozilla.org/ports/os2/
+
+* Beta Versions
+    ftp://ftp.netlabs.org/incoming/mozilla/
+
+* General Information About the Mozilla Apps
+    http://www.mozilla.com/en-US/firefox/
+    http://www.mozilla.com/en-US/thunderbird/
+    http://www.seamonkey-project.org/
+
+* Steve Wendt's Tips for Warpzilla
+    http://os2news.warpstock.org/Warpzilla.html
+
+* Mozilla for OS/2 Newsgroup
+    mozilla.dev.ports.os2 on server news.mozilla.org
+
+* Mailing list gateway to mozilla.dev.ports.os2
+    https://lists.mozilla.org/listinfo/dev-ports-os2
+
+* Mozilla for OS/2 IRC Channel
+    #warpzilla on server irc.mozilla.org
+
+* Submit Bug Reports (all platforms)
+    https://bugzilla.mozilla.org
+
+* Building Mozilla Apps on OS/2
+    https://developer.mozilla.org/en/OS/2_Build_Prerequisites
+
+
+===============================================================================
+-- System Requirements --------------------------------------------------------
+===============================================================================
+
+* Minimum hardware requirements for acceptable performance
+    - 1.0 GHz processor
+    - 256 MiB RAM plus 128 MiB free swap space
+    - 40 MiB free harddisk space for installation
+      plus storage space for disk cache
+    - Graphics card and driver capable of displaying 64k or 16m colors
+
+  Note:  Installing more RAM than the minimum required may produce
+         significant improvements in performance and stability.
+
+* Software requirements
+  - Installation on a file system supporting long file names
+    (i.e. HPFS or JFS but not FAT)
+  - OS/2 Warp 4 with Fixpack 15 or later (Warp 3 may work but is unsupported)
+  - Kernel with build level 14.104a is recommended.
+    (http://www.os2site.com/sw/upgrades/kernel/w420050811.zip)
+  - MPTS version 5.3
+  - TCP/IP version 4.1
+  - INETVER: SOCKETS.SYS=5.3007, AFOS2.SYS=5.3001, AFINET.SYS=5.3006
+
+  Note:  Do not attempt to use MPTS & TCP/IP versions below these INETVER
+         levels.  Although the app may seem to start and run normally,
+         some features it needs are not implemented correctly in older
+         MPTS versions and may cause crashes and data loss.
+
+  Convenience Pack 2 or eComStation 1.0 or later meet these requirements
+  out of the box.
+
+* Java
+    Java versions earlier than 1.5 are *not* supported.  Neither the IBM
+    nor Innotek versions of Java will work with this release.
+
+* Innotek Font Engine
+    This is no longer needed or used by any of the Mozilla apps and it is
+    recommended to remove browser related entries from the registry.
+    The mozinst.zip package includes a utility to do this and is
+    automatically invoked when using mozinst.cmd.
+
+* Plugins
+    Do not use the "OS/2 Multimedia Plugin for Netscape".  It does not
+    support any MM formats currently in use and is known to cause crashes.
+
+
+===============================================================================
