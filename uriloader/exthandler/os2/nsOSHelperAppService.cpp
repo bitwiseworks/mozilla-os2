@@ -192,6 +192,7 @@ nsOSHelperAppService::GetFileLocation(const char* aPrefName,
       // natural way to do the charset conversion is by just initing
       // an nsIFile with the native path and asking it for the Unicode
       // version.
+      nsresult rv;
       nsCOMPtr<nsIFile> file(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv));
       NS_ENSURE_SUCCESS(rv, rv);
 
