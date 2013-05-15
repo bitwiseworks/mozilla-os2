@@ -9,10 +9,13 @@
 #include "xptc_gcc_x86_unix.h"
 
 extern "C" {
-static void ATTRIBUTE_USED __attribute__ ((regparm(3)))
-invoke_copy_to_stack(uint32_t paramCount, nsXPTCVariant* s, uint32_t* d)
+#ifndef XP_WIN32
+static
+#endif
+void ATTRIBUTE_USED __attribute__ ((regparm(3)))
+invoke_copy_to_stack(PRUint32 paramCount, nsXPTCVariant* s, PRUint32* d)
 {
-    for(uint32_t i = paramCount; i >0; i--, d++, s++)
+    for(PRUint32 i = paramCount; i >0; i--, d++, s++)
     {
         if(s->IsPtrData())
         {
@@ -22,8 +25,8 @@ invoke_copy_to_stack(uint32_t paramCount, nsXPTCVariant* s, uint32_t* d)
 
         switch(s->type)
         {
-        case nsXPTType::T_I64    : *((int64_t*) d) = s->val.i64; d++;    break;
-        case nsXPTType::T_U64    : *((uint64_t*)d) = s->val.u64; d++;    break;
+        case nsXPTType::T_I64    : *((PRInt64*) d) = s->val.i64; d++;    break;
+        case nsXPTType::T_U64    : *((PRUint64*)d) = s->val.u64; d++;    break;
         case nsXPTType::T_DOUBLE : *((double*)  d) = s->val.d;   d++;    break;
         default                  : *((void**)d)    = s->val.p;           break;
         }
@@ -33,8 +36,8 @@ invoke_copy_to_stack(uint32_t paramCount, nsXPTCVariant* s, uint32_t* d)
 
 /*
   EXPORT_XPCOM_API(nsresult)
-  NS_InvokeByIndex_P(nsISupports* that, uint32_t methodIndex,
-                   uint32_t paramCount, nsXPTCVariant* params);
+  NS_InvokeByIndex_P(nsISupports* that, PRUint32 methodIndex,
+                   PRUint32 paramCount, nsXPTCVariant* params);
 
   Each param takes at most two 4-byte words.
   It doesn't matter if we push too many words, and calculating the exact
@@ -47,16 +50,37 @@ invoke_copy_to_stack(uint32_t paramCount, nsXPTCVariant* s, uint32_t* d)
 
 */
 
+/*
+ * Hack for gcc for os2. Functions used externally must be explicitly dllexported.
+ * Bug 226609
+ */
+#if defined(XP_OS2)
+extern "C" {
+    nsresult _NS_InvokeByIndex_P(nsISupports* that, PRUint32 methodIndex,
+                               PRUint32 paramCount, nsXPTCVariant* params);
+    EXPORT_XPCOM_API(nsresult)
+    NS_InvokeByIndex_P(nsISupports* that, PRUint32 methodIndex,
+                     PRUint32 paramCount, nsXPTCVariant* params) { 
+        return _NS_InvokeByIndex_P(that, methodIndex, paramCount, params);
+    }
+}
+#endif
+
 __asm__ (
 	".text\n\t"
 /* alignment here seems unimportant here; this was 16, now it's 2 which
    is what xptcstubs uses. */
 	".align 2\n\t"
+#if defined(XP_OS2)
+	".globl " SYMBOL_UNDERSCORE "_NS_InvokeByIndex_P\n\t"
+	SYMBOL_UNDERSCORE "_NS_InvokeByIndex_P:\n\t"
+#else
 	".globl " SYMBOL_UNDERSCORE "NS_InvokeByIndex_P\n\t"
-#ifndef XP_MACOSX
+#if !defined(XP_WIN32) && !defined(XP_OS2) && !defined(XP_MACOSX)
 	".type  " SYMBOL_UNDERSCORE "NS_InvokeByIndex_P,@function\n"
 #endif
 	SYMBOL_UNDERSCORE "NS_InvokeByIndex_P:\n\t"
+#endif
 	"pushl %ebp\n\t"
 	"movl  %esp, %ebp\n\t"
 	"movl  0x10(%ebp), %eax\n\t"
@@ -91,7 +115,11 @@ __asm__ (
 	"movl  %ebp, %esp\n\t"
 	"popl  %ebp\n\t"
 	"ret\n"
-#ifndef XP_MACOSX
+#if defined(XP_WIN32)
+	".section .drectve\n\t"
+	".ascii \" -export:NS_InvokeByIndex_P\"\n\t"
+	".text\n\t"
+#elif !defined(XP_MACOSX)
 	".size " SYMBOL_UNDERSCORE "NS_InvokeByIndex_P, . -" SYMBOL_UNDERSCORE "NS_InvokeByIndex_P\n\t"
 #endif
 );
