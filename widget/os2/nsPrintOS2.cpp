@@ -1,119 +1,165 @@
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsPrintOS2.h"
-
-#include "nsOS2Uni.h"
+//---------------------------------------------------------------------------
 
 #include <stdlib.h>
 
+#define INCL_PM
+#define INCL_SPLDOSPRINT
+#define INCL_DEV
+#define INCL_DEVDJP
+#define INCL_GRE_DEVICE
+#include <os2.h>
+
+#include "nsIServiceManager.h"
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
+#include "nsUnicharUtils.h"
+#include "nsOS2Uni.h"
+#include "nsPrintOS2.h"
+
 //---------------------------------------------------------------------------
-// OS/2 Printing   - was in libprint.cpp
-//---------------------------------------------------------------------------
-static HMODULE hmodRes;
 
 #define SHIFT_PTR(ptr,offset) ( *((LONG*)&ptr) += offset )
 
-
-class PRTQUEUE
+os2PrintQ::os2PrintQ(const os2PrintQ& PQInfo)
+  : mpDriverData(0)
 {
-public:
-   PRTQUEUE (const PRQINFO3* pPQI3)  { InitWithPQI3 (pPQI3); }
-   PRTQUEUE (const PRTQUEUE& PQInfo);
-  ~PRTQUEUE (void) { free (mpPQI3); }
+  mPQI3BufSize = PQInfo.mPQI3BufSize;
+  mpPQI3 = (PRQINFO3*)malloc(mPQI3BufSize);
+  memcpy(mpPQI3, PQInfo.mpPQI3, mPQI3BufSize);    // Copy entire buffer
 
-   PRQINFO3& PQI3 () const { return *mpPQI3; }
-   const char* DriverName () const { return mDriverName; }
-   const char* DeviceName () const { return mDeviceName; }
-   const char* PrinterName() const { return mPrinterName; }
-   const char* QueueName  () const { return mpPQI3->pszComment; }
-   
-private:
-   PRTQUEUE& operator = (const PRTQUEUE& z);        // prevent copying
-   void InitWithPQI3 (const PRQINFO3* pInfo);
+  long Diff = (long)mpPQI3 - (long)PQInfo.mpPQI3; // Calculate the difference between addresses
+  SHIFT_PTR(mpPQI3->pszName,       Diff);         // Modify internal pointers accordingly
+  SHIFT_PTR(mpPQI3->pszSepFile,    Diff);
+  SHIFT_PTR(mpPQI3->pszPrProc,     Diff);
+  SHIFT_PTR(mpPQI3->pszParms,      Diff);
+  SHIFT_PTR(mpPQI3->pszComment,    Diff);
+  SHIFT_PTR(mpPQI3->pszPrinters,   Diff);
+  SHIFT_PTR(mpPQI3->pszDriverName, Diff);
+  SHIFT_PTR(mpPQI3->pDriverData,   Diff);
 
-   PRQINFO3* mpPQI3;
-   unsigned  mPQI3BufSize;
-   char mDriverName  [DRIV_NAME_SIZE + 1];          // Driver name
-   char mDeviceName  [DRIV_DEVICENAME_SIZE + 1];    // Device name
-   char mPrinterName [PRINTERNAME_SIZE + 1];        // Printer name
-};
+  strcpy(mDriverName, PQInfo.mDriverName);
+  strcpy(mDeviceName, PQInfo.mDeviceName);
+  strcpy(mPrinterName, PQInfo.mPrinterName);
+  mPrinterTitle.Assign(PQInfo.mPrinterTitle);
 
-
-PRTQUEUE::PRTQUEUE (const PRTQUEUE& PQInfo)
-{
-   mPQI3BufSize = PQInfo.mPQI3BufSize;
-   mpPQI3 = (PRQINFO3*)malloc (mPQI3BufSize);
-   memcpy (mpPQI3, PQInfo.mpPQI3, mPQI3BufSize);    // Copy entire buffer
-
-   long Diff = (long)mpPQI3 - (long)PQInfo.mpPQI3;  // Calculate the difference between addresses
-   SHIFT_PTR (mpPQI3->pszName,       Diff);         // Modify internal pointers accordingly
-   SHIFT_PTR (mpPQI3->pszSepFile,    Diff);
-   SHIFT_PTR (mpPQI3->pszPrProc,     Diff);
-   SHIFT_PTR (mpPQI3->pszParms,      Diff);
-   SHIFT_PTR (mpPQI3->pszComment,    Diff);
-   SHIFT_PTR (mpPQI3->pszPrinters,   Diff);
-   SHIFT_PTR (mpPQI3->pszDriverName, Diff);
-   SHIFT_PTR (mpPQI3->pDriverData,   Diff);
-
-   strcpy (mDriverName, PQInfo.mDriverName);
-   strcpy (mDeviceName, PQInfo.mDeviceName);
-   strcpy (mPrinterName, PQInfo.mPrinterName);
+  if (PQInfo.mpDriverData) {
+    mpDriverData = (PDRIVDATA)malloc(PQInfo.mpDriverData->cb);
+    if (mpDriverData)
+      memcpy(mpDriverData, PQInfo.mpDriverData, PQInfo.mpDriverData->cb);
+  }
 }
 
-void PRTQUEUE::InitWithPQI3(const PRQINFO3* pInfo)
+os2PrintQ::os2PrintQ(const PRQINFO3* pInfo)
+  : mpDriverData(0)
 {
-   // Make local copy of PPRQINFO3 object
-   ULONG SizeNeeded;
-   ::SplQueryQueue (NULL, pInfo->pszName, 3, NULL, 0, &SizeNeeded);
-   mpPQI3 = (PRQINFO3*)malloc (SizeNeeded);
-   ::SplQueryQueue (NULL, pInfo->pszName, 3, mpPQI3, SizeNeeded, &SizeNeeded);
+  // Make local copy of PPRQINFO3 object
+  ULONG SizeNeeded;
+  SplQueryQueue(0, pInfo->pszName, 3, 0, 0, &SizeNeeded);
+  mpPQI3 = (PRQINFO3*)malloc(SizeNeeded);
+  SplQueryQueue(0, pInfo->pszName, 3, mpPQI3, SizeNeeded, &SizeNeeded);
 
-   mPQI3BufSize = SizeNeeded;
+  mPQI3BufSize = SizeNeeded;
 
-   PCHAR sep = strchr (pInfo->pszDriverName, '.');
+  PCHAR sep = strchr(pInfo->pszDriverName, '.');
 
-   if (sep)
-   {
-      *sep = '\0';
-      strcpy (mDriverName, pInfo->pszDriverName);
-      strcpy (mDeviceName, sep + 1);
-      *sep = '.';
-   } else
-   {
-      strcpy (mDriverName, pInfo->pszDriverName);
-      mDeviceName [0] = '\0';
-   }
+  if (sep) {
+    *sep = '\0';
+    strcpy(mDriverName, pInfo->pszDriverName);
+    strcpy(mDeviceName, sep + 1);
+    *sep = '.';
+  } else {
+    strcpy(mDriverName, pInfo->pszDriverName);
+    mDeviceName [0] = '\0';
+  }
 
+  sep = strchr (pInfo->pszPrinters, ',');
 
-   sep = strchr (pInfo->pszPrinters, ',');
+  if (sep) {
+    *sep = '\0';
+    strcpy(mPrinterName, pInfo->pszPrinters);
+    *sep = '.';
+  } else {
+    strcpy(mPrinterName, pInfo->pszPrinters);
+  }
 
-   if (sep)
-   {
-      *sep = '\0';
-      strcpy (mPrinterName, pInfo->pszPrinters);
-      *sep = '.';
-   } else
-   {
-      strcpy (mPrinterName, pInfo->pszPrinters);
-   }
+  mPrinterTitle.Truncate();
 }
 
+HDC os2PrintQ::OpenHDC()
+{
+  DEVOPENSTRUC dop;
 
-//===========================================================================
+  memset(&dop, 0, sizeof(dop));
+  dop.pszDriverName = (char*)mDriverName;
+  dop.pdriv         = DriverData();
 
-PRINTDLG::PRINTDLG()
+  return DevOpenDC(0, OD_INFO, "*", 9, (PDEVOPENDATA)&dop, 0);
+}
+
+nsAString* os2PrintQ::PrinterTitle()
+{
+  if (mPrinterTitle.IsEmpty()) {
+    nsCAutoString cName(mpPQI3->pszComment);
+    if (cName.IsEmpty())
+      cName.Assign(mpPQI3->pszName);
+    cName.ReplaceChar('\r', ' ');
+    cName.StripChars("\n");
+    if (cName.Length() > 64)
+      cName.Truncate(64);
+
+    nsAutoChar16Buffer uName;
+    PRInt32 uNameLength = 123;
+    if (NS_FAILED(MultiByteToWideChar(0, cName.get(), cName.Length(), uName, uNameLength))) {
+      mPrinterTitle.Assign(NS_LITERAL_STRING("Error"));
+    } else {
+      mPrinterTitle.Assign(nsDependentString(uName.Elements()));
+    }
+
+    // store printer description in prefs for the print dialog
+    nsresult rv;
+    nsCOMPtr<nsIPrefBranch> pPrefs = do_GetService(NS_PREFSERVICE_CONTRACTID, &rv);
+    if (NS_SUCCEEDED(rv)) {
+      char  desc[DRIV_DEVICENAME_SIZE + DRIV_NAME_SIZE + 8];
+      char  pref[128];
+
+      sprintf(desc, "%s (%s)", DriverData()->szDeviceName, mDriverName);
+      sprintf(pref, "print.printer_%s.printer_description", cName.get());
+      pPrefs->SetCharPref(pref, desc);
+    }
+  }
+
+  return &mPrinterTitle;
+}
+
+void os2PrintQ::SetDriverData(PDRIVDATA aDriverData)
+{
+  if (mpDriverData) {
+    free(mpDriverData);
+  }
+  mpDriverData = aDriverData;
+}
+
+//---------------------------------------------------------------------------
+
+os2Printers::os2Printers()
 {
   mQueueCount = 0;
 
-  ULONG TotalQueues = 0;
-  ULONG MemNeeded = 0;
+  ULONG  TotalQueues = 0;
+  ULONG  MemNeeded = 0;
   SPLERR rc;
-  
-  rc = ::SplEnumQueue(NULL, 3, NULL, 0, &mQueueCount, &TotalQueues, &MemNeeded, NULL);
-  PRQINFO3* pPQI3Buf = (PRQINFO3*) malloc (MemNeeded);
-  rc = ::SplEnumQueue(NULL, 3, pPQI3Buf, MemNeeded, &mQueueCount, &TotalQueues, &MemNeeded, NULL);
+
+  rc = SplEnumQueue(0, 3, 0, 0, &mQueueCount, &TotalQueues,
+                    &MemNeeded, 0);
+
+  PRQINFO3* pPQI3Buf = (PRQINFO3*)malloc(MemNeeded);
+  rc = SplEnumQueue(0, 3, pPQI3Buf, MemNeeded, &mQueueCount, &TotalQueues,
+                    &MemNeeded, 0);
 
   if (mQueueCount > MAX_PRINT_QUEUES)
     mQueueCount = MAX_PRINT_QUEUES;
@@ -122,12 +168,12 @@ PRINTDLG::PRINTDLG()
   for (ULONG cnt = 0; cnt < mQueueCount; cnt++) {
     if (pPQI3Buf[cnt].fsType & PRQ3_TYPE_APPDEFAULT)
       defaultQueue = cnt;
-    mPQBuf[cnt] = new PRTQUEUE(&pPQI3Buf[cnt]);
+    mPQBuf[cnt] = new os2PrintQ(&pPQI3Buf[cnt]);
   }
 
   // move the entry for the default printer to index 0 (if necessary)
   if (defaultQueue > 0) {
-    PRTQUEUE* temp = mPQBuf[0];
+    os2PrintQ* temp = mPQBuf[0];
     mPQBuf[0] = mPQBuf[defaultQueue];
     mPQBuf[defaultQueue] = temp;
   }
@@ -135,27 +181,29 @@ PRINTDLG::PRINTDLG()
   free(pPQI3Buf);
 }
 
-PRINTDLG::~PRINTDLG()
+os2Printers::~os2Printers()
 {
   for (ULONG index = 0; index < mQueueCount; index++)
     delete mPQBuf[index];
 }
 
-void PRINTDLG::RefreshPrintQueue()
+void os2Printers::RefreshPrintQueue()
 {
-  ULONG newQueueCount = 0;
-  ULONG TotalQueues = 0;
-  ULONG MemNeeded = 0;
+  ULONG  newQueueCount = 0;
+  ULONG  TotalQueues = 0;
+  ULONG  MemNeeded = 0;
   SPLERR rc;
-  
-  rc = ::SplEnumQueue(NULL, 3, NULL, 0, &newQueueCount, &TotalQueues, &MemNeeded, NULL);
-  PRQINFO3* pPQI3Buf = (PRQINFO3*)malloc(MemNeeded);
-  rc = ::SplEnumQueue(NULL, 3, pPQI3Buf, MemNeeded, &newQueueCount, &TotalQueues, &MemNeeded, NULL);
 
+  rc = SplEnumQueue(0, 3, 0, 0, &newQueueCount, &TotalQueues,
+                    &MemNeeded, 0);
+  PRQINFO3* pPQI3Buf = (PRQINFO3*)malloc(MemNeeded);
+
+  rc = SplEnumQueue(0, 3, pPQI3Buf, MemNeeded, &newQueueCount, &TotalQueues,
+                    &MemNeeded, 0);
   if (newQueueCount > MAX_PRINT_QUEUES)
     newQueueCount = MAX_PRINT_QUEUES;
 
-  PRTQUEUE* tmpBuf[MAX_PRINT_QUEUES];
+  os2PrintQ* tmpBuf[MAX_PRINT_QUEUES];
 
   ULONG defaultQueue = 0;
   for (ULONG cnt = 0; cnt < newQueueCount; cnt++) {
@@ -164,19 +212,20 @@ void PRINTDLG::RefreshPrintQueue()
 
     BOOL found = FALSE;
     for (ULONG index = 0; index < mQueueCount && !found; index++) {
-       //Compare printer from requeried list with what's already in Mozilla's printer list(mPQBuf)
-       //If printer is already there, use current properties; otherwise create a new printer in list
+       // Compare printer from requeried list with what's already in
+       // Mozilla's printer list(mPQBuf).  If printer is already there,
+       // use current properties; otherwise create a new printer in list.
        if (mPQBuf[index] != 0) {
-         if ((strcmp(pPQI3Buf[cnt].pszPrinters, mPQBuf[index]->PrinterName()) == 0) && 
-             (strcmp(pPQI3Buf[cnt].pszDriverName, mPQBuf[index]->PQI3().pszDriverName) == 0)) {
+         if (!strcmp(pPQI3Buf[cnt].pszPrinters, mPQBuf[index]->PrinterName()) &&
+             !strcmp(pPQI3Buf[cnt].pszDriverName, mPQBuf[index]->FullName())) {
            found = TRUE;
            tmpBuf[cnt] = mPQBuf[index];
            mPQBuf[index] = 0;
          }
        }
     }
-    if (!found) 
-       tmpBuf[cnt] = new PRTQUEUE(&pPQI3Buf[cnt]); 
+    if (!found)
+       tmpBuf[cnt] = new os2PrintQ(&pPQI3Buf[cnt]);
   }
 
   for (ULONG index = 0; index < newQueueCount; index++) {
@@ -194,7 +243,7 @@ void PRINTDLG::RefreshPrintQueue()
 
   // move the entry for the default printer to index 0 (if necessary)
   if (defaultQueue > 0) {
-    PRTQUEUE* temp = mPQBuf[0];
+    os2PrintQ* temp = mPQBuf[0];
     mPQBuf[0] = mPQBuf[defaultQueue];
     mPQBuf[defaultQueue] = temp;
   }
@@ -202,232 +251,187 @@ void PRINTDLG::RefreshPrintQueue()
   free(pPQI3Buf);
 }
 
-ULONG PRINTDLG::GetNumPrinters()
+ULONG os2Printers::GetNumPrinters()
 {
-   return mQueueCount;
+  return mQueueCount;
 }
 
-void PRINTDLG::GetPrinter(ULONG printerNdx, char** printerName)
+os2PrintQ* os2Printers::ClonePrintQ(ULONG printerNdx)
 {
-   if (printerNdx >= mQueueCount)
-      return;
- 
-   nsCAutoString pName(mPQBuf[printerNdx]->QueueName());
- 
-   pName.ReplaceChar('\r', ' ');
-   pName.StripChars("\n");
-   *printerName = ToNewCString(pName);
+  if (printerNdx >= mQueueCount)
+    return 0;
+
+  return new os2PrintQ(*mPQBuf[printerNdx]);
 }
 
-PRTQUEUE* PRINTDLG::SetPrinterQueue(ULONG printerNdx)
+LONG os2Printers::GetDriverDataSize(ULONG printerNdx)
 {
-   PRTQUEUE *pPQ = NULL;
+  if (printerNdx >= mQueueCount)
+    return 0;
 
-   if (printerNdx >= mQueueCount)
-      return NULL;
-
-   pPQ = mPQBuf[printerNdx];
-
-   return new PRTQUEUE(*pPQ);
+  return mPQBuf[printerNdx]->DriverData()->cb;
 }
 
-LONG PRINTDLG::GetPrintDriverSize(ULONG printerNdx)
+PDRIVDATA os2Printers::GetDriverData(ULONG printerNdx)
 {
-   return mPQBuf[printerNdx]->PQI3().pDriverData->cb;
+  if (printerNdx >= mQueueCount)
+    return 0;
+
+  return mPQBuf[printerNdx]->DriverData();
 }
 
-PDRIVDATA PRINTDLG::GetPrintDriver(ULONG printerNdx)
+HDC os2Printers::OpenHDC(ULONG printerNdx)
 {
-   if (printerNdx >= mQueueCount)
-      return NULL;
+  if (printerNdx >= mQueueCount)
+    return 0;
 
-   return mPQBuf[printerNdx]->PQI3().pDriverData;
+  return mPQBuf[printerNdx]->OpenHDC();
 }
 
-HDC PRINTDLG::GetDCHandle(ULONG printerNdx)
+char* os2Printers::GetDriverName(ULONG printerNdx)
 {
-    HDC hdc = 0;
-    DEVOPENSTRUC dop;
+  if (printerNdx >= mQueueCount)
+    return 0;
 
-    dop.pszLogAddress      = 0; 
-    dop.pszDriverName      = (char *)mPQBuf[printerNdx]->DriverName();
-    dop.pdriv              = mPQBuf[printerNdx]->PQI3().pDriverData;
-    dop.pszDataType        = 0; 
-    dop.pszComment         = 0;
-    dop.pszQueueProcName   = 0;     
-    dop.pszQueueProcParams = 0;   
-    dop.pszSpoolerParams   = 0;     
-    dop.pszNetworkParams   = 0;     
-
-    hdc = ::DevOpenDC(0, OD_INFO, "*", 9, (PDEVOPENDATA) &dop, NULLHANDLE);
-    return hdc;
+  return (char*)mPQBuf[printerNdx]->DriverName();
 }
 
-char* PRINTDLG::GetDriverType(ULONG printerNdx)
+BOOL os2Printers::ShowProperties(ULONG printerNdx)
 {
-  return (char *)mPQBuf[printerNdx]->DriverName ();
+  LONG          devrc = FALSE;
+  PDRIVDATA     pOldDrivData;
+  PDRIVDATA     pNewDrivData = 0;
+  LONG          buflen;
+
+  if (printerNdx >= mQueueCount)
+    return FALSE;
+
+  // check size of buffer required for job properties
+  buflen = DevPostDeviceModes(0,
+                              0,
+                              mPQBuf[printerNdx]->DriverName(),
+                              mPQBuf[printerNdx]->DeviceName(),
+                              mPQBuf[printerNdx]->PrinterName(),
+                              DPDM_POSTJOBPROP);
+
+  // return error to caller */
+  if (buflen <= 0)
+    return FALSE;
+
+  // see if the new driver data is bigger than the existing buffer;
+  // if so, alloc a new buffer and copy over old data so driver can
+  // use the old job properties to init the job properties dialog
+  pOldDrivData = mPQBuf[printerNdx]->DriverData();
+
+  if (buflen > pOldDrivData->cb) {
+    pNewDrivData = (PDRIVDATA)malloc(buflen);
+    if (!pNewDrivData)
+      return FALSE;
+    memcpy(pNewDrivData, pOldDrivData, pOldDrivData->cb);
+    mPQBuf[printerNdx]->SetDriverData(pNewDrivData);
+  }
+
+  // display job properties dialog and get updated
+  // job properties from driver
+  devrc = DevPostDeviceModes(0,
+                             mPQBuf[printerNdx]->DriverData(),
+                             mPQBuf[printerNdx]->DriverName(),
+                             mPQBuf[printerNdx]->DeviceName(),
+                             mPQBuf[printerNdx]->PrinterName(),
+                             DPDM_POSTJOBPROP);
+
+  return (devrc != DPDM_ERROR);
 }
 
-BOOL PRINTDLG::ShowProperties(ULONG printerNdx)
+nsAString* os2Printers::GetPrinterTitle(ULONG printerNdx)
 {
-    BOOL          rc = FALSE;
-    LONG          devrc = FALSE;
-    PDRIVDATA     pOldDrivData;
-    PDRIVDATA     pNewDrivData = NULL;
-    LONG          buflen;
+  if (printerNdx >= mQueueCount)
+    return 0;
 
-/* check size of buffer required for job properties */
-    buflen = DevPostDeviceModes( 0 /*hab*/,
-                                 NULL,
-                                 mPQBuf[printerNdx]->DriverName (),
-                                 mPQBuf[printerNdx]->DeviceName (),
-                                 mPQBuf[printerNdx]->PrinterName (),
-                                 DPDM_POSTJOBPROP);
-
-/* return error to caller */
-    if (buflen <= 0)
-        return(buflen);
-
-/* allocate some memory for larger job properties and */
-/* return error to caller */
-
-    if (buflen != mPQBuf[printerNdx]->PQI3().pDriverData->cb)
-    {
-        if (DosAllocMem((PPVOID)&pNewDrivData,buflen,fALLOC))
-            return(FALSE); // DPDM_ERROR
-    
-/* copy over old data so driver can use old job */
-/* properties as base for job properties dialog */
-        pOldDrivData = mPQBuf[printerNdx]->PQI3().pDriverData;
-        mPQBuf[printerNdx]->PQI3().pDriverData = pNewDrivData;
-        memcpy( (PSZ)pNewDrivData, (PSZ)pOldDrivData, pOldDrivData->cb );
-    }
-
-/* display job properties dialog and get updated */
-/* job properties from driver */
-
-    devrc = DevPostDeviceModes( 0 /*hab*/,
-                                mPQBuf[printerNdx]->PQI3().pDriverData,
-                                mPQBuf[printerNdx]->DriverName (),
-                                mPQBuf[printerNdx]->DeviceName (),
-                                mPQBuf[printerNdx]->PrinterName (),
-                                DPDM_POSTJOBPROP);
-    rc = (devrc != DPDM_ERROR);
-    return rc;
+  return mPQBuf[printerNdx]->PrinterTitle();
 }
 
-/****************************************************************************/
-/*  Job management                                                          */
-/****************************************************************************/
-
-HDC PrnOpenDC( PRTQUEUE *pInfo, PCSZ pszApplicationName, int copies, int destination, char *file )
+int32_t os2Printers::GetPrinterIndex(const PRUnichar* aPrinterName)
 {
-   HDC hdc = 0;
-   PCSZ pszLogAddress;
-   PCSZ pszDataType;
-   LONG dcType;
-   DEVOPENSTRUC dop;
+  ULONG index;
 
-   if (!pInfo || !pszApplicationName)
-      return hdc;
+  for (index = 0; index < mQueueCount; index++) {
+    if (mPQBuf[index]->PrinterTitle()->Equals(aPrinterName, nsCaseInsensitiveStringComparator()))
+      break;
+  }
+  if (index >= mQueueCount)
+    return -1;
 
-   if ( destination ) {
-      pszLogAddress = pInfo->PQI3 ().pszName;
-      pszDataType = "PM_Q_STD";
-      if ( destination == 2 )
-         dcType = OD_METAFILE;
-      else
-         dcType = OD_QUEUED;
-   } else {
-      if (file && *file)
-         pszLogAddress = (PSZ) file;
-      else    
-         pszLogAddress = "FILE";
-      pszDataType = "PM_Q_RAW";
-      dcType = OD_DIRECT;
-   } 
-
-   dop.pszLogAddress      = const_cast<PSZ>(pszLogAddress); 
-   dop.pszDriverName      = (char*)pInfo->DriverName ();
-   dop.pdriv              = pInfo->PQI3 ().pDriverData;
-   dop.pszDataType        = const_cast<PSZ>(pszDataType); 
-   dop.pszComment         = const_cast<PSZ>(pszApplicationName);
-   dop.pszQueueProcName   = pInfo->PQI3 ().pszPrProc;     
-   dop.pszQueueProcParams = 0;
-   dop.pszSpoolerParams   = 0;     
-   dop.pszNetworkParams   = 0;     
-
-   hdc = ::DevOpenDC( 0, dcType, "*", 9, (PDEVOPENDATA) &dop, NULLHANDLE);
-
-#ifdef DEBUG
-   if (hdc == 0)
-   {
-      ULONG ErrorCode = ERRORIDERROR (::WinGetLastError (0));
-      printf ("!ERROR! - Can't open DC for printer %04lX\a\n", ErrorCode);
-   }   
-#endif
-
-   return hdc;
+  return index;
 }
 
-/* find the selected form */
-BOOL PrnQueryHardcopyCaps( HDC hdc, PHCINFO pHCInfo)
+//---------------------------------------------------------------------------
+
+HDC   PrnOpenDC(os2PrintQ *pInfo, PCSZ pszApplicationName,
+                int copies, int destination, char *file )
 {
-   BOOL rc = FALSE;
+  PCSZ pszLogAddress;
+  PCSZ pszDataType;
+  LONG dcType;
+  DEVOPENSTRUC dop;
 
-   if( hdc && pHCInfo)
-   {
-      PHCINFO pBuffer;
-      long    lAvail, i;
+  if (!pInfo || !pszApplicationName)
+    return 0;
 
-      /* query how many forms are available */
-      lAvail = ::DevQueryHardcopyCaps( hdc, 0, 0, NULL);
+  if (destination != printToFile) {
+    pszLogAddress = pInfo->QueueName();
+    pszDataType = "PM_Q_STD";
 
-      pBuffer = (PHCINFO) malloc( lAvail * sizeof(HCINFO));
+    if (destination == printPreview)
+      dcType = OD_METAFILE;
+    else
+      dcType = OD_QUEUED;
+  } else {
+    if (file && *file)
+      pszLogAddress = (PSZ)file;
+    else
+      pszLogAddress = "FILE";
 
-      ::DevQueryHardcopyCaps( hdc, 0, lAvail, pBuffer);
+    pszDataType = "PM_Q_RAW";
+    dcType = OD_DIRECT;
+  }
 
-      for( i = 0; i < lAvail; i++)
-         if( pBuffer[ i].flAttributes & HCAPS_CURRENT)
-         {
-            memcpy( pHCInfo, pBuffer + i, sizeof(HCINFO));
-            rc = TRUE;
-            break;
-         }
+  dop.pszLogAddress      = const_cast<PSZ>(pszLogAddress);
+  dop.pszDriverName      = (char*)pInfo->DriverName();
+  dop.pdriv              = pInfo->DriverData();
+  dop.pszDataType        = const_cast<PSZ>(pszDataType);
+  dop.pszComment         = const_cast<PSZ>(pszApplicationName);
+  dop.pszQueueProcName   = const_cast<PSZ>(pInfo->QueueProc());
+  dop.pszQueueProcParams = 0;
+  dop.pszSpoolerParams   = 0;
+  dop.pszNetworkParams   = 0;
 
-      free( pBuffer);
-   }
-
-   return rc;
+  return DevOpenDC(0, dcType, "*", 9, (PDEVOPENDATA)&dop, 0);
 }
 
-
-/****************************************************************************/
-/*  Library-level data and functions    -Printing                           */
-/****************************************************************************/
-
-BOOL PrnInitialize( HMODULE hmodResources)
+BOOL  PrnQueryHardcopyCaps(HDC hdc, PHCINFO pHCInfo)
 {
-   hmodRes = hmodResources;
-   return TRUE;
-}
+  if (!hdc || !pHCInfo)
+    return FALSE;
 
-BOOL PrnTerminate()
-{
-   /* nop for now, may do something eventually */
-   return TRUE;
-}
+  // query how many forms are available
+  long lAvail = DevQueryHardcopyCaps(hdc, 0, 0, 0);
+  PHCINFO pBuffer = (PHCINFO)malloc(lAvail * sizeof(HCINFO));
 
-BOOL PrnClosePrinter( PRTQUEUE *pPrintQueue)
-{
-   BOOL rc = FALSE;
+  DevQueryHardcopyCaps(hdc, 0, lAvail, pBuffer);
 
-   if (pPrintQueue)
-   {
-      delete pPrintQueue;
+  BOOL rc = FALSE;
+  for (long i = 0; i < lAvail; i++) {
+    if (pBuffer[i].flAttributes & HCAPS_CURRENT) {
+      memcpy(pHCInfo, &pBuffer[i], sizeof(HCINFO));
       rc = TRUE;
-   }
+      break;
+    }
+  }
+  free( pBuffer);
 
-   return rc;
+  return rc;
 }
+
+//---------------------------------------------------------------------------
 
