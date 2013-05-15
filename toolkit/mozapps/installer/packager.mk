@@ -306,7 +306,9 @@ UPLOAD_EXTRA_FILES += gecko-unsigned-unaligned.apk
 
 include $(topsrcdir)/ipc/app/defs.mk
 
+ifdef MOZ_IPC
 DIST_FILES += $(MOZ_CHILD_PROCESS_NAME)
+endif
 
 ifeq ($(CPU_ARCH),x86)
 ABI_DIR = x86

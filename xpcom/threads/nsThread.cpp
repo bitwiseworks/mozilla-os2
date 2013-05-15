@@ -523,7 +523,11 @@ public:
   }
 
   static bool EventLatencyIsImportant() {
-    return NS_IsMainThread() && XRE_GetProcessType() == GeckoProcessType_Default;
+    return NS_IsMainThread()
+#ifdef MOZ_IPC
+           && XRE_GetProcessType() == GeckoProcessType_Default
+#endif
+    ;
   }
 
   static int sOutputFD;

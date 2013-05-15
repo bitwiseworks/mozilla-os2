@@ -5052,6 +5052,20 @@ MOZ_ARG_DISABLE_BOOL(jsd,
 
 
 dnl ========================================================
+dnl = Disable IPC support for tabs and plugins
+dnl ========================================================
+MOZ_ARG_DISABLE_BOOL(ipc,
+[  --disable-ipc           Disable IPC support for tabs and plugins],
+    MOZ_IPC=,
+    MOZ_IPC=1)
+
+if test -n "$MOZ_IPC"; then
+    AC_DEFINE(MOZ_IPC)
+fi
+
+AC_SUBST(MOZ_IPC)
+
+dnl ========================================================
 dnl = Enable IPDL's "expensive" unit tests
 dnl ========================================================
 MOZ_IPDL_TESTS=
@@ -5060,6 +5074,10 @@ MOZ_ARG_ENABLE_BOOL(ipdl-tests,
 [  --enable-ipdl-tests     Enable expensive IPDL tests],
     MOZ_IPDL_TESTS=1,
     MOZ_IPDL_TESTS=)
+
+if test -z "$MOZ_IPC" -a -n "$MOZ_IPDL_TESTS"; then
+    AC_MSG_ERROR([--enable-ipdl-tests requires --enable-ipc])
+fi
 
 if test -n "$MOZ_IPDL_TESTS"; then
     AC_DEFINE(MOZ_IPDL_TESTS)

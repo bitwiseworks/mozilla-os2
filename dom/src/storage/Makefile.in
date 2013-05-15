@@ -21,9 +21,14 @@ CPPSRCS = \
        nsDOMStorageDBWrapper.cpp \
        nsDOMStoragePersistentDB.cpp \
        nsDOMStorageMemoryDB.cpp \
+       $(NULL)
+
+ifdef MOZ_IPC
+CPPSRCS += \
        StorageChild.cpp \
        StorageParent.cpp \
        $(NULL)
+endif
 
 EXPORTS_NAMESPACES = mozilla/dom
 EXPORTS_mozilla/dom = StorageChild.h StorageParent.h

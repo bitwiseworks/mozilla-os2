@@ -7,7 +7,9 @@
 #include "nsContentPermissionHelper.h"
 #include "nsXULAppAPI.h"
 
+#ifdef MOZ_IPC
 #include "mozilla/dom/PBrowserChild.h"
+#endif
 #include "TabChild.h"
 #include "mozilla/Preferences.h"
 
@@ -90,6 +92,7 @@ nsDOMDesktopNotification::nsDOMDesktopNotification(const nsAString & title,
 
   nsRefPtr<nsDesktopNotificationRequest> request = new nsDesktopNotificationRequest(this);
 
+#ifdef MOZ_IPC
   // if we are in the content process, then remote it to the parent.
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
 
@@ -113,6 +116,7 @@ nsDOMDesktopNotification::nsDOMDesktopNotification(const nsAString & title,
     request->Sendprompt();
     return;
   }
+#endif
 
   // otherwise, dispatch it
   NS_DispatchToMainThread(request);

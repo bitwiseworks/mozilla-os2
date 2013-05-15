@@ -1371,7 +1371,11 @@ public:
         char gcname[MAXPATHLEN] = {'\0'};
         sprintf(gcname, "%s%sgc-edges-%d.%d.log", basename,
                 XPCOM_FILE_PATH_SEPARATOR,
-                gLogCounter, base::GetCurrentProcId());
+                gLogCounter
+#ifdef MOZ_IPC
+, base::GetCurrentProcId()
+#endif
+);
 
         FILE* gcDumpFile = fopen(gcname, "w");
         if (!gcDumpFile)

@@ -637,9 +637,11 @@ nsChromeRegistry::GetSingleton()
   }
 
   nsRefPtr<nsChromeRegistry> cr;
+#ifdef MOZ_IPC
   if (GeckoProcessType_Content == XRE_GetProcessType())
     cr = new nsChromeRegistryContent();
   else
+#endif
     cr = new nsChromeRegistryChrome();
 
   if (NS_FAILED(cr->Init()))

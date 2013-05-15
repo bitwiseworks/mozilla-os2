@@ -6,7 +6,9 @@
 
 /* rendering objects for replaced elements implemented by a plugin */
 
+#ifdef MOZ_IPC
 #include "mozilla/plugins/PluginMessageUtils.h"
+#endif
 
 #include "nscore.h"
 #include "nsCOMPtr.h"
@@ -198,7 +200,9 @@ extern "C" {
 #endif /* #if defined(XP_MACOSX) && !defined(NP_NO_CARBON) */
 
 using namespace mozilla;
+#ifdef MOZ_IPC
 using namespace mozilla::plugins;
+#endif
 using namespace mozilla::layers;
 
 class PluginBackgroundSink : public ReadbackSink {
@@ -1913,6 +1917,7 @@ nsObjectFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
       nsPoint origin;
 
       gfxWindowsNativeDrawing nativeDraw(ctx, frameGfxRect);
+#ifdef MOZ_IPC
       if (nativeDraw.IsDoublePass()) {
         // OOP plugin specific: let the shim know before we paint if we are doing a
         // double pass render. If this plugin isn't oop, the register window message
@@ -1924,6 +1929,7 @@ nsObjectFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
         if (pluginEvent.event)
           inst->HandleEvent(&pluginEvent, nullptr);
       }
+#endif
       do {
         HDC hdc = nativeDraw.BeginNativeDrawing();
         if (!hdc)

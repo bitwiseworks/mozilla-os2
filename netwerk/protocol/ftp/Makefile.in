@@ -37,9 +37,13 @@ CPPSRCS = \
   nsFTPChannel.cpp \
   nsFtpConnectionThread.cpp \
   nsFtpControlConnection.cpp \
+
+ifdef MOZ_IPC
+CPPSRCS += \
   FTPChannelParent.cpp \
   FTPChannelChild.cpp \
   $(NULL)
+endif
 
 LOCAL_INCLUDES = \
   -I$(srcdir)/../../base/src \

@@ -51,6 +51,7 @@ EXPORTS_mozilla/dom/ipc = \
   nsIRemoteBlob.h \
   $(NULL)
 
+ifdef MOZ_IPc
 CPPSRCS = \
   AppProcessPermissions.cpp \
   Blob.cpp \
@@ -66,16 +67,20 @@ CPPSRCS = \
   TabChild.cpp \
   TabMessageUtils.cpp \
   $(NULL)
+endif
 
 ifdef MOZ_SYDNEYAUDIO
 EXPORTS_mozilla/dom += \
   AudioChild.h \
   AudioParent.h \
   $(NULL)
+
+ifdef MOZ_IPC
 CPPSRCS += \
   AudioChild.cpp \
   AudioParent.cpp \
   $(NULL)
+endif
 endif
 
 include $(topsrcdir)/config/config.mk

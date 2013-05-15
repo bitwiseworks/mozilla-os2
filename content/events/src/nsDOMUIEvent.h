@@ -26,8 +26,10 @@ public:
   // Forward to nsDOMEvent
   NS_FORWARD_TO_NSDOMEVENT_NO_SERIALIZATION_NO_DUPLICATION
   NS_IMETHOD DuplicatePrivateData();
+#ifdef MOZ_IPC
   NS_IMETHOD_(void) Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType);
   NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg, void** aIter);
+#endif
 
   virtual nsresult InitFromCtor(const nsAString& aType,
                                 JSContext* aCx, jsval* aVal);

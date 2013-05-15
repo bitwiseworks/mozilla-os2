@@ -74,9 +74,6 @@ CPPSRCS = \
   nsHttpPipeline.cpp \
   nsHttpActivityDistributor.cpp \
   nsHttpChannelAuthProvider.cpp \
-  HttpChannelParent.cpp \
-  HttpChannelChild.cpp \
-  HttpChannelParentListener.cpp \
   NullHttpTransaction.cpp \
   ASpdySession.cpp \
   SpdySession2.cpp \
@@ -85,6 +82,14 @@ CPPSRCS = \
   SpdyStream3.cpp \
   ConnectionDiagnostics.cpp \
   $(NULL)
+
+ifdef MOZ_IPC
+CPPSRCS += \
+   HttpChannelParent.cpp \
+   HttpChannelChild.cpp \
+   HttpChannelParentListener.cpp \
+   $(NULL)
+endif
 
 LOCAL_INCLUDES = \
   -I$(srcdir)/../../base/src \

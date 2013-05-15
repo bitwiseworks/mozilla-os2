@@ -246,6 +246,7 @@ NS_INTERFACE_MAP_END_INHERITING(nsSimpleNestedURI)
 NS_IMETHODIMP
 nsNestedAboutURI::Read(nsIObjectInputStream* aStream)
 {
+#ifdef MOZ_IPC
     nsresult rv = nsSimpleNestedURI::Read(aStream);
     if (NS_FAILED(rv)) return rv;
 
@@ -263,11 +264,14 @@ nsNestedAboutURI::Read(nsIObjectInputStream* aStream)
     }
 
     return NS_OK;
+#endif
+    return NS_ERROR;
 }
 
 NS_IMETHODIMP
 nsNestedAboutURI::Write(nsIObjectOutputStream* aStream)
 {
+#ifdef MOZ_IPC
     nsresult rv = nsSimpleNestedURI::Write(aStream);
     if (NS_FAILED(rv)) return rv;
 
@@ -289,6 +293,8 @@ nsNestedAboutURI::Write(nsIObjectOutputStream* aStream)
     }
 
     return NS_OK;
+#endif
+    return NS_ERROR;
 }
 
 // nsSimpleURI

@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef MOZ_IPC
 #include "mozilla/dom/PContentParent.h"
+#endif
 #include "RegistryMessageUtils.h"
 #include "nsResProtocolHandler.h"
 
@@ -397,6 +399,7 @@ nsresult nsChromeRegistryChrome::UpdateSelectedLocale()
   return rv;
 }
 
+#ifdef MOZ_IPC
 static void
 SerializeURI(nsIURI* aURI,
              SerializedURI& aSerializedURI)
@@ -494,6 +497,7 @@ nsChromeRegistryChrome::CollectPackages(PLDHashTable *table,
   args->packages.AppendElement(chromePackage);
   return (PLDHashOperator)PL_DHASH_NEXT;
 }
+#endif
 
 static bool
 CanLoadResource(nsIURI* aResourceURI)

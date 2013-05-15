@@ -1558,6 +1558,7 @@ nsDOMEvent::GetDefaultPrevented(bool* aReturn)
 NS_IMETHODIMP_(void)
 nsDOMEvent::Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType)
 {
+#ifdef MOZ_IPC
   if (aSerializeInterfaceType) {
     IPC::WriteParam(aMsg, NS_LITERAL_STRING("event"));
   }
@@ -1579,11 +1580,13 @@ nsDOMEvent::Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType)
   IPC::WriteParam(aMsg, trusted);
 
   // No timestamp serialization for now!
+#endif
 }
 
 NS_IMETHODIMP_(bool)
 nsDOMEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
 {
+#ifdef MOZ_IPC
   nsString type;
   NS_ENSURE_TRUE(IPC::ReadParam(aMsg, aIter, &type), false);
 
@@ -1601,6 +1604,9 @@ nsDOMEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
   SetTrusted(trusted);
 
   return true;
+#else
+  return false;
+#endif
 }
 
 

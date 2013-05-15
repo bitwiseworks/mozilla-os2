@@ -38,7 +38,11 @@ class ImageFactory;
  * between layers).
  */
 class THEBES_API BasicLayerManager :
+#ifdef MOZ_IPC
     public ShadowLayerManager
+#else
+    public LayerManager
+#endif
 {
 public:
   /**
@@ -197,6 +201,7 @@ protected:
 };
  
 
+#ifdef MOZ_IPC
 class BasicShadowLayerManager : public BasicLayerManager,
                                 public ShadowLayerForwarder
 {
@@ -273,6 +278,7 @@ private:
   // a display list) to support progressive drawing.
   bool mRepeatTransaction;
 };
+#endif
 
 class BasicShadowableThebesLayer;
 class BasicShadowableLayer : public ShadowableLayer

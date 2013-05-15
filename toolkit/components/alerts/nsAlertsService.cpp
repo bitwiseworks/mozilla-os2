@@ -72,6 +72,7 @@ NS_IMETHODIMP nsAlertsService::ShowAlertNotification(const nsAString & aImageUrl
                                                      nsIObserver * aAlertListener,
                                                      const nsAString & aAlertName)
 {
+#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     ContentChild* cpc = ContentChild::GetSingleton();
 
@@ -86,6 +87,7 @@ NS_IMETHODIMP nsAlertsService::ShowAlertNotification(const nsAString & aImageUrl
                                    nsAutoString(aAlertName));
     return NS_OK;
   }
+#endif
 
 #ifdef MOZ_WIDGET_ANDROID
   mozilla::AndroidBridge::Bridge()->ShowAlertNotification(aImageUrl, aAlertTitle, aAlertText, aAlertCookie,

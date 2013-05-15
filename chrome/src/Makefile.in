@@ -25,8 +25,11 @@ CPPSRCS		= \
 		nsChromeRegistry.cpp \
 		nsChromeRegistryChrome.cpp \
 		nsChromeProtocolHandler.cpp \
-		nsChromeRegistryContent.cpp \
 		$(NULL)
+
+ifdef MOZ_IPC
+CPPSRCS += nsChromeRegistryContent.cpp
+endif
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

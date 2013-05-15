@@ -337,6 +337,7 @@ FocusManager::FocusedDOMNode() const
   nsFocusManager* DOMFocusManager = nsFocusManager::GetFocusManager();
   nsIContent* focusedElm = DOMFocusManager->GetFocusedContent();
 
+#ifdef MOZ_IPC
   // No focus on remote target elements like xul:browser having DOM focus and
   // residing in chrome process because it means an element in content process
   // keeps the focus.
@@ -345,6 +346,7 @@ FocusManager::FocusedDOMNode() const
       return nullptr;
     return focusedElm;
   }
+#endif
 
   // Otherwise the focus can be on DOM document.
   nsPIDOMWindow* focusedWnd = DOMFocusManager->GetFocusedWindow();

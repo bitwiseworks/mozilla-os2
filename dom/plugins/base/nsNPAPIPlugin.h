@@ -58,6 +58,7 @@ public:
   void SetPluginRefNum(short aRefNum);
 #endif
 
+#ifdef MOZ_IPC
   // The IPC mechanism notifies the nsNPAPIPlugin if the plugin
   // crashes and is no longer usable. pluginDumpID/browserDumpID are
   // the IDs of respective minidumps that were written, or empty if no
@@ -66,6 +67,7 @@ public:
                      const nsAString& browserDumpID);
   
   static bool RunPluginOOP(const nsPluginTag *aPluginTag);
+#endif
 
   nsresult Shutdown();
 

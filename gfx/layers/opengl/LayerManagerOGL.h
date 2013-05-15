@@ -88,6 +88,7 @@ public:
    */
   void SetClippingRegion(const nsIntRegion& aClippingRegion);
 
+#ifdef MOZ_IPC
   /**
    * LayerManager implementation.
    */
@@ -95,6 +96,7 @@ public:
   {
     return this;
   }
+#endif
 
   void BeginTransaction();
 

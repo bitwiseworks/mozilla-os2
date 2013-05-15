@@ -45,6 +45,7 @@ IPDLDIRS =  \
   uriloader/prefetch  \
   $(NULL)
 
+ifdef MOZ_IPC
 ifdef MOZ_IPDL_TESTS #{
 IPDLDIRS += ipc/ipdl/test/cxx
 endif #}
@@ -52,6 +53,7 @@ endif #}
 
 ifdef MOZ_IPDL_TESTS
 DIRS += test
+endif
 endif
 
 vpath %.ipdl $(topsrcdir)
@@ -69,6 +71,7 @@ PROTOCOLS :=
 $(foreach IPDLDIR,$(IPDLDIRS),$(eval $(ADD_IPDLDIR)))
 
 
+ifdef MOZ_IPC
 CPPSRCS =					\
   $(PROTOCOLS:%.ipdl=%Parent.cpp)		\
   $(PROTOCOLS:%.ipdl=%Child.cpp)		\
@@ -77,6 +80,7 @@ CPPSRCS =					\
   $(NULL)
 
 GARBAGE += $(CPPSRCS)
+endif
 
 LOCAL_INCLUDES += -I$(DEPTH)/ipc/ipdl/_ipdlheaders
 

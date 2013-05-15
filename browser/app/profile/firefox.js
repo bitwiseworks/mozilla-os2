@@ -878,8 +878,10 @@ pref("dom.ipc.plugins.enabled.i386.javaappletplugin.plugin", true);
 pref("dom.ipc.plugins.enabled.i386.silverlight.plugin", true);
 // x86_64 ipc preferences
 pref("dom.ipc.plugins.enabled.x86_64", true);
++#elifdef MOZ_IPC
++pref("dom.ipc.plugins.enabled", true);
 #else
-pref("dom.ipc.plugins.enabled", true);
+pref("dom.ipc.plugins.enabled", false);
 #endif
 
 #ifdef MOZ_E10S_COMPAT

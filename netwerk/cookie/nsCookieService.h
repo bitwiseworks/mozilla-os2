@@ -43,7 +43,9 @@ struct nsEnumerationData;
 
 namespace mozilla {
 namespace net {
+#ifdef MOZ_IPC
 class CookieServiceParent;
+#endif
 }
 }
 
@@ -281,7 +283,9 @@ class nsCookieService : public nsICookieService
     friend class CloseCookieDBListener;
 
     static nsCookieService*       GetSingleton();
+#ifdef MOZ_IPC
     friend class mozilla::net::CookieServiceParent;
+#endif
 };
 
 #endif // nsCookieService_h__

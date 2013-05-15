@@ -472,6 +472,7 @@ Layer::CanUseOpaqueSurface()
     parent->CanUseOpaqueSurface();
 }
 
+#ifdef MOZ_IPC
 // NB: eventually these methods will be defined unconditionally, and
 // can be moved into Layers.h
 const nsIntRect*
@@ -491,6 +492,13 @@ Layer::GetEffectiveVisibleRegion()
   }
   return GetVisibleRegion();
 }
+
+#else
+
+const nsIntRect* Layer::GetEffectiveClipRect() { return GetClipRect(); }
+const nsIntRegion& Layer::GetEffectiveVisibleRegion() { return GetVisibleRegion(); }
+
+#endif  // MOZ_IPC
 
 gfx3DMatrix
 Layer::SnapTransform(const gfx3DMatrix& aTransform,
@@ -612,9 +620,11 @@ const gfx3DMatrix
 Layer::GetLocalTransform()
 {
   gfx3DMatrix transform;
+#ifdef MOZ_IPC
   if (ShadowLayer* shadow = AsShadowLayer())
     transform = shadow->GetShadowTransform();
   else
+#endif
     transform = mTransform;
   if (ContainerLayer* c = AsContainerLayer()) {
     transform.Scale(c->GetPreXScale(), c->GetPreYScale(), 1.0f);
@@ -657,11 +667,13 @@ Layer::ComputeEffectiveTransformForMaskLayer(const gfx3DMatrix& aTransformToSurf
   }
 }
 
+#ifdef MOZ_IPC
 void
 ContainerLayer::FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
 {
   aAttrs = ContainerLayerAttributes(GetFrameMetrics(), mPreXScale, mPreYScale);
 }
+#endif
 
 bool
 ContainerLayer::HasMultipleChildren()
@@ -1159,6 +1171,7 @@ LayerManager::IsLogEnabled()
   return PR_LOG_TEST(sLog, PR_LOG_DEBUG);
 }
 
+# ifdef MOZ_IPC
 static nsACString&
 PrintInfo(nsACString& aTo, ShadowLayer* aShadowLayer)
 {
@@ -1176,6 +1189,12 @@ PrintInfo(nsACString& aTo, ShadowLayer* aShadowLayer)
   }
   return aTo;
 }
+# else
+static nsACString& PrintInfo(nsACString& aTo, ShadowLayer* aShadowLayer)
+{
+  return aTo;
+}
+# endif  // MOZ_IPC
 
 #else  // !MOZ_LAYERS_HAVE_LOG
 

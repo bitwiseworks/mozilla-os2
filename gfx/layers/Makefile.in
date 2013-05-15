@@ -15,6 +15,12 @@ VPATH       = \
   $(srcdir)/ipc \
   $(NULL)
 
+ifdef MOZ_IPC
+VPATH		+= \
+  $(srcdir)/opengl \
+  $(NULL)
+endif
+
 include $(DEPTH)/config/autoconf.mk
 
 MODULE         = thebes
@@ -151,12 +157,16 @@ CPPSRCS += \
         ImageBridgeParent.cpp \
         ImageContainerChild.cpp \
         ImageContainerParent.cpp \
+	$(NULL)
+ifdef MOZ_IPC
+CPPSRCS += \
         ShadowLayers.cpp \
         ShadowLayerChild.cpp \
         ShadowLayersChild.cpp \
         ShadowLayerParent.cpp \
         ShadowLayersParent.cpp \
         $(NULL)
+endif
 
 ifdef MOZ_X11 #{
 EXPORTS_mozilla/layers += ShadowLayerUtilsX11.h

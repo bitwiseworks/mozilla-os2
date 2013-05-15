@@ -626,6 +626,7 @@ DumpHeap(JSContext *cx, unsigned argc, jsval *vp)
 
 #endif /* DEBUG */
 
+#ifdef MOZ_IPC
 static JSBool
 SendCommand(JSContext* cx,
             unsigned argc,
@@ -669,6 +670,7 @@ GetChildGlobalObject(JSContext* cx,
     }
     return false;
 }
+#endif // MOZ_IPC
 
 /*
  * JSContext option name to flag map. The option names are in alphabetical
@@ -803,8 +805,10 @@ static JSFunctionSpec glob_functions[] = {
 #ifdef DEBUG
     JS_FS("dumpHeap",        DumpHeap,       5,0),
 #endif
+#ifdef MOZ_IPC
     JS_FS("sendCommand",     SendCommand,    1,0),
     JS_FS("getChildGlobalObject", GetChildGlobalObject, 0,0),
+#endif
     JS_FS_END
 };
 
@@ -1938,8 +1942,10 @@ main(int argc, char **argv, char **envp)
         JS_DestroyContext(cx);
     } // this scopes the nsCOMPtrs
 
+#ifdef MOZ_IPC
     if (!XRE_ShutdownTestShell())
         NS_ERROR("problem shutting down testshell");
+#endif
 
 #ifdef MOZ_CRASHREPORTER
     // Get the crashreporter service while XPCOM is still active.

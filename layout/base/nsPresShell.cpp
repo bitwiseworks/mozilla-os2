@@ -4955,11 +4955,13 @@ void PresShell::UpdateCanvasBackground()
   if (!FrameConstructor()->GetRootElementFrame()) {
     mCanvasBackgroundColor = GetDefaultBackgroundColorToDraw();
   }
+#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     if (TabChild* tabChild = GetTabChildFrom(this)) {
       tabChild->SetBackgroundColor(mCanvasBackgroundColor);
     }
   }
+#endif
 }
 
 nscolor PresShell::ComputeBackstopColor(nsIView* aDisplayRoot)

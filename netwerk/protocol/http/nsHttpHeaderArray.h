@@ -121,7 +121,9 @@ private:
     // All members must be copy-constructable and assignable
     nsTArray<nsEntry> mHeaders;
 
+#ifdef MOZ_IPC
     friend struct IPC::ParamTraits<nsHttpHeaderArray>;
+#endif
 };
 
 

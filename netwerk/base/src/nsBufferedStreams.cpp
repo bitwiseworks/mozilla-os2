@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef MOZ_IPC
 #include "IPC/IPCMessageUtils.h"
+#endif
 
 #include "nsAlgorithm.h"
 #include "nsBufferedStreams.h"
@@ -11,7 +13,9 @@
 #include "nsCRT.h"
 #include "nsNetCID.h"
 #include "nsIClassInfoImpl.h"
+#ifdef MOZ_IPC
 #include "mozilla/ipc/InputStreamUtils.h"
+#endif
 
 #ifdef DEBUG_brendan
 # define METERING

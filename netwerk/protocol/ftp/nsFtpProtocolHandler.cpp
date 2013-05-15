@@ -17,10 +17,10 @@
  *                               use in OS2
  */
 
+#ifdef MOZ_IPC
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/FTPChannelChild.h"
-using namespace mozilla;
-using namespace mozilla::net;
+#endif
 
 #include "nsFtpProtocolHandler.h"
 #include "nsFTPChannel.h"
@@ -103,8 +103,10 @@ NS_IMPL_THREADSAFE_ISUPPORTS4(nsFtpProtocolHandler,
 nsresult
 nsFtpProtocolHandler::Init()
 {
+#ifdef MOZ_IPC
     if (IsNeckoChild())
         NeckoChild::InitNeckoChild();
+#endif
 
     if (mIdleTimeout == -1) {
         nsresult rv;
@@ -220,9 +222,11 @@ nsFtpProtocolHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* proxyInfo,
 {
     NS_ENSURE_ARG_POINTER(uri);
     nsRefPtr<nsBaseChannel> channel;
+#ifdef MOZ_IPC
     if (IsNeckoChild())
         channel = new FTPChannelChild(uri);
     else
+#endif
         channel = new nsFtpChannel(uri, proxyInfo);
 
     nsresult rv = channel->Init();

@@ -221,6 +221,7 @@ public:
   nsIDocument* GetOwnerDoc() const
   { return mOwnerContent ? mOwnerContent->OwnerDoc() : nullptr; }
 
+#ifdef MOZ_IPC
   PBrowserParent* GetRemoteBrowser();
 
   /**
@@ -251,6 +252,8 @@ public:
   {
     mCurrentRemoteFrame = aFrame;
   }
+#endif
+
   nsFrameMessageManager* GetFrameMessageManager() { return mMessageManager; }
 
   mozilla::dom::Element* GetOwnerContent() { return mOwnerContent; }
@@ -291,7 +294,9 @@ private:
 
   void SetOwnerContent(mozilla::dom::Element* aContent);
 
+#ifdef MOZ_IPC
   bool ShouldUseRemoteProcess();
+#endif
 
   /**
    * Is this a frameloader for a bona fide <iframe mozbrowser> or
@@ -367,6 +372,7 @@ private:
   // it may lose the flag.
   bool mNetworkCreated : 1;
 
+#ifdef MOZ_IPC
   bool mDelayRemoteDialogs : 1;
   bool mRemoteBrowserShown : 1;
   bool mRemoteFrame : 1;
@@ -378,6 +384,7 @@ private:
   nsCOMPtr<nsIObserver> mChildHost;
   RenderFrameParent* mCurrentRemoteFrame;
   TabParent* mRemoteBrowser;
+#endif
 
   // See nsIFrameLoader.idl.  Short story, if !(mRenderMode &
   // RENDER_MODE_ASYNC_SCROLL), all the fields below are ignored in

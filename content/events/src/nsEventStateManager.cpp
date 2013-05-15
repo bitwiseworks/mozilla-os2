@@ -1140,8 +1140,10 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     break;
   case NS_QUERY_TEXT_CONTENT:
     {
+#ifdef MOZ_IPC
       if (RemoteQueryContentEvent(aEvent))
         break;
+#endif
       nsContentEventHandler handler(mPresContext);
       handler.OnQueryTextContent((nsQueryContentEvent*)aEvent);
     }
@@ -1197,6 +1199,7 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     break;
   case NS_SELECTION_SET:
     {
+#ifdef MOZ_IPC
       nsSelectionEvent *selectionEvent =
           static_cast<nsSelectionEvent*>(aEvent);
       if (IsTargetCrossProcess(selectionEvent)) {
@@ -1205,6 +1208,7 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
           selectionEvent->mSucceeded = true;
         break;
       }
+#endif
       nsContentEventHandler handler(mPresContext);
       handler.OnSelectionEvent((nsSelectionEvent*)aEvent);
     }
@@ -1225,6 +1229,7 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       DoContentCommandScrollEvent(static_cast<nsContentCommandEvent*>(aEvent));
     }
     break;
+#ifdef MOZ_IPC
   case NS_TEXT_TEXT:
     {
       nsTextEvent *textEvent = static_cast<nsTextEvent*>(aEvent);
@@ -1264,6 +1269,7 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       }
     }
     break;
+#endif // MOZ_IPC
   }
   return NS_OK;
 }
@@ -1515,6 +1521,7 @@ nsEventStateManager::HandleAccessKey(nsPresContext* aPresContext,
   }// if end. bubble up process
 }// end of HandleAccessKey
 
+#ifdef MOZ_IPC
 bool
 nsEventStateManager::DispatchCrossProcessEvent(nsEvent* aEvent,
                                                nsFrameLoader* aFrameLoader,
@@ -1724,6 +1731,7 @@ nsEventStateManager::HandleCrossProcessEvent(nsEvent *aEvent,
   }
   return dispatched;
 }
+#endif
 
 //
 // CreateClickHoldTimer
@@ -3046,7 +3054,9 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
   NS_ENSURE_ARG(aPresContext);
   NS_ENSURE_ARG_POINTER(aStatus);
 
+#ifdef MOZ_IPC
   HandleCrossProcessEvent(aEvent, aTargetFrame, aStatus);
+#endif
 
   mCurrentTarget = aTargetFrame;
   mCurrentTargetContent = nullptr;
@@ -3491,6 +3501,7 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
   return ret;
 }
 
+#ifdef MOZ_IPC
 bool
 nsEventStateManager::RemoteQueryContentEvent(nsEvent *aEvent)
 {
@@ -3520,6 +3531,7 @@ nsEventStateManager::IsTargetCrossProcess(nsGUIEvent *aEvent)
     return false;
   return TabParent::GetIMETabParent() != nullptr;
 }
+#endif
 
 void
 nsEventStateManager::NotifyDestroyPresContext(nsPresContext* aPresContext)
@@ -3553,9 +3565,11 @@ nsEventStateManager::UpdateCursor(nsPresContext* aPresContext,
                                   nsEvent* aEvent, nsIFrame* aTargetFrame,
                                   nsEventStatus* aStatus)
 {
+#ifdef MOZ_IPC
   if (aTargetFrame && IsRemoteTarget(aTargetFrame->GetContent())) {
     return;
   }
+#endif
 
   int32_t cursor = NS_STYLE_CURSOR_DEFAULT;
   imgIContainer* container = nullptr;
@@ -5036,9 +5050,11 @@ nsEventStateManager::DoContentCommandScrollEvent(nsContentCommandEvent* aEvent)
 void
 nsEventStateManager::DoQuerySelectedText(nsQueryContentEvent* aEvent)
 {
+#ifdef MOZ_IPC
   if (RemoteQueryContentEvent(aEvent)) {
     return;
   }
+#endif
   nsContentEventHandler handler(mPresContext);
   handler.OnQuerySelectedText(aEvent);
 }

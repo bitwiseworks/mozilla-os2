@@ -39,8 +39,10 @@ public:
   void Init(nsPIDOMWindow *aWindow);
   void Shutdown();
 
+#ifdef MOZ_IPC
   // For IObserver.
   void Notify(const hal::BatteryInformation& aBatteryInfo);
+#endif
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(BatteryManager,
                                            nsDOMEventTargetHelper)

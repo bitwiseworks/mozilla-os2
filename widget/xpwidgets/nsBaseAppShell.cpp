@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef MOZ_IPC
 #include "base/message_loop.h"
+#endif
 
 #include "nsBaseAppShell.h"
 #include "nsThreadUtils.h"
@@ -160,7 +162,12 @@ nsBaseAppShell::Run(void)
 
   nsIThread *thread = NS_GetCurrentThread();
 
+#ifdef MOZ_IPC
   MessageLoop::current()->Run();
+#else
+  while (!mExiting)
+    NS_ProcessNextEvent(thread);
+#endif
 
   NS_ProcessPendingEvents(thread);
 
@@ -171,9 +178,11 @@ nsBaseAppShell::Run(void)
 NS_IMETHODIMP
 nsBaseAppShell::Exit(void)
 {
+#ifdef MOZ_IPC
   if (mRunning && !mExiting) {
     MessageLoop::current()->Quit();
   }
+#endif
   mExiting = true;
   return NS_OK;
 }

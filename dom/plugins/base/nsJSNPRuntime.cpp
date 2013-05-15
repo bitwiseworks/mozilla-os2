@@ -31,9 +31,11 @@
 using namespace mozilla::plugins::parent;
 using namespace mozilla;
 
+#ifdef MOZ_IPC
 #include "mozilla/plugins/PluginScriptableObjectParent.h"
 using mozilla::plugins::PluginScriptableObjectParent;
 using mozilla::plugins::ParentNPObject;
+#endif
 
 // Hash of JSObject wrappers that wraps JSObjects as NPObjects. There
 // will be one wrapper per JSObject per plugin instance, i.e. if two
@@ -67,7 +69,11 @@ namespace {
 inline bool
 NPObjectIsOutOfProcessProxy(NPObject *obj)
 {
+#ifdef MOZ_IPC
   return obj->_class == PluginScriptableObjectParent::GetClass();
+#else
+  return false;
+#endif
 }
 
 } // anonymous namespace
@@ -1323,6 +1329,7 @@ NPObjWrapper_GetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSMut
 
   NPIdentifier identifier = JSIdToNPIdentifier(id);
 
+#ifdef MOZ_IPC
   if (NPObjectIsOutOfProcessProxy(npobj)) {
     PluginScriptableObjectParent* actor =
       static_cast<ParentNPObject*>(npobj)->parent;
@@ -1354,6 +1361,7 @@ NPObjWrapper_GetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSMut
     }
     return JS_TRUE;
   }
+#endif
 
   hasProperty = npobj->_class->hasProperty(npobj, identifier);
   if (!ReportExceptionIfPending(cx))

@@ -1044,7 +1044,9 @@ Navigator::GetBattery(nsIDOMBatteryManager** aBattery)
     nsCOMPtr<nsPIDOMWindow> win(do_QueryReferent(mWindow));
     NS_ENSURE_TRUE(win && win->GetDocShell(), NS_OK);
 
+#ifdef MOZ_IPC
     mBatteryManager = new battery::BatteryManager();
+#endif
     mBatteryManager->Init(win);
   }
 

@@ -61,7 +61,9 @@
 //-----------------------------------------------------------------------------
 using namespace mozilla;
 using namespace mozilla::net;
+#ifdef MOZ_IPC
 #include "mozilla/net/HttpChannelChild.h"
+#endif
 
 #include "mozilla/FunctionTimer.h"
 
@@ -226,8 +228,10 @@ nsHttpHandler::Init()
         return rv;
     }
 
+#ifdef MOZ_IPC
     if (IsNeckoChild())
         NeckoChild::InitNeckoChild();
+#endif
 
     InitUserAgentComponents();
 
@@ -1442,9 +1446,12 @@ nsHttpHandler::NewProxiedChannel(nsIURI *uri,
     if (NS_FAILED(rv))
         return rv;
 
+#ifdef MOZ_IPC
     if (IsNeckoChild()) {
         httpChannel = new HttpChannelChild();
-    } else {
+    } else
+#endif
+    {
         httpChannel = new nsHttpChannel();
     }
 
@@ -1461,7 +1468,10 @@ nsHttpHandler::NewProxiedChannel(nsIURI *uri,
         if (mPipeliningOverSSL)
             caps |= NS_HTTP_ALLOW_PIPELINING;
 
-        if (!IsNeckoChild()) {
+#ifdef MOZ_IPC
+        if (!IsNeckoChild())
+#endif
+        {
             // HACK: make sure PSM gets initialized on the main thread.
             net_EnsurePSMInit();
         }
@@ -1608,7 +1618,10 @@ nsHttpHandler::SpeculativeConnect(nsIURI *aURI,
     // If this is HTTPS, make sure PSM is initialized as the channel
     // creation path may have been bypassed
     if (scheme.EqualsLiteral("https")) {
-        if (!IsNeckoChild()) {
+#ifdef MOZ_IPc
+        if (!IsNeckoChild())
+#endif
+        {
             // make sure PSM gets initialized on the main thread.
             net_EnsurePSMInit();
         }

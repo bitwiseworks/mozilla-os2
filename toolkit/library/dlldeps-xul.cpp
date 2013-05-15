@@ -18,9 +18,11 @@ void xxxNeverCalledXUL()
   XRE_ChildProcessTypeToString(GeckoProcessType_Default);
   XRE_StringToChildProcessType("");
   XRE_GetProcessType();
+#ifdef MOZ_IPC
   XRE_InitChildProcess(0, nullptr, GeckoProcessType_Default);
   XRE_InitParentProcess(0, nullptr, nullptr, nullptr);
   XRE_RunAppShell();
   XRE_ShutdownChildProcess();
   XRE_SendTestShellCommand(nullptr, nullptr, nullptr);
+#endif
 }

@@ -863,7 +863,9 @@ void nsBaseWidget::CreateCompositor()
   AsyncChannel::Side childSide = mozilla::ipc::AsyncChannel::Child;
   mCompositorChild->Open(parentChannel, childMessageLoop, childSide);
   int32_t maxTextureSize;
+#ifdef MOZ_IPC
   PLayersChild* shadowManager;
+#endif
   mozilla::layers::LayersBackend backendHint =
     mUseAcceleratedRendering ? mozilla::layers::LAYERS_OPENGL : mozilla::layers::LAYERS_BASIC;
   mozilla::layers::LayersBackend parentBackend;
@@ -947,7 +949,11 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayersChild* aShadowManager,
 
 BasicLayerManager* nsBaseWidget::CreateBasicLayerManager()
 {
+#if !defined(MOZ_IPC)
+      return new BasicLayerManager(this);
+#else
       return new BasicShadowLayerManager(this);
+#endif
 }
 
 //-------------------------------------------------------------------------

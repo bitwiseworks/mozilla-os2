@@ -282,6 +282,7 @@ Preferences::Init()
   rv = pref_InitInitialObjects();
   NS_ENSURE_SUCCESS(rv, rv);
 
+#ifdef MOZ_IPC
   using mozilla::dom::ContentChild;
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     InfallibleTArray<PrefSetting> prefs;
@@ -293,6 +294,7 @@ Preferences::Init()
     }
     return NS_OK;
   }
+#endif
 
   nsXPIDLCString lockFileName;
   /*
@@ -333,8 +335,10 @@ NS_IMETHODIMP
 Preferences::Observe(nsISupports *aSubject, const char *aTopic,
                      const PRUnichar *someData)
 {
+#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content)
     return NS_ERROR_NOT_AVAILABLE;
+#endif
 
   nsresult rv = NS_OK;
 
@@ -360,10 +364,12 @@ Preferences::Observe(nsISupports *aSubject, const char *aTopic,
 NS_IMETHODIMP
 Preferences::ReadUserPrefs(nsIFile *aFile)
 {
+#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     NS_ERROR("cannot load prefs from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
+#endif
 
   nsresult rv;
 
@@ -384,10 +390,12 @@ Preferences::ReadUserPrefs(nsIFile *aFile)
 NS_IMETHODIMP
 Preferences::ResetPrefs()
 {
+#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     NS_ERROR("cannot set prefs from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
+#endif
 
   NotifyServiceObservers(NS_PREFSERVICE_RESET_TOPIC_ID);
   PREF_CleanupPrefs();
@@ -401,10 +409,12 @@ Preferences::ResetPrefs()
 NS_IMETHODIMP
 Preferences::ResetUserPrefs()
 {
+#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     NS_ERROR("cannot set prefs from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
+#endif
 
   PREF_ClearAllUserPrefs();
   return NS_OK;    
@@ -413,10 +423,12 @@ Preferences::ResetUserPrefs()
 NS_IMETHODIMP
 Preferences::SavePrefFile(nsIFile *aFile)
 {
+#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     NS_ERROR("cannot save prefs from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
+#endif
 
   return SavePrefFileInternal(aFile);
 }

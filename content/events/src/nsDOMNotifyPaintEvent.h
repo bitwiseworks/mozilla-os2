@@ -31,8 +31,10 @@ public:
   {
     return nsDOMEvent::DuplicatePrivateData();
   }
+#ifdef MOZ_IPC
   NS_IMETHOD_(void) Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType);
   NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg, void** aIter);
+#endif
 private:
   nsRegion GetRegion();
 

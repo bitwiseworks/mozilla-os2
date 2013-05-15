@@ -25,10 +25,12 @@ EXPORTS_mozilla/jsipc = \
   ObjectWrapperChild.h \
   $(NULL)
 
+ifdef MOZ_IPC
 CPPSRCS = \
   ObjectWrapperParent.cpp \
   ObjectWrapperChild.cpp \
   $(NULL)
+endif
 
 # For nsDependentJSString
 LOCAL_INCLUDES += \

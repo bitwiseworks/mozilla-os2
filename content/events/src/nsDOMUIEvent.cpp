@@ -389,6 +389,7 @@ nsDOMUIEvent::DuplicatePrivateData()
   return rv;
 }
 
+#ifdef MOZ_IPC
 NS_IMETHODIMP_(void)
 nsDOMUIEvent::Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType)
 {
@@ -410,6 +411,7 @@ nsDOMUIEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
   NS_ENSURE_TRUE(IPC::ReadParam(aMsg, aIter, &mDetail), false);
   return true;
 }
+#endif
 
 // XXX Following struct and array are used only in
 //     nsDOMUIEvent::ComputeModifierState(), but if we define them in it,

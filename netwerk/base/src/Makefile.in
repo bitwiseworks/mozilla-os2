@@ -62,10 +62,13 @@ CPPSRCS		= \
 		nsBase64Encoder.cpp \
 		nsSerializationHelper.cpp \
 		nsDNSPrefetch.cpp \
-		RedirectChannelRegistrar.cpp \
 		nsPreloadedStream.cpp \
 		nsStreamListenerWrapper.cpp \
 		$(NULL)
+
+ifdef MOZ_IPC
+	CPPSRCS += RedirectChannelRegistrar.cpp
+endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
 	CPPSRCS += nsURLHelperOS2.cpp

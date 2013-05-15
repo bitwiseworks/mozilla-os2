@@ -1608,7 +1608,9 @@ nsGfxScrollFrameInner::nsGfxScrollFrameInner(nsContainerFrame* aOuter,
   , mMayHaveDirtyFixedChildren(false)
   , mUpdateScrollbarAttributes(false)
   , mCollapsedResizer(false)
+#ifdef MOZ_IPC
   , mShouldBuildLayer(false)
+#endif
 {
   mScrollingActive = IsAlwaysActive();
 
@@ -2163,9 +2165,14 @@ nsGfxScrollFrameInner::AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
 bool
 nsGfxScrollFrameInner::ShouldBuildLayer() const
 {
+#ifdef MOZ_IPC
   return mShouldBuildLayer;
+#else
+  return false;
+#endif
 }
 
+#ifdef MOZ_IPC
 class ScrollLayerWrapper : public nsDisplayWrapper
 {
 public:
@@ -2202,6 +2209,7 @@ protected:
   nsIFrame* mScrollFrame;
   nsIFrame* mScrolledFrame;
 };
+#endif
 
 nsresult
 nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
@@ -2271,6 +2279,7 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   rv = mOuter->BuildDisplayListForChild(aBuilder, mScrolledFrame, dirtyRect, set);
   NS_ENSURE_SUCCESS(rv, rv);
 
+#ifdef MOZ_IPC
   // Since making new layers is expensive, only use nsDisplayScrollLayer
   // if the area is scrollable and we're the content process.
   // When a displayport is being used, force building of a layer so that
@@ -2330,6 +2339,7 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       aBuilder, mScrolledFrame, mOuter);
     aLists.BorderBackground()->AppendNewToBottom(layerItem);
   }
+#endif
 
   // Now display overlay scrollbars and the resizer, if we have one.
   AppendScrollPartsTo(aBuilder, aDirtyRect, aLists, createLayersForScrollbars,

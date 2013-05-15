@@ -82,6 +82,7 @@ nsDOMScrollAreaEvent::InitScrollAreaEvent(const nsAString &aEventType,
   return NS_OK;
 }
 
+#ifdef MOZ_IPC
 NS_IMETHODIMP_(void)
 nsDOMScrollAreaEvent::Serialize(IPC::Message* aMsg,
                                 bool aSerializeInterfaceType)
@@ -117,6 +118,7 @@ nsDOMScrollAreaEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
 
   return true;
 }
+#endif
 
 nsresult
 NS_NewDOMScrollAreaEvent(nsIDOMEvent **aInstancePtrResult,

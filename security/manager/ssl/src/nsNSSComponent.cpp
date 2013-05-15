@@ -245,6 +245,7 @@ bool EnsureNSSInitialized(EnsureNSSOperator op)
   if (nsPSMInitPanic::GetPanic())
     return false;
 
+#ifdef MOZ_IPC
   if (GeckoProcessType_Default != XRE_GetProcessType())
   {
     if (op == nssEnsureOnChromeOnly)
@@ -259,6 +260,7 @@ bool EnsureNSSInitialized(EnsureNSSOperator op)
     NS_ERROR("Trying to initialize PSM/NSS in a non-chrome process!");
     return false;
   }
+#endif
 
   static bool loading = false;
   static int32_t haveLoaded = 0;

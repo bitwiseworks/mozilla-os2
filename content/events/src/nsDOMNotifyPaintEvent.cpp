@@ -116,6 +116,7 @@ nsDOMNotifyPaintEvent::GetPaintRequests(nsIDOMPaintRequestList** aResult)
   return NS_OK;
 }
 
+#ifdef MOZ_IPC
 NS_IMETHODIMP_(void)
 nsDOMNotifyPaintEvent::Serialize(IPC::Message* aMsg,
                                  bool aSerializeInterfaceType)
@@ -157,6 +158,7 @@ nsDOMNotifyPaintEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
 
   return true;
 }
+#endif
 
 nsresult NS_NewDOMNotifyPaintEvent(nsIDOMEvent** aInstancePtrResult,
                                    nsPresContext* aPresContext,

@@ -5,9 +5,11 @@
 #ifndef nsGeoLocation_h
 #define nsGeoLocation_h
 
+#ifdef MOZ_IPC
 #include "mozilla/dom/PContentPermissionRequestChild.h"
 // Microsoft's API Name hackery sucks
 #undef CreateEvent
+#endif
 
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
@@ -32,7 +34,9 @@
 #include "nsIGeolocationProvider.h"
 #include "nsIContentPermissionPrompt.h"
 #include "DictionaryHelpers.h"
+#ifdef MOZ_IPC
 #include "PCOMContentPermissionRequestChild.h"
+#endif
 #include "mozilla/Attributes.h"
 
 class nsGeolocationService;
@@ -41,7 +45,9 @@ class nsGeolocation;
 class nsGeolocationRequest
  : public nsIContentPermissionRequest
  , public nsITimerCallback
+#ifdef MOZ_IPC
  , public PCOMContentPermissionRequestChild
+#endif
 {
  public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -68,8 +74,10 @@ class nsGeolocationRequest
 
   ~nsGeolocationRequest();
 
+#ifdef MOZ_IPC
   bool Recv__delete__(const bool& allow);
   void IPDLRelease() { Release(); }
+#endif
 
  private:
 
