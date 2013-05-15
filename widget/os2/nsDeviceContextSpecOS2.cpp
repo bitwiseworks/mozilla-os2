@@ -50,6 +50,24 @@ using namespace mozilla;
             "chrome://global/locale/printing.properties"
 
 //---------------------------------------------------------------------------
+
+#define DEBUG
+#define debug_thebes_print
+#define debug_enterexit
+
+#ifdef debug_enterexit
+  #define DBGN()    printf("enter %s\n", __FUNCTION__)
+  #define DBGX()    printf("exit  %s\n", __FUNCTION__)
+  #define DBGNX()   printf("en/ex %s\n", __FUNCTION__)
+  #define DBGM(m)   printf("%s - %s\n", __FUNCTION__, m)
+#else
+  #define DBGN()
+  #define DBGX()
+  #define DBGNX()
+  #define DBGM(m)
+#endif
+
+//---------------------------------------------------------------------------
 //  Static Functions
 //---------------------------------------------------------------------------
 
@@ -87,7 +105,10 @@ public:
   os2NullOutputStream();
 
 private:
-  ~os2NullOutputStream()  { }
+  ~os2NullOutputStream()  { DBGNX(); }
+#ifdef debug_enterexit
+  int32_t   mWrites;
+#endif
 };
 
 //---------------------------------------------------------------------------
@@ -109,10 +130,13 @@ public:
   void      IncPageCount()  { mPages++; }
 
 private:
-  ~os2SpoolerStream()       { }
+  ~os2SpoolerStream()       { DBGNX(); }
 
   HSPL      mSpl;
   uint32_t  mPages;
+#ifdef debug_enterexit
+  int32_t   mWrites;
+#endif
 };
 
 //---------------------------------------------------------------------------
@@ -123,10 +147,13 @@ nsDeviceContextSpecOS2::nsDeviceContextSpecOS2()
   : mQueue(nullptr), mPrintDC(nullptr), mPrintingStarted(false), mPages(0),
     mXPixels(1), mYPixels(1), mXDpi(-1), mYDpi(-1)
 {
+  DBGNX();
 }
 
 nsDeviceContextSpecOS2::~nsDeviceContextSpecOS2()
 {
+  DBGNX();
+
   if (mQueue)
     delete mQueue;
 }
@@ -139,6 +166,8 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::Init(nsIWidget *aWidget,
                                            nsIPrintSettings* aPrintSettings,
                                            bool aIsPrintPreview)
 {
+  DBGN();
+
   NS_ENSURE_ARG_POINTER(aPrintSettings);
   mPrintSettings = aPrintSettings;
 
@@ -147,8 +176,10 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::Init(nsIWidget *aWidget,
   NS_ENSURE_TRUE(!printerName.IsEmpty(), NS_ERROR_FAILURE);
 
   int32_t printerNdx = sPrinterList.GetPrinterIndex(printerName);
-  if (printerNdx < 0)
+  if (printerNdx < 0) {
+    DBGM("GetPrinterIndex failed");
     return NS_ERROR_FAILURE;
+  }
 
   // Set dynamic job properties (orientation, nbr of copies).
   mPrintSettings->GetNumCopies(&mCopies);
@@ -157,15 +188,19 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::Init(nsIWidget *aWidget,
 
   // Get a device context we can query.
   HDC hdc = sPrinterList.OpenHDC(printerNdx);
-  if (!hdc)
+  if (!hdc) {
+    DBGM("OpenHDC failed");
     return NS_ERROR_FAILURE;
+  }
 
   // Get paper's size and unprintable margins.
   // This should be settable in SetPrintSettingsFromDevMode() but
   // UnwriteableMargin gets reset to zero by the time it is used.
   HCINFO  hci;
-  if (!PrnQueryHardcopyCaps(hdc, &hci))
+  if (!PrnQueryHardcopyCaps(hdc, &hci)) {
+    DBGM("PrnQueryHardcopyCaps failed");
     return NS_ERROR_FAILURE;
+  }
 
   mPrintSettings->SetPaperWidth(double(hci.cx / 25.4));
   mPrintSettings->SetPaperHeight(double(hci.cy / 25.4));
@@ -262,6 +297,28 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::Init(nsIWidget *aWidget,
   // of the os2PrintQ object we're going to use.
   mQueue = sPrinterList.ClonePrintQ(printerNdx);
 
+#ifdef debug_thebes_print
+  if (outputFormat == nsIPrintSettings::kOutputFormatNative)
+    printf("Init - format= Native  dest= %s\n",
+           (mDestination == printToPrinter ? "Printer" :
+            (mDestination == printPreview ?  "Preview" :
+             NS_LossyConvertUTF16toASCII(fileName).get())));
+  else
+    printf("Init - format= %s  dest= %s\n",
+           (outputFormat == nsIPrintSettings::kOutputFormatPS ? "PS" : "PDF"),
+           (mDestination == printToPrinter ? "Printer" :
+            (mDestination == printPreview ?  "Preview" :
+             NS_LossyConvertUTF16toASCII(fileName).get())));
+
+  printf("Page size =  %.2f x %.2f twips - %d x %d pixels\n"
+         "Margins   =  lt= %d  rt= %d  tp= %d  bt= %d twips\n",
+         NS_MILLIMETERS_TO_TWIPS(hci.cx),
+         NS_MILLIMETERS_TO_TWIPS(hci.cy),
+         mXPixels, mYPixels,
+         margin.left, margin.right, margin.top, margin.bottom);
+#endif
+
+  DBGX();
   return NS_OK;
 }
 
@@ -277,7 +334,7 @@ int16_t nsDeviceContextSpecOS2::AdjustDestinationForFormat(int16_t aFormat,
   }
 
   // Determine whether to use the native or builtin PS generator
-  bool useBuiltinPS; 
+  bool useBuiltinPS;
       if (!NS_SUCCEEDED(Preferences::GetBool(kOS2UseBuiltinPS, &useBuiltinPS)))
     Preferences::SetBool(kOS2UseBuiltinPS, false);
 
@@ -412,9 +469,17 @@ nsresult  GetFileNameForPrintSettings(nsIPrintSettings* aPS,
 
 NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface)
 {
+  DBGN();
   NS_ENSURE_ARG_POINTER(mQueue);
 
   *surface = nullptr;
+
+#ifdef debug_thebes_print
+  printf("GetSurface - Driver= %s  Device= %s\n  "
+         "Printer= %s  QName= %s  QTitle= %s\n",
+         mQueue->DriverName(), mQueue->DeviceName(),
+         mQueue->PrinterName(), mQueue->QueueName(), mQueue->QueueTitle());
+#endif
 
   int16_t outputFormat;
   mPrintSettings->GetOutputFormat(&outputFormat);
@@ -486,12 +551,15 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
                     (mDestination == printPreview));
   }
 
-  if (!newSurface)
+  if (!newSurface) {
+    DBGM("new gfxOS2Surface failed");
     return NS_ERROR_FAILURE;
+  }
 
   *surface = newSurface;
   NS_ADDREF(*surface);
 
+  DBGX();
   return NS_OK;
 }
 
@@ -500,6 +568,8 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
 nsresult nsDeviceContextSpecOS2::CreateStreamForFormat(int16_t aFormat,
                                                        nsIOutputStream **aStream)
 {
+  DBGN();
+
   nsresult rv;
 
   // This function only works for PS and PDF surfaces
@@ -563,6 +633,8 @@ nsresult nsDeviceContextSpecOS2::CreateStreamForFormat(int16_t aFormat,
   *aStream = stream;
   NS_ADDREF(*aStream);
 
+  DBGX();
+
   return rv;
 }
 
@@ -592,6 +664,15 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(PRUnichar* aTitle,
                                                     int32_t aStartPage,
                                                     int32_t aEndPage)
 {
+  DBGN();
+
+#ifdef debug_thebes_print
+  printf("BeginDoc - tile= %s  file= %s  fromPg= %d  toPg= %d\n",
+         NS_LossyConvertUTF16toASCII(nsString(aTitle)).get(),
+         NS_LossyConvertUTF16toASCII(nsString(aPrintToFileName)).get(),
+         aStartPage, aEndPage);
+#endif
+
   if (mSpoolerStream) {
     if (aTitle) {
       char *title = GetACPString(aTitle);
@@ -620,6 +701,8 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(PRUnichar* aTitle,
     nsMemory::Free(title);
   }
 
+  DBGX();
+
   return lResult == DEV_OK ? NS_OK : NS_ERROR_GFX_PRINTER_STARTDOC;
 }
 
@@ -627,6 +710,8 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(PRUnichar* aTitle,
 
 NS_IMETHODIMP nsDeviceContextSpecOS2::EndDocument()
 {
+  DBGN();
+
   // don't try to send device escapes for non-native output (like PDF) but
   // clear the filename to make sure that we don't overwrite it next time
   int16_t outputFormat;
@@ -641,6 +726,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::EndDocument()
     if (pss)
       pss->SavePrintSettingsToPrefs(mPrintSettings, true,
                                     nsIPrintSettings::kInitSaveToFileName);
+    DBGX();
     return NS_OK;
   }
 
@@ -649,6 +735,8 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::EndDocument()
   LONG   lResult = DevEscape(mPrintDC, DEVESC_ENDDOC, 0, 0,
                              &lOutCount, (PBYTE)&usJobID);
 
+  DBGX();
+
   return lResult == DEV_OK ? NS_OK : NS_ERROR_GFX_PRINTER_ENDDOC;
 }
 
@@ -656,23 +744,32 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::EndDocument()
 
 NS_IMETHODIMP nsDeviceContextSpecOS2::BeginPage()
 {
+  DBGN();
+
   mPages++;
   if (mSpoolerStream)
     mSpoolerStream->IncPageCount();
+#ifdef debug_thebes_print
+  printf("BeginPage - nbr= %d\n", mPages);
+#endif
 
   int16_t outputFormat;
   mPrintSettings->GetOutputFormat(&outputFormat);
-  if (outputFormat != nsIPrintSettings::kOutputFormatNative)
+  if (outputFormat != nsIPrintSettings::kOutputFormatNative) {
+    DBGX();
     return NS_OK;
+  }
 
   if (mPrintingStarted) {
     // we don't want an extra page break at the start of the document
     mPrintingStarted = false;
+    DBGX();
     return NS_OK;
   }
 
   LONG lResult = DevEscape(mPrintDC, DEVESC_NEWFRAME, 0, 0, 0, 0);
 
+  DBGX();
   return lResult == DEV_OK ? NS_OK : NS_ERROR_GFX_PRINTER_STARTPAGE;
 }
 
@@ -680,6 +777,8 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginPage()
 
 NS_IMETHODIMP nsDeviceContextSpecOS2::EndPage()
 {
+  DBGNX();
+
   return NS_OK;
 }
 
@@ -741,9 +840,9 @@ nsresult nsDeviceContextSpecOS2::SetPrintSettingsFromDevMode(
       pDJP = DJP_NEXT_STRUCTP(pDJP);
     }
   }
-  
+
   delete [] pDJP_Buffer;
-  DevCloseDC(hdc);  
+  DevCloseDC(hdc);
 
   return NS_OK;
 }
@@ -809,10 +908,12 @@ void  SetDevModeFromSettings(ULONG printer, nsIPrintSettings* aPrintSettings)
 
 nsPrinterEnumeratorOS2::nsPrinterEnumeratorOS2()
 {
+DBGNX();
 }
 
 nsPrinterEnumeratorOS2::~nsPrinterEnumeratorOS2()
 {
+DBGNX();
 }
 
 NS_IMPL_ISUPPORTS1(nsPrinterEnumeratorOS2, nsIPrinterEnumerator)
@@ -855,7 +956,7 @@ NS_IMETHODIMP nsPrinterEnumeratorOS2::InitPrintSettingsFromPrinter(
   NS_ENSURE_ARG_POINTER(aPrinterName);
   NS_ENSURE_ARG_POINTER(aPrintSettings);
 
-  if (!*aPrinterName) 
+  if (!*aPrinterName)
     return NS_OK;
 
   int32_t index = sPrinterList.GetPrinterIndex(aPrinterName);
@@ -893,21 +994,33 @@ NS_IMPL_ISUPPORTS1(os2NullOutputStream, nsIOutputStream)
 
 os2NullOutputStream::os2NullOutputStream()
 {
+  DBGNX();
+#ifdef debug_enterexit
+  mWrites = 0;
+#endif
 }
 
 NS_IMETHODIMP os2NullOutputStream::Close()
 {
+  DBGNX();
   return NS_OK;
 }
 
 NS_IMETHODIMP os2NullOutputStream::Flush()
 {
+  DBGNX();
   return NS_OK;
 }
 
 NS_IMETHODIMP os2NullOutputStream::Write(const char *aBuf, uint32_t aCount,
                                          uint32_t *_retval NS_OUTPARAM)
 {
+#ifdef debug_enterexit
+  if (!mWrites) {
+    mWrites++;
+    DBGNX();
+  }
+#endif
     *_retval = aCount;
     return NS_OK;
 }
@@ -916,6 +1029,7 @@ NS_IMETHODIMP os2NullOutputStream::WriteFrom(nsIInputStream *aFromStream,
                                              uint32_t aCount,
                                              uint32_t *_retval NS_OUTPARAM)
 {
+    DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -923,11 +1037,13 @@ NS_IMETHODIMP os2NullOutputStream::WriteSegments(nsReadSegmentFun aReader,
                                                  void *aClosure, uint32_t aCount,
                                                  uint32_t *_retval NS_OUTPARAM)
 {
+    DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP os2NullOutputStream::IsNonBlocking(bool *_retval NS_OUTPARAM)
 {
+    DBGNX();
     *_retval = true;
     return NS_OK;
 }
@@ -941,10 +1057,16 @@ NS_IMPL_ISUPPORTS1(os2SpoolerStream, nsIOutputStream)
 os2SpoolerStream::os2SpoolerStream()
   : mSpl(0), mPages(0)
 {
+  DBGNX();
+#ifdef debug_enterexit
+  mWrites = 0;
+#endif
 }
 
 nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
 {
+  DBGN();
+
   ULONG   rc;
   ULONG   ulSize = 0;
 
@@ -963,28 +1085,39 @@ nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
   if (useIbmNull) {
     // Get a PRDINFO3 for this printer and save its list of associated drivers.
     rc = SplQueryDevice("", aQueue->PrinterName(), 3, 0, 0, &ulSize);
-    if (rc && rc != NERR_BufTooSmall)
+    if (rc && rc != NERR_BufTooSmall) {
+#ifdef debug_thebes_print
+      printf("SplQueryDevice for bufsize failed - rc= %ld\n", rc);
+#endif
       return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
-  
+    }
+
     PRDINFO3 * pInfo = (PRDINFO3*)malloc(ulSize);
     NS_ENSURE_TRUE(pInfo, NS_ERROR_OUT_OF_MEMORY);
-  
+
     rc = SplQueryDevice("", aQueue->PrinterName(), 3, pInfo, ulSize, &ulSize);
     if (rc) {
       free(pInfo);
+#ifdef debug_thebes_print
+      printf("SplQueryDevice failed - rc= %ld\n", rc);
+#endif
       return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
     }
-  
+
     nsCString drivers(pInfo->pszDrivers);
     free(pInfo);
-  
+
     // If the list doesn't include IBMNULL, add it.
     if (!FindInReadable(NS_LITERAL_CSTRING("IBMNULL"), drivers)) {
       drivers.AppendLiteral(",IBMNULL");
       rc = SplSetDevice("", aQueue->PrinterName(), 3, (void*)drivers.get(),
                         drivers.Length() + 1, PRD_DRIVERS_PARMNUM);
-      if (rc)
+      if (rc) {
+#ifdef debug_thebes_print
+        printf("SplSetDevice failed - rc= %ld\n", rc);
+#endif
         return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
+      }
     }
   }
 
@@ -1000,52 +1133,96 @@ nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
     pData->pdriv         = aQueue->DriverData();
   }
 
+#ifdef debug_thebes_print
+  printf("os2SpoolerStream will use '%s' - pdriv= %lx\n",
+         pData->pszDriverName, (ULONG)pData->pdriv);
+#endif
+
   mSpl = SplQmOpen("*", 5L, (PQMOPENDATA)pData);
   free(pData);
-  if (!mSpl)
+  if (!mSpl) {
+#ifdef debug_thebes_print
+    printf("SplQmOpen failed\n");
+#endif
     return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
+  }
+
+  DBGX();
 
   return NS_OK;
 }
 
 nsresult os2SpoolerStream::BeginDocument(const char* aTitle)
 {
+  DBGN();
+
   // tag print job with app title
   if (!SplQmStartDoc(mSpl, aTitle)) {
+#ifdef debug_thebes_print
+    printf("SplQmStartDoc failed\n");
+#endif
     SplQmAbort(mSpl);
     return NS_ERROR_GFX_PRINTER_STARTDOC;
   }
 
   if (!SplQmNewPage(mSpl, 1)) {
+#ifdef debug_thebes_print
+    printf("SplQmNewPage failed\n");
+#endif
     SplQmAbort(mSpl);
     return NS_ERROR_GFX_PRINTER_STARTDOC;
   }
+
+  DBGX();
 
   return NS_OK;
 }
 
 NS_IMETHODIMP os2SpoolerStream::Close()
 {
-  SplQmNewPage(mSpl, mPages);
+  DBGN();
 
-  if (SplQmEndDoc(mSpl) == SPL_ERROR) {
+  BOOL rc = SplQmNewPage(mSpl, mPages);
+#ifdef debug_thebes_print
+  if (!rc) {
+    printf("SplQmNewPage failed setting page count - continuing\n");
+  }
+#endif
+
+  ULONG ulJobID = SplQmEndDoc(mSpl);
+  if (ulJobID == SPL_ERROR) {
+#ifdef debug_thebes_print
+    printf("SplQmEndDoc failed\n");
+#endif
     SplQmAbort(mSpl);
     return NS_ERROR_GFX_PRINTER_ENDDOC;
   }
 
-  SplQmClose(mSpl);
+  rc = SplQmClose(mSpl);
+#ifdef debug_thebes_print
+  printf("Close spooler - job= %lu  pages= %d - %s\n",
+         ulJobID, mPages, rc ? "success" : "failure");
+#endif
+
+  DBGX();
 
   return NS_OK;
 }
 
 NS_IMETHODIMP os2SpoolerStream::Flush()
 {
+  DBGNX();
   return NS_OK;
 }
 
 NS_IMETHODIMP os2SpoolerStream::Write(const char *aBuf, uint32_t aCount,
                                       uint32_t *_retval NS_OUTPARAM)
 {
+#ifdef debug_enterexit
+  if (!mWrites)
+    DBGN();
+#endif
+
   uint32_t total = 0;
   uint32_t write;
 
@@ -1059,6 +1236,13 @@ NS_IMETHODIMP os2SpoolerStream::Write(const char *aBuf, uint32_t aCount,
 
   *_retval = total;
 
+#ifdef debug_enterexit
+  if (!mWrites) {
+    mWrites++;
+    DBGX();
+  }
+#endif
+
   return NS_OK;
 }
 
@@ -1066,6 +1250,7 @@ NS_IMETHODIMP os2SpoolerStream::WriteFrom(nsIInputStream *aFromStream,
                                           uint32_t aCount,
                                           uint32_t *_retval NS_OUTPARAM)
 {
+    DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1073,11 +1258,13 @@ NS_IMETHODIMP os2SpoolerStream::WriteSegments(nsReadSegmentFun aReader,
                                               void *aClosure, uint32_t aCount,
                                               uint32_t *_retval NS_OUTPARAM)
 {
+    DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP os2SpoolerStream::IsNonBlocking(bool *_retval NS_OUTPARAM)
 {
+    DBGNX();
     *_retval = false;
     return NS_OK;
 }

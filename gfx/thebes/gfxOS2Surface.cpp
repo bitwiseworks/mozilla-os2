@@ -8,6 +8,8 @@
 #include "gfxContext.h"
 #include <cairo-os2.h>
 
+#include <stdio.h>
+
 // a rough approximation of the memory used
 // by gfxOS2Surface and cairo_os2_surface
 #define OS2_OVERHEAD  sizeof(gfxOS2Surface) + 128
@@ -62,6 +64,9 @@ gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize, int aPreview)
                       (aPreview ? GPIT_MICRO : GPIT_NORMAL));
     NS_ASSERTION(mPS != GPI_ERROR, "Could not create PS on print DC!");
 
+    printf("gfxOS2Surface for print  - DC= %lx PS= %lx w= %d h= %d preview= %d\n",
+           mDC, mPS, mSize.width, mSize.height, aPreview);
+
     // Create a cairo surface for the PS associated with the printer DC.
     // For print preview, create a null surface that can be queried but
     // generates no output.  Otherwise, create a printing surface that
@@ -98,6 +103,9 @@ gfxOS2Surface::~gfxOS2Surface()
             break;
 
         case os2Print:
+            printf("~gfxOS2Surface for print - DC= %lx PS= %lx w= %d h= %d\n",
+                   mDC, mPS, mSize.width, mSize.height);
+
             if (mPS)
                 GpiDestroyPS(mPS);
             if (mDC)
@@ -136,6 +144,9 @@ int gfxOS2Surface::Resize(const gfxIntSize& aSize)
 
 HPS gfxOS2Surface::GetPS()
 {
+    printf("gfxOS2Surface::GetPS - mSurfType= %d  mPS= %lx\n",
+           mSurfType, mPS);
+
     // Creating an HPS on-the-fly should never be needed because GetPS()
     // is only called for printing surfaces & mPS should only be null for
     // window surfaces.  It would be a bug if Cairo had an HPS but Thebes
@@ -155,6 +166,8 @@ HPS gfxOS2Surface::GetPS()
 // Currently, this is the only print event we need to deal with in Thebes.
 nsresult gfxOS2Surface::EndPage()
 {
+    printf("gfxOS2Surface::EndPage - mSurfType= %d\n", mSurfType);
+
     if (mSurfType == os2Print)
       cairo_surface_show_page(CairoSurface());
     else

@@ -23,6 +23,24 @@
 
 //---------------------------------------------------------------------------
 
+#define DEBUG
+#define debug_thebes_print
+#define debug_enterexit
+
+#ifdef debug_enterexit
+  #define DBGN()    printf("enter %s\n", __FUNCTION__)
+  #define DBGX()    printf("exit  %s\n", __FUNCTION__)
+  #define DBGNX()   printf("en/ex %s\n", __FUNCTION__)
+  #define DBGM(m)   printf("%s - %s\n", __FUNCTION__, m)
+#else
+  #define DBGN()
+  #define DBGX()
+  #define DBGNX()
+  #define DBGM(m)
+#endif
+
+//---------------------------------------------------------------------------
+
 #define SHIFT_PTR(ptr,offset) ( *((LONG*)&ptr) += offset )
 
 os2PrintQ::os2PrintQ(const os2PrintQ& PQInfo)
@@ -113,7 +131,7 @@ nsAString* os2PrintQ::PrinterTitle()
       cName.Truncate(64);
 
     nsAutoChar16Buffer uName;
-    PRInt32 uNameLength = 123;
+    int32_t uNameLength = 123;
     if (NS_FAILED(MultiByteToWideChar(0, cName.get(), cName.Length(), uName, uNameLength))) {
       mPrinterTitle.Assign(NS_LITERAL_STRING("Error"));
     } else {
@@ -148,6 +166,7 @@ void os2PrintQ::SetDriverData(PDRIVDATA aDriverData)
 
 os2Printers::os2Printers()
 {
+DBGNX();
   mQueueCount = 0;
 
   ULONG  TotalQueues = 0;
@@ -183,12 +202,14 @@ os2Printers::os2Printers()
 
 os2Printers::~os2Printers()
 {
+DBGNX();
   for (ULONG index = 0; index < mQueueCount; index++)
     delete mPQBuf[index];
 }
 
 void os2Printers::RefreshPrintQueue()
 {
+DBGX();
   ULONG  newQueueCount = 0;
   ULONG  TotalQueues = 0;
   ULONG  MemNeeded = 0;
@@ -298,6 +319,7 @@ char* os2Printers::GetDriverName(ULONG printerNdx)
 
 BOOL os2Printers::ShowProperties(ULONG printerNdx)
 {
+DBGNX();
   LONG          devrc = FALSE;
   PDRIVDATA     pOldDrivData;
   PDRIVDATA     pNewDrivData = 0;
@@ -324,6 +346,8 @@ BOOL os2Printers::ShowProperties(ULONG printerNdx)
   pOldDrivData = mPQBuf[printerNdx]->DriverData();
 
   if (buflen > pOldDrivData->cb) {
+    DBGM("Allocating new memory for driver data");
+
     pNewDrivData = (PDRIVDATA)malloc(buflen);
     if (!pNewDrivData)
       return FALSE;
