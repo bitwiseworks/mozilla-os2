@@ -28,6 +28,7 @@ extern uint32_t            gOS2Flags;
 
 #ifdef DEBUG_FOCUS
   extern int currentWindowIdentifier;
+  int           mWindowIdentifier;  // a serial number for each new window
 #endif
 
 //-----------------------------------------------------------------------------
