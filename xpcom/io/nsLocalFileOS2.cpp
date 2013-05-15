@@ -22,6 +22,8 @@
 #include "nsISupportsPrimitives.h"
 #include "nsIMutableArray.h"
 #include "nsTraceRefcntImpl.h"
+#include "nsHashKeys.h"
+#include "mozilla/HashFunctions.h"
 
 using namespace mozilla;
 
