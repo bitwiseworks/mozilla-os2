@@ -667,12 +667,8 @@ nsresult nsWindow::CreateWindow(nsWindow* aParent,
                   aRect.x, parRect.height - aRect.y - aRect.height,
                   aRect.width, aRect.height, SWP_SIZE | SWP_MOVE);
 
-  // Store the widget's parent and add it to the parent's list of children.
-  // Don't ADDREF mParent because AddChild() ADDREFs us.
+  // Store the widget's parent
   mParent = aParent;
-  if (mParent) {
-    mParent->AddChild(this);
-  }
 
   DEBUGFOCUS(Create nsWindow);
   return NS_OK;
