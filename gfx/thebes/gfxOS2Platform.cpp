@@ -4,6 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <os2.h>
+#include <cairo-os2.h>
+#include "cairo-ft.h" // includes fontconfig.h, too
 
 #include "gfxOS2Platform.h"
 #include "gfxOS2Surface.h"

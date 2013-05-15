@@ -561,6 +561,7 @@ static const SurfaceMemoryReporterAttrs sSurfaceMemoryReporterAttrs[] = {
     {"gfx-surface-skia", nullptr},
     {"gfx-surface-subsurface", nullptr},
     {"gfx-surface-d2d", nullptr},
+    {"gfx-surface-os2printing", nullptr},
 };
 
 PR_STATIC_ASSERT(NS_ARRAY_LENGTH(sSurfaceMemoryReporterAttrs) ==

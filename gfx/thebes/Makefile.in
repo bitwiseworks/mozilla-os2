@@ -107,6 +107,7 @@ EXPORTS	+= \
 	gfxOS2Platform.h \
 	gfxOS2Surface.h \
 	gfxPDFSurface.h \
+	gfxPSSurface.h \
 	$(NULL)
 endif
 
@@ -273,8 +274,9 @@ CPPSRCS	+=	gfxOS2Fonts.cpp \
 		gfxOS2Surface.cpp \
 		nsUnicodeRange.cpp \
 		gfxFontconfigUtils.cpp \
+		gfxPDFSurface.cpp \
+		gfxPSSurface.cpp \
 		$(NULL)
-CPPSRCS +=	gfxPDFSurface.cpp
 endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)

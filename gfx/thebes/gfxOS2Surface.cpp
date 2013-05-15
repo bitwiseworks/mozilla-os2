@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <os2.h>
 #include "gfxOS2Surface.h"
+#include "gfxContext.h"
 #include <cairo-os2.h>
 
 // a rough approximation of the memory used
@@ -29,7 +31,7 @@ gfxOS2Surface::gfxOS2Surface(const gfxIntSize& aSize,
     RecordMemoryUsed(mSize.width * mSize.height * 4 + OS2_OVERHEAD);
 }
 
-gfxOS2Surface::gfxOS2Surface(HWND aWnd)
+gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize)
     : mWnd(aWnd), mDC(0), mPS(0), mSize(0,0), mSurfType(os2Window)
 {
     RECTL rectl;
@@ -51,20 +53,30 @@ gfxOS2Surface::gfxOS2Surface(HWND aWnd)
     RecordMemoryUsed(mSize.width * mSize.height * 4 + OS2_OVERHEAD);
 }
 
-gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize)
+gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize, int aPreview)
     : mWnd(0), mDC(aDC), mPS(0), mSize(aSize), mSurfType(os2Print)
 {
     // Create a PS using the same page size as the device.
     SIZEL sizel = { 0, 0 };
-    mPS = GpiCreatePS(0, mDC, &sizel, PU_PELS | GPIA_ASSOC | GPIT_MICRO);
+    mPS = GpiCreatePS(0, mDC, &sizel, PU_PELS | GPIA_ASSOC |
+                      (aPreview ? GPIT_MICRO : GPIT_NORMAL));
     NS_ASSERTION(mPS != GPI_ERROR, "Could not create PS on print DC!");
 
     // Create a cairo surface for the PS associated with the printer DC.
-    // Since we only "print" to PDF, create a null surface that has no bitmap.
+    // For print preview, create a null surface that can be queried but
+    // generates no output.  Otherwise, create a printing surface that
+    // uses GPI functions to render the output.
+
     cairo_surface_t* surf;
-    surf = cairo_os2_surface_create_null_surface(mPS, mSize.width, mSize.height);
+    if (aPreview)
+        surf = cairo_os2_surface_create_null_surface(mPS, mSize.width, mSize.height);
+    else
+        surf = cairo_os2_printing_surface_create(mPS, mSize.width, mSize.height);
+
     Init(surf);
 
+    // Cairo allocates temporary buffers when it converts images from
+    // BGR4 to BGR3 but there's no way to determine their size.
     RecordMemoryUsed(OS2_OVERHEAD);
 }
 
@@ -140,9 +152,30 @@ HPS gfxOS2Surface::GetPS()
     return mPS;
 }
 
+// Currently, this is the only print event we need to deal with in Thebes.
+nsresult gfxOS2Surface::EndPage()
+{
+    if (mSurfType == os2Print)
+      cairo_surface_show_page(CairoSurface());
+    else
+      NS_WARNING("gfxOS2Surface::EndPage() called on non-printing surface\n");
+
+    return NS_OK;
+}
+
 //static
 bool gfxOS2Surface::EnableDIVE(PRBool aEnable, PRBool aHidePointer)
 {
     // enable/disable DIVE (direct access to the video framebuffer)
     return cairo_os2_surface_enable_dive(aEnable, aHidePointer);
+}
+
+int32_t gfxOS2Surface::GetDefaultContextFlags() const
+{
+    if (mSurfType == os2Print)
+        return gfxContext::FLAG_SIMPLIFY_OPERATORS |
+               gfxContext::FLAG_DISABLE_SNAPPING |
+               gfxContext::FLAG_DISABLE_COPY_BACKGROUND;
+
+    return 0;
 }

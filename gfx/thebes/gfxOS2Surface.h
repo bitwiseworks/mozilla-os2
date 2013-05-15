@@ -6,8 +6,6 @@
 #ifndef GFX_OS2_SURFACE_H
 #define GFX_OS2_SURFACE_H
 
-#define INCL_WIN
-#include <os2.h>
 #include "gfxASurface.h"
 
 class THEBES_API gfxOS2Surface : public gfxASurface {
@@ -22,7 +20,7 @@ public:
     gfxOS2Surface(HWND aWnd);
 
     // constructor for an os2Print surface
-    gfxOS2Surface(HDC aDC, const gfxIntSize& aSize);
+    gfxOS2Surface(HDC aDC, const gfxIntSize& aSize, int aPreview);
 
     // constructor for an as-yet-unwrapped os2Image surface
     gfxOS2Surface(cairo_surface_t *csurf);
@@ -42,8 +40,14 @@ public:
     // invoked on os2Print surfaces to get the associated PS
     HPS GetPS();
 
+    // invoked on os2Print surfaces to print the current page
+    virtual nsresult EndPage();
+
     // enable/disable DIVE (direct access to the video framebuffer)
     static bool EnableDIVE(bool aEnable, bool aHidePointer);
+
+    // returns special rendering flags for os2Print surfaces
+    virtual int32_t GetDefaultContextFlags() const;
 
 private:
     typedef enum {

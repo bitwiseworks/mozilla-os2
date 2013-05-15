@@ -89,6 +89,7 @@ public:
         SurfaceTypeSkia,
         SurfaceTypeSubsurface,
         SurfaceTypeD2D,
+        SurfaceTypeOS2Printing,
         SurfaceTypeMax
     } gfxSurfaceType;
 

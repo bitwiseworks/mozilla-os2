@@ -6,16 +6,11 @@
 #ifndef GFX_OS2_FONTS_H
 #define GFX_OS2_FONTS_H
 
+#include <cairo.h>
 #include "gfxTypes.h"
 #include "gfxFont.h"
 #include "gfxMatrix.h"
 #include "nsDataHashtable.h"
-
-#define INCL_GPI
-#include <os2.h>
-#include <cairo-os2.h>
-#include "cairo-ft.h" // includes fontconfig.h, too
-#include <freetype/tttables.h>
 
 #include "nsICharsetConverterManager.h"
 

@@ -7927,6 +7927,7 @@ if test "$MOZ_TREE_CAIRO"; then
         ;;
       os2)
         OS2_SURFACE_FEATURE="#define CAIRO_HAS_OS2_SURFACE 1"
+        PS_SURFACE_FEATURE="#define CAIRO_HAS_PS_SURFACE 1"
         FT_FONT_FEATURE="#define CAIRO_HAS_FT_FONT 1"
         MOZ_ENABLE_CAIRO_FT=1
         CAIRO_FT_CFLAGS="-I${MZFTCFGFT2}/include"

@@ -28,6 +28,11 @@
 #elif XP_WIN
 #include "gfxWindowsSurface.h"
 #elif defined(XP_OS2)
+#define INCL_WIN
+#include <os2.h>
+#include "nsSystemFontsOS2.h"
+#include "gfxPDFSurface.h"
+#include "gfxPSSurface.h"
 #include "gfxOS2Surface.h"
 #elif XP_MACOSX
 #include "gfxQuartzSurface.h"
@@ -302,11 +307,25 @@ nsDeviceContext::SetDPI()
         }
 #endif
 #ifdef XP_OS2
-        case gfxASurface::SurfaceTypeOS2: {
-            LONG lDPI;
-            HDC dc = GpiQueryDevice(reinterpret_cast<gfxOS2Surface*>(mPrintingSurface.get())->GetPS());
-            if (DevQueryCaps(dc, CAPS_VERTICAL_FONT_RES, 1, &lDPI))
-                dpi = lDPI;
+        case gfxASurface::SurfaceTypeOS2:
+        case gfxASurface::SurfaceTypeOS2Printing: {
+            // Setting |dpi| to the screen res, then scaling up to the
+            // printer's actual res results in widgets (such as buttons)
+            // that are properly sized in the print output.  It also
+            // produces properly sized scrollbars in Print Preview.
+            LONG scrn, prnt;
+            HPS hps = WinGetScreenPS(HWND_DESKTOP);
+            HDC hdc = GpiQueryDevice(hps);
+            if (!hdc || !DevQueryCaps(hdc, CAPS_VERTICAL_FONT_RES, 1, &scrn))
+                scrn = 96;
+
+            hps = reinterpret_cast<gfxOS2Surface*>(mPrintingSurface.get())->GetPS();
+            hdc = GpiQueryDevice(hps);
+            if (!hdc || !DevQueryCaps(hdc, CAPS_VERTICAL_FONT_RES, 1, &prnt))
+                prnt = 300;
+
+            dpi = scrn;
+            mPrintingScale = float(prnt) / dpi;
             break;
         }
 #endif
@@ -640,7 +659,7 @@ nsDeviceContext::CalcPrintingSize()
         break;
 #endif
 
-#ifdef MOZ_WIDGET_GTK
+#if defined (MOZ_WIDGET_GTK) || defined (XP_OS2)
     case gfxASurface::SurfaceTypePS:
         inPoints = true;
         size = reinterpret_cast<gfxPSSurface*>(mPrintingSurface.get())->GetSize();
@@ -673,21 +692,16 @@ nsDeviceContext::CalcPrintingSize()
 
 #ifdef XP_OS2
     case gfxASurface::SurfaceTypeOS2:
+    case gfxASurface::SurfaceTypeOS2Printing:
         {
             inPoints = false;
-            // we already set the size in the surface constructor we set for
-            // printing, so just get those values here
             size = reinterpret_cast<gfxOS2Surface*>(mPrintingSurface.get())->GetSize();
-            // as they are in pixels we need to scale them to app units
-            size.width = NSFloatPixelsToAppUnits(size.width, AppUnitsPerDevPixel());
-            size.height = NSFloatPixelsToAppUnits(size.height, AppUnitsPerDevPixel());
-            // still need to get the depth from the device context
-            HDC dc = GpiQueryDevice(reinterpret_cast<gfxOS2Surface*>(mPrintingSurface.get())->GetPS());
-            LONG value;
-            if (DevQueryCaps(dc, CAPS_COLOR_BITCOUNT, 1, &value))
-                mDepth = value;
-            else
-                mDepth = 8; // default to 8bpp, should be enough for printers
+            size.width = NSFloatPixelsToAppUnits(size.width/mPrintingScale, AppUnitsPerDevPixel());
+            size.height = NSFloatPixelsToAppUnits(size.height/mPrintingScale, AppUnitsPerDevPixel());
+
+            // The print DC usually returns an incorrect color depth of 8bpp.
+            // Since we actually use 24bpp, plug in the desired value.
+            mDepth = 24;
             break;
         }
 #endif
