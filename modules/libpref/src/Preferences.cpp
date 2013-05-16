@@ -479,6 +479,7 @@ ReadExtensionPrefs(nsIFile *aFile)
   return rv;
 }
 
+#ifdef MOZ_IPC // this needs more work, rev/525302117187
 void
 Preferences::SetPreference(const PrefSetting& aPref)
 {
@@ -501,6 +502,7 @@ Preferences::GetPreferences(InfallibleTArray<PrefSetting>* aPrefs)
   aPrefs->SetCapacity(PL_DHASH_TABLE_SIZE(&gHashTable));
   PL_DHashTableEnumerate(&gHashTable, pref_GetPrefs, aPrefs);
 }
+#endif
 
 NS_IMETHODIMP
 Preferences::GetBranch(const char *aPrefRoot, nsIPrefBranch **_retval)

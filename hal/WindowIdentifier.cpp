@@ -57,7 +57,9 @@ void
 WindowIdentifier::AppendProcessID()
 {
   MOZ_ASSERT(!mIsEmpty);
+#ifdef MOZ_IPC
   mID.AppendElement(dom::ContentChild::GetSingleton()->GetID());
+#endif
 }
 
 uint64_t

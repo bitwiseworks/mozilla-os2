@@ -492,6 +492,7 @@ nsBufferedInputStream::GetUnbufferedStream(nsISupports* *aStream)
 void
 nsBufferedInputStream::Serialize(InputStreamParams& aParams)
 {
+#ifdef MOZ_IPC
     BufferedInputStreamParams params;
 
     if (mStream) {
@@ -514,11 +515,13 @@ nsBufferedInputStream::Serialize(InputStreamParams& aParams)
     params.bufferSize() = mBufferSize;
 
     aParams = params;
+#endif
 }
 
 bool
 nsBufferedInputStream::Deserialize(const InputStreamParams& aParams)
 {
+#ifdef MOZ_IPC
     if (aParams.type() != InputStreamParams::TBufferedInputStreamParams) {
         NS_ERROR("Received unknown parameters from the other process!");
         return false;
@@ -545,6 +548,9 @@ nsBufferedInputStream::Deserialize(const InputStreamParams& aParams)
     NS_ENSURE_SUCCESS(rv, false);
 
     return true;
+#else
+    return false;
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////

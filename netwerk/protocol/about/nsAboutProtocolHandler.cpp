@@ -264,8 +264,9 @@ nsNestedAboutURI::Read(nsIObjectInputStream* aStream)
     }
 
     return NS_OK;
+#else
+    return NS_ERROR_NOT_AVAILABLE;
 #endif
-    return NS_ERROR;
 }
 
 NS_IMETHODIMP
@@ -293,8 +294,9 @@ nsNestedAboutURI::Write(nsIObjectOutputStream* aStream)
     }
 
     return NS_OK;
+#else
+    return NS_ERROR_NOT_AVAILABLE;
 #endif
-    return NS_ERROR;
 }
 
 // nsSimpleURI

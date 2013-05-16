@@ -15,6 +15,10 @@
 #include "nsHttpRequestHead.h"
 #include "mozilla/Attributes.h"
 
+#ifndef MOZ_IPC
+#include "nsIOService.h"
+#endif
+
 // This is the minimal nsAHttpTransaction implementation. A NullHttpTransaction
 // can be used to drive connection level semantics (such as SSL handshakes
 // tunnels) so that a nsHttpConnection becomes fully established in

@@ -474,7 +474,9 @@ Navigator::GetOnLine(bool* aOnline)
 {
   NS_PRECONDITION(aOnline, "Null out param");
 
+#ifdef MOZ_IPC
   *aOnline = !NS_IsOffline();
+#endif
   return NS_OK;
 }
 
