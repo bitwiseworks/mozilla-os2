@@ -1216,6 +1216,10 @@ int sqlite3_quota_file_mtime(quota_FILE *p, time_t *pTime){
   struct _stati64 buf;
   rc = _stati64(p->zMbcsName, &buf);
 #endif
+#if SQLITE_OS_OS2
+  struct stat buf;
+  rc = fstat(fileno(p->f), &buf);
+#endif
   if( rc==0 ) *pTime = buf.st_mtime;
   return rc;
 }
@@ -1233,6 +1237,10 @@ sqlite3_int64 sqlite3_quota_file_truesize(quota_FILE *p){
 #if SQLITE_OS_WIN
   struct _stati64 buf;
   rc = _stati64(p->zMbcsName, &buf);
+#endif
+#if SQLITE_OS_OS2
+  struct stat buf;
+  rc = fstat(fileno(p->f), &buf);
 #endif
   return rc==0 ? buf.st_size : -1;
 }
