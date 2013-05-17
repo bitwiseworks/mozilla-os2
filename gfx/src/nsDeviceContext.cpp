@@ -30,7 +30,6 @@
 #elif defined(XP_OS2)
 #define INCL_WIN
 #include <os2.h>
-#include "nsSystemFontsOS2.h"
 #include "gfxPDFSurface.h"
 #include "gfxPSSurface.h"
 #include "gfxOS2Surface.h"
