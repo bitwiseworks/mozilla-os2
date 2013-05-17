@@ -826,8 +826,10 @@ struct JSRuntime : js::RuntimeFriendFields
     /* Structured data callbacks are runtime-wide. */
     const JSStructuredCloneCallbacks *structuredCloneCallbacks;
 
+#ifdef MOZ_IPC
     /* Call this to accumulate telemetry data. */
     JSAccumulateTelemetryDataCallback telemetryCallback;
+#endif
 
     /*
      * The propertyRemovals counter is incremented for every JSObject::clear,

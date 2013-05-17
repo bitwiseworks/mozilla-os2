@@ -31,7 +31,9 @@
 #include "nsDNSPrefetch.h"
 #include "TimingStruct.h"
 #include "AutoClose.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 class nsAHttpConnection;
 
@@ -112,11 +114,11 @@ public:
     // nsIResumableChannel
     NS_IMETHOD ResumeAt(uint64_t startPos, const nsACString& entityID);
 
-public: /* internal necko use only */ 
+public: /* internal necko use only */
 
-    void InternalSetUploadStream(nsIInputStream *uploadStream) 
+    void InternalSetUploadStream(nsIInputStream *uploadStream)
       { mUploadStream = uploadStream; }
-    void SetUploadStreamHasHeaders(bool hasHeaders) 
+    void SetUploadStreamHasHeaders(bool hasHeaders)
       { mUploadStreamHasHeaders = hasHeaders; }
 
     nsresult SetReferrerInternal(nsIURI *referrer) {
@@ -240,7 +242,7 @@ private:
     nsresult ContinueAsyncRedirectChannelToHttps(nsresult rv);
 
     /**
-     * A function that takes care of reading STS headers and enforcing STS 
+     * A function that takes care of reading STS headers and enforcing STS
      * load rules.  After a secure channel is erected, STS requires the channel
      * to be trusted or any STS header data on the channel is ignored.
      * This is called from ProcessResponse.
@@ -286,7 +288,9 @@ private:
     nsAutoPtr<nsHttpResponseHead>     mCachedResponseHead;
     nsCOMPtr<nsISupports>             mCachedSecurityInfo;
     nsCacheAccessMode                 mCacheAccess;
+#ifdef MOZ_IPC
     mozilla::Telemetry::ID            mCacheEntryDeviceTelemetryID;
+#endif
     uint32_t                          mPostID;
     uint32_t                          mRequestTime;
 

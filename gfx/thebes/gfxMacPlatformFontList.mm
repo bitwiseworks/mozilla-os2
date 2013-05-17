@@ -62,7 +62,9 @@
 #include "nsISimpleEnumerator.h"
 #include "nsCharTraits.h"
 
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 #include <unistd.h>
 #include <time.h>
@@ -830,7 +832,9 @@ gfxMacPlatformFontList::InitFontList()
     if (mATSGeneration == currentGeneration)
         return NS_OK;
 
+#ifdef MOZ_IPC
     Telemetry::AutoTimer<Telemetry::MAC_INITFONTLIST_TOTAL> timer;
+#endif
 
     mATSGeneration = currentGeneration;
 #ifdef PR_LOGGING

@@ -19,7 +19,9 @@
 #include "mozStorageStatementData.h"
 #include "mozStorageAsyncStatementExecution.h"
 
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 namespace mozilla {
 namespace storage {
@@ -213,7 +215,9 @@ AsyncExecuteStatements::AsyncExecuteStatements(StatementDataArray &aStatements,
 , mCancelRequested(false)
 , mMutex(aConnection->sharedAsyncExecutionMutex)
 , mDBMutex(aConnection->sharedDBMutex)
+#ifdef MOZ_IPC
   , mRequestStartDate(TimeStamp::Now())
+#endif
 {
   (void)mStatements.SwapElements(aStatements);
   NS_ASSERTION(mStatements.Length(), "We weren't given any statements!");
@@ -255,7 +259,7 @@ AsyncExecuteStatements::bindExecuteAndProcessStatement(StatementData &aData,
   BindingParamsArray::iterator end = paramsArray->end();
   while (itr != end && continueProcessing) {
     // Bind the data to our statement.
-    nsCOMPtr<IStorageBindingParamsInternal> bindingInternal = 
+    nsCOMPtr<IStorageBindingParamsInternal> bindingInternal =
       do_QueryInterface(*itr);
     nsCOMPtr<mozIStorageError> error = bindingInternal->bind(aStatement);
     if (error) {
@@ -336,7 +340,9 @@ bool
 AsyncExecuteStatements::executeStatement(sqlite3_stmt *aStatement)
 {
   mMutex.AssertNotCurrentThreadOwns();
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::MOZ_STORAGE_ASYNC_REQUESTS_MS> finallySendExecutionDuration(mRequestStartDate);
+#endif
   while (true) {
     // lock the sqlite mutex so sqlite3_errmsg cannot change
     SQLiteMutexAutoLock lockedScope(mDBMutex);
@@ -345,14 +351,18 @@ AsyncExecuteStatements::executeStatement(sqlite3_stmt *aStatement)
     // Stop if we have no more results.
     if (rc == SQLITE_DONE)
     {
+#ifdef MOZ_IPC
       Telemetry::Accumulate(Telemetry::MOZ_STORAGE_ASYNC_REQUESTS_SUCCESS, true);
+#endif
       return false;
     }
 
     // If we got results, we can return now.
     if (rc == SQLITE_ROW)
     {
+#ifdef MOZ_IPC
       Telemetry::Accumulate(Telemetry::MOZ_STORAGE_ASYNC_REQUESTS_SUCCESS, true);
+#endif
       return true;
     }
 
@@ -368,7 +378,9 @@ AsyncExecuteStatements::executeStatement(sqlite3_stmt *aStatement)
 
     // Set an error state.
     mState = ERROR;
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::MOZ_STORAGE_ASYNC_REQUESTS_SUCCESS, false);
+#endif
 
     // Construct the error message before giving up the mutex (which we cannot
     // hold during the call to notifyError).

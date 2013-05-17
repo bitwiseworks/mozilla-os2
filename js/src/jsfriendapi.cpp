@@ -553,11 +553,13 @@ js::GetWeakmapKeyDelegate(JSObject *key)
     return NULL;
 }
 
+#ifdef MOZ_IPC
 JS_FRIEND_API(void)
 JS_SetAccumulateTelemetryCallback(JSRuntime *rt, JSAccumulateTelemetryDataCallback callback)
 {
     rt->telemetryCallback = callback;
 }
+#endif
 
 #ifdef DEBUG
 JS_FRIEND_API(void)

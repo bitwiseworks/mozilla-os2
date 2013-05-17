@@ -36,7 +36,9 @@
 #include "nsISeekableStream.h"
 
 #include "mozilla/FunctionTimer.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 #include "sqlite3.h"
 #include "mozilla/storage.h"
@@ -307,7 +309,7 @@ nsOfflineCacheDeviceInfo::GetUsageReport(char ** usageReport)
     AppendUTF16toUTF8(path, buffer);
   else
     buffer.AppendLiteral("directory unavailable");
-  
+
   buffer.AppendLiteral("</td>\n"
                        "  </tr>\n");
 
@@ -461,7 +463,7 @@ CreateCacheEntry(nsOfflineCacheDevice *device,
   if (device->IsLocked(*fullKey)) {
       return nullptr;
   }
-  
+
   nsresult rv = nsCacheEntry::Create(fullKey->get(), // XXX enable sharing
                                      nsICache::STREAM_BASED,
                                      nsICache::STORE_OFFLINE,
@@ -880,7 +882,7 @@ nsOfflineCacheDevice::CacheSize()
   bool hasRows;
   nsresult rv = statement->ExecuteStep(&hasRows);
   NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && hasRows, 0);
-  
+
   return (uint32_t) statement->AsInt32(0);
 }
 
@@ -1063,7 +1065,7 @@ nsOfflineCacheDevice::Init()
   NS_ENSURE_SUCCESS(rv, rv);
 
   // build path to index file
-  nsCOMPtr<nsIFile> indexFile; 
+  nsCOMPtr<nsIFile> indexFile;
   rv = mCacheDirectory->Clone(getter_AddRefs(indexFile));
   NS_ENSURE_SUCCESS(rv, rv);
   rv = indexFile->AppendNative(NS_LITERAL_CSTRING("index.sqlite"));
@@ -1364,7 +1366,9 @@ nsOfflineCacheDevice::GetDeviceID()
 nsCacheEntry *
 nsOfflineCacheDevice::FindEntry(nsCString *fullKey, bool *collision)
 {
+#ifdef MOZ_IPC
   mozilla::Telemetry::AutoTimer<mozilla::Telemetry::CACHE_OFFLINE_SEARCH_2> timer;
+#endif
   LOG(("nsOfflineCacheDevice::FindEntry [key=%s]\n", fullKey->get()));
 
   // SELECT * FROM moz_cache WHERE key = ?
@@ -1548,7 +1552,7 @@ nsOfflineCacheDevice::BindEntry(nsCacheEntry *entry)
     rv = tmp;
   }
   NS_ENSURE_SUCCESS(rv, rv);
-  
+
   bool hasRows;
   rv = statement->ExecuteStep(&hasRows);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1574,7 +1578,7 @@ nsOfflineCacheDevice::DoomEntry(nsCacheEntry *entry)
   // but we must not delete the file on disk until we are deactivated.
   // In another word, the file should be deleted if the entry had been
   // deactivated.
-  
+
   DeleteEntry(entry, !entry->IsActive());
 }
 
@@ -1724,7 +1728,7 @@ nsOfflineCacheDevice::Visit(nsICacheVisitor *visitor)
                                      &keepGoing);
   if (NS_FAILED(rv))
     return rv;
-  
+
   if (!keepGoing)
     return NS_OK;
 

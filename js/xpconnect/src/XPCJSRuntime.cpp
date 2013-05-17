@@ -20,7 +20,9 @@
 #include "mozilla/FunctionTimer.h"
 #include "prsystem.h"
 #include "mozilla/Preferences.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 #include "nsLayoutStatics.h"
 #include "nsContentUtils.h"
@@ -537,7 +539,7 @@ void
 XPCJSRuntime::UnmarkSkippableJSHolders()
 {
     XPCAutoLock lock(mMapLock);
-    if (mJSHolders.ops) {             
+    if (mJSHolders.ops) {
         JS_DHashTableEnumerate(&mJSHolders, UnmarkJSHolder, nullptr);
     }
 }
@@ -1000,7 +1002,7 @@ XPCJSRuntime::ActivityCallback(void *arg, JSBool active)
     XPCJSRuntime* self = static_cast<XPCJSRuntime*>(arg);
 
     AutoLockWatchdog lock(self);
-    
+
     if (active) {
         self->mLastActiveTime = -1;
         if (self->mWatchdogHibernating) {
@@ -1731,7 +1733,7 @@ class JSCompartmentsMultiReporter MOZ_FINAL : public nsIMemoryMultiReporter
         return NS_OK;
     }
 
-    typedef js::Vector<nsCString, 0, js::SystemAllocPolicy> Paths; 
+    typedef js::Vector<nsCString, 0, js::SystemAllocPolicy> Paths;
 
     static void CompartmentCallback(JSRuntime *rt, void* data, JSCompartment *c)
     {
@@ -1754,11 +1756,11 @@ class JSCompartmentsMultiReporter MOZ_FINAL : public nsIMemoryMultiReporter
         // from within CompartmentCallback() leads to all manner of assertions.
 
         // Collect.
- 
-        Paths paths; 
+
+        Paths paths;
         JS_IterateCompartments(nsXPConnect::GetRuntimeInstance()->GetJSRuntime(),
                                &paths, CompartmentCallback);
- 
+
         // Report.
         for (size_t i = 0; i < paths.length(); i++)
             // These ones don't need a description, hence the "".
@@ -1789,11 +1791,11 @@ namespace xpc {
 
 static size_t
 SizeOfTreeIncludingThis(nsINode *tree)
-{       
+{
     size_t n = tree->SizeOfIncludingThis(OrphanSizeOf);
     for (nsIContent* child = tree->GetFirstChild(); child; child = child->GetNextNode(tree)) {
         n += child->SizeOfIncludingThis(OrphanSizeOf);
-    }   
+    }
     return n;
 }
 
@@ -1898,7 +1900,7 @@ class XPCJSRuntimeStats : public JS::RuntimeStats
         cstats->extra2 = strdup(cDOMPathPrefix.get());
     }
 };
-    
+
 nsresult
 JSMemoryMultiReporter::CollectReports(WindowPaths *windowPaths,
                                       nsIMemoryMultiReporterCallback *cb,
@@ -2025,6 +2027,7 @@ DiagnosticMemoryCallback(void *ptr, size_t size)
 }
 #endif
 
+#ifdef MOZ_IPC
 static void
 AccumulateTelemetryCallback(int id, uint32_t sample)
 {
@@ -2076,6 +2079,7 @@ AccumulateTelemetryCallback(int id, uint32_t sample)
         break;
     }
 }
+#endif
 
 static void
 CompartmentNameCallback(JSRuntime *rt, JSCompartment *comp,
@@ -2170,7 +2174,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
 #ifdef MOZ_ASAN
     // ASan requires more stack space due to redzones
     JS_SetNativeStackQuota(mJSRuntime, 2 * 128 * sizeof(size_t) * 1024);
-#else  
+#else
     JS_SetNativeStackQuota(mJSRuntime, 128 * sizeof(size_t) * 1024);
 #endif
     JS_SetContextCallback(mJSRuntime, ContextCallback);
@@ -2193,9 +2197,11 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     if (ProfileStack *stack = mozilla_profile_stack())
         stack->sampleRuntime(mJSRuntime);
 #endif
+#ifdef MOZ_IPC
     JS_SetAccumulateTelemetryCallback(mJSRuntime, AccumulateTelemetryCallback);
+#endif
     js::SetActivityCallback(mJSRuntime, ActivityCallback, this);
-        
+
     NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(XPConnectJSGCHeap));
     NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(XPConnectJSSystemCompartmentCount));
     NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(XPConnectJSUserCompartmentCount));

@@ -138,7 +138,9 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/StandardInteger.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 using namespace mozilla;
 
@@ -2734,10 +2736,12 @@ nsCycleCollector::CleanupAfterCollection()
         mResults->mVisitedGCed = mVisitedGCed;
         mResults = nullptr;
     }
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR, interval);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_VISITED_REF_COUNTED, mVisitedRefCounted);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_VISITED_GCED, mVisitedGCed);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_COLLECTED, mWhiteNodeCount);
+#endif
 }
 
 void

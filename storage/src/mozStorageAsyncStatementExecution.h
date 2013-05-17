@@ -221,13 +221,15 @@ private:
    * about the error message, the user gets reliable error messages.
    */
   SQLiteMutex &mDBMutex;
-  
+
+#ifdef MOZ_IPC
   /**
    * The instant at which the request was started.
    *
    * Used by telemetry.
    */
   TimeStamp mRequestStartDate;
+#endif
 };
 
 } // namespace storage

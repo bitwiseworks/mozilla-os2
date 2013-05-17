@@ -526,7 +526,7 @@ nsAccessibilityService::TreeViewChanged(nsIPresShell* aPresShell,
     Accessible* accessible = document->GetAccessible(aContent);
     if (accessible) {
       XULTreeAccessible* treeAcc = accessible->AsXULTree();
-      if (treeAcc) 
+      if (treeAcc)
         treeAcc->TreeViewChanged(aView);
     }
   }
@@ -1134,7 +1134,7 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
   }
 
   if (!newAcc) {
-    // xul:deck does not have XBL and nsIFrame::CreateAccessible() is only called 
+    // xul:deck does not have XBL and nsIFrame::CreateAccessible() is only called
     // on HTML elements
     nsIAtom* tag = content->Tag();
     if ((tag == nsGkAtoms::deck) || (tag == nsGkAtoms::tabpanels)) {
@@ -1708,7 +1708,7 @@ NS_GetAccessibilityService(nsIAccessibilityService** aResult)
 {
   NS_ENSURE_TRUE(aResult, NS_ERROR_NULL_POINTER);
   *aResult = nullptr;
- 
+
   if (nsAccessibilityService::gAccessibilityService) {
     NS_ADDREF(*aResult = nsAccessibilityService::gAccessibilityService);
     return NS_OK;
@@ -1722,7 +1722,9 @@ NS_GetAccessibilityService(nsIAccessibilityService** aResult)
     return NS_ERROR_FAILURE;
   }
 
+#ifdef MOZ_IPC
   statistics::A11yInitialized();
+#endif
 
   nsAccessibilityService::gAccessibilityService = service;
   NS_ADDREF(*aResult = service);

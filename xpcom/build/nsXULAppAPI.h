@@ -437,8 +437,10 @@ XRE_API(void,
         XRE_SetupDllBlocklist, ())
 #endif
 
+#ifdef MOZ_IPC
 XRE_API(void,
         XRE_TelemetryAccumulate, (int aID, uint32_t aSample))
+#endif
 
 XRE_API(void,
         XRE_StartupTimelineRecord, (int aEvent, PRTime aWhen))

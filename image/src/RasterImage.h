@@ -29,7 +29,9 @@
 #include "nsThreadUtils.h"
 #include "DiscardTracker.h"
 #include "mozilla/TimeStamp.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "mozilla/LinkedList.h"
 #include "mozilla/StaticPtr.h"
 #ifdef DEBUG

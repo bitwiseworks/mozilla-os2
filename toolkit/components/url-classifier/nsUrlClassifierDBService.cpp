@@ -32,7 +32,9 @@
 #include "nsProxyRelease.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/TimeStamp.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "prlog.h"
 #include "prprf.h"
 #include "prnetdb.h"
@@ -348,8 +350,10 @@ nsUrlClassifierDBServiceWorker::HandlePendingLookups()
       DoLookup(lookup.mKey, lookup.mCallback);
     }
     double lookupTime = (TimeStamp::Now() - lookup.mStartTime).ToMilliseconds();
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::URLCLASSIFIER_LOOKUP_TIME,
                           static_cast<uint32_t>(lookupTime));
+#endif
   }
 
   return NS_OK;

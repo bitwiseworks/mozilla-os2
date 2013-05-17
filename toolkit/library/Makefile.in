@@ -162,13 +162,18 @@ COMPONENT_LIBS += \
   appcomps \
   jsreflect \
   composer \
-  telemetry \
   jsinspector \
   jsdebugger \
   storagecomps \
   rdf \
   windowds \
   $(NULL)
+
+ifdef MOZ_IPC
+COMPONENT_LIBS += \
+  telemetry \
+  $(NULL)
+endif
 
 ifdef BUILD_CTYPES
 COMPONENT_LIBS += \

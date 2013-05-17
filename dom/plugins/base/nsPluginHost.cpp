@@ -117,7 +117,9 @@
 #include "nsIContentPolicy.h"
 #include "nsContentPolicyUtils.h"
 #include "mozilla/TimeStamp.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "nsIImageLoadingContent.h"
 #include "mozilla/Preferences.h"
 #include "nsVersionComparator.h"
@@ -2373,7 +2375,9 @@ nsresult nsPluginHost::LoadPlugins()
 // This is needed in ReloadPlugins to prevent possible recursive reloads
 nsresult nsPluginHost::FindPlugins(bool aCreatePluginList, bool * aPluginsChanged)
 {
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::FIND_PLUGINS> telemetry;
+#endif
 
 #ifdef CALL_SAFETY_ON
   // check preferences on whether or not we want to try safe calls to plugins

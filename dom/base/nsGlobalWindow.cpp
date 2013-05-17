@@ -216,7 +216,9 @@
 #include "nsRefreshDriver.h"
 #include "mozAutoDocUpdate.h"
 
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "nsLocation.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsDOMEventTargetHelper.h"
@@ -866,8 +868,10 @@ nsGlobalWindow::~nsGlobalWindow()
       PR_REMOVE_AND_INIT_LINK(w);
     }
   } else {
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::INNERWINDOWS_WITH_MUTATION_LISTENERS,
                           mMutationBits ? 1 : 0);
+#endif
 
     if (mListenerManager) {
       mListenerManager->Disconnect();
@@ -2212,8 +2216,10 @@ nsGlobalWindow::InnerSetNewDocument(nsIDocument* aDocument)
   mLastOpenedURI = aDocument->GetDocumentURI();
 #endif
 
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::INNERWINDOWS_WITH_MUTATION_LISTENERS,
                         mMutationBits ? 1 : 0);
+#endif
 
   // Clear our mutation bitfield.
   mMutationBits = 0;

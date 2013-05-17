@@ -12,7 +12,9 @@
 #include "nsCRT.h"
 #include "nsCache.h"
 #include "nsReadableUtils.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 // The memory cache implements the "LRU-SP" caching algorithm
 // described in "LRU-SP: A Size-Adjusted and Popularity-Aware LRU Replacement
@@ -42,7 +44,7 @@ nsMemoryCacheDevice::nsMemoryCacheDevice()
 
 
 nsMemoryCacheDevice::~nsMemoryCacheDevice()
-{    
+{
     Shutdown();
 }
 
@@ -63,7 +65,7 @@ nsMemoryCacheDevice::Shutdown()
 {
     NS_ASSERTION(mInitialized, "### attempting shutdown while not initialized");
     NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-    
+
     mMemCacheEntries.Shutdown();
 
     // evict all entries
@@ -75,7 +77,7 @@ nsMemoryCacheDevice::Shutdown()
             NS_ASSERTION(!entry->IsInUse(), "### shutting down with active entries");
             next = (nsCacheEntry *)PR_NEXT_LINK(entry);
             PR_REMOVE_AND_INIT_LINK(entry);
-        
+
             // update statistics
             int32_t memoryRecovered = (int32_t)entry->DataSize();
             mTotalSize    -= memoryRecovered;
@@ -88,12 +90,12 @@ nsMemoryCacheDevice::Shutdown()
     }
 
 /*
- * we're not factoring in changes to meta data yet...    
+ * we're not factoring in changes to meta data yet...
  *  NS_ASSERTION(mTotalSize == 0, "### mem cache leaking entries?");
  */
     NS_ASSERTION(mInactiveSize == 0, "### mem cache leaking entries?");
     NS_ASSERTION(mEntryCount == 0, "### mem cache leaking entries?");
-    
+
     mInitialized = false;
 
     return NS_OK;
@@ -110,14 +112,16 @@ nsMemoryCacheDevice::GetDeviceID()
 nsCacheEntry *
 nsMemoryCacheDevice::FindEntry(nsCString * key, bool *collision)
 {
+#ifdef MOZ_IPC
     mozilla::Telemetry::AutoTimer<mozilla::Telemetry::CACHE_MEMORY_SEARCH_2> timer;
+#endif
     nsCacheEntry * entry = mMemCacheEntries.GetEntry(key);
     if (!entry)  return nullptr;
 
     // move entry to the tail of an eviction list
     PR_REMOVE_AND_INIT_LINK(entry);
     PR_APPEND_LINK(entry, &mEvictionList[EvictionList(entry, 0)]);
-    
+
     mInactiveSize -= entry->DataSize();
 
     return entry;
@@ -296,7 +300,7 @@ nsMemoryCacheDevice::OnDataSizeChange( nsCacheEntry * entry, int32_t deltaSize)
 
     // adjust our totals
     mTotalSize    += deltaSize;
-    
+
     if (!entry->IsDoomed()) {
         // move entry to the tail of the appropriate eviction list
         PR_REMOVE_AND_INIT_LINK(entry);
@@ -326,17 +330,17 @@ nsMemoryCacheDevice::EvictEntry(nsCacheEntry * entry, bool deleteEntry)
                      entry, deleteEntry));
     // remove entry from our hashtable
     mMemCacheEntries.RemoveEntry(entry);
-    
+
     // remove entry from the eviction list
     PR_REMOVE_AND_INIT_LINK(entry);
-    
+
     // update statistics
     int32_t memoryRecovered = (int32_t)entry->DataSize();
     mTotalSize    -= memoryRecovered;
     if (!entry->IsDoomed())
         mInactiveSize -= memoryRecovered;
     --mEntryCount;
-    
+
     if (deleteEntry)  delete entry;
 }
 
@@ -349,7 +353,7 @@ nsMemoryCacheDevice::EvictEntriesIfNecessary(void)
     CACHE_LOG_DEBUG(("EvictEntriesIfNecessary.  mTotalSize: %d, mHardLimit: %d,"
                      "mInactiveSize: %d, mSoftLimit: %d\n",
                      mTotalSize, mHardLimit, mInactiveSize, mSoftLimit));
-    
+
     if ((mTotalSize < mHardLimit) && (mInactiveSize < mSoftLimit))
         return;
 
@@ -372,7 +376,7 @@ nsMemoryCacheDevice::EvictEntriesIfNecessary(void)
 
             if (entry != &mEvictionList[i]) {
                 entryCost = (uint64_t)
-                    (now - entry->LastFetched()) * entry->DataSize() / 
+                    (now - entry->LastFetched()) * entry->DataSize() /
                     PR_MAX(1, entry->FetchCount());
                 if (!maxEntry || (entryCost > maxCost)) {
                     maxEntry = entry;
@@ -457,7 +461,7 @@ nsMemoryCacheDevice::EvictEntries(const char * clientID)
             const char * key = entry->Key()->get();
             if (clientID && nsCRT::strncmp(clientID, key, prefixLength) != 0)
                 continue;
-            
+
             if (entry->IsInUse()) {
                 nsresult rv = nsCacheService::DoomEntry(entry);
                 if (NS_FAILED(rv)) {
@@ -520,7 +524,7 @@ nsMemoryCacheDevice::CheckEntryCount()
 
     int32_t entryCount = 0;
     mMemCacheEntries.VisitEntries(CountEntry, &entryCount);
-    NS_ASSERTION(mEntryCount == entryCount, "### mem cache badness");    
+    NS_ASSERTION(mEntryCount == entryCount, "### mem cache badness");
 }
 #endif
 

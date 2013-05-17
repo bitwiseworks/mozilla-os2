@@ -7,12 +7,15 @@
 #ifndef A11Y_STATISTICS_H_
 #define A11Y_STATISTICS_H_
 
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 namespace mozilla {
 namespace a11y {
 namespace statistics {
 
+#ifdef MOZ_IPC
   inline void A11yInitialized()
     { Telemetry::Accumulate(Telemetry::A11Y_INSTANTIATED_FLAG, true); }
 
@@ -36,6 +39,7 @@ namespace statistics {
    */
   inline void XFormsAccessibleUsed()
     { Telemetry::Accumulate(Telemetry::A11Y_XFORMS_USAGE_FLAG, true); }
+#endif
 
 } // namespace statistics
 } // namespace a11y

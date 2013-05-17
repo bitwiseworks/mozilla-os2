@@ -43,7 +43,7 @@
 
 #if defined(XP_WIN)
 #include <windows.h>
-// windows.h can go to hell 
+// windows.h can go to hell
 #undef GetStartupInfo
 #elif defined(XP_UNIX)
 #include <unistd.h>
@@ -59,7 +59,9 @@
 #include <sys/sysctl.h>
 #endif
 
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "mozilla/StartupTimeline.h"
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
@@ -103,7 +105,7 @@ static NS_DEFINE_CID(kPlacesInitCompleteCID,
 static NS_DEFINE_CID(kSessionStoreWindowRestoredCID,
   NS_SESSION_STORE_WINDOW_RESTORED_EVENT_CID);
 static NS_DEFINE_CID(kXPCOMShutdownCID,
-  NS_XPCOM_SHUTDOWN_EVENT_CID);  
+  NS_XPCOM_SHUTDOWN_EVENT_CID);
 #endif //defined(XP_WIN)
 
 using namespace mozilla;
@@ -198,7 +200,7 @@ nsAppStartup::Init()
                NS_LITERAL_CSTRING("sessionstore-windows-restored"));
     NS_WARN_IF_FALSE(mSessionWindowRestoredProbe,
                      "Cannot initialize probe 'sessionstore-windows-restored'");
-                     
+
     mXPCOMShutdownProbe =
       mProbesManager->
       GetProbe(kXPCOMShutdownCID,
@@ -309,8 +311,10 @@ GetShutdownTimeFileName()
 
 static void
 RecordShutdownStartTimeStamp() {
+#ifdef MOZ_IPC
   if (!Telemetry::CanRecord())
     return;
+#endif
 
   gRecordedShutdownStartTime = TimeStamp::Now();
 
@@ -572,6 +576,7 @@ nsAppStartup::ExitLastWindowClosingSurvivalArea(void)
 NS_IMETHODIMP
 nsAppStartup::GetLastShutdownDuration(uint32_t *aResult)
 {
+#ifdef MOZ_IPC
   // We make this check so that GetShutdownTimeFileName() doesn't get
   // called; calling that function without telemetry enabled violates
   // assumptions that the write-the-shutdown-timestamp machinery makes.
@@ -579,6 +584,7 @@ nsAppStartup::GetLastShutdownDuration(uint32_t *aResult)
     *aResult = 0;
     return NS_OK;
   }
+#endif
 
   if (!mCachedShutdownTime) {
     const char *filename = GetShutdownTimeFileName();
@@ -690,7 +696,7 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
     nsCOMPtr<nsIAppShellService> appShell(do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
     if (!appShell)
       return NS_ERROR_FAILURE;
-    
+
     appShell->CreateTopLevelWindow(0, 0, aChromeFlags,
                                    nsIAppShellService::SIZE_TO_CONTENT,
                                    nsIAppShellService::SIZE_TO_CONTENT,
@@ -754,7 +760,7 @@ nsAppStartup::Observe(nsISupports *aSubject,
 }
 
 #if defined(LINUX) || defined(ANDROID)
-static uint64_t 
+static uint64_t
 JiffiesSinceBoot(const char *file)
 {
   char stat[512];
@@ -766,9 +772,9 @@ JiffiesSinceBoot(const char *file)
   if (n <= 0)
     return 0;
   stat[n] = 0;
-  
+
   long long unsigned starttime = 0; // instead of uint64_t to keep GCC quiet
-  
+
   char *s = strrchr(stat, ')');
   if (!s)
     return 0;
@@ -793,10 +799,10 @@ ThreadedCalculateProcessCreationTimestamp(void *aClosure)
 
   char thread_stat[40];
   sprintf(thread_stat, "/proc/self/task/%d/stat", (pid_t) syscall(__NR_gettid));
-  
+
   uint64_t thread_jiffies = JiffiesSinceBoot(thread_stat);
   uint64_t self_jiffies = JiffiesSinceBoot("/proc/self/stat");
-  
+
   if (!thread_jiffies || !self_jiffies)
     return;
 
@@ -845,7 +851,7 @@ CalculateProcessCreationTimestamp()
   if (sysctl(mib, 4, NULL, &buffer_size, NULL, 0))
     return 0;
 
-  struct kinfo_proc *proc = (kinfo_proc*) malloc(buffer_size);  
+  struct kinfo_proc *proc = (kinfo_proc*) malloc(buffer_size);
   if (sysctl(mib, 4, proc, &buffer_size, NULL, 0)) {
     free(proc);
     return 0;
@@ -881,7 +887,7 @@ CalculateProcessCreationTimestamp()
   return 0;
 }
 #endif
- 
+
 NS_IMETHODIMP
 nsAppStartup::GetStartupInfo(JSContext* aCx, JS::Value* aRetval)
 {
@@ -900,7 +906,9 @@ nsAppStartup::GetStartupInfo(JSContext* aCx, JS::Value* aRetval)
     // Bug 670008: Avoid obviously invalid process creation times
     if (PR_Now() <= ProcessCreationTimestamp) {
       ProcessCreationTimestamp = -1;
+#ifdef MOZ_IPC
       Telemetry::Accumulate(Telemetry::STARTUP_MEASUREMENT_ERRORS, StartupTimeline::PROCESS_CREATION);
+#endif
     }
     StartupTimeline::Record(StartupTimeline::PROCESS_CREATION, ProcessCreationTimestamp);
   }
@@ -911,7 +919,9 @@ nsAppStartup::GetStartupInfo(JSContext* aCx, JS::Value* aRetval)
       // always define main to aid with bug 689256
       if ((ev != StartupTimeline::MAIN) &&
           (StartupTimeline::Get(ev) < StartupTimeline::Get(StartupTimeline::PROCESS_CREATION))) {
+#ifdef MOZ_IPC
         Telemetry::Accumulate(Telemetry::STARTUP_MEASUREMENT_ERRORS, i);
+#endif
         StartupTimeline::Record(ev, -1);
       } else {
         JSObject *date = JS_NewDateObjectMsec(aCx, StartupTimeline::Get(ev) / PR_USEC_PER_MSEC);
@@ -1004,7 +1014,9 @@ nsAppStartup::TrackStartupCrashBegin(bool *aIsSafeModeNecessary)
     return NS_ERROR_FAILURE;
 
   // The last startup was a crash so include it in the count regardless of when it happened.
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::STARTUP_CRASH_DETECTED, true);
+#endif
 
   if (inSafeMode) {
     GetAutomaticSafeModeNecessary(aIsSafeModeNecessary);

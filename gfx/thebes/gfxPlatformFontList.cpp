@@ -15,7 +15,9 @@
 #include "nsUnicodeProperties.h"
 
 #include "mozilla/Preferences.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Attributes.h"
 
@@ -202,7 +204,9 @@ gfxPlatformFontList::InitOtherFamilyNames()
 {
     mOtherFamilyNamesInitialized = true;
 
+#ifdef MOZ_IPC
     Telemetry::AutoTimer<Telemetry::FONTLIST_INITOTHERFAMILYNAMES> timer;
+#endif
     // iterate over all font families and read in other family names
     mFontFamilies.Enumerate(gfxPlatformFontList::InitOtherFamilyNamesProc, this);
 }
@@ -223,7 +227,9 @@ gfxPlatformFontList::InitFaceNameLists()
     mFaceNamesInitialized = true;
 
     // iterate over all font families and read in other family names
+#ifdef MOZ_IPC
     Telemetry::AutoTimer<Telemetry::FONTLIST_INITFACENAMELISTS> timer;
+#endif
     mFontFamilies.Enumerate(gfxPlatformFontList::InitFaceNameListsProc, this);
 }
 

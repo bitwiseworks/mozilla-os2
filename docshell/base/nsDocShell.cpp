@@ -77,7 +77,9 @@
 #include "IHistory.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "mozilla/AutoRestore.h"
 #include "mozilla/Attributes.h"
 
@@ -6392,6 +6394,7 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
     nsresult rv = aChannel->GetURI(getter_AddRefs(url));
     if (NS_FAILED(rv)) return rv;
 
+#ifdef MOZ_IPC
     nsCOMPtr<nsITimedChannel> timingChannel =
         do_QueryInterface(aChannel);
     if (timingChannel) {
@@ -6402,6 +6405,7 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
                 Telemetry::TOTAL_CONTENT_PAGE_LOAD_TIME,
                 channelCreationTime);
     }
+#endif
 
     // Timing is picked up by the window, we don't need it anymore
     mTiming = nullptr;

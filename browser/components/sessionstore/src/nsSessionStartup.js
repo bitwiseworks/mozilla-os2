@@ -37,7 +37,9 @@ const Cr = Components.results;
 const Cu = Components.utils;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+#ifdef MOZ_IPC
 Cu.import("resource://gre/modules/TelemetryStopwatch.jsm");
+#endif
 
 const STATE_RUNNING_STR = "running";
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 megabytes
@@ -112,7 +114,9 @@ SessionStartup.prototype = {
         corruptFile = true;
       }
     }
+#ifdef MOZ_IPC
     Services.telemetry.getHistogramById("FX_SESSION_RESTORE_CORRUPT_FILE").add(corruptFile);
+#endif
 
     // If this is a normal restore then throw away any previous session
     if (!doResumeSessionOnce)
@@ -124,10 +128,12 @@ SessionStartup.prototype = {
       this._initialState.session.state &&
       this._initialState.session.state == STATE_RUNNING_STR;
 
+#ifdef MOZ_IPC
     // Report shutdown success via telemetry. Shortcoming here are
     // being-killed-by-OS-shutdown-logic, shutdown freezing after
     // session restore was written, etc.
     Services.telemetry.getHistogramById("SHUTDOWN_OK").add(!lastSessionCrashed);
+#endif
 
     // set the startup type
     if (lastSessionCrashed && resumeFromCrash)
@@ -268,11 +274,15 @@ SessionStartup.prototype = {
    * @returns a session state string
    */
   _readStateFile: function sss_readStateFile(aFile) {
+#ifdef MOZ_IPC
     TelemetryStopwatch.start("FX_SESSION_RESTORE_READ_FILE_MS");
+#endif
     var stateString = Cc["@mozilla.org/supports-string;1"].
                         createInstance(Ci.nsISupportsString);
     stateString.data = this._readFile(aFile) || "";
+#ifdef MOZ_IPC
     TelemetryStopwatch.finish("FX_SESSION_RESTORE_READ_FILE_MS");
+#endif
 
     Services.obs.notifyObservers(stateString, "sessionstore-state-read", "");
 
