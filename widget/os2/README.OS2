@@ -71,10 +71,16 @@
       (e.g. 'x:\os2\dll').  You can download a zip from:
          ftp://ftp.netlabs.org/pub/gcc/libc-0.6.5-csd5.zip
 
-4. Optional: Use mozinst to create icons on desktop.
-   http://hobbes.nmsu.edu/h-search.php?key=mozinst
+4. INSTALL 'freetyp2.dll' and 'fntcfg2.dll' into one of the directories
+      on your "LIBPATH" or in the program directory of the Mozilla app.
+      You can download a zip or wpi from Hobbes or netlabs:
+      http://hobbes.nmsu.edu/h-search.php?button=Search&key=mzfntcfgft_runtime&dir=%2F
+      ftp://ftp.netlabs.org/incoming/mozilla
 
-5. Optional: you may want to install some of the items listed in the
+5. Optional: Use mozinst to create icons on desktop.
+      http://hobbes.nmsu.edu/h-search.php?key=mozinst
+
+6. Optional: you may want to install some of the items listed in the
       "OS/2 Add-ons" section below to improve the app's performance.
 
 
