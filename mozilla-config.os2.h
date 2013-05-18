@@ -2,6 +2,7 @@
  * Included by generated mozilla-config.h. */
 
 #define ACCESSIBILITY 1
+#define ATTRIBUTE_ALIGNED_MAX 16
 #define BUILD_CTYPES 1
 #define D_INO d_ino
 #define ENABLE_SYSTEM_EXTENSION_DIRS 1
@@ -21,6 +22,7 @@
 #define IBMBIDI 1
 #define JSGC_INCREMENTAL 1
 #define JS_DEFAULT_JITREPORT_GRANULARITY 3
+#define LIBJPEG_TURBO_X86_ASM 1
 #define MALLOC_H <malloc.h>
 #define MOZILLA_UAVERSION "17.0"
 #define MOZILLA_VERSION "17.0.5"
@@ -52,7 +54,6 @@
 #define MOZ_SERVICES_NOTIFICATIONS 1
 #define MOZ_SERVICES_SYNC 1
 #define MOZ_SPEEX_RESAMPLER 1
-#define MOZ_STATIC_JS 1
 #define MOZ_SYDNEYAUDIO 1
 #define MOZ_TREE_CAIRO 1
 #define MOZ_TREE_PIXMAN 1
@@ -74,6 +75,6 @@
 #define NS_WARN_UNUSED_RESULT 
 #define OS2 1
 #define OS2EMX_PLAIN_CHAR 1
-#define TCPV40HDRS 1
+#define VPX_X86_ASM 1
 #define XP_OS2 1
 #define X_DISPLAY_MISSING 1
