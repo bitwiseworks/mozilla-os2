@@ -20,8 +20,16 @@ LOCAL_CONFIG_PRE =
 # Global definitions
 #------------------------------------------------------------------------------
 
-MOZ_BUILD_APP      ?= browser
+MOZ_BUILD_APP          ?= browser
+MOZ_DISTRIBUTION_ID    ?= org.mozilla
+MOZ_USER_DIR           ?= Mozilla
 
+MOZ_UPDATE_CHANNEL     ?= default
+
+MOZ_MACBUNDLE_ID        = \
+    $(MOZ_DISTRIBUTION_ID).$(tolower $(MOZ_APP_DISPLAYNAME))$(filter-out release,$(BUILD_TYPE))
+
+# Variables read from the environment (normally after config scripts)
 SHELL_CONFIG_VARS = \
 	MOZILLA_VERSION MOZILLA_UAVERSION FIREFOX_VERSION \
 	MOZ_APP_BASENAME MOZ_APP_VENDOR \
@@ -29,7 +37,22 @@ SHELL_CONFIG_VARS = \
 	MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS MOZ_SERVICES_SYNC \
 	MOZ_APP_VERSION MOZ_BRANDING_DIRECTORY MOZ_OFFICIAL_BRANDING_DIRECTORY MOZ_APP_ID \
 	ACCEPTED_MAR_CHANNEL_IDS MAR_CHANNEL_ID MOZ_PROFILE_MIGRATOR \
-	MOZ_EXTENSION_MANAGER MOZ_APP_STATIC_INI MOZ_WEBAPP_RUNTIME MOZ_MEDIA_NAVIGATOR
+	MOZ_EXTENSION_MANAGER MOZ_APP_STATIC_INI MOZ_WEBAPP_RUNTIME MOZ_MEDIA_NAVIGATOR \
+	MOZ_APP_DISPLAYNAME MOZ_UA_BUILDID
+
+# Variables put to generated mozilla-config.h unquoted
+H_CONFIG_VARS = \
+    FIREFOX_VERSION MOZ_UPDATER MOZ_PHOENIX \
+    MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
+    MOZ_SERVICES_SYNC MOZ_MEDIA_NAVIGATOR \
+    MOZ_BUILD_APP MOZ_MACBUNDLE_ID MOZ_UPDATE_CHANNEL \
+    MOZILLA_VERSION_U=$(MOZILLA_VERSION)
+
+# Variables put to generated mozilla-config.h quoted
+H_CONFIG_VARS_QUOTED = \
+    MOZILLA_VERSION MOZILLA_UAVERSION \
+    MOZ_APP_UA_NAME MOZ_APP_UA_VERSION=$(MOZ_APP_VERSION) \
+    MOZ_DISTRIBUTION_ID MOZ_UA_BUILDID MOZ_USER_DIR
 
 FILE_SUB_FOOTER     = $(PATH_ROOT)/config/footer.kmk
 CACHED_CONFIG       = $(PATH_OBJ)/CachedConfig.kmk
@@ -115,15 +138,27 @@ MOZILLA_CONFIG_GEN_H = $(PATH_OBJ)/mozilla-config.gen.h
 
 $$(MOZILLA_CONFIG_GEN_H): | $$(call DIRDEP,$$(dir $$@))
 	%$(call MSG_GENERATE,,$@)
-	$(QUIET)kmk_echo "#include \"$(PATH_ROOT)/mozilla-config.os2.h\"" > $@
+	$(QUIET)$(RM) -f $@
+	$(QUIET)$(APPEND_EXT) -n $@ \
+        $(foreach v, $(H_CONFIG_VARS), \
+            "#define $(firstword $(subst =, ,$(v))) \
+                $(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))")
+	$(QUIET)$(APPEND_EXT) -n $@ \
+        $(foreach v, $(H_CONFIG_VARS_QUOTED), \
+            "#define $(firstword $(subst =, ,$(v))) \
+                \"$(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))\"")
+	$(QUIET)$(ECHO_EXT) "#include \"$(PATH_ROOT)/mozilla-config.os2.h\"" >> $@
 
 $$(MOZILLA_CONFIG_H): $(PATH_ROOT)/mozilla-config.h.in $$(MOZILLA_CONFIG_GEN_H)
 	%$(call MSG_GENERATE,,$@)
 	$(QUIET)$(SED) -e "s/@ALLDEFINES@/\#include \"$(notdir $(MOZILLA_CONFIG_GEN_H))\"/" < $< > $@
 
+BLDDIRS += $(call DIRDEP,$(dir $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)))
 OTHER_CLEAN += $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
+
+redo-mozilla-config: clean-mozilla-config $$(MOZILLA_CONFIG_H)
 clean-mozilla-config:
-	$(RM) $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
+	$(RM) -f $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
 
 $$(XPCOM_CONFIG_H): $(PATH_ROOT)/xpcom/xpcom-config.os2.h | $$(call DIRDEP,$$(dir $$@))
 	%$(call MSG_GENERATE,,$@)
@@ -135,8 +170,10 @@ $$(XPCOM_PRIVATE_H): $(PATH_ROOT)/xpcom/xpcom-private.os2.h | $$(call DIRDEP,$$(
 
 BLDDIRS += $(call DIRDEP,$(dir $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)))
 OTHER_CLEAN += $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
+
+redo-xpcom-config: clean-xpcom-config $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 clean-xpcom-config:
-	$(RM) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
+	$(RM) -f $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 
 $$(BUILDID): | $$(call DIRDEP,$$(dir $$@))
 ifdef MOZ_BUILD_DATE
@@ -154,7 +191,7 @@ clean-buildid:
 # Configure target prepares cached settings by putting them to a dedicated
 # .kmk file that is included by Config.kmk. It is intended for variables that
 # require running other programs (like text processors) to get their values
-# so they will slow down the build process if evaluated each time kmk is run.
+# so they would slow down the build process if evaluated each time kmk is run.
 #
 .PHONY: configure
 configure: | $$(call DIRDEP,$$(dir $$(CACHED_CONFIG)))
@@ -168,6 +205,9 @@ MOZILLA_UAVERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_RO
 FIREFOX_VERSION=`cat $(PATH_ROOT)/browser/config/version.txt` ; \
 	\
 	test -f $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh && . $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh ; \
+	\
+	test -z "$$MOZ_BRANDING_DIRECTORY" || MOZ_BRANDING_DIRECTORY=$(MOZ_BUILD_APP)/branding/nightly ; \
+	test -f $(PATH_ROOT)/$$MOZ_BRANDING_DIRECTORY/configure.sh && . $(PATH_ROOT)/$$MOZ_BRANDING_DIRECTORY/configure.sh ; \
 	\
 	$(APPEND_EXT) -n $(CACHED_CONFIG) \
 		$(foreach var, $(SHELL_CONFIG_VARS), "$(var) ?= $$$(var)") \
