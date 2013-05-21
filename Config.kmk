@@ -38,7 +38,8 @@ SHELL_CONFIG_VARS = \
 	MOZ_APP_VERSION MOZ_BRANDING_DIRECTORY MOZ_OFFICIAL_BRANDING_DIRECTORY MOZ_APP_ID \
 	ACCEPTED_MAR_CHANNEL_IDS MAR_CHANNEL_ID MOZ_PROFILE_MIGRATOR \
 	MOZ_EXTENSION_MANAGER MOZ_APP_STATIC_INI MOZ_WEBAPP_RUNTIME MOZ_MEDIA_NAVIGATOR \
-	MOZ_APP_DISPLAYNAME MOZ_UA_BUILDID
+	MOZ_APP_DISPLAYNAME MOZ_UA_BUILDID \
+	NSPR_MAJOR_VERSION NSPR_MINOR_VERSION NSPR_PATCH_VERSION
 
 # Variables put to generated mozilla-config.h unquoted
 H_CONFIG_VARS = \
@@ -200,19 +201,25 @@ configure: | $$(call DIRDEP,$$(dir $$(CACHED_CONFIG)))
 
 	$(QUIET)$(SHELL) -c ' \
 	\
-MOZILLA_VERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) 2>nul` ; \
-MOZILLA_UAVERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) -uaversion 2>nul` ; \
-FIREFOX_VERSION=`cat $(PATH_ROOT)/browser/config/version.txt` ; \
+	MOZILLA_VERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) 2>nul` ; \
+	MOZILLA_UAVERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) -uaversion 2>nul` ; \
+	FIREFOX_VERSION=`cat $(PATH_ROOT)/browser/config/version.txt` ; \
 	\
 	test -f $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh && . $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh ; \
 	\
 	test -z "$$MOZ_BRANDING_DIRECTORY" || MOZ_BRANDING_DIRECTORY=$(MOZ_BUILD_APP)/branding/nightly ; \
 	test -f $(PATH_ROOT)/$$MOZ_BRANDING_DIRECTORY/configure.sh && . $(PATH_ROOT)/$$MOZ_BRANDING_DIRECTORY/configure.sh ; \
 	\
+	$(shell $(SED) -nre " \
+		s:^MOD_MAJOR_VERSION=+([0-9]+)$$:NSPR_MAJOR_VERSION=\1\;:p; \
+		s:^MOD_MINOR_VERSION=+([0-9]+)$$:NSPR_MINOR_VERSION=\1\;:p; \
+		s:^MOD_PATCH_VERSION=+([0-9]+)$$:NSPR_PATCH_VERSION=\1\;:p; \
+		" < $(PATH_ROOT)/nsprpub/configure.in) \
+	\
 	$(APPEND_EXT) -n $(CACHED_CONFIG) \
 		$(foreach var, $(SHELL_CONFIG_VARS), "$(var) ?= $$$(var)") \
+	\
 '
-
 	$(QUIET)$(CAT) $(CACHED_CONFIG)
 
 	$(QUIET)$(APPEND) $(CACHED_CONFIG) 'CACHED_CONFIG_INCLUDED := 1'
