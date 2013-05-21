@@ -25,10 +25,11 @@ define def_installs_pp_src
 local tgt := $$($(target)_0_OUTDIR)/$(notdir $(src))
 local srcsrc := $(abspathex $(src),$($(target)_DEFPATH))
 
-$(tgt): DEFS := $($(src)_DEFS)
+$(eval $$(subst :,_,$$(srcsrc))_DEFS = $$($(src)_DEFS))
+
 $(tgt): $(srcsrc) $($(src)_DEPS) | $$(call DIRDEP,$$(dir $$@))
 	%$(call MSG_GENERATE,,$@)
-	$(QUIET)$(PYTHON) $(PATH_ROOT)/config/Preprocessor.py $(addprefix -D,$(DEFS)) $< > $@
+	$(QUIET)$(PYTHON) $(PATH_ROOT)/config/Preprocessor.py $(addprefix -D,$($(subst :,_,$<)_DEFS)) $< > $@
 
 $(eval OTHER_CLEAN += $(tgt))
 
