@@ -10,6 +10,6 @@ include $(KBUILD_PATH)/subheader.kmk
 #
 include $(PATH_SUB_CURRENT)/config/Makefile.kmk
 include $(PATH_SUB_CURRENT)/pr/Makefile.kmk
-#include $(PATH_SUB_CURRENT)/lib/Makefile.kmk
+include $(PATH_SUB_CURRENT)/lib/Makefile.kmk
 
 include $(FILE_SUB_FOOTER)

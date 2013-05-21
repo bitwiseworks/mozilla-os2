@@ -194,12 +194,6 @@ nspr_SOURCES   += prvrsion.c
 prvrsion.c_DEPS = $(nspr_0_OUTDIR)/_pr_bld.h
 prvrsion.c_INCS = $(nspr_0_OUTDIR)
 
-if1of ($(KBUILD_TARGET), win)
-LONGLONG_SUFF = i64
-else
-LONGLONG_SUFF = LL
-endif
-
 $$(nspr_0_OUTDIR)/_pr_bld.h: $$(nspr_MAKEFILE) $(PATH_OBJ)/now/now$(HOSTSUFF_EXE)
 	$(QUIET)$(RM) -f $@
 	$(QUIET)$(APPEND_EXT) -n $@ \

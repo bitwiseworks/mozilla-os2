@@ -63,6 +63,13 @@ XPCOM_CONFIG_H 	    = $(PATH_OBJ)/xpcom/xpcom-config.h
 XPCOM_PRIVATE_H     = $(PATH_OBJ)/xpcom/xpcom-private.h
 BUILDID             = $(PATH_OBJ)/buildid
 
+# Suffix for long long integer constants in C
+if1of ($(KBUILD_TARGET), win)
+LONGLONG_SUFF = i64
+else
+LONGLONG_SUFF = LL
+endif
+
 #
 # Include cached build settings.
 #
@@ -87,6 +94,8 @@ endif # ifn1of (configure, $(MAKECMDGOALS))
 #------------------------------------------------------------------------------
 # Common libraries referenced by components
 #------------------------------------------------------------------------------
+
+NSPR_LIBS   = $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
 
 #------------------------------------------------------------------------------
 # Templates
