@@ -7523,7 +7523,7 @@ dnl ========================================================
 dnl Check for gcc -pipe support
 dnl ========================================================
 AC_MSG_CHECKING([for -pipe support])
-if test -n "$GNU_CC" -a -n "$GNU_CXX"; then
+if test "$OS_ARCH" != "OS2" -a -n "$GNU_CC" -a -n "$GNU_CXX"; then
     dnl Any gcc that supports firefox supports -pipe.
     CFLAGS="$CFLAGS -pipe"
     CXXFLAGS="$CXXFLAGS -pipe"
