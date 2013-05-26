@@ -40,6 +40,12 @@ typedef unsigned int mode_t;
 #include <getopt.h>
 #endif
 
+#if defined(__OS2__)
+#define OPEN_FLAGS O_BINARY
+#else
+#define OPEN_FLAGS 0
+#endif
+
 #if defined(SCO) || defined(UNIXWARE) || defined(SNI) || defined(NCR) || defined(NEC)
 #if !defined(S_ISLNK) && defined(S_IFLNK)
 #define S_ISLNK(a)	(((a) & S_IFMT) == S_IFLNK)
@@ -345,7 +351,7 @@ retry:
 	    }
 	} else {
 	    /* Copy from name to toname, which might be the same file. */
-	    fromfd = open(name, O_RDONLY);
+	    fromfd = open(name, O_RDONLY | OPEN_FLAGS);
 	    if (fromfd < 0 || fstat(fromfd, &sb) < 0)
 		fail("cannot access %s", name);
 	    if (exists && 
@@ -356,7 +362,7 @@ retry:
 		    fail("destination exists, cannot remove %s", toname);
 		}
 	    }
-	    tofd = open(toname, O_CREAT | O_WRONLY, 0666);
+	    tofd = open(toname, O_CREAT | O_WRONLY | OPEN_FLAGS, 0666);
 	    if (tofd < 0)
 		fail("cannot create %s", toname);
 

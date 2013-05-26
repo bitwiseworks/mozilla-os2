@@ -56,6 +56,12 @@
 #define d_ino d_stat.st_ino
 #endif
 
+#if defined(__OS2__)
+#define OPEN_FLAGS O_BINARY
+#else
+#define OPEN_FLAGS 0
+#endif
+
 static void
 usage(void)
 {
@@ -284,12 +290,12 @@ main(int argc, char **argv)
 	    }
 	} else {
 	    /* Copy from name to toname, which might be the same file. */
-	    fromfd = open(name, O_RDONLY);
+	    fromfd = open(name, O_RDONLY | OPEN_FLAGS);
 	    if (fromfd < 0 || fstat(fromfd, &sb) < 0)
 		fail("cannot access %s", name);
 	    if (exists && (!S_ISREG(tosb.st_mode) || access(toname, W_OK) < 0))
 		(void) (S_ISDIR(tosb.st_mode) ? rmdir : unlink)(toname);
-	    tofd = open(toname, O_CREAT | O_WRONLY, 0666);
+	    tofd = open(toname, O_CREAT | O_WRONLY | OPEN_FLAGS, 0666);
 	    if (tofd < 0)
 		fail("cannot create %s", toname);
 
