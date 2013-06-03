@@ -10,7 +10,9 @@
 #include "nsHttpConnection.h"
 #include "nsHttpHandler.h"
 #include "prnetdb.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "mozilla/Preferences.h"
 #include "prprf.h"
 
@@ -145,10 +147,12 @@ SpdySession2::~SpdySession2()
   deflateEnd(&mUpstreamZlib);
   
   mStreamTransactionHash.Enumerate(ShutdownEnumerator, this);
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::SPDY_PARALLEL_STREAMS, mConcurrentHighWater);
   Telemetry::Accumulate(Telemetry::SPDY_REQUEST_PER_CONN, (mNextStreamID - 1) / 2);
   Telemetry::Accumulate(Telemetry::SPDY_SERVER_INITIATED_STREAMS,
                         mServerPushedResources);
+#endif
 }
 
 void
@@ -289,12 +293,14 @@ SpdySession2::ClearPing(bool pingOK)
           this, PR_IntervalToSeconds(mPingThreshold),
           pingOK ? "pass" :"fail"));
 
+#ifdef MOZ_IPC
     if (pingOK)
       Telemetry::Accumulate(Telemetry::SPDY_PING_EXPERIMENT_PASS,
                             PR_IntervalToSeconds(mPingThreshold));
     else
       Telemetry::Accumulate(Telemetry::SPDY_PING_EXPERIMENT_FAIL,
                             PR_IntervalToSeconds(mPingThreshold));
+#endif
     mPingThreshold = gHttpHandler->SpdyPingThreshold();
     mPingThresholdExperiment = false;
   }
@@ -1134,6 +1140,7 @@ SpdySession2::HandleSynReplyForValidStream()
         "fin=%d",
         this, mInputFrameDataStream->StreamID(), mInputFrameDataLast));
   
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::SPDY_SYN_REPLY_SIZE,
                         mInputFrameDataSize - 6);
   if (mDecompressBufferUsed) {
@@ -1141,6 +1148,7 @@ SpdySession2::HandleSynReplyForValidStream()
       (mInputFrameDataSize - 6) * 100 / mDecompressBufferUsed;
     Telemetry::Accumulate(Telemetry::SPDY_SYN_REPLY_RATIO, ratio);
   }
+#endif
 
   // status and version are required.
   nsDependentCSubstring status, version;
@@ -1264,6 +1272,7 @@ SpdySession2::HandleSettings(SpdySession2 *self)
 
     LOG3(("Settings ID %d, Flags %X, Value %d", id, flags, value));
 
+#ifdef MOZ_IPC
     switch (id)
     {
     case SETTINGS_TYPE_UPLOAD_BW:
@@ -1298,6 +1307,7 @@ SpdySession2::HandleSettings(SpdySession2 *self)
     default:
       break;
     }
+#endif
     
   }
   
@@ -1693,8 +1703,10 @@ SpdySession2::WriteSegments(nsAHttpSegmentWriter *writer,
         ChangeDownstreamState(DISCARDING_DATA_FRAME);
       }
       mInputFrameDataLast = (mInputFrameBuffer[4] & kFlag_Data_FIN);
+#ifdef MOZ_IPC
       Telemetry::Accumulate(Telemetry::SPDY_CHUNK_RECVD,
                             mInputFrameDataSize >> 10);
+#endif
       LOG3(("Start Processing Data Frame. "
             "Session=%p Stream ID 0x%x Stream Ptr %p Fin=%d Len=%d",
             this, streamID, mInputFrameDataStream, mInputFrameDataLast,

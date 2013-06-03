@@ -21,7 +21,9 @@
 #include "prmem.h"
 #include "nsPreloadedStream.h"
 #include "ASpdySession.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "nsISupportsPriority.h"
 #include "nsHttpPipeline.h"
 
@@ -90,19 +92,23 @@ nsHttpConnection::~nsHttpConnection()
     if (!mEverUsedSpdy) {
         LOG(("nsHttpConnection %p performed %d HTTP/1.x transactions\n",
              this, mHttp1xTransactionCount));
+#ifdef MOZ_IPC
         mozilla::Telemetry::Accumulate(
             mozilla::Telemetry::HTTP_REQUEST_PER_CONN, mHttp1xTransactionCount);
+#endif
     }
 
     if (mTotalBytesRead) {
         uint32_t totalKBRead = static_cast<uint32_t>(mTotalBytesRead >> 10);
         LOG(("nsHttpConnection %p read %dkb on connection spdy=%d\n",
              this, totalKBRead, mEverUsedSpdy));
+#ifdef MOZ_IPC
         mozilla::Telemetry::Accumulate(
             mEverUsedSpdy ?
               mozilla::Telemetry::SPDY_KBREAD_PER_CONN :
               mozilla::Telemetry::HTTP_KBREAD_PER_CONN,
             totalKBRead);
+#endif
     }
 }
 
@@ -217,7 +223,7 @@ nsHttpConnection::StartSpdy(uint8_t spdyVersion)
         for (int32_t index = 0; index < count; ++index) {
             if (!mSpdySession) {
                 mSpdySession = ASpdySession::NewSpdySession(spdyVersion,
-                                                            list[index], mSocketTransport, 
+                                                            list[index], mSocketTransport,
                                                             mPriority);
             }
             else {
@@ -295,8 +301,10 @@ nsHttpConnection::EnsureNPNComplete()
     if (NS_SUCCEEDED(rv))
         StartSpdy(spdyVersion);
 
+#ifdef MOZ_IPC
     mozilla::Telemetry::Accumulate(mozilla::Telemetry::SPDY_NPN_CONNECT,
                                    mUsingSpdyVersion);
+#endif
 
 npnComplete:
     LOG(("nsHttpConnection::EnsureNPNComplete setting complete to true"));

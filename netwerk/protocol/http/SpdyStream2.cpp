@@ -10,7 +10,9 @@
 #include "nsAlgorithm.h"
 #include "prnetdb.h"
 #include "nsHttpRequestHead.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "nsISocketTransport.h"
 #include "nsISupportsPriority.h"
 #include "nsHttpHandler.h"
@@ -445,6 +447,7 @@ SpdyStream2::ParseHttpRequestHeaders(const char *buf,
     mTxInlineFrame[4] = SpdySession2::kFlag_Data_FIN;
   }
   
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::SPDY_SYN_SIZE, mTxInlineFrameUsed - 18);
 
   // The size of the input headers is approximate
@@ -454,6 +457,7 @@ SpdyStream2::ParseHttpRequestHeaders(const char *buf,
      mFlatHttpRequestHeaders.Length());
   
   Telemetry::Accumulate(Telemetry::SPDY_SYN_RATIO, ratio);
+#endif
   return NS_OK;
 }
 

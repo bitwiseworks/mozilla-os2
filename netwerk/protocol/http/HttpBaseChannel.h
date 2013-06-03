@@ -31,6 +31,10 @@
 #include "mozilla/net/NeckoCommon.h"
 #include "nsThreadUtils.h"
 
+#ifndef MOZ_IPC
+#include "prio.h"
+#endif
+
 namespace mozilla {
 namespace net {
 

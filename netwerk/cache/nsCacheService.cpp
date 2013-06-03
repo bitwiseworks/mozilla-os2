@@ -1324,10 +1324,14 @@ nsCacheService::Shutdown()
             if (NS_SUCCEEDED(parentDir->Exists(&exists)) && exists)
                 nsDeleteDir::DeleteDir(parentDir, false);
         }
+#ifdef MOZ_IPC
         Telemetry::AutoTimer<Telemetry::NETWORK_DISK_CACHE_SHUTDOWN_CLEAR_PRIVATE> timer;
+#endif
         nsDeleteDir::Shutdown(shouldSanitize);
     } else {
+#ifdef MOZ_IPC
         Telemetry::AutoTimer<Telemetry::NETWORK_DISK_CACHE_DELETEDIR_SHUTDOWN> timer;
+#endif
         nsDeleteDir::Shutdown(shouldSanitize);
     }
 }
@@ -1621,8 +1625,10 @@ nsCacheService::CreateDiskDevice()
         return rv;
     }
 
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::DISK_CACHE_SMART_SIZE_USING_OLD_MAX,
                           mObserver->ShouldUseOldMaxSmartSize());
+#endif
 
     NS_ASSERTION(!mSmartSizeTimer, "Smartsize timer was already fired!");
 
@@ -2179,7 +2185,9 @@ nsCacheService::ActivateEntry(nsCacheRequest * request,
 nsCacheEntry *
 nsCacheService::SearchCacheDevices(nsCString * key, nsCacheStoragePolicy policy, bool *collision)
 {
+#ifdef MOZ_IPC
     Telemetry::AutoTimer<Telemetry::CACHE_DEVICE_SEARCH_2> timer;
+#endif
     nsCacheEntry * entry = nullptr;
 
     CACHE_LOG_DEBUG(("mMemoryDevice: 0x%p\n", mMemoryDevice));
@@ -2627,8 +2635,13 @@ nsCacheService::OnDataSizeChange(nsCacheEntry * entry, int32_t deltaSize)
 }
 
 void
+#ifdef MOZ_IPC
 nsCacheService::Lock(mozilla::Telemetry::ID mainThreadLockerID)
+#else
+nsCacheService::Lock()
+#endif
 {
+#ifdef MOZ_IPC
     mozilla::Telemetry::ID lockerID;
     mozilla::Telemetry::ID generalID;
 
@@ -2641,9 +2654,11 @@ nsCacheService::Lock(mozilla::Telemetry::ID mainThreadLockerID)
 	}
 
     TimeStamp start(TimeStamp::Now());
+#endif
 
     gService->mLock.Lock();
 
+#ifdef MOZ_IPC
     TimeStamp stop(TimeStamp::Now());
 
     // Telemetry isn't thread safe on its own, but this is OK because we're
@@ -2652,6 +2667,7 @@ nsCacheService::Lock(mozilla::Telemetry::ID mainThreadLockerID)
         mozilla::Telemetry::AccumulateTimeDelta(lockerID, start, stop);
     }
     mozilla::Telemetry::AccumulateTimeDelta(generalID, start, stop);
+#endif
 }
 
 void

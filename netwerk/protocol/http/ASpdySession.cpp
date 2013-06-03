@@ -11,7 +11,9 @@
 #include "SpdySession2.h"
 #include "SpdySession3.h"
 
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 namespace mozilla {
 namespace net {
@@ -33,7 +35,9 @@ ASpdySession::NewSpdySession(uint32_t version,
   // from a list provided in the SERVER HELLO filtered by our acceptable
   // versions, so there is no risk of the server ignoring our prefs.
 
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::SPDY_VERSION2, version);
+#endif
     
   if (version == SpdyInformation::SPDY_VERSION_2)
     return new SpdySession2(aTransaction, aTransport, aPriority);

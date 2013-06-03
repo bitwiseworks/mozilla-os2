@@ -36,7 +36,9 @@
 #include "mozilla/HashFunctions.h"
 #include "mozilla/FunctionTimer.h"
 #include "mozilla/TimeStamp.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 using namespace mozilla;
 
@@ -541,7 +543,9 @@ nsHostResolver::ResolveHost(const char            *host,
                 LOG(("Using cached record for host [%s].\n", host));
                 // put reference to host record on stack...
                 result = he->rec;
+#ifdef MOZ_IPC
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2, METHOD_HIT);
+#endif
 
                 // For entries that are in the grace period, or all cached
                 // negative entries, use the cache but start a new lookup in
@@ -555,22 +559,28 @@ nsHostResolver::ResolveHost(const char            *host,
                     if (!he->rec->negative) {
                         // negative entries are constantly being refreshed, only
                         // track positive grace period induced renewals
+#ifdef MOZ_IPC
                         Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                               METHOD_RENEWAL);
+#endif
                     }
                 }
                 
                 if (he->rec->negative) {
+#ifdef MOZ_IPC
                     Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                           METHOD_NEGATIVE_HIT);
+#endif
                     status = NS_ERROR_UNKNOWN_HOST;
                 }
             }
             // if the host name is an IP address literal and has been parsed,
             // go ahead and use it.
             else if (he->rec->addr) {
+#ifdef MOZ_IPC
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                       METHOD_LITERAL);
+#endif
                 result = he->rec;
             }
             // try parsing the host name as an IP address literal to short
@@ -585,15 +595,19 @@ nsHostResolver::ResolveHost(const char            *host,
                 else
                     memcpy(he->rec->addr, &tempAddr, sizeof(PRNetAddr));
                 // put reference to host record on stack...
+#ifdef MOZ_IPC
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                       METHOD_LITERAL);
+#endif
                 result = he->rec;
             }
             else if (mPendingCount >= MAX_NON_PRIORITY_REQUESTS &&
                      !IsHighPriority(flags) &&
                      !he->rec->resolving) {
+#ifdef MOZ_IPC
                 Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                       METHOD_OVERFLOW);
+#endif
                 // This is a lower priority request and we are swamped, so refuse it.
                 rv = NS_ERROR_DNS_LOOKUP_QUEUE_FULL;
             }
@@ -605,16 +619,20 @@ nsHostResolver::ResolveHost(const char            *host,
                 if (!he->rec->resolving) {
                     he->rec->flags = flags;
                     rv = IssueLookup(he->rec);
+#ifdef MOZ_IPC
                     Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                           METHOD_NETWORK_FIRST);
+#endif
                     if (NS_FAILED(rv))
                         PR_REMOVE_AND_INIT_LINK(callback);
                     else
                         LOG(("DNS lookup for host [%s] blocking pending 'getaddrinfo' query.", host));
                 }
                 else if (he->rec->onQueue) {
+#ifdef MOZ_IPC
                     Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
                                           METHOD_NETWORK_SHARED);
+#endif
 
                     // Consider the case where we are on a pending queue of 
                     // lower priority than the request is being made at.
@@ -877,9 +895,11 @@ nsHostResolver::OnLookupComplete(nsHostRecord *rec, nsresult status, PRAddrInfo 
 
                 if (!head->negative) {
                     // record the age of the entry upon eviction.
+#ifdef MOZ_IPC
                     uint32_t age =
                         NowInMinutes() - (head->expiration - mMaxCacheLifetime);
                     Telemetry::Accumulate(Telemetry::DNS_CLEANUP_AGE, age);
+#endif
                 }
 
                 // release reference to rec owned by mEvictionQ
@@ -985,14 +1005,18 @@ nsHostResolver::ThreadFunc(void *arg)
         if (ai) {
             status = NS_OK;
 
+#ifdef MOZ_IPC
             Telemetry::Accumulate(!rec->addr_info_gencnt ?
                                     Telemetry::DNS_LOOKUP_TIME :
                                     Telemetry::DNS_RENEWAL_TIME,
                                   millis);
+#endif
         }
         else {
             status = NS_ERROR_UNKNOWN_HOST;
+#ifdef MOZ_IPC
             Telemetry::Accumulate(Telemetry::DNS_FAILED_LOOKUP_TIME, millis);
+#endif
         }
         
         resolver->OnLookupComplete(rec, status, ai);

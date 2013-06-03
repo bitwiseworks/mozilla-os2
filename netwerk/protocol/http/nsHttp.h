@@ -37,6 +37,10 @@
 #include "nsURLHelper.h"
 #include "netCore.h"
 
+#ifndef MOZ_IPC
+#include "mozilla/Mutex.h"
+#endif
+
 #if defined(PR_LOGGING)
 //
 // Log module for HTTP Protocol logging...

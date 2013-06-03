@@ -102,7 +102,9 @@ extern nsresult nsStringInputStreamConstructor(nsISupports *, REFNSIID, void **)
 #include "mozilla/FunctionTimer.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/HangMonitor.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 #include "nsChromeRegistry.h"
 #include "nsChromeProtocolHandler.h"
@@ -516,7 +518,9 @@ NS_InitXPCOM2(nsIServiceManager* *result,
 
     mozilla::HangMonitor::Startup();
 
+#ifdef MOZ_IPC
     mozilla::Telemetry::Init();
+#endif
 
     mozilla::eventtracer::Init();
 

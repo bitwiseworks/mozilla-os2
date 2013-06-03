@@ -20,7 +20,9 @@
 #include "nsRefPtrHashtable.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/Mutex.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 class nsCacheRequest;
 class nsCacheProfilePrefObserver;
@@ -196,7 +198,11 @@ private:
      * Internal Methods
      */
 
+#ifdef MOZ_IPC
     static void      Lock(::mozilla::Telemetry::ID mainThreadLockerID);
+#else
+    static void      Lock();
+#endif
     static void      Unlock();
 
     nsresult         CreateDiskDevice();
@@ -321,16 +327,26 @@ private:
  *  nsCacheServiceAutoLock
  ******************************************************************************/
 
+#ifdef MOZ_IPC
 #define LOCK_TELEM(x) \
   (::mozilla::Telemetry::CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_##x)
+#else
+#define LOCK_TELEM(x)
+#endif
 
 // Instantiate this class to acquire the cache service lock for a particular
 // execution scope.
 class nsCacheServiceAutoLock {
 public:
+#ifdef MOZ_IPC
     nsCacheServiceAutoLock(mozilla::Telemetry::ID mainThreadLockerID) {
         nsCacheService::Lock(mainThreadLockerID);
     }
+#else
+    nsCacheServiceAutoLock() {
+        nsCacheService::Lock();
+    }
+#endif
     ~nsCacheServiceAutoLock() {
         nsCacheService::Unlock();
     }
