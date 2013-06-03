@@ -42,7 +42,7 @@
 #define GETCWD_CAN_MALLOC
 #endif
 
-#if defined(LINUX) || defined(__GNU__) || defined(__GLIBC__) 
+#if defined(LINUX) || defined(__GNU__) || defined(__GLIBC__)
 #include <getopt.h>
 #endif
 
@@ -78,7 +78,7 @@ mkdirs(char *path, mode_t mode)
     char *cp;
     struct stat sb;
     int res;
-    
+
     while (*path == '/' && path[1] == '/')
 	path++;
     for (cp = strrchr(path, '/'); cp && cp != path && cp[-1] == '/'; cp--)
@@ -156,6 +156,13 @@ main(int argc, char **argv)
 	  case 'd':
 	    dodir = 1;
 	    break;
+#if defined(__OS2__)
+      /* no proper symlink support so far */
+      case 'l':
+      case 'L':
+      case 'R':
+        break;
+#else
 	  case 'l':
 	    dolink = 1;
 	    break;
@@ -167,6 +174,7 @@ main(int argc, char **argv)
 	  case 'R':
 	    dolink = dorelsymlink = 1;
 	    break;
+#endif
 	  case 'm':
 	    mode = strtoul(optarg, &cp, 8);
 	    if (mode == 0 && cp == optarg)

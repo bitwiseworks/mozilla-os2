@@ -291,6 +291,13 @@ main(int argc, char **argv)
 	  case 'd':
 	    dodir = 1;
 	    break;
+#if defined(__OS2__)
+    /* no proper symlink support so far */
+    case 'l':
+    case 'L':
+    case 'R':
+      break;
+#else
 	  case 'l':
 	    dolink = 1;
 	    break;
@@ -302,6 +309,7 @@ main(int argc, char **argv)
      case 'R':
 	    dolink = dorelsymlink = 1;
 	    break;
+#endif
 	  case 'm':
 	    mode = strtoul(optarg, &cp, 8);
 	    if (mode == 0 && cp == optarg)
