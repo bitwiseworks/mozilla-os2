@@ -26,7 +26,9 @@
 #include <unidef.h>
 
 extern "C" {
+#ifndef __EMX__
 #include <callconv.h>
+#endif
 int APIENTRY UniQueryLocaleValue ( const LocaleObject locale_object,
                                    LocaleItem item,
                                   int *info_item);
