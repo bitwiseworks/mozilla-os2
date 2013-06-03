@@ -218,24 +218,31 @@ sdb_getFallbackTempDir(void)
         path[len - 1] = '\0';
     return PORT_Strdup(path);
 }
-#elif defined(XP_UNIX)
+#elif defined(XP_UNIX) || defined(XP_OS2)
 static char *
 sdb_getFallbackTempDir(void)
 {
     const char *azDirs[] = {
+#if defined(XP_OS2)
+        getenv("TEMP"),
+        getenv("TMP"),
+#else
         NULL,
         NULL,
         "/var/tmp",
         "/usr/tmp",
         "/tmp",
+#endif
         NULL     /* List terminator */
     };
     unsigned int i;
     struct stat buf;
     const char *zDir = NULL;
 
+#if !defined(XP_OS2)
     azDirs[0] = sqlite3_temp_directory;
     azDirs[1] = getenv("TMPDIR");
+#endif
 
     for (i = 0; i < PR_ARRAY_SIZE(azDirs); i++) {
         zDir = azDirs[i];
