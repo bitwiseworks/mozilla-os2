@@ -20,6 +20,8 @@
       defined(__GLIBC__) || defined(__GNU__) || \
       defined(__QNX__)
 #define ANGLE_OS_POSIX
+#elif defined (__OS2__)
+#define ANGLE_USE_NSPR
 #else
 #error Unsupported platform.
 #endif

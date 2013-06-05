@@ -99,7 +99,11 @@ CPPSRCS += \
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 CPPSRCS += ossource_win.cpp $(NULL)
 else
+ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
+CPPSRCS += ossource_nspr.cpp $(NULL)
+else
 CPPSRCS += ossource_posix.cpp $(NULL)
+endif
 endif
 
 CSRCS   = \
