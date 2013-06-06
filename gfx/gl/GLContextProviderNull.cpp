@@ -23,7 +23,7 @@ GLContextProviderNull::CreateOffscreen(const gfxIntSize&,
 }
 
 GLContext *
-GLContextProviderNull::GetGlobalContext()
+GLContextProviderNull::GetGlobalContext(const ContextFlags)
 {
     return nullptr;
 }
