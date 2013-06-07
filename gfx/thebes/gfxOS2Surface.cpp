@@ -33,7 +33,7 @@ gfxOS2Surface::gfxOS2Surface(const gfxIntSize& aSize,
     RecordMemoryUsed(mSize.width * mSize.height * 4 + OS2_OVERHEAD);
 }
 
-gfxOS2Surface::gfxOS2Surface(HDC aDC, const gfxIntSize& aSize)
+gfxOS2Surface::gfxOS2Surface(HWND aWnd)
     : mWnd(aWnd), mDC(0), mPS(0), mSize(0,0), mSurfType(os2Window)
 {
     RECTL rectl;
@@ -177,7 +177,7 @@ nsresult gfxOS2Surface::EndPage()
 }
 
 //static
-bool gfxOS2Surface::EnableDIVE(PRBool aEnable, PRBool aHidePointer)
+bool gfxOS2Surface::EnableDIVE(bool aEnable, bool aHidePointer)
 {
     // enable/disable DIVE (direct access to the video framebuffer)
     return cairo_os2_surface_enable_dive(aEnable, aHidePointer);
