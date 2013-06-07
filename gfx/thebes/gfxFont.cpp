@@ -34,7 +34,9 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 #include "cairo.h"
 #include "gfxFontTest.h"
@@ -1197,7 +1199,9 @@ gfxFontCache::Lookup(const gfxFontEntry *aFontEntry,
     Key key(aFontEntry, aStyle);
     HashEntry *entry = mFonts.GetEntry(key);
 
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::FONT_CACHE_HIT, entry != nullptr);
+#endif
     if (!entry)
         return nullptr;
 
@@ -2192,11 +2196,15 @@ gfxFont::GetShapedWord(gfxContext *aContext,
 
     if (sw) {
         sw->ResetAge();
+#ifdef MOZ_IPC
         Telemetry::Accumulate(Telemetry::WORD_CACHE_HITS, aLength);
+#endif
         return sw;
     }
 
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::WORD_CACHE_MISSES, aLength);
+#endif
     sw = entry->mShapedWord = gfxShapedWord::Create(aText, aLength,
                                                     aRunScript,
                                                     aAppUnitsPerDevUnit,

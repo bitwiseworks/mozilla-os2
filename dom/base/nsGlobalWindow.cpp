@@ -9796,7 +9796,9 @@ nsGlobalWindow::RunTimeout(nsTimeout *aTimeout)
       now - gLastRecordedRecentTimeouts > recordingInterval) {
     uint32_t count = gTimeoutsRecentlySet;
     gTimeoutsRecentlySet = 0;
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::DOM_TIMERS_RECENTLY_SET, count);
+#endif
     gLastRecordedRecentTimeouts = now;
   }
 
@@ -9819,7 +9821,9 @@ nsGlobalWindow::RunTimeout(nsTimeout *aTimeout)
   // the logic in ResetTimersForNonBackgroundWindow will need to change.
   mTimeoutInsertionPoint = &dummy_timeout;
 
+#ifdef MOZ_IPC
   Telemetry::AutoCounter<Telemetry::DOM_TIMERS_FIRED_PER_NATIVE_TIMEOUT> timeoutsRan;
+#endif
 
   for (timeout = FirstTimeout();
        timeout != &dummy_timeout && !IsFrozen();
@@ -9868,7 +9872,9 @@ nsGlobalWindow::RunTimeout(nsTimeout *aTimeout)
     }
 
     // This timeout is good to run
+#ifdef MOZ_IPC
     ++timeoutsRan;
+#endif
     bool timeout_was_cleared = RunTimeoutHandler(timeout, scx);
 
     if (timeout_was_cleared) {

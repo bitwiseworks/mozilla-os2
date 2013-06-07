@@ -376,12 +376,14 @@ private:
   bool mDelayRemoteDialogs : 1;
   bool mRemoteBrowserShown : 1;
   bool mRemoteFrame : 1;
+#endif
   bool mClipSubdocument : 1;
   bool mClampScrollPosition : 1;
   bool mRemoteBrowserInitialized : 1;
 
   // XXX leaking
   nsCOMPtr<nsIObserver> mChildHost;
+#ifdef MOZ_IPC
   RenderFrameParent* mCurrentRemoteFrame;
   TabParent* mRemoteBrowser;
 #endif

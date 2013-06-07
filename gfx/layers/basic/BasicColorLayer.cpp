@@ -58,6 +58,7 @@ BasicColorLayer::PaintColorTo(gfxRGBA aColor, float aOpacity,
   PaintWithMask(aContext, aOpacity, aMaskLayer);
 }
 
+#ifdef MOZ_IPC
 class BasicShadowableColorLayer : public BasicColorLayer,
                                   public BasicShadowableLayer
 {
@@ -150,6 +151,7 @@ BasicShadowLayerManager::CreateShadowColorLayer()
   nsRefPtr<ShadowColorLayer> layer = new BasicShadowColorLayer(this);
   return layer.forget();
 }
+#endif
 
 }
 }

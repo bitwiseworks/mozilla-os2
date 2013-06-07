@@ -981,6 +981,7 @@ CompositorParent::AllocPLayers(const LayersBackend& aBackendHint,
     }
     *aMaxTextureSize = layerManager->GetMaxTextureSize();
     return new ShadowLayersParent(slm, this, 0);
+#ifdef MOZ_IPC
   } else if (aBackendHint == mozilla::layers::LAYERS_BASIC) {
     nsRefPtr<LayerManager> layerManager = new BasicShadowLayerManager(mWidget);
     mWidget = NULL;
@@ -991,6 +992,7 @@ CompositorParent::AllocPLayers(const LayersBackend& aBackendHint,
     }
     *aMaxTextureSize = layerManager->GetMaxTextureSize();
     return new ShadowLayersParent(slm, this, 0);
+#endif
   } else {
     NS_ERROR("Unsupported backend selected for Async Compositor");
     return NULL;

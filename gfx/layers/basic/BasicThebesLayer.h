@@ -105,6 +105,7 @@ protected:
 
 struct AutoBufferTracker;
 
+#ifdef MOZ_IPC
 class BasicShadowableThebesLayer : public BasicThebesLayer,
                                    public BasicShadowableLayer
 {
@@ -200,6 +201,7 @@ private:
   nsIntRegion mFrontValidRegion;
   bool mFrontAndBackBufferDiffer;
 };
+#endif
 
 }
 }

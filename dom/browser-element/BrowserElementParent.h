@@ -30,6 +30,7 @@ class TabParent;
 class BrowserElementParent
 {
 public:
+#ifdef MOZ_IPC
   /**
    * Handle a window.open call from an out-of-process <iframe mozbrowser>.
    *
@@ -68,6 +69,7 @@ public:
                 const nsAString& aURL,
                 const nsAString& aName,
                 const nsAString& aFeatures);
+#endif
 
   /**
    * Handle a window.open call from an in-process <iframe mozbrowser>.

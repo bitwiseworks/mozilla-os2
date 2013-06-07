@@ -13,6 +13,7 @@ namespace layers {
 
 using mozilla::gl::GLContext;
 
+#ifdef MOZ_IPC
 TiledLayerBufferOGL::~TiledLayerBufferOGL()
 {
   if (mRetainedTiles.Length() == 0)
@@ -286,6 +287,7 @@ TiledThebesLayerOGL::RenderLayer(int aPreviousFrameBuffer, const nsIntPoint& aOf
   }
 
 }
+#endif
 
 } // mozilla
 } // layers

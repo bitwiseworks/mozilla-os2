@@ -159,6 +159,7 @@ BatteryManager::UpdateFromBatteryInfo(const hal::BatteryInformation& aBatteryInf
   }
 }
 
+#ifdef MOZ_IPC
 void
 BatteryManager::Notify(const hal::BatteryInformation& aBatteryInfo)
 {
@@ -199,6 +200,7 @@ BatteryManager::Notify(const hal::BatteryInformation& aBatteryInfo)
                                          : DISCHARGINGTIMECHANGE_EVENT_NAME);
   }
 }
+#endif
 
 /* static */ bool
 BatteryManager::HasSupport()

@@ -455,14 +455,18 @@ gfxPlatformFontList::SystemFindFontForChar(const uint32_t aCh,
     static bool first = true;
     int32_t intElapsed = int32_t(first ? elapsed.ToMilliseconds() :
                                          elapsed.ToMicroseconds());
+#ifdef MOZ_IPC
     Telemetry::Accumulate((first ? Telemetry::SYSTEM_FONT_FALLBACK_FIRST :
                                    Telemetry::SYSTEM_FONT_FALLBACK),
                           intElapsed);
+#endif
     first = false;
 
     // track the script for which fallback occurred (incremented one make it
     // 1-based)
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::SYSTEM_FONT_FALLBACK_SCRIPT, aRunScript + 1);
+#endif
 
     return fontEntry;
 }

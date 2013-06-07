@@ -296,6 +296,7 @@ BasicCanvasLayer::PaintWithOpacity(gfxContext* aContext,
   }
 }
 
+#ifdef MOZ_IPC
 class BasicShadowableCanvasLayer : public BasicCanvasLayer,
                                    public BasicShadowableLayer
 {
@@ -590,6 +591,7 @@ BasicShadowLayerManager::CreateShadowCanvasLayer()
   nsRefPtr<ShadowCanvasLayer> layer = new BasicShadowCanvasLayer(this);
   return layer.forget();
 }
+#endif
 
 }
 }

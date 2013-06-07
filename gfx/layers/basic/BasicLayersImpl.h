@@ -144,6 +144,7 @@ GetBasicShadowable(const OpT& op)
     static_cast<const ShadowLayerChild*>(op.layerChild())->layer());
 }
 
+#ifdef MOZ_IPC
 // Create a shadow layer (PLayerChild) for aLayer, if we're forwarding
 // our layer tree to a parent process.  Record the new layer creation
 // in the current open transaction as a side effect.
@@ -168,6 +169,9 @@ MaybeCreateShadowFor(BasicShadowableLayer* aLayer,
 #define MAYBE_CREATE_SHADOW(_type)                                      \
   MaybeCreateShadowFor(layer, this,                                     \
                        &ShadowLayerForwarder::Created ## _type ## Layer)
+#else
+#define MAYBE_CREATE_SHADOW(_type) do {} while(0)
+#endif
 
 }
 }

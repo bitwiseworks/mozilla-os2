@@ -223,6 +223,7 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
   }
 }
 
+#ifdef MOZ_IPC
 /**
  * AutoOpenBuffer is a helper that builds on top of AutoOpenSurface,
  * which we need to get a gfxASurface from a SurfaceDescriptor.  For
@@ -619,6 +620,7 @@ BasicShadowLayerManager::CreateShadowThebesLayer()
   nsRefPtr<ShadowThebesLayer> layer = new BasicShadowThebesLayer(this);
   return layer.forget();
 }
+#endif
 
 }
 }

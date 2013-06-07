@@ -15,6 +15,7 @@
 namespace mozilla {
 namespace layers {
 
+#ifdef MOZ_IPC
 /**
  * Represent a single tile in tiled buffer. It's backed
  * by a gfxReusableSurfaceWrapper that implements a
@@ -210,6 +211,7 @@ private:
   // Members
   BasicTiledLayerBuffer mTiledBuffer;
 };
+#endif
 
 } // layers
 } // mozilla

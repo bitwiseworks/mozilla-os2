@@ -78,7 +78,9 @@
 
 #include "mozilla/FunctionTimer.h"
 #include "mozilla/Preferences.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
@@ -3112,13 +3114,17 @@ nsJSContext::CycleCollectNow(nsICycleCollectorListener *aListener,
   PRTime now = PR_Now();
 
   if (sLastCCEndTime) {
+#ifdef MOZ_IPC
     uint32_t timeBetween = (uint32_t)(start - sLastCCEndTime) / PR_USEC_PER_SEC;
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_TIME_BETWEEN, timeBetween);
+#endif
   }
   sLastCCEndTime = now;
 
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::FORGET_SKIPPABLE_MAX,
                         sMaxForgetSkippableTime / PR_USEC_PER_MSEC);
+#endif
 
   PRTime delta = GetCollectionTimeDelta();
 

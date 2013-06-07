@@ -7,6 +7,7 @@
 namespace mozilla {
 namespace layers {
 
+#ifdef MOZ_IPC
 ReusableTileStoreOGL::~ReusableTileStoreOGL()
 {
   if (mTiles.Length() == 0)
@@ -292,6 +293,7 @@ ReusableTileStoreOGL::DrawTiles(TiledThebesLayerOGL* aLayer,
     aLayer->RenderTile(tile->mTexture, transform, aRenderOffset, tileRegion, tileOffset, textureSize, aMaskLayer);
   }
 }
+#endif
 
 } // mozilla
 } // layers

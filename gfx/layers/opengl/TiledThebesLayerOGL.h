@@ -20,6 +20,7 @@ class GLContext;
 
 namespace layers {
 
+#ifdef MOZ_IPC
 class ReusableTileStoreOGL;
 
 class TiledTexture {
@@ -145,6 +146,7 @@ private:
   TiledLayerBufferOGL          mVideoMemoryTiledBuffer;
   ReusableTileStoreOGL*        mReusableTileStore;
 };
+#endif
 
 } // layers
 } // mozilla
