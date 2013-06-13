@@ -258,7 +258,7 @@ nsWindow::~nsWindow()
     WinDestroyWindow(mClipWnd);
     mClipWnd = 0;
   }
- 
+
   // If it exists, destroy our os2FrameWindow helper object.
   if (mFrame) {
     delete mFrame;
@@ -871,7 +871,7 @@ float nsWindow::GetDPI()
       sDPI = 96;
     }
   }
-  return sDPI;  
+  return sDPI;
 }
 
 //-----------------------------------------------------------------------------
@@ -1133,7 +1133,7 @@ void nsWindow::ActivatePlugin(HWND aWnd)
   // Fire a plugin activation event on the plugin widget.
   inPluginActivate = TRUE;
   DEBUGFOCUS(NS_PLUGIN_ACTIVATE);
-  DispatchActivationEvent(NS_PLUGIN_ACTIVATE);
+  DispatchPluginActivationEvent();
 
   // Activating the plugin moves the focus off the child that had it,
   // so try to restore it.  If the WM_FOCUSCHANGED msg was synthesized
@@ -2271,7 +2271,7 @@ do {
   // Establish a clipping region for the event and for Thebes.
   thebesContext->NewPath();
   for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
-    event.region.Or(event.region, 
+    event.region.Or(event.region,
                     nsIntRect(pr->xLeft, mBounds.height - pr->yTop,
                               pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
 
@@ -3387,11 +3387,25 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
 }
 
 //-----------------------------------------------------------------------------
-// Signal plugin & top-level window activation.
+// Signal top-level window activation.
 
-bool nsWindow::DispatchActivationEvent(uint32_t aEventType)
+bool nsWindow::DispatchActivationEvent(bool aIsActivate)
 {
-  nsGUIEvent event(true, aEventType, this);
+  if (!mWidgetListener)
+    return;
+
+  if (aIsActivate)
+    mWidgetListener->WindowActivated();
+  else
+    mWidgetListener->WindowDeactivated();
+}
+
+//-----------------------------------------------------------------------------
+// Signal plugin window activation.
+
+bool nsWindow::DispatchPluginActivationEvent()
+{
+  nsGUIEvent event(true, NS_PLUGIN_ACTIVATE, this);
 
   // These events should go to their base widget location,
   // not current mouse position.
@@ -3399,17 +3413,7 @@ bool nsWindow::DispatchActivationEvent(uint32_t aEventType)
   InitEvent(event, &point);
 
   NPEvent pluginEvent;
-  switch (aEventType) {
-    case NS_ACTIVATE:
-      pluginEvent.event = WM_SETFOCUS;
-      break;
-    case NS_DEACTIVATE:
-      pluginEvent.event = WM_FOCUSCHANGED;
-      break;
-    case NS_PLUGIN_ACTIVATE:
-      pluginEvent.event = WM_FOCUSCHANGED;
-      break;
-  }
+  pluginEvent.event = WM_FOCUSCHANGED;
   event.pluginEvent = (void*)&pluginEvent;
 
   return DispatchWindowEvent(&event);

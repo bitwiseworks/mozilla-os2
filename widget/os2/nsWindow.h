@@ -163,8 +163,8 @@ public:
   virtual nsresult      ConfigureChildren(const nsTArray<Configuration>& aConfigurations);
   NS_IMETHOD            SetSizeMode(int32_t aMode);
   NS_IMETHOD            HideWindowChrome(bool aShouldHide);
-  NS_IMETHOD            SetTitle(const nsAString& aTitle); 
-  NS_IMETHOD            SetIcon(const nsAString& aIconSpec); 
+  NS_IMETHOD            SetTitle(const nsAString& aTitle);
+  NS_IMETHOD            SetIcon(const nsAString& aIconSpec);
   NS_IMETHOD            ConstrainPosition(bool aAllowSlop,
                                           int32_t* aX, int32_t* aY);
   NS_IMETHOD            SetCursor(nsCursor aCursor);
@@ -218,7 +218,7 @@ protected:
   HBITMAP               CreateTransparencyMask(gfxASurface::gfxImageFormat format,
                                                uint8_t* aImageData,
                                                uint32_t aWidth, uint32_t aHeight);
-  static bool           EventIsInsideWindow(nsWindow* aWindow); 
+  static bool           EventIsInsideWindow(nsWindow* aWindow);
   static bool           RollupOnButtonDown(ULONG aMsg);
   static void           RollupOnFocusLost(HWND aFocus);
   MRESULT               ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2);
@@ -242,13 +242,14 @@ protected:
   bool                  DispatchCommandEvent(uint32_t aEventCommand);
   bool                  DispatchDragDropEvent(uint32_t aMsg);
   bool                  DispatchMoveEvent(int32_t aX, int32_t aY);
-  bool                  DispatchResizeEvent(int32_t aClientX, 
+  bool                  DispatchResizeEvent(int32_t aClientX,
                                             int32_t aClientY);
   bool                  DispatchMouseEvent(uint32_t aEventType,
-                                           MPARAM mp1, MPARAM mp2, 
+                                           MPARAM mp1, MPARAM mp2,
                                            bool aIsContextMenuKey = false,
                                            int16_t aButton = nsMouseEvent::eLeftButton);
-  bool                  DispatchActivationEvent(uint32_t aEventType);
+  void                  DispatchActivationEvent(bool aIsActivate);
+  bool                  DispatchPluginActivationEvent();
   bool                  DispatchScrollEvent(ULONG msg, MPARAM mp1, MPARAM mp2);
 
   friend MRESULT EXPENTRY fnwpNSWindow(HWND hwnd, ULONG msg,

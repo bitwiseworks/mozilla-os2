@@ -16,6 +16,7 @@
 #include "os2FrameWindow.h"
 #include "nsIRollupListener.h"
 #include "nsIScreenManager.h"
+#include "nsIWidgetListener.h"
 #include "nsOS2Uni.h"
 
 //-----------------------------------------------------------------------------
@@ -323,7 +324,7 @@ void os2FrameWindow::ActivateTopLevelWidget()
     if (sizeMode != nsSizeMode_Minimized) {
       mNeedActivation = false;
       DEBUGFOCUS(NS_ACTIVATE);
-      mOwner->DispatchActivationEvent(NS_ACTIVATE);
+      mOwner->DispatchActivationEvent(true);
     }
   }
   return;
@@ -639,16 +640,17 @@ MRESULT os2FrameWindow::ProcessFrameMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
       }
 
       if (pSwp->fl & (SWP_MAXIMIZE | SWP_MINIMIZE | SWP_RESTORE)) {
-        nsSizeModeEvent event(true, NS_SIZEMODE, mOwner);
-        if (pSwp->fl & SWP_MAXIMIZE) {
-          event.mSizeMode = nsSizeMode_Maximized;
-        } else if (pSwp->fl & SWP_MINIMIZE) {
-          event.mSizeMode = nsSizeMode_Minimized;
-        } else {
-          event.mSizeMode = nsSizeMode_Normal;
+        if (mOwner->mWidgetListener) {
+          nsSizeMode mode;
+          if (pSwp->fl & SWP_MAXIMIZE) {
+            mode = nsSizeMode_Maximized;
+          } else if (pSwp->fl & SWP_MINIMIZE) {
+            mode = nsSizeMode_Minimized;
+          } else {
+            mode = nsSizeMode_Normal;
+          }
+          mOwner->mWidgetListener->SizeModeChanged(mode);
         }
-        mOwner->InitEvent(event);
-        mOwner->DispatchWindowEvent(&event);
       }
       break;
     }
@@ -714,7 +716,7 @@ MRESULT os2FrameWindow::ProcessFrameMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
       } else {
         mNeedActivation = false;
         DEBUGFOCUS(NS_DEACTIVATE);
-        mOwner->DispatchActivationEvent(NS_DEACTIVATE);
+        mOwner->DispatchActivationEvent(false);
         // Prevent the frame from automatically focusing any window
         // when it's reactivated.  Let moz set the focus to avoid
         // having non-widget children of plugins focused in error.
