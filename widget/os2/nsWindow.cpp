@@ -40,6 +40,7 @@
 #include "nsIRollupListener.h"
 #include "nsIScreenManager.h"
 #include "nsIXULRuntime.h"
+#include "nsIWidgetListener.h"
 #include "nsOS2Uni.h"
 #include "nsTHashtable.h"
 #include "nsGkAtoms.h"
@@ -3389,7 +3390,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, MPARAM mp1, MPARAM mp2,
 //-----------------------------------------------------------------------------
 // Signal top-level window activation.
 
-bool nsWindow::DispatchActivationEvent(bool aIsActivate)
+void nsWindow::DispatchActivationEvent(bool aIsActivate)
 {
   if (!mWidgetListener)
     return;
