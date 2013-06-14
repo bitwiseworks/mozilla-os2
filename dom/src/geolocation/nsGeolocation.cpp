@@ -4,6 +4,8 @@
 
 #ifdef MOZ_IPC
 #include "nsContentPermissionHelper.h"
+#else
+#include "base/basictypes.h"
 #endif
 #include "nsXULAppAPI.h"
 

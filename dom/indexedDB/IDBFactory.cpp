@@ -45,9 +45,11 @@
 
 USING_INDEXEDDB_NAMESPACE
 
+#ifdef MOZ_IPC
 using mozilla::dom::ContentChild;
 using mozilla::dom::ContentParent;
 using mozilla::dom::TabChild;
+#endif
 
 namespace {
 
@@ -122,6 +124,7 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
   factory->mWindow = aWindow;
   factory->mContentParent = aContentParent;
 
+#ifdef MOZ_IPC
   if (!IndexedDatabaseManager::IsMainProcess()) {
     TabChild* tabChild = GetTabChildFrom(aWindow);
     NS_ENSURE_TRUE(tabChild, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
@@ -139,6 +142,7 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
 
     actor->SetFactory(factory);
   }
+#endif
 
   factory.forget(aFactory);
   return NS_OK;
@@ -168,6 +172,7 @@ IDBFactory::Create(JSContext* aCx,
   factory->mOwningObject = aOwningObject;
   factory->mContentParent = aContentParent;
 
+#ifdef MOZ_IPC
   if (!IndexedDatabaseManager::IsMainProcess()) {
     ContentChild* contentChild = ContentChild::GetSingleton();
     NS_ENSURE_TRUE(contentChild, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
@@ -178,6 +183,7 @@ IDBFactory::Create(JSContext* aCx,
 
     actor->SetFactory(factory);
   }
+#endif
 
   factory.forget(aFactory);
   return NS_OK;

@@ -15,7 +15,9 @@
 #include "prlog.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -453,7 +455,9 @@ nsIdleService::ResetIdleTimeOut(uint32_t idleDeltaInMS)
   }
 
   // Mark all idle services as non-idle, and calculate the next idle timeout.
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::IDLE_NOTIFY_BACK_MS> timer;
+#endif
   nsCOMArray<nsIObserver> notifyList;
   mDeltaToNextIdleSwitchInS = PR_UINT32_MAX;
 
@@ -479,8 +483,10 @@ nsIdleService::ResetIdleTimeOut(uint32_t idleDeltaInMS)
   ReconfigureTimer();
 
   int32_t numberOfPendingNotifications = notifyList.Count();
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::IDLE_NOTIFY_BACK_LISTENERS,
                         numberOfPendingNotifications);
+#endif
 
   // Bail if nothing to do.
   if (!numberOfPendingNotifications) {
@@ -629,7 +635,9 @@ nsIdleService::IdleTimerCallback(void)
   }
 
   // Tell expired listeners they are expired,and find the next timeout
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::IDLE_NOTIFY_IDLE_MS> timer;
+#endif
 
   // We need to initialise the time to the next idle switch.
   mDeltaToNextIdleSwitchInS = PR_UINT32_MAX;
@@ -664,8 +672,10 @@ nsIdleService::IdleTimerCallback(void)
   ReconfigureTimer();
 
   int32_t numberOfPendingNotifications = notifyList.Count();
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::IDLE_NOTIFY_IDLE_LISTENERS,
                         numberOfPendingNotifications);
+#endif
 
   // Bail if nothing to do.
   if (!numberOfPendingNotifications) {

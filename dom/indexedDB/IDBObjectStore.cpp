@@ -1478,11 +1478,13 @@ IDBObjectStore::ConvertBlobsToActors(
 
       nsCOMPtr<nsIDOMBlob> blob = new nsDOMFileFile(nativeFile);
 
+#ifdef MOZ_IPC
       BlobParent* actor =
         aContentParent->GetOrCreateActorForBlob(blob);
       NS_ASSERTION(actor, "This should never fail without aborting!");
 
       aActors.AppendElement(actor);
+#endif
     }
   }
 
@@ -2780,6 +2782,7 @@ AddHelper::ReleaseMainThreadObjects()
 nsresult
 AddHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 {
+#ifdef MOZ_IPC
   AddPutParams commonParams;
   commonParams.cloneInfo() = mCloneWriteInfo;
   commonParams.key() = mKey;
@@ -2820,6 +2823,7 @@ AddHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
     addParams.commonParams() = commonParams;
     aParams = addParams;
   }
+#endif
 
   return NS_OK;
 }

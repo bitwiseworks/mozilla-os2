@@ -13,6 +13,11 @@
 #include "nsDeviceStorage.h"
 #include "nsTArray.h"
 
+#ifndef MOZ_IPC
+#include "nsNetCID.h"
+#include "mozilla/dom/PContent.h"
+#endif
+
 namespace mozilla {
 namespace dom {
 namespace devicestorage {

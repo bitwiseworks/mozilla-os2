@@ -862,10 +862,9 @@ void nsBaseWidget::CreateCompositor()
   AsyncChannel *parentChannel = mCompositorParent->GetIPCChannel();
   AsyncChannel::Side childSide = mozilla::ipc::AsyncChannel::Child;
   mCompositorChild->Open(parentChannel, childMessageLoop, childSide);
-  int32_t maxTextureSize;
 #ifdef MOZ_IPC
+  int32_t maxTextureSize;
   PLayersChild* shadowManager;
-#endif
   mozilla::layers::LayersBackend backendHint =
     mUseAcceleratedRendering ? mozilla::layers::LAYERS_OPENGL : mozilla::layers::LAYERS_BASIC;
   mozilla::layers::LayersBackend parentBackend;
@@ -884,7 +883,9 @@ void nsBaseWidget::CreateCompositor()
     lf->SetMaxTextureSize(maxTextureSize);
 
     mLayerManager = lm;
-  } else {
+  } else
+#endif
+  {
     // We don't currently want to support not having a LayersChild
     NS_RUNTIMEABORT("failed to construct LayersChild");
     delete lm;

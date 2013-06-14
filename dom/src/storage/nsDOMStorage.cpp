@@ -39,7 +39,9 @@ using mozilla::dom::ContentChild;
 #include "nsNetCID.h"
 #include "mozilla/Preferences.h"
 #include "nsThreadUtils.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "DictionaryHelpers.h"
 #include "GeneratedEvents.h"
 
@@ -1546,6 +1548,7 @@ nsDOMStorage::GetItem(const nsAString& aKey, nsAString &aData)
   return NS_OK;
 }
 
+#ifdef MOZ_IPC
 static Telemetry::ID
 TelemetryIDForKey(nsPIDOMStorage::nsDOMStorageType type)
 {
@@ -1575,6 +1578,7 @@ TelemetryIDForValue(nsPIDOMStorage::nsDOMStorageType type)
     return Telemetry::SESSIONDOMSTORAGE_VALUE_SIZE_BYTES;
   }
 }
+#endif
 
 NS_IMETHODIMP
 nsDOMStorage::GetItem(const nsAString& aKey, nsIDOMStorageItem **aItem)
@@ -1592,8 +1596,10 @@ nsDOMStorage::SetItem(const nsAString& aKey, const nsAString& aData)
   if (!CacheStoragePermissions())
     return NS_ERROR_DOM_SECURITY_ERR;
 
+#ifdef MOZ_IPC
   Telemetry::Accumulate(TelemetryIDForKey(mStorageType), aKey.Length());
   Telemetry::Accumulate(TelemetryIDForValue(mStorageType), aData.Length());
+#endif
 
   nsString oldValue;
   nsresult rv = mStorageImpl->SetValue(IsCallerSecure(), aKey, aData, oldValue);
