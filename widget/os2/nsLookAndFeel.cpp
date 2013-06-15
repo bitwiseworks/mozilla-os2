@@ -15,6 +15,7 @@
 #include "nsFont.h"
 #include "nsSize.h"
 #include "nsStyleConsts.h"
+#include "gfxFont.h"
 
 static bool bIsDBCS;
 static bool bIsDBCSSet = false;
@@ -424,8 +425,8 @@ QueryFontFromINI(char* fontType, char* fontName, ULONG ulLength)
  * to determine the font style from it.
  */
 bool
-nsLookAndFeel::GetFont(FontID aID, nsString& aFontName,
-                       gfxFontStyle& aFontStyle)
+nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
+                           gfxFontStyle& aFontStyle)
 {
   char szFontNameSize[MAXNAMEL];
 

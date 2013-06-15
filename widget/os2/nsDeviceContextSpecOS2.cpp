@@ -24,7 +24,6 @@
 #include "nsStringFwd.h"
 #include "nsStringEnumerator.h"
 #include "nsOS2Uni.h"
-#include "nsIFile.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsIFileStreams.h"
 #include "gfxPDFSurface.h"
@@ -36,6 +35,7 @@
 #include "nsIDOMWindow.h"
 #include "nsIFilePicker.h"
 #include "nsIStringBundle.h"
+#include "nsILocalFile.h"
 
 #include "nsDeviceContextSpecOS2.h"
 #include "nsPrintOS2.h"
@@ -232,7 +232,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::Init(nsIWidget *aWidget,
   PRExplodedTime time;
   PR_ExplodeTime(PR_Now(), PR_LocalTimeParameters, &time);
   mDefaultName.Assign(
-      nsPrintfCString(64, "%s_%04d%02d%02d_%02d%02d%02d",
+      nsPrintfCString("%s_%04d%02d%02d_%02d%02d%02d",
                       MOZ_APP_DISPLAYNAME, time.tm_year, time.tm_month+1,
                       time.tm_mday, time.tm_hour, time.tm_min, time.tm_sec));
 
@@ -441,7 +441,7 @@ nsresult  GetFileNameForPrintSettings(nsIPrintSettings* aPS,
     return NS_ERROR_ABORT;
   }
 
-  nsCOMPtr<nsILocalFile> localFile;
+  nsCOMPtr<nsIFile> localFile;
   rv = filePicker->GetFile(getter_AddRefs(localFile));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1013,7 +1013,7 @@ NS_IMETHODIMP os2NullOutputStream::Flush()
 }
 
 NS_IMETHODIMP os2NullOutputStream::Write(const char *aBuf, uint32_t aCount,
-                                         uint32_t *_retval NS_OUTPARAM)
+                                         uint32_t *_retval)
 {
 #ifdef debug_enterexit
   if (!mWrites) {
@@ -1027,7 +1027,7 @@ NS_IMETHODIMP os2NullOutputStream::Write(const char *aBuf, uint32_t aCount,
 
 NS_IMETHODIMP os2NullOutputStream::WriteFrom(nsIInputStream *aFromStream,
                                              uint32_t aCount,
-                                             uint32_t *_retval NS_OUTPARAM)
+                                             uint32_t *_retval)
 {
     DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -1035,13 +1035,13 @@ NS_IMETHODIMP os2NullOutputStream::WriteFrom(nsIInputStream *aFromStream,
 
 NS_IMETHODIMP os2NullOutputStream::WriteSegments(nsReadSegmentFun aReader,
                                                  void *aClosure, uint32_t aCount,
-                                                 uint32_t *_retval NS_OUTPARAM)
+                                                 uint32_t *_retval)
 {
     DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP os2NullOutputStream::IsNonBlocking(bool *_retval NS_OUTPARAM)
+NS_IMETHODIMP os2NullOutputStream::IsNonBlocking(bool *_retval)
 {
     DBGNX();
     *_retval = true;
@@ -1216,7 +1216,7 @@ NS_IMETHODIMP os2SpoolerStream::Flush()
 }
 
 NS_IMETHODIMP os2SpoolerStream::Write(const char *aBuf, uint32_t aCount,
-                                      uint32_t *_retval NS_OUTPARAM)
+                                      uint32_t *_retval)
 {
 #ifdef debug_enterexit
   if (!mWrites)
@@ -1248,7 +1248,7 @@ NS_IMETHODIMP os2SpoolerStream::Write(const char *aBuf, uint32_t aCount,
 
 NS_IMETHODIMP os2SpoolerStream::WriteFrom(nsIInputStream *aFromStream,
                                           uint32_t aCount,
-                                          uint32_t *_retval NS_OUTPARAM)
+                                          uint32_t *_retval)
 {
     DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -1256,13 +1256,13 @@ NS_IMETHODIMP os2SpoolerStream::WriteFrom(nsIInputStream *aFromStream,
 
 NS_IMETHODIMP os2SpoolerStream::WriteSegments(nsReadSegmentFun aReader,
                                               void *aClosure, uint32_t aCount,
-                                              uint32_t *_retval NS_OUTPARAM)
+                                              uint32_t *_retval)
 {
     DBGNX();
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP os2SpoolerStream::IsNonBlocking(bool *_retval NS_OUTPARAM)
+NS_IMETHODIMP os2SpoolerStream::IsNonBlocking(bool *_retval)
 {
     DBGNX();
     *_retval = false;
