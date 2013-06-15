@@ -193,6 +193,7 @@ static APIRET (APIENTRY *spfnImRequestIME)(HIMI, ULONG, ULONG, ULONG);
 static uint32_t     WMChar2KeyCode(MPARAM mp1, MPARAM mp2);
 static void         InitDIVEStatus();
 static void         SetDIVEStatus();
+static void         InitIME();
 
 //=============================================================================
 //  nsWindow Create / Destroy
