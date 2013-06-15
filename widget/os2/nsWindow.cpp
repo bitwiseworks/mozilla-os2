@@ -542,7 +542,6 @@ void nsWindow::ReleaseGlobals()
 NS_METHOD nsWindow::Create(nsIWidget* aParent,
                            nsNativeWidget aNativeParent,
                            const nsIntRect& aRect,
-                           EVENT_CALLBACK aHandleEventFunction,
                            nsDeviceContext* aContext,
                            nsWidgetInitData* aInitData)
 {
@@ -566,7 +565,7 @@ NS_METHOD nsWindow::Create(nsIWidget* aParent,
     }
   }
 
-  BaseCreate(aParent, aRect, aHandleEventFunction, aContext, aInitData);
+  BaseCreate(aParent, aRect, aContext, aInitData);
 
 #ifdef DEBUG_FOCUS
   mWindowIdentifier = currentWindowIdentifier;
@@ -605,11 +604,6 @@ NS_METHOD nsWindow::Create(nsIWidget* aParent,
 
   // Store a pointer to this object in the window's extra bytes.
   SetNSWindowPtr(mWnd, this);
-
-  // Finalize the widget creation process.
-  nsGUIEvent event(true, NS_CREATE, this);
-  InitEvent(event);
-  DispatchWindowEvent(&event);
 
   mWindowState = nsWindowState_eLive;
   return NS_OK;
@@ -714,7 +708,7 @@ NS_METHOD nsWindow::Destroy()
 // This can't be inlined in nsWindow.h because it doesn't know about
 // GetFrameWnd().
 
-inline HWND nsWindow::GetMainWindow()
+inline HWND nsWindow::GetMainWindow() const
 {
   return mFrame ? mFrame->GetFrameWnd() : mWnd;
 }
@@ -1896,10 +1890,8 @@ MRESULT nsWindow::ProcessMessage(ULONG msg, MPARAM mp1, MPARAM mp2)
     // windows can be closed from the Window List
     case WM_CLOSE:
     case WM_QUIT: {
-      mWindowState |= nsWindowState_eClosing;
-      nsGUIEvent event(true, NS_XUL_CLOSE, this);
-      InitEvent(event);
-      DispatchWindowEvent(&event);
+      if (mWidgetListener)
+        mWidgetListener->RequestWindowClose(this);
       // abort window closure
       isDone = true;
       break;
@@ -2170,10 +2162,10 @@ bool nsWindow::OnReposition(PSWP pSwp)
 
 bool nsWindow::OnPaint()
 {
+  bool   result = false;
   HPS    hPS;
   HPS    hpsDrag;
   HRGN   hrgn = 0;
-  nsEventStatus eventStatus = nsEventStatus_eIgnore;
 
 #ifdef DEBUG_PAINT
   HRGN debugPaintFlashRegion = 0;
@@ -2224,14 +2216,13 @@ do {
 
   // Even if there is no callback to update the content (unlikely)
   // we still want to update the screen with whatever's available.
-  if (!mEventCallback) {
+  if (!mWidgetListener) {
     mThebesSurface->Refresh(&rcl, 1, hPS);
     break;
   }
 
-  // Create an event & a Thebes context.
-  nsPaintEvent event(true, NS_PAINT, this);
-  InitEvent(event);
+  // Create a Thebes context.
+  nsIntRegion region;
   nsRefPtr<gfxContext> thebesContext = new gfxContext(mThebesSurface);
 
   // Decide whether to display the entire update rectangle or
@@ -2270,12 +2261,12 @@ do {
     rgnrect.crcReturned = 1;
   }
 
-  // Establish a clipping region for the event and for Thebes.
+  // Establish a clipping region for Thebes.
   thebesContext->NewPath();
   for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
-    event.region.Or(event.region,
-                    nsIntRect(pr->xLeft, mBounds.height - pr->yTop,
-                              pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
+    region.Or(region,
+              nsIntRect(pr->xLeft, mBounds.height - pr->yTop,
+                        pr->xRight - pr->xLeft, pr->yTop - pr->yBottom));
 
     thebesContext->Rectangle(gfxRect(pr->xLeft,
                                      mBounds.height - pr->yTop,
@@ -2284,22 +2275,21 @@ do {
   }
   thebesContext->Clip();
 
+  if (!region.IsEmpty()) {
 #ifdef DEBUG_PAINT
-  debug_DumpPaintEvent(stdout, this, &event, nsCAutoString("noname"),
-                       (int32_t)mWnd);
+    debug_DumpPaintEvent(stdout, this, region, nsCAutoString("noname"),
+                         (int32_t)mWnd);
 #endif
 
-  // Init the Layers manager then dispatch the event.
-  // If it returns false there's nothing to paint, so exit.
-  AutoLayerManagerSetup
-      setupLayerManager(this, thebesContext, BasicLayerManager::BUFFER_NONE);
-  if (!DispatchWindowEvent(&event, eventStatus)) {
-    break;
+    // Init the Layers manager then dispatch the event.
+    // If it returns false there's nothing to paint, so exit.
+    AutoLayerManagerSetup
+        setupLayerManager(this, thebesContext, mozilla::layers::BUFFER_NONE);
+    result = mWidgetListener->PaintWindow(this, region, true, true);
+
+    // Have Thebes display the rectangle(s).
+    mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
   }
-
-  // Have Thebes display the rectangle(s).
-  mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
-
 } while (0);
 
   // Cleanup.
@@ -2318,7 +2308,7 @@ do {
     // Only flash paint events which have not ignored the paint message.
     // Those that ignore the paint message aren't painting anything so there
     // is only the overhead of the dispatching the paint event.
-    if (eventStatus != nsEventStatus_eIgnore) {
+    if (result) {
       LONG CurMix = GpiQueryMix(debugPaintFlashPS);
       GpiSetMix(debugPaintFlashPS, FM_INVERT);
 
@@ -2334,7 +2324,7 @@ do {
   }
 #endif
 
-  return true;
+  return result;
 }
 
 //-----------------------------------------------------------------------------
@@ -3140,13 +3130,13 @@ NS_IMETHODIMP nsWindow::DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus)
 {
   aStatus = nsEventStatus_eIgnore;
 
-  if (!mEventCallback) {
+  if (!mWidgetListener) {
     return NS_OK;
   }
 
   // if state is eDoingDelete, don't send out anything
   if (mWindowState & nsWindowState_eLive) {
-    aStatus = (*mEventCallback)(event);
+    aStatus = mWidgetListener->HandleEvent(event, mUseAttachedEvents);
   }
   return NS_OK;
 }
@@ -3220,25 +3210,14 @@ bool nsWindow::DispatchDragDropEvent(uint32_t aMsg)
 bool nsWindow::DispatchMoveEvent(int32_t aX, int32_t aY)
 {
   // Params here are in XP-space for the desktop
-  nsGUIEvent event(true, NS_MOVE, this);
-  nsIntPoint point(aX, aY);
-  InitEvent(event, &point);
-  return DispatchWindowEvent(&event);
+  return mWidgetListener ? mWidgetListener->WindowMoved(this, aX, aY) : false;
 }
 
 //-----------------------------------------------------------------------------
 
 bool nsWindow::DispatchResizeEvent(int32_t aX, int32_t aY)
 {
-  nsSizeEvent event(true, NS_SIZE, this);
-  nsIntRect   rect(0, 0, aX, aY);
-
-  InitEvent(event);
-  event.windowSize = &rect;             // this is the *client* rectangle
-  event.mWinWidth = mBounds.width;
-  event.mWinHeight = mBounds.height;
-
-  return DispatchWindowEvent(&event);
+  return mWidgetListener ? mWidgetListener->WindowResized(this, aX, aY) : false;
 }
 
 //-----------------------------------------------------------------------------
@@ -3437,25 +3416,25 @@ bool nsWindow::DispatchScrollEvent(ULONG msg, MPARAM mp1, MPARAM mp2)
   switch (SHORT2FROMMP(mp2)) {
     case SB_LINEUP:
     //   SB_LINELEFT:
-      wheelEvent.deltaMode = nsIDOMWheelEvent.DOM_DELTA_LINE;
+      wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
       delta = -1;
       break;
 
     case SB_LINEDOWN:
     //   SB_LINERIGHT:
-      wheelEvent.deltaMode = nsIDOMWheelEvent.DOM_DELTA_LINE;
+      wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
       delta = 1;
       break;
 
     case SB_PAGEUP:
     //   SB_PAGELEFT:
-      wheelEvent.deltaMode = nsIDOMWheelEvent.DOM_DELTA_PAGE;
+      wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_PAGE;
       delta = -1;
       break;
 
     case SB_PAGEDOWN:
     //   SB_PAGERIGHT:
-      wheelEvent.deltaMode = nsIDOMWheelEvent.DOM_DELTA_PAGE;
+      wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_PAGE;
       delta = 1;
       break;
 

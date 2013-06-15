@@ -131,7 +131,6 @@ public:
   NS_IMETHOD            Create(nsIWidget* aParent,
                                nsNativeWidget aNativeParent,
                                const nsIntRect& aRect,
-                               EVENT_CALLBACK aHandleEventFunction,
                                nsDeviceContext* aContext,
                                nsWidgetInitData* aInitData = nullptr);
   NS_IMETHOD            Destroy();
@@ -201,7 +200,7 @@ protected:
                                      const nsIntRect& aRect,
                                      nsWidgetInitData* aInitData);
   gfxASurface*          ConfirmThebesSurface();
-  HWND                  GetMainWindow();
+  HWND                  GetMainWindow() const;
   static nsWindow*      GetNSWindowPtr(HWND aWnd);
   static bool           SetNSWindowPtr(HWND aWnd, nsWindow* aPtr);
   void                  NS2PM(POINTL& ptl);
