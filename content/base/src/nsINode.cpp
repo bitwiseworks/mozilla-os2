@@ -13,7 +13,9 @@
 #include "jsapi.h"
 #include "mozAutoDocUpdate.h"
 #include "mozilla/CORSMode.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "mozilla/Util.h"
 #include "nsAsyncDOMEvent.h"
 #include "nsAttrValueOrString.h"

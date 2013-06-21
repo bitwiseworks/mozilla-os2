@@ -323,10 +323,13 @@ nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue()
           hrefURI->GetAsciiHost(hostName);
 
         if (!hostName.IsEmpty()) {
+#ifdef MOZ_IPC
           if (IsNeckoChild()) {
             gNeckoChild->SendHTMLDNSPrefetch(NS_ConvertUTF8toUTF16(hostName),
                                            mEntries[mTail].mFlags);
-          } else {
+          } else
+#endif
+          {
             nsCOMPtr<nsICancelable> tmpOutstanding;
 
             nsresult rv = sDNSService->AsyncResolve(hostName, 

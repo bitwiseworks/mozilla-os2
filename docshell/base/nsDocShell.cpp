@@ -193,7 +193,6 @@
 #include "nsITimedChannel.h"
 #include "mozilla/StartupTimeline.h"
 
-#include "mozilla/Telemetry.h"
 #include "nsISecurityUITelemetry.h"
 
 #ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
@@ -693,8 +692,10 @@ IncreasePrivateDocShellCount()
         return;
     }
 
+#ifdef MOZ_IPC
     mozilla::dom::ContentChild* cc = mozilla::dom::ContentChild::GetSingleton();
     cc->SendPrivateDocShellsExist(true);
+#endif
 }
 
 static void
@@ -704,11 +705,13 @@ DecreasePrivateDocShellCount()
     gNumberOfPrivateDocShells--;
     if (!gNumberOfPrivateDocShells)
     {
+#ifdef MOZ_IPC
         if (XRE_GetProcessType() == GeckoProcessType_Content) {
             mozilla::dom::ContentChild* cc = mozilla::dom::ContentChild::GetSingleton();
             cc->SendPrivateDocShellsExist(false);
             return;
         }
+#endif
 
         nsCOMPtr<nsIObserverService> obsvc = mozilla::services::GetObserverService();
         if (obsvc) {
@@ -4157,9 +4160,10 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI *aURI,
                 if (alternateErrorPage)
                     errorPage.Assign(alternateErrorPage);
 
+#ifdef MOZ_IPC
                 if (errorPage.EqualsIgnoreCase("certerror")) 
                     mozilla::Telemetry::Accumulate(mozilla::Telemetry::SECURITY_UI, bucketId);
-
+#endif
             } else {
                 error.AssignLiteral("nssFailure2");
             }
@@ -4186,9 +4190,11 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI *aURI,
             bucketId = nsISecurityUITelemetry::WARNING_MALWARE_PAGE;
         }
 
+#ifdef MOZ_IPC
         if (errorPage.EqualsIgnoreCase("blocked"))
             mozilla::Telemetry::Accumulate(mozilla::Telemetry::SECURITY_UI,
                                            bucketId);
+#endif
 
         cssClass.AssignLiteral("blacklist");
     }
@@ -12392,10 +12398,12 @@ nsDocShell::GetAppId(uint32_t* aAppId)
 NS_IMETHODIMP
 nsDocShell::GetAsyncPanZoomEnabled(bool* aOut)
 {
+#ifdef MOZ_IPC
     if (TabChild* tabChild = GetTabChildFrom(this)) {
         *aOut = tabChild->IsAsyncPanZoomEnabled();
         return NS_OK;
     }
+#endif
     *aOut = false;
     return NS_OK;
 }

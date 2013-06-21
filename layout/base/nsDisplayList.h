@@ -1969,7 +1969,6 @@ protected:
   nsIFrame* mFixedPosFrame;
 };
 
-#ifdef MOZ_IPC
 /**
  * This potentially creates a layer for the given list of items, whose
  * visibility is determined by the displayport for the given frame instead of
@@ -2077,7 +2076,6 @@ public:
 
   virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder);
 };
-#endif // MOZ_IPC
 
 /**
  * nsDisplayClip can clip a list of items, but we take a single item

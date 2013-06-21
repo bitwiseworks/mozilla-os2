@@ -2079,12 +2079,15 @@ nsFrameLoader::TryRemoteBrowser()
   }
   return true;
 }
+#endif
 
+#ifdef MOZ_IPC
 mozilla::dom::PBrowserParent*
 nsFrameLoader::GetRemoteBrowser()
 {
   return mRemoteBrowser;
 }
+#endif
 
 NS_IMETHODIMP
 nsFrameLoader::ActivateRemoteFrame() {
@@ -2269,6 +2272,7 @@ bool SendAsyncMessageToChild(void* aCallbackData,
                              const nsAString& aMessage,
                                    const StructuredCloneData& aData)
 {
+#ifdef MOZ_IPC
   PBrowserParent* tabParent =
     static_cast<nsFrameLoader*>(aCallbackData)->GetRemoteBrowser();
   if (tabParent) {
@@ -2299,6 +2303,7 @@ bool SendAsyncMessageToChild(void* aCallbackData,
 
     return tabParent->SendAsyncMessage(nsString(aMessage), data);
   }
+#endif
 
   nsRefPtr<nsIRunnable> ev =
     new nsAsyncMessageToChild(static_cast<nsFrameLoader*>(aCallbackData),
@@ -2460,6 +2465,7 @@ nsFrameLoader::GetOwnerElement(nsIDOMElement **aElement)
   return NS_OK;
 }
 
+#ifdef MOZ_IPC
 void
 nsFrameLoader::SetRemoteBrowser(nsITabParent* aTabParent)
 {
@@ -2470,6 +2476,7 @@ nsFrameLoader::SetRemoteBrowser(nsITabParent* aTabParent)
 
   ShowRemoteFrame(nsIntSize(0, 0));
 }
+#endif
 
 void
 nsFrameLoader::SetDetachedSubdocView(nsIView* aDetachedViews,

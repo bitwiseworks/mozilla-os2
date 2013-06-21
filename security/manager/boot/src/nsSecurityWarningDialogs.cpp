@@ -17,7 +17,9 @@
 #include "nsThreadUtils.h"
 #include "nsAutoPtr.h"
 
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "nsISecurityUITelemetry.h"
 
 NS_IMPL_THREADSAFE_ISUPPORTS1(nsSecurityWarningDialogs, nsISecurityWarningDialogs)
@@ -156,7 +158,9 @@ nsAsyncAlert::Run()
   // Stop if alert is not requested
   if (!prefValue) return NS_OK;
 
+#ifdef MOZ_IPC
   mozilla::Telemetry::Accumulate(mozilla::Telemetry::SECURITY_UI, mBucket);
+#endif
   // Check for a show-once pref for this dialog.
   // If the show-once pref is set to true:
   //   - The default value of the "show every time" checkbox is unchecked
@@ -276,7 +280,9 @@ nsSecurityWarningDialogs::ConfirmDialog(nsIInterfaceRequestor *ctx, const char *
   }
   
   MOZ_ASSERT(NS_IsMainThread());
+#ifdef MOZ_IPC
   mozilla::Telemetry::Accumulate(mozilla::Telemetry::SECURITY_UI, aBucket);
+#endif
   // See AlertDialog() for a description of how showOnce works.
   nsCAutoString showOncePref(prefName);
   showOncePref += ".show_once";
@@ -336,7 +342,9 @@ nsSecurityWarningDialogs::ConfirmDialog(nsIInterfaceRequestor *ctx, const char *
   if (*_result) {
   // For confirmation dialogs, the clickthrough constant is 1 more
   // than the constant for the dialog.
+#ifdef MOZ_IPC
   mozilla::Telemetry::Accumulate(mozilla::Telemetry::SECURITY_UI, aBucket + 1);
+#endif
   }
 
   if (!prefValue && prefName != nullptr) {

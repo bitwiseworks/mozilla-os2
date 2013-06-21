@@ -28,7 +28,9 @@
 
 using namespace mozilla;
 
+#ifdef MOZ_IPC
 using mozilla::dom::ContentChild;
+#endif
 
 NS_IMPL_THREADSAFE_ISUPPORTS2(nsAlertsService, nsIAlertsService, nsIAlertsProgressListener)
 

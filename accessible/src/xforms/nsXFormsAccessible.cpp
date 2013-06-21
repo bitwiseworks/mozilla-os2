@@ -39,7 +39,9 @@ nsXFormsAccessibleBase::nsXFormsAccessibleBase()
     if (NS_FAILED(rv))
       NS_WARNING("No XForms utility service.");
   }
+#ifdef MOZ_IPC
   statistics::XFormsAccessibleUsed();
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////

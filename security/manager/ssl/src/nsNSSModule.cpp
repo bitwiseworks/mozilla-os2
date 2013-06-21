@@ -50,8 +50,7 @@
 #define NS_IS_PROCESS_DEFAULT                                                 \
     (GeckoProcessType_Default == XRE_GetProcessType())
 #else
-#define NS_IS_PROCESS_DEFAULT
-    (true)
+#define NS_IS_PROCESS_DEFAULT (true)
 #endif
 
 #define NS_NSS_INSTANTIATE(ensureOperator, _InstanceClass)                    \

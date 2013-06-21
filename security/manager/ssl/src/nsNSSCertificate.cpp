@@ -168,8 +168,8 @@ nsNSSCertificate::nsNSSCertificate() :
 #ifdef MOZ_IPC
   if (GeckoProcessType_Default != XRE_GetProcessType())
     NS_ERROR("Trying to initialize nsNSSCertificate in a non-chrome process!");
-}
 #endif
+}
 
 nsNSSCertificate::~nsNSSCertificate()
 {

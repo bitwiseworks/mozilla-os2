@@ -261,6 +261,7 @@ public:
 
   bool ShouldClampScrollPosition() { return mClampScrollPosition; }
 
+#ifdef MOZ_IPC
   /**
    * Tell this FrameLoader to use a particular remote browser.
    *
@@ -270,6 +271,7 @@ public:
    * ReallyStartLoading().
    */
   void SetRemoteBrowser(nsITabParent* aTabParent);
+#endif
 
   /**
    * Stashes a detached view on the frame loader. We do this when we're
@@ -336,11 +338,13 @@ private:
   void FireErrorEvent();
   nsresult ReallyStartLoadingInternal();
 
+#ifdef MOZ_IPC
   // Return true if remote browser created; nothing else to do
   bool TryRemoteBrowser();
 
   // Tell the remote browser that it's now "virtually visible"
   bool ShowRemoteFrame(const nsIntSize& size);
+#endif
 
   nsCOMPtr<nsIDocShell> mDocShell;
   nsCOMPtr<nsIURI> mURIToLoad;

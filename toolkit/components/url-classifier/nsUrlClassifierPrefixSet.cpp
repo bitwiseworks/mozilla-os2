@@ -390,7 +390,9 @@ nsUrlClassifierPrefixSet::LoadFromFd(AutoFDClose& fileFd)
 NS_IMETHODIMP
 nsUrlClassifierPrefixSet::LoadFromFile(nsIFile* aFile)
 {
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_PS_FILELOAD_TIME> timer;
+#endif
 
   nsresult rv;
   AutoFDClose fileFd;

@@ -400,6 +400,8 @@ AsyncStatementCallbackNotifier::HandleCompletion(uint16_t aReason)
   return NS_OK;
 }
 
+#ifdef MOZ_IPC
+
 ////////////////////////////////////////////////////////////////////////////////
 //// AsyncStatementCallbackNotifier
 
@@ -411,6 +413,8 @@ AsyncStatementTelemetryTimer::HandleCompletion(uint16_t aReason)
   }
   return NS_OK;
 }
+
+#endif
 
 } // namespace places
 } // namespace mozilla

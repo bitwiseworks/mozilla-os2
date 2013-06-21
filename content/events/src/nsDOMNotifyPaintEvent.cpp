@@ -116,11 +116,11 @@ nsDOMNotifyPaintEvent::GetPaintRequests(nsIDOMPaintRequestList** aResult)
   return NS_OK;
 }
 
-#ifdef MOZ_IPC
 NS_IMETHODIMP_(void)
 nsDOMNotifyPaintEvent::Serialize(IPC::Message* aMsg,
                                  bool aSerializeInterfaceType)
 {
+#ifdef MOZ_IPC
   if (aSerializeInterfaceType) {
     IPC::WriteParam(aMsg, NS_LITERAL_STRING("notifypaintevent"));
   }
@@ -136,11 +136,13 @@ nsDOMNotifyPaintEvent::Serialize(IPC::Message* aMsg,
     IPC::WriteParam(aMsg, mInvalidateRequests[i].mRect.height);
     IPC::WriteParam(aMsg, mInvalidateRequests[i].mFlags);
   }
+#endif
 }
 
 NS_IMETHODIMP_(bool)
 nsDOMNotifyPaintEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
 {
+#ifdef MOZ_IPC
   NS_ENSURE_TRUE(nsDOMEvent::Deserialize(aMsg, aIter), false);
 
   uint32_t length = 0;
@@ -157,8 +159,10 @@ nsDOMNotifyPaintEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
   }
 
   return true;
-}
+#else
+  return false;
 #endif
+}
 
 nsresult NS_NewDOMNotifyPaintEvent(nsIDOMEvent** aInstancePtrResult,
                                    nsPresContext* aPresContext,

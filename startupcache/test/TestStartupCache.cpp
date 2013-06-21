@@ -20,7 +20,9 @@
 #include "nsStringAPI.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
+#ifdef MOZ_IPC
 #include "nsITelemetry.h"
+#endif
 #include "jsapi.h"
 
 namespace mozilla {
@@ -301,6 +303,7 @@ SetupJS(JSContext **cxp)
 bool
 GetHistogramCounts(const char *testmsg, JSContext *cx, jsval *counts)
 {
+#ifdef MOZ_IPC
   nsCOMPtr<nsITelemetry> telemetry = do_GetService("@mozilla.org/base/telemetry;1");
   NS_NAMED_LITERAL_CSTRING(histogram_id, "STARTUP_CACHE_AGE_HOURS");
   JS::AutoValueRooter h(cx);
@@ -321,6 +324,9 @@ GetHistogramCounts(const char *testmsg, JSContext *cx, jsval *counts)
                       snapshot_fn, 0, NULL, ss.addr())
           && JS_GetProperty(cx, JSVAL_TO_OBJECT(ss.value()),
                             "counts", counts));
+#else
+  return false;
+#endif
 }
 
 nsresult

@@ -34,7 +34,9 @@
 #include "mozilla/Services.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/Preferences.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 #include <stdlib.h>
 
@@ -797,7 +799,9 @@ nsXREDirProvider::DoStartup()
       else
         mode = 2;
     }
+#ifdef MOZ_IPC
     mozilla::Telemetry::Accumulate(mozilla::Telemetry::SAFE_MODE_USAGE, mode);
+#endif
 
     obsSvc->NotifyObservers(nullptr, "profile-initial-state", nullptr);
   }

@@ -12,7 +12,9 @@
 #include "nsISeekableStream.h"
 #include "nsIFile.h"
 #include "nsAutoPtr.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "prlog.h"
 
 // NSPR_LOG_MODULES=UrlClassifierDbService:5
@@ -278,7 +280,9 @@ Classifier::TableRequest(nsACString& aResult)
 nsresult
 Classifier::Check(const nsACString& aSpec, LookupResultArray& aResults)
 {
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_CL_CHECK_TIME> timer;
+#endif
 
   // Get the set of fragments to look up.
   nsTArray<nsCString> fragments;
@@ -360,7 +364,9 @@ Classifier::Check(const nsACString& aSpec, LookupResultArray& aResults)
 nsresult
 Classifier::ApplyUpdates(nsTArray<TableUpdate*>* aUpdates)
 {
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_CL_UPDATE_TIME> timer;
+#endif
 
 #if defined(PR_LOGGING)
   PRIntervalTime clockStart = 0;

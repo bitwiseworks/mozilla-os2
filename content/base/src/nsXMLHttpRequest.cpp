@@ -69,7 +69,9 @@
 #include "nsStringBuffer.h"
 #include "nsDOMFile.h"
 #include "nsIFileChannel.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 #include "jsfriendapi.h"
 #include "sampler.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
@@ -1767,8 +1769,10 @@ nsXMLHttpRequest::Open(const nsACString& method, const nsACString& url,
 {
   NS_ENSURE_ARG(!method.IsEmpty());
 
+#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::XMLHTTPREQUEST_ASYNC_OR_SYNC,
                         async ? 0 : 1);
+#endif
 
   NS_ENSURE_TRUE(mPrincipal, NS_ERROR_NOT_INITIALIZED);
 
@@ -3024,10 +3028,14 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
   // Create our listener
   nsCOMPtr<nsIStreamListener> listener = this;
   if (mState & XML_HTTP_REQUEST_MULTIPART) {
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::MULTIPART_XHR_RESPONSE, 1);
+#endif
     listener = new nsMultipartProxyListener(listener);
   } else {
+#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::MULTIPART_XHR_RESPONSE, 0);
+#endif
   }
 
   // Blocking gets are common enough out of XHR that we should mark

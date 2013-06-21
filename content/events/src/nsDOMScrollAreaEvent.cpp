@@ -82,11 +82,11 @@ nsDOMScrollAreaEvent::InitScrollAreaEvent(const nsAString &aEventType,
   return NS_OK;
 }
 
-#ifdef MOZ_IPC
 NS_IMETHODIMP_(void)
 nsDOMScrollAreaEvent::Serialize(IPC::Message* aMsg,
                                 bool aSerializeInterfaceType)
 {
+#ifdef MOZ_IPC
   if (aSerializeInterfaceType) {
     IPC::WriteParam(aMsg, NS_LITERAL_STRING("scrollareaevent"));
   }
@@ -102,11 +102,13 @@ nsDOMScrollAreaEvent::Serialize(IPC::Message* aMsg,
   IPC::WriteParam(aMsg, val);
   mClientArea.GetHeight(&val);
   IPC::WriteParam(aMsg, val);
+#endif
 }
 
 NS_IMETHODIMP_(bool)
 nsDOMScrollAreaEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
 {
+#ifdef MOZ_IPC
   NS_ENSURE_TRUE(nsDOMEvent::Deserialize(aMsg, aIter), false);
 
   float x, y, width, height;
@@ -117,8 +119,10 @@ nsDOMScrollAreaEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
   mClientArea.SetRect(x, y, width, height);
 
   return true;
-}
+#else
+  return false;
 #endif
+}
 
 nsresult
 NS_NewDOMScrollAreaEvent(nsIDOMEvent **aInstancePtrResult,

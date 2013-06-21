@@ -113,11 +113,15 @@ nsGenericHTMLFrameElement::EnsureFrameLoader()
 nsresult
 nsGenericHTMLFrameElement::CreateRemoteFrameLoader(nsITabParent* aTabParent)
 {
+#ifdef MOZ_IPC
   MOZ_ASSERT(!mFrameLoader);
   EnsureFrameLoader();
   NS_ENSURE_STATE(mFrameLoader);
   mFrameLoader->SetRemoteBrowser(aTabParent);
   return NS_OK;
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
 }
 
 NS_IMETHODIMP

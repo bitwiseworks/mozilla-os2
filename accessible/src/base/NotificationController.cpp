@@ -21,7 +21,9 @@
 #endif
 
 #include "mozilla/dom/Element.h"
+#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
+#endif
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -176,7 +178,9 @@ NotificationController::IsUpdatePending()
 void
 NotificationController::WillRefresh(mozilla::TimeStamp aTime)
 {
+#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::A11Y_UPDATE_TIME> updateTimer;
+#endif
 
   // If the document accessible that notification collector was created for is
   // now shut down, don't process notifications anymore.

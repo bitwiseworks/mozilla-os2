@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef MOZ_IPC
+#include "base/basictypes.h"
+#endif
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "nsXULAppAPI.h"
@@ -1475,7 +1478,6 @@ History::NotifyVisited(nsIURI* aURI)
         unused << cplist[i]->SendNotifyVisited(uri);
       }
     }
-#endif
   }
 
   // If the hash table has not been initialized, then we have nothing to notify
@@ -1483,6 +1485,7 @@ History::NotifyVisited(nsIURI* aURI)
   if (!mObservers.IsInitialized()) {
     return;
   }
+#endif
 
   // Additionally, if we have no observers for this URI, we have nothing to
   // notify about.
