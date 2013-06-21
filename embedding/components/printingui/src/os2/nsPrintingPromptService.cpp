@@ -120,8 +120,7 @@ nsPrintingPromptService::ShowPrintDialog(nsIDOMWindow *parent, nsIWebBrowserPrin
                 nsCOMPtr<nsIWidget> parentWidget;
                 parentWindow->GetMainWidget(getter_AddRefs(parentWidget));
                 if (parentWidget) {
-                  bool parentVisible = true;
-                  parentWidget->IsVisible(parentVisible);
+                  bool parentVisible = parentWidget->IsVisible();
                   if (!parentVisible)
                     parent = 0;
                 }
