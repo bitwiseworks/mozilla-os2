@@ -3544,7 +3544,14 @@ ac_clean_files="$ac_clean_files a.out a.out.dSYM a.exe b.out"
 # of exeext.
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the C compiler works" >&5
 $as_echo_n "checking whether the C compiler works... " >&6; }
-ac_link_default=`$as_echo "$ac_link" | sed 's/ -o *conftest[^ ]*//'`
+case $host_os in
+  os2*)
+    ac_link_default="$ac_link"
+    ;;
+  *)
+    ac_link_default=`$as_echo "$ac_link" | sed 's/ -o *conftest[^ ]*//'`
+    ;;
+esac
 
 # The possible output files:
 ac_files="a.out conftest.exe conftest a.exe a_out.exe b.out conftest.*"
