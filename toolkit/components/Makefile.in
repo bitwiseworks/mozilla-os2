@@ -39,17 +39,12 @@ PARALLEL_DIRS += \
   social \
   startup \
   statusfilter \
+  telemetry \
   typeaheadfind \
   urlformatter \
   viewconfig \
   viewsource \
   $(NULL)
-
-ifdef MOZ_IPC
-PARALLEL_DIRS += \
-   telemetry \
-   $(NULL)
-endif
 
 ifdef BUILD_CTYPES
 PARALLEL_DIRS += \

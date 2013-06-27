@@ -10,9 +10,7 @@
 #include "nsAlgorithm.h"
 #include "prnetdb.h"
 #include "nsHttpRequestHead.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "nsISocketTransport.h"
 #include "nsISupportsPriority.h"
 #include "nsHttpHandler.h"
@@ -467,9 +465,7 @@ SpdyStream3::ParseHttpRequestHeaders(const char *buf,
     mTxInlineFrame[4] = SpdySession3::kFlag_Data_FIN;
   }
   
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::SPDY_SYN_SIZE, mTxInlineFrameUsed - 18);
-#endif
 
   // The size of the input headers is approximate
   uint32_t ratio =
@@ -477,9 +473,7 @@ SpdyStream3::ParseHttpRequestHeaders(const char *buf,
     (11 + mTransaction->RequestHead()->RequestURI().Length() +
      mFlatHttpRequestHeaders.Length());
   
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::SPDY_SYN_RATIO, ratio);
-#endif
   return NS_OK;
 }
 
@@ -996,12 +990,10 @@ SpdyStream3::ConvertHeaders(nsACString &aHeadersOut)
     return (rv == NS_ERROR_NOT_AVAILABLE) ? NS_ERROR_ILLEGAL_VALUE : rv;
 
   if (mDecompressedBytes && mDecompressBufferUsed) {
-#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::SPDY_SYN_REPLY_SIZE, mDecompressedBytes);
     uint32_t ratio =
       mDecompressedBytes * 100 / mDecompressBufferUsed;
     Telemetry::Accumulate(Telemetry::SPDY_SYN_REPLY_RATIO, ratio);
-#endif
   }
 
   aHeadersOut.Truncate();

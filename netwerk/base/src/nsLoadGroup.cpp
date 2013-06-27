@@ -17,9 +17,7 @@
 #include "nsReadableUtils.h"
 #include "nsString.h"
 #include "nsTArray.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 using namespace mozilla;
 
@@ -112,11 +110,9 @@ nsLoadGroup::nsLoadGroup(nsISupports* outer)
     , mStatus(NS_OK)
     , mPriority(PRIORITY_NORMAL)
     , mIsCanceling(false)
-#ifdef MOZ_IPC
     , mDefaultLoadIsTimed(false)
     , mTimedRequests(0)
     , mCachedRequests(0)
-#endif
 {
     NS_INIT_AGGREGATED(outer);
 
@@ -198,7 +194,7 @@ nsLoadGroup::GetName(nsACString &result)
         result.Truncate();
         return NS_OK;
     }
-
+    
     return mDefaultLoadRequest->GetName(result);
 }
 
@@ -214,9 +210,9 @@ nsLoadGroup::GetStatus(nsresult *status)
 {
     if (NS_SUCCEEDED(mStatus) && mDefaultLoadRequest)
         return mDefaultLoadRequest->GetStatus(status);
-
+    
     *status = mStatus;
-    return NS_OK;
+    return NS_OK; 
 }
 
 // PLDHashTable enumeration callback that appends strong references to
@@ -262,7 +258,7 @@ nsLoadGroup::Cancel(nsresult status)
         return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    // set the load group status to our cancel status while we cancel
+    // set the load group status to our cancel status while we cancel 
     // all our requests...once the cancel is done, we'll reset it...
     //
     mStatus = status;
@@ -485,14 +481,12 @@ nsLoadGroup::SetDefaultLoadRequest(nsIRequest *aRequest)
         //
         mLoadFlags &= nsIRequest::LOAD_REQUESTMASK;
 
-#ifdef MOZ_IPC
         nsCOMPtr<nsITimedChannel> timedChannel = do_QueryInterface(aRequest);
         mDefaultLoadIsTimed = timedChannel != nullptr;
         if (mDefaultLoadIsTimed) {
             timedChannel->GetChannelCreation(&mDefaultRequestCreationTime);
             timedChannel->SetTimingEnabled(true);
         }
-#endif
     }
     // Else, do not change the group's load flags (see bug 95981)
     return NS_OK;
@@ -546,7 +540,7 @@ nsLoadGroup::AddRequest(nsIRequest *request, nsISupports* ctxt)
     else
         rv = MergeLoadFlags(request, flags);
     if (NS_FAILED(rv)) return rv;
-
+    
     //
     // Add the request to the list of active requests...
     //
@@ -563,11 +557,9 @@ nsLoadGroup::AddRequest(nsIRequest *request, nsISupports* ctxt)
     if (mPriority != 0)
         RescheduleRequest(request, mPriority);
 
-#ifdef MOZ_IPC
     nsCOMPtr<nsITimedChannel> timedChannel = do_QueryInterface(request);
     if (timedChannel)
         timedChannel->SetTimingEnabled(true);
-#endif
 
     if (!(flags & nsIRequest::LOAD_BACKGROUND)) {
         // Update the count of foreground URIs..
@@ -651,7 +643,6 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports* ctxt,
 
     PL_DHashTableRawRemove(&mRequests, entry);
 
-#ifdef MOZ_IPC
     // Collect telemetry stats only when default request is a timed channel.
     // Don't include failed requests in the timing statistics.
     if (mDefaultLoadIsTimed && NS_SUCCEEDED(aStatus)) {
@@ -685,7 +676,6 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports* ctxt,
     if (mRequests.entryCount == 0) {
         TelemetryReport();
     }
-#endif
 
     // Undo any group priority delta...
     if (mPriority != 0)
@@ -831,8 +821,7 @@ nsLoadGroup::AdjustPriority(int32_t aDelta)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifdef MOZ_IPC
-void
+void 
 nsLoadGroup::TelemetryReport()
 {
     if (mDefaultLoadIsTimed) {
@@ -990,7 +979,6 @@ nsLoadGroup::TelemetryReportChannel(nsITimedChannel *aTimedChannel,
     }
 #undef HTTP_REQUEST_HISTOGRAMS
 }
-#endif
 
 nsresult nsLoadGroup::MergeLoadFlags(nsIRequest *aRequest, nsLoadFlags& outFlags)
 {
@@ -998,7 +986,7 @@ nsresult nsLoadGroup::MergeLoadFlags(nsIRequest *aRequest, nsLoadFlags& outFlags
     nsLoadFlags flags, oldFlags;
 
     rv = aRequest->GetLoadFlags(&flags);
-    if (NS_FAILED(rv))
+    if (NS_FAILED(rv)) 
         return rv;
 
     oldFlags = flags;

@@ -1179,9 +1179,7 @@ public:
   {
     if (mFrameMetrics != aFrameMetrics) {
       mFrameMetrics = aFrameMetrics;
-#ifdef MOZ_IPC
       Mutated();
-#endif
     }
   }
 
@@ -1192,9 +1190,7 @@ public:
     Mutated();
   }
 
-#ifdef MOZ_IPC
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs);
-#endif
 
   void SortChildrenBy3DZOrder(nsTArray<Layer*>& aArray);
 

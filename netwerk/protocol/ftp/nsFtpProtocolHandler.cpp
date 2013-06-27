@@ -17,10 +17,10 @@
  *                               use in OS2
  */
 
-#ifdef MOZ_IPC
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/FTPChannelChild.h"
-#endif
+using namespace mozilla;
+using namespace mozilla::net;
 
 #include "nsFtpProtocolHandler.h"
 #include "nsFTPChannel.h"
@@ -38,17 +38,6 @@
 #include "nsIObserverService.h"
 #include "nsEscape.h"
 #include "nsAlgorithm.h"
-
-#ifndef MOZ_IPC
-template <class T>
-inline
-const T&
-clamped( const T& a, const T& min, const T& max )
-  {
-    NS_ABORT_IF_FALSE(max >= min, "clamped(): max must be greater than or equal to min");
-    return NS_MIN(NS_MAX(a, min), max);
-  }
-#endif
 
 //-----------------------------------------------------------------------------
 
@@ -114,10 +103,8 @@ NS_IMPL_THREADSAFE_ISUPPORTS4(nsFtpProtocolHandler,
 nsresult
 nsFtpProtocolHandler::Init()
 {
-#ifdef MOZ_IPC
     if (IsNeckoChild())
         NeckoChild::InitNeckoChild();
-#endif
 
     if (mIdleTimeout == -1) {
         nsresult rv;
@@ -233,11 +220,9 @@ nsFtpProtocolHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* proxyInfo,
 {
     NS_ENSURE_ARG_POINTER(uri);
     nsRefPtr<nsBaseChannel> channel;
-#ifdef MOZ_IPC
     if (IsNeckoChild())
         channel = new FTPChannelChild(uri);
     else
-#endif
         channel = new nsFtpChannel(uri, proxyInfo);
 
     nsresult rv = channel->Init();

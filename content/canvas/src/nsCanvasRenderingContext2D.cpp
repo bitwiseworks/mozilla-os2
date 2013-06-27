@@ -83,10 +83,8 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/PBrowserParent.h"
-#ifdef MOZ_IPC
 #include "mozilla/ipc/DocumentRendererParent.h"
 #include "mozilla/ipc/PDocumentRendererParent.h"
-#endif
 #include "mozilla/unused.h"
 
 #include "CustomQS_Canvas.h"
@@ -1293,7 +1291,6 @@ nsCanvasRenderingContext2D::SetIsOpaque(bool isOpaque)
 NS_IMETHODIMP
 nsCanvasRenderingContext2D::SetIsIPC(bool isIPC)
 {
-#ifdef MOZ_IPC
     if (isIPC == mIPC)
         return NS_OK;
 
@@ -1307,9 +1304,6 @@ nsCanvasRenderingContext2D::SetIsIPC(bool isIPC)
     }
 
     return NS_OK;
-#else
-    return NS_ERROR_NOT_IMPLEMENTED;
-#endif
 }
 
 NS_IMETHODIMP
@@ -3773,7 +3767,6 @@ nsCanvasRenderingContext2D::AsyncDrawXULElement(nsIDOMXULElement* aElem, float a
     if (!frameloader)
         return NS_ERROR_FAILURE;
 
-#ifdef MOZ_IPC
     PBrowserParent *child = frameloader->GetRemoteBrowser();
     if (!child) {
         nsCOMPtr<nsIDOMWindow> window =
@@ -3821,14 +3814,6 @@ nsCanvasRenderingContext2D::AsyncDrawXULElement(nsIDOMXULElement* aElem, float a
     }
 
     return NS_OK;
-#else
-    nsCOMPtr<nsIDOMWindow> window =
-        do_GetInterface(frameloader->GetExistingDocShell());
-    if (!window)
-        return NS_ERROR_FAILURE;
-
-    return DrawWindow(window, aX, aY, aW, aH, aBGColor, flags);
-#endif
 }
 
 //

@@ -55,7 +55,6 @@ static void DrawDebugOverlay(gfxImageSurface* imgSurf, int x, int y)
 namespace mozilla {
 namespace layers {
 
-#ifdef MOZ_IPC
 gfxASurface::gfxImageFormat
 BasicTiledLayerBuffer::GetFormat() const
 {
@@ -300,7 +299,6 @@ BasicTiledThebesLayer::PaintThebes(gfxContext* aContext,
 
   BasicManager()->PaintedTiledLayerBuffer(BasicManager()->Hold(this), heapCopy);
 }
-#endif
 
 } // mozilla
 } // layers

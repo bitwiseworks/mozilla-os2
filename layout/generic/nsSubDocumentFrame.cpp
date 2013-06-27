@@ -8,9 +8,7 @@
  * as <frame>, <iframe>, and some <object>s
  */
 
-#ifdef MOZ_IPC
 #include "mozilla/layout/RenderFrameParent.h"
-#endif
 
 #include "nsSubDocumentFrame.h"
 #include "nsCOMPtr.h"
@@ -66,9 +64,7 @@
 #endif
 
 using namespace mozilla;
-#ifdef MOZ_IPC
 using mozilla::layout::RenderFrameParent;
-#endif
 
 static nsIDocument*
 GetDocumentFromView(nsIView* aView)
@@ -267,7 +263,6 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (!mInnerView)
     return NS_OK;
 
-#ifdef MOZ_IPC
   nsFrameLoader* frameLoader = FrameLoader();
   if (frameLoader) {
     RenderFrameParent* rfp = frameLoader->GetCurrentRemoteFrame();
@@ -275,7 +270,6 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       return rfp->BuildDisplayList(aBuilder, this, aDirtyRect, aLists);
     }
   }
-#endif
 
   nsIView* subdocView = mInnerView->GetFirstChild();
   if (!subdocView)
@@ -717,12 +711,10 @@ nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
       return NS_OK;
     }
 
-#ifdef MOZ_IPC
     if (mFrameLoader->GetRemoteBrowser()) {
       // TODO: Implement ContentShellAdded for remote browsers (bug 658304)
       return NS_OK;
     }
-#endif
 
     // Note: This logic duplicates a lot of logic in
     // nsFrameLoader::EnsureDocShell.  We should fix that.

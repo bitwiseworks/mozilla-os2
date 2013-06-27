@@ -221,7 +221,6 @@ public:
   nsIDocument* GetOwnerDoc() const
   { return mOwnerContent ? mOwnerContent->OwnerDoc() : nullptr; }
 
-#ifdef MOZ_IPC
   PBrowserParent* GetRemoteBrowser();
 
   /**
@@ -252,8 +251,6 @@ public:
   {
     mCurrentRemoteFrame = aFrame;
   }
-#endif
-
   nsFrameMessageManager* GetFrameMessageManager() { return mMessageManager; }
 
   mozilla::dom::Element* GetOwnerContent() { return mOwnerContent; }
@@ -261,7 +258,6 @@ public:
 
   bool ShouldClampScrollPosition() { return mClampScrollPosition; }
 
-#ifdef MOZ_IPC
   /**
    * Tell this FrameLoader to use a particular remote browser.
    *
@@ -271,7 +267,6 @@ public:
    * ReallyStartLoading().
    */
   void SetRemoteBrowser(nsITabParent* aTabParent);
-#endif
 
   /**
    * Stashes a detached view on the frame loader. We do this when we're
@@ -296,9 +291,7 @@ private:
 
   void SetOwnerContent(mozilla::dom::Element* aContent);
 
-#ifdef MOZ_IPC
   bool ShouldUseRemoteProcess();
-#endif
 
   /**
    * Is this a frameloader for a bona fide <iframe mozbrowser> or
@@ -338,13 +331,11 @@ private:
   void FireErrorEvent();
   nsresult ReallyStartLoadingInternal();
 
-#ifdef MOZ_IPC
   // Return true if remote browser created; nothing else to do
   bool TryRemoteBrowser();
 
   // Tell the remote browser that it's now "virtually visible"
   bool ShowRemoteFrame(const nsIntSize& size);
-#endif
 
   nsCOMPtr<nsIDocShell> mDocShell;
   nsCOMPtr<nsIURI> mURIToLoad;
@@ -376,21 +367,17 @@ private:
   // it may lose the flag.
   bool mNetworkCreated : 1;
 
-#ifdef MOZ_IPC
   bool mDelayRemoteDialogs : 1;
   bool mRemoteBrowserShown : 1;
   bool mRemoteFrame : 1;
-#endif
   bool mClipSubdocument : 1;
   bool mClampScrollPosition : 1;
   bool mRemoteBrowserInitialized : 1;
 
   // XXX leaking
   nsCOMPtr<nsIObserver> mChildHost;
-#ifdef MOZ_IPC
   RenderFrameParent* mCurrentRemoteFrame;
   TabParent* mRemoteBrowser;
-#endif
 
   // See nsIFrameLoader.idl.  Short story, if !(mRenderMode &
   // RENDER_MODE_ASYNC_SCROLL), all the fields below are ignored in

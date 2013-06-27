@@ -44,7 +44,6 @@
 #include "nsXREDirProvider.h"
 
 #include "mozilla/Omnijar.h"
-#ifdef MOZ_IPC
 #if defined(XP_MACOSX)
 #include "nsVersionComparator.h"
 #include "chrome/common/mach_ipc_mac.h"
@@ -83,10 +82,9 @@
 
 using mozilla::_ipdltest::IPDLUnitTestProcessChild;
 #endif  // ifdef MOZ_IPDL_TESTS
-#endif // MOZ_IPC
+
 using namespace mozilla;
 
-#ifdef MOZ_IPC
 using mozilla::ipc::BrowserProcessSubThread;
 using mozilla::ipc::GeckoChildProcessHost;
 using mozilla::ipc::IOThreadChild;
@@ -106,7 +104,6 @@ using mozilla::ipc::TestShellCommandParent;
 using mozilla::ipc::XPCShellEnvironment;
 
 using mozilla::startup::sChildProcessType;
-#endif
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
@@ -220,7 +217,6 @@ XRE_StringToChildProcessType(const char* aProcessTypeString)
   return GeckoProcessType_Invalid;
 }
 
-#ifdef MOZ_IPC
 namespace mozilla {
 namespace startup {
 GeckoProcessType sChildProcessType = GeckoProcessType_Default;
@@ -755,7 +751,6 @@ XRE_InstallX11ErrorHandler()
   InstallX11ErrorHandler();
 }
 #endif
-#endif // MOZ_IPC
 
 #ifdef XP_WIN
 static WindowsEnvironmentType

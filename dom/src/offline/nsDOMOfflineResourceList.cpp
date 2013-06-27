@@ -26,13 +26,8 @@
 #include "mozilla/Preferences.h"
 
 #include "nsXULAppAPI.h"
-#ifdef MOZ_IPC
 #define IS_CHILD_PROCESS() \
     (GeckoProcessType_Default != XRE_GetProcessType())
-#else
-#define IS_CHILD_PROCESS() \
-    (false)
-#endif
 
 using namespace mozilla;
 

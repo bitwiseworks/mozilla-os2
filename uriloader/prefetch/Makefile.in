@@ -26,14 +26,9 @@ CPPSRCS = \
 		nsOfflineCacheUpdate.cpp \
 		nsOfflineCacheUpdateService.cpp  \
 		OfflineCacheUpdateGlue.cpp \
-		$(NULL)
-
-ifdef MOZ_IPC
-CPPSRCS += \
 		OfflineCacheUpdateChild.cpp \
 		OfflineCacheUpdateParent.cpp \
 		$(NULL)
-endif
 
 XPIDLSRCS =	\
 		nsIPrefetchService.idl \

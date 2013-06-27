@@ -77,9 +77,7 @@
 #include "IHistory.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "mozilla/AutoRestore.h"
 #include "mozilla/Attributes.h"
 
@@ -193,6 +191,7 @@
 #include "nsITimedChannel.h"
 #include "mozilla/StartupTimeline.h"
 
+#include "mozilla/Telemetry.h"
 #include "nsISecurityUITelemetry.h"
 
 #ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
@@ -692,10 +691,8 @@ IncreasePrivateDocShellCount()
         return;
     }
 
-#ifdef MOZ_IPC
     mozilla::dom::ContentChild* cc = mozilla::dom::ContentChild::GetSingleton();
     cc->SendPrivateDocShellsExist(true);
-#endif
 }
 
 static void
@@ -705,13 +702,11 @@ DecreasePrivateDocShellCount()
     gNumberOfPrivateDocShells--;
     if (!gNumberOfPrivateDocShells)
     {
-#ifdef MOZ_IPC
         if (XRE_GetProcessType() == GeckoProcessType_Content) {
             mozilla::dom::ContentChild* cc = mozilla::dom::ContentChild::GetSingleton();
             cc->SendPrivateDocShellsExist(false);
             return;
         }
-#endif
 
         nsCOMPtr<nsIObserverService> obsvc = mozilla::services::GetObserverService();
         if (obsvc) {
@@ -4160,10 +4155,9 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI *aURI,
                 if (alternateErrorPage)
                     errorPage.Assign(alternateErrorPage);
 
-#ifdef MOZ_IPC
                 if (errorPage.EqualsIgnoreCase("certerror")) 
                     mozilla::Telemetry::Accumulate(mozilla::Telemetry::SECURITY_UI, bucketId);
-#endif
+
             } else {
                 error.AssignLiteral("nssFailure2");
             }
@@ -4190,11 +4184,9 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI *aURI,
             bucketId = nsISecurityUITelemetry::WARNING_MALWARE_PAGE;
         }
 
-#ifdef MOZ_IPC
         if (errorPage.EqualsIgnoreCase("blocked"))
             mozilla::Telemetry::Accumulate(mozilla::Telemetry::SECURITY_UI,
                                            bucketId);
-#endif
 
         cssClass.AssignLiteral("blacklist");
     }
@@ -6355,12 +6347,10 @@ nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
     nsCOMPtr<nsIApplicationCacheChannel> appCacheChannel =
         do_QueryInterface(aNewChannel);
     if (appCacheChannel) {
-#ifdef MOZ_IPC
         // Permission will be checked in the parent process.
         if (GeckoProcessType_Default != XRE_GetProcessType())
             appCacheChannel->SetChooseApplicationCache(true);
         else
-#endif
             appCacheChannel->SetChooseApplicationCache(ShouldCheckAppCache(newURI));
     }
 
@@ -6400,7 +6390,6 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
     nsresult rv = aChannel->GetURI(getter_AddRefs(url));
     if (NS_FAILED(rv)) return rv;
 
-#ifdef MOZ_IPC
     nsCOMPtr<nsITimedChannel> timingChannel =
         do_QueryInterface(aChannel);
     if (timingChannel) {
@@ -6411,7 +6400,6 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
                 Telemetry::TOTAL_CONTENT_PAGE_LOAD_TIME,
                 channelCreationTime);
     }
-#endif
 
     // Timing is picked up by the window, we don't need it anymore
     mTiming = nullptr;
@@ -9205,12 +9193,10 @@ nsDocShell::DoURILoad(nsIURI * aURI,
 
         // Loads with the correct permissions should check for a matching
         // application cache.
-#ifdef MOZ_IPC
         // Permission will be checked in the parent process
         if (GeckoProcessType_Default != XRE_GetProcessType())
             appCacheChannel->SetChooseApplicationCache(true);
         else
-#endif
             appCacheChannel->SetChooseApplicationCache(
                 ShouldCheckAppCache(aURI));
     }
@@ -12398,12 +12384,10 @@ nsDocShell::GetAppId(uint32_t* aAppId)
 NS_IMETHODIMP
 nsDocShell::GetAsyncPanZoomEnabled(bool* aOut)
 {
-#ifdef MOZ_IPC
     if (TabChild* tabChild = GetTabChildFrom(this)) {
         *aOut = tabChild->IsAsyncPanZoomEnabled();
         return NS_OK;
     }
-#endif
     *aOut = false;
     return NS_OK;
 }

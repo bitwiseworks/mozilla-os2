@@ -12,9 +12,7 @@
 #include "mozilla/FileUtils.h"
 #include "nsIDiskCacheStreamInternal.h"
 #include "nsThreadUtils.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "mozilla/TimeStamp.h"
 
 
@@ -235,7 +233,6 @@ nsDiskCacheOutputStream::Close()
         rv = mStreamIO->CloseOutputStream(this);
     }
 
-#ifdef MOZ_IPC
     mozilla::Telemetry::ID id;
     if (NS_IsMainThread())
         id = mozilla::Telemetry::NETWORK_DISK_CACHE_OUTPUT_STREAM_CLOSE_MAIN_THREAD;
@@ -243,7 +240,6 @@ nsDiskCacheOutputStream::Close()
         id = mozilla::Telemetry::NETWORK_DISK_CACHE_OUTPUT_STREAM_CLOSE;
 
     mozilla::Telemetry::AccumulateTimeDelta(id, start);
-#endif
 
     return rv;
 }
@@ -260,7 +256,6 @@ nsDiskCacheOutputStream::CloseInternal()
         rv = mStreamIO->CloseOutputStreamInternal(this);
     }
 
-#ifdef MOZ_IPC
     mozilla::Telemetry::ID id;
     if (NS_IsMainThread())
         id = mozilla::Telemetry::NETWORK_DISK_CACHE_OUTPUT_STREAM_CLOSE_INTERNAL_MAIN_THREAD;
@@ -268,7 +263,6 @@ nsDiskCacheOutputStream::CloseInternal()
         id = mozilla::Telemetry::NETWORK_DISK_CACHE_OUTPUT_STREAM_CLOSE_INTERNAL;
 
     mozilla::Telemetry::AccumulateTimeDelta(id, start);
-#endif
 
     return rv;
 }

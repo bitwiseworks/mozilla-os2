@@ -86,12 +86,10 @@ NS_IMPL_THREADSAFE_ISUPPORTS7(nsNSSCertificate, nsIX509Cert,
 nsNSSCertificate*
 nsNSSCertificate::Create(CERTCertificate *cert)
 {
-#ifdef MOZ_IPC
   if (GeckoProcessType_Default != XRE_GetProcessType()) {
     NS_ERROR("Trying to initialize nsNSSCertificate in a non-chrome process!");
     return nullptr;
   }
-#endif
   if (cert)
     return new nsNSSCertificate(cert);
   else
@@ -101,11 +99,9 @@ nsNSSCertificate::Create(CERTCertificate *cert)
 nsNSSCertificate*
 nsNSSCertificate::ConstructFromDER(char *certDER, int derLen)
 {
-#ifdef MOZ_IPC
   // On non-chrome process prevent instantiation
   if (GeckoProcessType_Default != XRE_GetProcessType())
     return nullptr;
-#endif
 
   nsNSSCertificate* newObject = nsNSSCertificate::Create();
   if (newObject && !newObject->InitFromDER(certDER, derLen)) {
@@ -146,7 +142,7 @@ nsNSSCertificate::nsNSSCertificate(CERTCertificate *cert) :
                                            mCertType(CERT_TYPE_NOT_YET_INITIALIZED),
                                            mCachedEVStatus(ev_status_unknown)
 {
-#if defined(DEBUG) && defined(MOZ_IPC)
+#if defined(DEBUG)
   if (GeckoProcessType_Default != XRE_GetProcessType())
     NS_ERROR("Trying to initialize nsNSSCertificate in a non-chrome process!");
 #endif
@@ -165,10 +161,8 @@ nsNSSCertificate::nsNSSCertificate() :
   mCertType(CERT_TYPE_NOT_YET_INITIALIZED),
   mCachedEVStatus(ev_status_unknown)
 {
-#ifdef MOZ_IPC
   if (GeckoProcessType_Default != XRE_GetProcessType())
     NS_ERROR("Trying to initialize nsNSSCertificate in a non-chrome process!");
-#endif
 }
 
 nsNSSCertificate::~nsNSSCertificate()

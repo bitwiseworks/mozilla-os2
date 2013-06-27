@@ -37,7 +37,6 @@ static PLDHashOperator
   pref_enumChild(PLDHashTable *table, PLDHashEntryHdr *heh,
                  uint32_t i, void *arg);
 
-#ifdef MOZ_IPC
 using mozilla::dom::ContentChild;
 
 static ContentChild*
@@ -52,7 +51,6 @@ GetContentChild()
   }
   return nullptr;
 }
-#endif
 
 /*
  * Constructor/Destructor
@@ -133,12 +131,10 @@ NS_IMETHODIMP nsPrefBranch::GetBoolPref(const char *aPrefName, bool *_retval)
 
 NS_IMETHODIMP nsPrefBranch::SetBoolPref(const char *aPrefName, bool aValue)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot set pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aPrefName);
   const char *pref = getPrefName(aPrefName);
@@ -154,12 +150,10 @@ NS_IMETHODIMP nsPrefBranch::GetCharPref(const char *aPrefName, char **_retval)
 
 NS_IMETHODIMP nsPrefBranch::SetCharPref(const char *aPrefName, const char *aValue)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot set pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aPrefName);
   NS_ENSURE_ARG(aValue);
@@ -176,12 +170,10 @@ NS_IMETHODIMP nsPrefBranch::GetIntPref(const char *aPrefName, int32_t *_retval)
 
 NS_IMETHODIMP nsPrefBranch::SetIntPref(const char *aPrefName, int32_t aValue)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot set pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aPrefName);
   const char *pref = getPrefName(aPrefName);
@@ -242,12 +234,10 @@ NS_IMETHODIMP nsPrefBranch::GetComplexValue(const char *aPrefName, const nsIID &
 
   // also check nsILocalFile, for backwards compatibility
   if (aType.Equals(NS_GET_IID(nsIFile)) || aType.Equals(NS_GET_IID(nsILocalFile))) {
-#ifdef MOZ_IPC
     if (GetContentChild()) {
       NS_ERROR("cannot get nsIFile pref from content process");
       return NS_ERROR_NOT_AVAILABLE;
     }
-#endif
 
     nsCOMPtr<nsIFile> file(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv));
 
@@ -262,12 +252,10 @@ NS_IMETHODIMP nsPrefBranch::GetComplexValue(const char *aPrefName, const nsIID &
   }
 
   if (aType.Equals(NS_GET_IID(nsIRelativeFilePref))) {
-#ifdef MOZ_IPC
     if (GetContentChild()) {
       NS_ERROR("cannot get nsIRelativeFilePref from content process");
       return NS_ERROR_NOT_AVAILABLE;
     }
-#endif
 
     nsACString::const_iterator keyBegin, strEnd;
     utf8String.BeginReading(keyBegin);
@@ -321,12 +309,10 @@ NS_IMETHODIMP nsPrefBranch::GetComplexValue(const char *aPrefName, const nsIID &
 
 NS_IMETHODIMP nsPrefBranch::SetComplexValue(const char *aPrefName, const nsIID & aType, nsISupports *aValue)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot set pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aPrefName);
 
@@ -413,12 +399,10 @@ NS_IMETHODIMP nsPrefBranch::SetComplexValue(const char *aPrefName, const nsIID &
 
 NS_IMETHODIMP nsPrefBranch::ClearUserPref(const char *aPrefName)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot set pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aPrefName);
   const char *pref = getPrefName(aPrefName);
@@ -436,12 +420,10 @@ NS_IMETHODIMP nsPrefBranch::PrefHasUserValue(const char *aPrefName, bool *_retva
 
 NS_IMETHODIMP nsPrefBranch::LockPref(const char *aPrefName)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot lock pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aPrefName);
   const char *pref = getPrefName(aPrefName);
@@ -450,12 +432,10 @@ NS_IMETHODIMP nsPrefBranch::LockPref(const char *aPrefName)
 
 NS_IMETHODIMP nsPrefBranch::PrefIsLocked(const char *aPrefName, bool *_retval)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot check lock pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG_POINTER(_retval);
   NS_ENSURE_ARG(aPrefName);
@@ -466,12 +446,10 @@ NS_IMETHODIMP nsPrefBranch::PrefIsLocked(const char *aPrefName, bool *_retval)
 
 NS_IMETHODIMP nsPrefBranch::UnlockPref(const char *aPrefName)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot unlock pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aPrefName);
   const char *pref = getPrefName(aPrefName);
@@ -486,12 +464,10 @@ NS_IMETHODIMP nsPrefBranch::ResetBranch(const char *aStartingAt)
 
 NS_IMETHODIMP nsPrefBranch::DeleteBranch(const char *aStartingAt)
 {
-#ifdef MOZ_IPC
   if (GetContentChild()) {
     NS_ERROR("cannot set pref from content process");
     return NS_ERROR_NOT_AVAILABLE;
   }
-#endif
 
   NS_ENSURE_ARG(aStartingAt);
   const char *pref = getPrefName(aStartingAt);

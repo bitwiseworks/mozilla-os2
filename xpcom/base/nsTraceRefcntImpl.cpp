@@ -325,12 +325,8 @@ public:
   }
 
   bool PrintDumpHeader(FILE* out, const char* msg, nsTraceRefcntImpl::StatisticsType type) {
-#ifdef MOZ_IPC
     fprintf(out, "\n== BloatView: %s, %s process %d\n", msg,
             XRE_ChildProcessTypeToString(XRE_GetProcessType()), getpid());
-#else
-    fprintf(out, "\n== BloatView: %s\n", msg);
-#endif
     nsTraceRefcntStats& stats =
       (type == nsTraceRefcntImpl::NEW_STATS) ? mNewStats : mAllStats;
     if (gLogLeaksOnly && !HaveLeaks(&stats))
@@ -637,7 +633,6 @@ static bool InitLog(const char* envVar, const char* msg, FILE* *result)
     else {
       FILE *stream;
       nsCAutoString fname(value);
-#ifdef MOZ_IPC
       if (XRE_GetProcessType() != GeckoProcessType_Default) {
         bool hasLogExtension = 
             fname.RFind(".log", true, -1, 4) == kNotFound ? false : true;
@@ -650,7 +645,6 @@ static bool InitLog(const char* envVar, const char* msg, FILE* *result)
         if (hasLogExtension)
           fname.AppendLiteral(".log");
       }
-#endif
       stream = ::fopen(fname.get(), "w" FOPEN_NO_INHERIT);
       if (stream != NULL) {
         MozillaRegisterDebugFD(fileno(stream));

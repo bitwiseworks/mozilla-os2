@@ -17,9 +17,7 @@
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Mutex.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "mozilla/FileUtils.h"
 #include "prlog.h"
 
@@ -390,9 +388,7 @@ nsUrlClassifierPrefixSet::LoadFromFd(AutoFDClose& fileFd)
 NS_IMETHODIMP
 nsUrlClassifierPrefixSet::LoadFromFile(nsIFile* aFile)
 {
-#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_PS_FILELOAD_TIME> timer;
-#endif
 
   nsresult rv;
   AutoFDClose fileFd;
@@ -407,9 +403,7 @@ nsresult
 nsUrlClassifierPrefixSet::StoreToFd(AutoFDClose& fileFd)
 {
   {
-#ifdef MOZ_IPC
       Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_PS_FALLOCATE_TIME> timer;
-#endif
       int64_t size = 4 * sizeof(uint32_t);
       size += 2 * mIndexStarts.Length() * sizeof(uint32_t);
       size +=     mDeltas.Length() * sizeof(uint16_t);

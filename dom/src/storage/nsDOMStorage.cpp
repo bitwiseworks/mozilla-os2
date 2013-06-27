@@ -7,11 +7,8 @@
 #include "StorageParent.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsXULAppAPI.h"
-
-#ifdef MOZ_IPC
 using mozilla::dom::StorageChild;
 using mozilla::dom::ContentChild;
-#endif
 
 #include "prnetdb.h"
 #include "nsCOMPtr.h"
@@ -39,9 +36,7 @@ using mozilla::dom::ContentChild;
 #include "nsNetCID.h"
 #include "mozilla/Preferences.h"
 #include "nsThreadUtils.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "DictionaryHelpers.h"
 #include "GeneratedEvents.h"
 
@@ -245,11 +240,9 @@ nsDOMStorageManager::Initialize()
   gStorageManager->mStorages.Init();
   NS_ADDREF(gStorageManager);
 
-#ifdef MOZ_IPC
   // No observers needed in non-chrome
   if (XRE_GetProcessType() != GeckoProcessType_Default)
     return NS_OK;
-#endif
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (!os)
@@ -1288,11 +1281,9 @@ nsDOMStorage::nsDOMStorage()
   : mStorageType(nsPIDOMStorage::Unknown)
   , mEventBroadcaster(nullptr)
 {
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() != GeckoProcessType_Default)
     mStorageImpl = new StorageChild(this);
   else
-#endif
     mStorageImpl = new DOMStorageImpl(this);
 }
 
@@ -1301,13 +1292,10 @@ nsDOMStorage::nsDOMStorage(nsDOMStorage& aThat)
   , mPrincipal(aThat.mPrincipal)
   , mEventBroadcaster(nullptr)
 {
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() != GeckoProcessType_Default) {
     StorageChild* other = static_cast<StorageChild*>(aThat.mStorageImpl.get());
     mStorageImpl = new StorageChild(this, *other);
-  } else
-#endif
-  {
+  } else {
     DOMStorageImpl* other = static_cast<DOMStorageImpl*>(aThat.mStorageImpl.get());
     mStorageImpl = new DOMStorageImpl(this, *other);
   }
@@ -1548,7 +1536,6 @@ nsDOMStorage::GetItem(const nsAString& aKey, nsAString &aData)
   return NS_OK;
 }
 
-#ifdef MOZ_IPC
 static Telemetry::ID
 TelemetryIDForKey(nsPIDOMStorage::nsDOMStorageType type)
 {
@@ -1578,7 +1565,6 @@ TelemetryIDForValue(nsPIDOMStorage::nsDOMStorageType type)
     return Telemetry::SESSIONDOMSTORAGE_VALUE_SIZE_BYTES;
   }
 }
-#endif
 
 NS_IMETHODIMP
 nsDOMStorage::GetItem(const nsAString& aKey, nsIDOMStorageItem **aItem)
@@ -1596,10 +1582,8 @@ nsDOMStorage::SetItem(const nsAString& aKey, const nsAString& aData)
   if (!CacheStoragePermissions())
     return NS_ERROR_DOM_SECURITY_ERR;
 
-#ifdef MOZ_IPC
   Telemetry::Accumulate(TelemetryIDForKey(mStorageType), aKey.Length());
   Telemetry::Accumulate(TelemetryIDForValue(mStorageType), aData.Length());
-#endif
 
   nsString oldValue;
   nsresult rv = mStorageImpl->SetValue(IsCallerSecure(), aKey, aData, oldValue);

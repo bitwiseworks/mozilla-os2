@@ -40,6 +40,7 @@ SHARED_LIBRARY_LIBS = \
 	../base/$(LIB_PREFIX)gkbase_s.$(LIB_SUFFIX) \
 	../forms/$(LIB_PREFIX)gkforms_s.$(LIB_SUFFIX) \
 	../generic/$(LIB_PREFIX)gkgeneric_s.$(LIB_SUFFIX) \
+	../ipc/$(LIB_PREFIX)gkipc_s.$(LIB_SUFFIX) \
 	../style/$(LIB_PREFIX)gkstyle_s.$(LIB_SUFFIX) \
 	../tables/$(LIB_PREFIX)gktable_s.$(LIB_SUFFIX) \
 	../xul/base/src/$(LIB_PREFIX)gkxulbase_s.$(LIB_SUFFIX) \
@@ -90,12 +91,6 @@ SHARED_LIBRARY_LIBS = \
 	$(DEPTH)/editor/txtsvc/src/$(LIB_PREFIX)txtsvc_s.$(LIB_SUFFIX) \
 	$(DEPTH)/content/mathml/content/src/$(LIB_PREFIX)gkcontentmathml_s.$(LIB_SUFFIX) \
 	$(NULL)
-
-ifdef MOZ_IPC
-SHARED_LIBRARY_LIBS += \
-	../ipc/$(LIB_PREFIX)gkipc_s.$(LIB_SUFFIX) \
-	$(NULL)
-endif
 
 ifneq (,$(filter qt gtk2,$(MOZ_WIDGET_TOOLKIT)))
 SHARED_LIBRARY_LIBS += \

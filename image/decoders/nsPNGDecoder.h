@@ -30,9 +30,7 @@ public:
 
   virtual void InitInternal();
   virtual void WriteInternal(const char* aBuffer, uint32_t aCount);
-#ifdef MOZ_IPC
   virtual Telemetry::ID SpeedHistogram();
-#endif
 
   void CreateFrame(png_uint_32 x_offset, png_uint_32 y_offset,
                    int32_t width, int32_t height,

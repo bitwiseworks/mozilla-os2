@@ -17,9 +17,7 @@
 
 #include "base/basictypes.h"
 #include "prlog.h"
-#ifdef MOZ_IPC
 #include "mozilla/net/NeckoChild.h"
-#endif
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* webSocketLog;

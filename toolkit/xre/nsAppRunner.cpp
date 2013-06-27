@@ -182,9 +182,7 @@ using mozilla::unused;
 #include "nsIPrefService.h"
 #endif
 
-#ifdef MOZ_IPC
 #include "base/command_line.h"
-#endif
 
 #include "mozilla/FunctionTimer.h"
 
@@ -230,10 +228,8 @@ static char **gQtOnlyArgv;
 #endif
 #include "BinaryPath.h"
 
-#ifdef MOZ_IPC
 using mozilla::dom::ContentParent;
 using mozilla::dom::ContentChild;
-#endif
 
 // Save literal putenv string to environment variable.
 static void
@@ -643,13 +639,11 @@ nsXULAppInfo::GetID(nsACString& aResult)
 NS_IMETHODIMP
 nsXULAppInfo::GetVersion(nsACString& aResult)
 {
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     ContentChild* cc = ContentChild::GetSingleton();
     aResult = cc->GetAppInfo().version;
     return NS_OK;
   }
-#endif
   aResult.Assign(gAppData->version);
 
   return NS_OK;
@@ -666,13 +660,11 @@ nsXULAppInfo::GetPlatformVersion(nsACString& aResult)
 NS_IMETHODIMP
 nsXULAppInfo::GetAppBuildID(nsACString& aResult)
 {
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     ContentChild* cc = ContentChild::GetSingleton();
     aResult = cc->GetAppInfo().buildID;
     return NS_OK;
   }
-#endif
   aResult.Assign(gAppData->buildID);
 
   return NS_OK;
@@ -772,15 +764,11 @@ nsXULAppInfo::GetProcessType(uint32_t* aResult)
 NS_IMETHODIMP
 nsXULAppInfo::EnsureContentProcess()
 {
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() != GeckoProcessType_Default)
     return NS_ERROR_NOT_AVAILABLE;
 
   unused << ContentParent::GetNewOrUsed();
   return NS_OK;
-#else
-  return NS_ERROR_NOT_AVAILABLE;
-#endif
 }
 
 NS_IMETHODIMP
@@ -3984,8 +3972,6 @@ XRE_InitCommandLine(int aArgc, char* aArgv[])
 {
   nsresult rv = NS_OK;
 
-#if defined(MOZ_IPC)
-
 #if defined(OS_WIN)
   CommandLine::Init(aArgc, aArgv);
 #else
@@ -4018,7 +4004,6 @@ XRE_InitCommandLine(int aArgc, char* aArgv[])
   for (int i = 0; i < aArgc; ++i)
       free(canonArgs[i]);
   delete[] canonArgs;
-#endif
 #endif
 
   const char *path = nullptr;
@@ -4062,9 +4047,7 @@ XRE_DeinitCommandLine()
 {
   nsresult rv = NS_OK;
 
-#if defined(MOZ_IPC)
   CommandLine::Terminate();
-#endif
 
   return rv;
 }
@@ -4072,11 +4055,7 @@ XRE_DeinitCommandLine()
 GeckoProcessType
 XRE_GetProcessType()
 {
-#ifdef MOZ_IPC
   return mozilla::startup::sChildProcessType;
-#else
-  return GeckoProcessType_Default;
-#endif
 }
 
 void

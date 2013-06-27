@@ -265,10 +265,8 @@ nsIOService::InitializeNetworkLinkService()
         return NS_ERROR_FAILURE; 
     }
 
-#ifdef MOZ_IPC
     // go into managed mode if we can, and chrome process
     if (XRE_GetProcessType() == GeckoProcessType_Default)
-#endif
     {
         mNetworkLinkService = do_GetService(NS_NETWORK_LINK_SERVICE_CONTRACTID, &rv);
     }
@@ -735,7 +733,6 @@ nsIOService::SetOffline(bool offline)
 
     NS_ASSERTION(observerService, "The observer service should not be null");
 
-#ifdef MOZ_IPC
     if (XRE_GetProcessType() == GeckoProcessType_Default) {
         if (observerService) {
             (void)observerService->NotifyObservers(nullptr,
@@ -744,7 +741,6 @@ nsIOService::SetOffline(bool offline)
                 NS_LITERAL_STRING("false").get());
         }
     }
-#endif
 
     while (mSetOfflineValue != mOffline) {
         offline = mSetOfflineValue;

@@ -14,9 +14,7 @@
 #include "nsIURI.h"
 #include "nsThreadUtils.h"
 #include "nsProxyRelease.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "jsapi.h"
 
 namespace mozilla {
@@ -246,7 +244,6 @@ private:
   const char* mTopic;
 };
 
-#ifdef MOZ_IPC
 /**
  * Used to notify a topic to system observers on async execute completion.
  */
@@ -266,7 +263,6 @@ private:
   const Telemetry::ID mHistogramId;
   const TimeStamp mStart;
 };
-#endif
 
 } // namespace places
 } // namespace mozilla

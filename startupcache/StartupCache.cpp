@@ -32,9 +32,7 @@
 #include "mozilla/Omnijar.h"
 #include "prenv.h"
 #include "mozilla/FunctionTimer.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 #include "nsIProtocolHandler.h"
@@ -244,7 +242,6 @@ StartupCache::LoadArchive(enum TelemetrifyAge flag)
     return rv;
   }
 
-#ifdef MOZ_IPC
   const char *data;
   size_t len = NS_CStringGetData(comment, &data);
   PRTime creationStamp;
@@ -262,7 +259,6 @@ StartupCache::LoadArchive(enum TelemetrifyAge flag)
     mozilla::Telemetry::Accumulate(Telemetry::STARTUP_CACHE_AGE_HOURS,
                                    hour_diff);
   }
-#endif
 
   return rv;
 }

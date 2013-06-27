@@ -1588,13 +1588,11 @@ nsFocusManager::Blur(nsPIDOMWindow* aWindowToClear,
         }
       }
 
-#ifdef MOZ_IPc
       // if the object being blurred is a remote browser, deactivate remote content
       if (TabParent* remote = TabParent::GetFrom(content)) {
         remote->Deactivate();
         LOGFOCUS(("Remote browser deactivated"));
       }
-#endif
     }
   }
 
@@ -1805,13 +1803,11 @@ nsFocusManager::Focus(nsPIDOMWindow* aWindow,
         if (aAdjustWidgets && objectFrameWidget && !sTestMode)
           objectFrameWidget->SetFocus(false);
 
-#ifdef MOZ_IPC
         // if the object being focused is a remote browser, activate remote content
         if (TabParent* remote = TabParent::GetFrom(aContent)) {
           remote->Activate();
           LOGFOCUS(("Remote browser activated"));
         }
-#endif
       }
 
       nsIMEStateManager::OnChangeFocus(presContext, aContent,

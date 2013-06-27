@@ -171,7 +171,6 @@ BasicImageLayer::GetAsSurface(gfxASurface** aSurface,
   return true;
 }
 
-#ifdef MOZ_IPC
 class BasicShadowableImageLayer : public BasicImageLayer,
                                   public BasicShadowableLayer
 {
@@ -518,7 +517,6 @@ BasicShadowLayerManager::CreateShadowImageLayer()
   nsRefPtr<ShadowImageLayer> layer = new BasicShadowImageLayer(this);
   return layer.forget();
 }
-#endif
 
 }
 }

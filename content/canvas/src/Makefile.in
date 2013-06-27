@@ -34,15 +34,10 @@ CPPSRCS	= \
 	CanvasUtils.cpp \
 	nsCanvasRenderingContext2D.cpp \
 	nsCanvasRenderingContext2DAzure.cpp \
-	$(NULL)
-
-ifdef MOZ_IPC
-CPPSRCS += \
 	DocumentRendererParent.cpp \
 	DocumentRendererChild.cpp \
 	ImageData.cpp \
 	$(NULL)
-endif
 
 ifdef MOZ_WEBGL
 

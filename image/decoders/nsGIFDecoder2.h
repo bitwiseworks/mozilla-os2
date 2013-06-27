@@ -29,9 +29,7 @@ public:
 
   virtual void WriteInternal(const char* aBuffer, uint32_t aCount);
   virtual void FinishInternal();
-#ifdef MOZ_IPC
   virtual Telemetry::ID SpeedHistogram();
-#endif
 
 private:
   /* These functions will be called when the decoder has a decoded row,

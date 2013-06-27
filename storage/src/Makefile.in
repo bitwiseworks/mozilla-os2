@@ -63,14 +63,9 @@ CPPSRCS = \
   StorageBaseStatementInternal.cpp \
   SQLCollations.cpp \
   VacuumManager.cpp \
+  TelemetryVFS.cpp \
   FileSystemModule.cpp \
   $(NULL)
-
-ifdef MOZ_IPC
-CPPSRCS += \
-  TelemetryVFS.cpp \
-  $(NULL)
-endif
 
 # For nsDependentJSString
 LOCAL_INCLUDES = \

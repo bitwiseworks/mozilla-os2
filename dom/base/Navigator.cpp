@@ -24,9 +24,7 @@
 #include "nsContentUtils.h"
 #include "nsUnicharUtils.h"
 #include "mozilla/Preferences.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "BatteryManager.h"
 #include "PowerManager.h"
 #include "nsIDOMWakeLock.h"
@@ -476,9 +474,7 @@ Navigator::GetOnLine(bool* aOnline)
 {
   NS_PRECONDITION(aOnline, "Null out param");
 
-#ifdef MOZ_IPC
   *aOnline = !NS_IsOffline();
-#endif
   return NS_OK;
 }
 
@@ -527,9 +523,7 @@ Navigator::GetDoNotTrack(nsAString &aResult)
 NS_IMETHODIMP
 Navigator::JavaEnabled(bool* aReturn)
 {
-#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::CHECK_JAVA_ENABLED> telemetryTimer;
-#endif
   // Return true if we have a handler for "application/x-java-vm",
   // otherwise return false.
   *aReturn = false;
@@ -1050,9 +1044,7 @@ Navigator::GetBattery(nsIDOMBatteryManager** aBattery)
     nsCOMPtr<nsPIDOMWindow> win(do_QueryReferent(mWindow));
     NS_ENSURE_TRUE(win && win->GetDocShell(), NS_OK);
 
-#ifdef MOZ_IPC
     mBatteryManager = new battery::BatteryManager();
-#endif
     mBatteryManager->Init(win);
   }
 

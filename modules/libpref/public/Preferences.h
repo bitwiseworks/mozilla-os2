@@ -31,11 +31,9 @@ typedef int (*PR_CALLBACK PrefChangedFunc)(const char *, void *);
 
 namespace mozilla {
 
-#ifdef MOZ_IPC
 namespace dom {
 class PrefSetting;
 }
-#endif
 
 class Preferences : public nsIPrefService,
                     public nsIObserver,
@@ -43,9 +41,7 @@ class Preferences : public nsIPrefService,
                     public nsSupportsWeakReference
 {
 public:
-#ifdef MOZ_IPC
   typedef mozilla::dom::PrefSetting PrefSetting;
-#endif
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPREFSERVICE
@@ -331,17 +327,9 @@ public:
   static int32_t GetDefaultType(const char* aPref);
 
   // Used to synchronise preferences between chrome and content processes.
-#ifndef MOZ_IPC
-  static void MirrorPreferences(nsTArray<PrefTuple,
-                                nsTArrayInfallibleAllocator> *aArray);
-  static bool MirrorPreference(const char *aPref, PrefTuple *aTuple);
-  static void ClearContentPref(const char *aPref);
-  static void SetPreference(const PrefTuple *aTuple);
-#else
   static void GetPreferences(InfallibleTArray<PrefSetting>* aPrefs);
   static void GetPreference(PrefSetting* aPref);
   static void SetPreference(const PrefSetting& aPref);
-#endif
 
 protected:
   nsresult NotifyServiceObservers(const char *aSubject);

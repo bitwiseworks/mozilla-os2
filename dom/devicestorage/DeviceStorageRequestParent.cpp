@@ -185,7 +185,6 @@ nsresult
 DeviceStorageRequestParent::PostBlobSuccessEvent::CancelableRun() {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-#ifdef MOZ_IPC
   nsString mime;
   CopyASCIItoUTF16(mMimeType, mime);
 
@@ -199,9 +198,6 @@ DeviceStorageRequestParent::PostBlobSuccessEvent::CancelableRun() {
 
   unused <<  mParent->Send__delete__(mParent, response);
   return NS_OK;
-#else
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
 }
 
 DeviceStorageRequestParent::PostEnumerationSuccessEvent::PostEnumerationSuccessEvent(DeviceStorageRequestParent* aParent,

@@ -131,7 +131,7 @@ private:
 public:
   NS_DECL_ISUPPORTS
 
-  StorageSQLiteMultiReporter(Service *aService)
+  StorageSQLiteMultiReporter(Service *aService) 
   : mService(aService)
   {
     mStmtDesc = NS_LITERAL_CSTRING(
@@ -494,9 +494,7 @@ Service::shutdown()
   NS_IF_RELEASE(sXPConnect);
 }
 
-#ifdef MOZ_IPC
 sqlite3_vfs *ConstructTelemetryVFS();
-#endif
 
 #ifdef MOZ_STORAGE_MEMORY
 #  include "jemalloc.h"
@@ -564,7 +562,7 @@ const sqlite3_mem_methods memMethods = {
   &sqliteMemInit,
   &sqliteMemShutdown,
   NULL
-};
+}; 
 
 } // anonymous namespace
 
@@ -590,7 +588,6 @@ Service::initialize()
   if (rc != SQLITE_OK)
     return convertResultCode(rc);
 
-#ifdef MOZ_IPC
   mSqliteVFS = ConstructTelemetryVFS();
   if (mSqliteVFS) {
     rc = sqlite3_vfs_register(mSqliteVFS, 1);
@@ -602,7 +599,6 @@ Service::initialize()
   rc = ::sqlite3_quota_initialize("telemetry-vfs", 0);
   if (rc != SQLITE_OK)
     return convertResultCode(rc);
-#endif
 
   // Set the default value for the toolkit.storage.synchronous pref.  It will be
   // updated with the user preference on the main thread.

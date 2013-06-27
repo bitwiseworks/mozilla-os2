@@ -520,7 +520,6 @@ Statistics::endGC()
     for (int i = 0; i < PHASE_LIMIT; i++)
         phaseTotals[i] += phaseTimes[i];
 
-#ifdef MOZ_IPC
     if (JSAccumulateTelemetryDataCallback cb = runtime->telemetryCallback) {
         int64_t total, longest;
         gcDuration(&total, &longest);
@@ -543,7 +542,6 @@ Statistics::endGC()
         double mmu50 = computeMMU(50 * PRMJ_USEC_PER_MSEC);
         (*cb)(JS_TELEMETRY_GC_MMU_50, mmu50 * 100);
     }
-#endif
 
     if (fp)
         printStats();
@@ -562,10 +560,8 @@ Statistics::beginSlice(int collectedCount, int compartmentCount, gcreason::Reaso
     SliceData data(reason, PRMJ_Now(), gc::GetPageFaultCount());
     (void) slices.append(data); /* Ignore any OOMs here. */
 
-#ifdef MOZ_IPC
     if (JSAccumulateTelemetryDataCallback cb = runtime->telemetryCallback)
         (*cb)(JS_TELEMETRY_GC_REASON, reason);
-#endif
 
     // Slice callbacks should only fire for the outermost level
     if (++gcDepth == 1) {
@@ -581,12 +577,10 @@ Statistics::endSlice()
     slices.back().end = PRMJ_Now();
     slices.back().endFaults = gc::GetPageFaultCount();
 
-#ifdef MOZ_IPC
     if (JSAccumulateTelemetryDataCallback cb = runtime->telemetryCallback) {
         (*cb)(JS_TELEMETRY_GC_SLICE_MS, t(slices.back().end - slices.back().start));
         (*cb)(JS_TELEMETRY_GC_RESET, !!slices.back().resetReason);
     }
-#endif
 
     bool last = runtime->gcIncrementalState == gc::NO_INCREMENTAL;
     if (last)

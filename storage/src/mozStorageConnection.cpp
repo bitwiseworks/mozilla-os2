@@ -12,9 +12,7 @@
 #include "nsIMemoryReporter.h"
 #include "nsThreadUtils.h"
 #include "nsIFile.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "mozilla/Mutex.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/Attributes.h"
@@ -771,7 +769,6 @@ Connection::stepStatement(sqlite3_stmt *aStatement)
     ::sqlite3_reset(aStatement);
   }
 
-#ifdef MOZ_IPC
   // Report very slow SQL statements to Telemetry
   TimeDuration duration = TimeStamp::Now() - startTime;
   if (duration.ToMilliseconds() >= Telemetry::kSlowStatementThreshold) {
@@ -779,7 +776,6 @@ Connection::stepStatement(sqlite3_stmt *aStatement)
     Telemetry::RecordSlowSQLStatement(statementString, getFilename(),
                                       duration.ToMilliseconds());
   }
-#endif
 
   (void)::sqlite3_extended_result_codes(mDBConn, 0);
   // Drop off the extended result bits of the result code.
@@ -849,7 +845,6 @@ Connection::executeSql(const char *aSqlString)
   TimeStamp startTime = TimeStamp::Now();
   int srv = ::sqlite3_exec(mDBConn, aSqlString, NULL, NULL, NULL);
 
-#ifdef MOZ_IPC
   // Report very slow SQL statements to Telemetry
   TimeDuration duration = TimeStamp::Now() - startTime;
   if (duration.ToMilliseconds() >= Telemetry::kSlowStatementThreshold) {
@@ -857,7 +852,6 @@ Connection::executeSql(const char *aSqlString)
     Telemetry::RecordSlowSQLStatement(statementString, getFilename(),
                                       duration.ToMilliseconds());
   }
-#endif
 
   return srv;
 }

@@ -22,9 +22,7 @@
 #include "nsMathUtils.h"
 #include "nsStreamUtils.h"
 #include "mozilla/Preferences.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 #include "nsFrameManager.h"
 #include "nsDisplayList.h"
@@ -562,7 +560,6 @@ NS_IMETHODIMP
 nsHTMLCanvasElement::MozGetIPCContext(const nsAString& aContextId,
                                       nsISupports **aContext)
 {
-#ifdef MOZ_IPC
   if(!nsContentUtils::IsCallerTrustedForRead()) {
     // XXX ERRMSG we need to report an error to developers here! (bug 329026)
     return NS_ERROR_DOM_SECURITY_ERR;
@@ -592,9 +589,6 @@ nsHTMLCanvasElement::MozGetIPCContext(const nsAString& aContextId,
 
   NS_ADDREF (*aContext = mCurrentContext);
   return NS_OK;
-#else
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
 }
 
 nsresult
@@ -785,9 +779,7 @@ nsresult NS_NewCanvasRenderingContext2DAzure(nsIDOMCanvasRenderingContext2D** aR
 nsresult
 NS_NewCanvasRenderingContext2D(nsIDOMCanvasRenderingContext2D** aResult)
 {
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::CANVAS_2D_USED, 1);
-#endif
   if (AzureCanvasEnabled()) {
     return NS_NewCanvasRenderingContext2DAzure(aResult);
   }

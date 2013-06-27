@@ -5,14 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/ContentChild.h"
-#ifdef MOZ_IPC
 #include "mozilla/dom/PAudioChild.h"
-#endif
 #include "mozilla/dom/AudioChild.h"
 #include "nsXULAppAPI.h"
-#ifdef MOZ_IPC
 using namespace mozilla::dom;
-#endif
 
 #include <stdio.h>
 #include <math.h>
@@ -91,7 +87,6 @@ class nsNativeAudioStream : public nsAudioStream
 };
 
 #if defined(REMOTE_AUDIO)
-#ifdef MOZ_IPC
 class nsRemotedAudioStream : public nsAudioStream
 {
  public:
@@ -280,7 +275,6 @@ class AudioShutdownEvent : public nsRunnable
 
   nsRefPtr<AudioChild> mAudioChild;
 };
-#endif
 #endif
 
 #define PREF_VOLUME_SCALE "media.volume_scale"
@@ -622,7 +616,6 @@ int32_t nsNativeAudioStream::GetMinWriteSize()
 }
 
 #if defined(REMOTE_AUDIO)
-#ifdef MOZ_IPC
 nsRemotedAudioStream::nsRemotedAudioStream()
  : mAudioChild(nullptr),
    mBytesPerFrame(0),
@@ -758,8 +751,6 @@ nsRemotedAudioStream::IsPaused()
 {
   return mPaused;
 }
-
-#endif // MOZ_IPC
 #endif
 
 #if defined(MOZ_CUBEB)

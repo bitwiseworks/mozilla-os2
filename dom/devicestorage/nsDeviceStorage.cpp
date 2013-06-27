@@ -859,11 +859,9 @@ nsDOMDeviceStorageCursor::Allow()
       return NS_OK;
     }
 
-#ifdef MOZ_IPC
     PDeviceStorageRequestChild* child = new DeviceStorageRequestChild(this, mFile);
     DeviceStorageEnumerationParams params(fullpath, mSince);
     ContentChild::GetSingleton()->SendPDeviceStorageRequestConstructor(child, params);
-#endif
     return NS_OK;
   }
 
@@ -1201,7 +1199,6 @@ public:
       return NS_OK;
     }
 
-#ifdef MOZ_IPC
     if (XRE_GetProcessType() == GeckoProcessType_Content) {
 
       // because owner implements nsITabChild, we can assume that it is
@@ -1221,7 +1218,6 @@ public:
       Sendprompt();
       return NS_OK;
     }
-#endif
 
     nsCOMPtr<nsIContentPermissionPrompt> prompt = do_GetService(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
     if (prompt) {
@@ -1286,7 +1282,6 @@ public:
           return NS_ERROR_FAILURE;
         }
 
-#ifdef MOZ_IPC
         if (XRE_GetProcessType() != GeckoProcessType_Default) {
 
 	  BlobChild* actor = ContentChild::GetSingleton()->GetOrCreateActorForBlob(mBlob);
@@ -1303,49 +1298,43 @@ public:
           ContentChild::GetSingleton()->SendPDeviceStorageRequestConstructor(child, params);
           return NS_OK;
         }
-#endif
         r = new WriteFileEvent(mBlob, mFile, mRequest);
         break;
       }
 
       case DEVICE_STORAGE_REQUEST_READ:
       {
-#ifdef MOZ_IPC
         if (XRE_GetProcessType() != GeckoProcessType_Default) {
           PDeviceStorageRequestChild* child = new DeviceStorageRequestChild(mRequest, mFile);
           DeviceStorageGetParams params(mFile->mPath, fullpath);
           ContentChild::GetSingleton()->SendPDeviceStorageRequestConstructor(child, params);
           return NS_OK;
         }
-#endif
+
         r = new ReadFileEvent(mFile, mRequest);
         break;
       }
 
       case DEVICE_STORAGE_REQUEST_DELETE:
       {
-#ifdef MOZ_IPC
         if (XRE_GetProcessType() != GeckoProcessType_Default) {
           PDeviceStorageRequestChild* child = new DeviceStorageRequestChild(mRequest, mFile);
           DeviceStorageDeleteParams params(fullpath);
           ContentChild::GetSingleton()->SendPDeviceStorageRequestConstructor(child, params);
           return NS_OK;
         }
-#endif
         r = new DeleteFileEvent(mFile, mRequest);
         break;
       }
 
       case DEVICE_STORAGE_REQUEST_STAT:
       {
-#ifdef MOZ_IPC
         if (XRE_GetProcessType() != GeckoProcessType_Default) {
           PDeviceStorageRequestChild* child = new DeviceStorageRequestChild(mRequest, mFile);
           DeviceStorageStatParams params(fullpath);
           ContentChild::GetSingleton()->SendPDeviceStorageRequestConstructor(child, params);
 	  return NS_OK;
         }
-#endif
         r = new StatFileEvent(mFile, mRequest);
         break;
       }
@@ -1741,7 +1730,6 @@ nsDOMDeviceStorage::EnumerateInternal(const JS::Value & aName,
     return NS_OK;
   }
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     // because owner implements nsITabChild, we can assume that it is
     // the one and only TabChild.
@@ -1760,7 +1748,6 @@ nsDOMDeviceStorage::EnumerateInternal(const JS::Value & aName,
 
     return NS_OK;
   }
-#endif
 
   nsCOMPtr<nsIContentPermissionPrompt> prompt = do_GetService(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
   if (prompt) {

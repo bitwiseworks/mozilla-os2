@@ -56,8 +56,6 @@ EXPORTS_mozilla/plugins = \
   StreamNotifyParent.h \
   $(NULL)
 
-ifdef MOZ_IPC
-
 MODULE           = dom
 LIBRARY_NAME     = domplugins_s
 LIBXUL_LIBRARY   = 1
@@ -120,8 +118,6 @@ CMMSRCS   += \
 EXPORTS_mozilla/plugins += \
     PluginInterposeOSX.h \
     $(NULL)
-endif
-
 endif
 
 LOCAL_INCLUDES = \

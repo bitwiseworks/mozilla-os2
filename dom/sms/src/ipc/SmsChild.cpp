@@ -63,11 +63,9 @@ SmsChild::RecvNotifyRequestSmsSent(const SmsMessageData& aMessage,
                                    const int32_t& aRequestId,
                                    const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsIDOMMozSmsMessage> message = new SmsMessage(aMessage);
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
@@ -81,11 +79,9 @@ SmsChild::RecvNotifyRequestSmsSendFailed(const int32_t& aError,
                                          const int32_t& aRequestId,
                                          const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
   requestManager->NotifySmsSendFailed(aRequestId, aError);
@@ -98,11 +94,9 @@ SmsChild::RecvNotifyRequestGotSms(const SmsMessageData& aMessage,
                                   const int32_t& aRequestId,
                                   const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsIDOMMozSmsMessage> message = new SmsMessage(aMessage);
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
@@ -116,11 +110,9 @@ SmsChild::RecvNotifyRequestGetSmsFailed(const int32_t& aError,
                                         const int32_t& aRequestId,
                                         const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
   requestManager->NotifyGetSmsFailed(aRequestId, aError);
@@ -133,11 +125,9 @@ SmsChild::RecvNotifyRequestSmsDeleted(const bool& aDeleted,
                                       const int32_t& aRequestId,
                                       const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
   requestManager->NotifySmsDeleted(aRequestId, aDeleted);
@@ -150,11 +140,9 @@ SmsChild::RecvNotifyRequestSmsDeleteFailed(const int32_t& aError,
                                            const int32_t& aRequestId,
                                            const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
   requestManager->NotifySmsDeleteFailed(aRequestId, aError);
@@ -166,11 +154,9 @@ bool
 SmsChild::RecvNotifyRequestNoMessageInList(const int32_t& aRequestId,
                                            const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
   requestManager->NotifyNoMessageInList(aRequestId);
@@ -183,11 +169,9 @@ SmsChild::RecvNotifyRequestCreateMessageList(const int32_t& aListId,
                                              const int32_t& aRequestId,
                                              const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsIDOMMozSmsMessage> message = new SmsMessage(aMessageData);
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
@@ -200,11 +184,9 @@ SmsChild::RecvNotifyRequestGotNextMessage(const SmsMessageData& aMessageData,
                                           const int32_t& aRequestId,
                                           const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsIDOMMozSmsMessage> message = new SmsMessage(aMessageData);
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
@@ -217,11 +199,9 @@ SmsChild::RecvNotifyRequestReadListFailed(const int32_t& aError,
                                           const int32_t& aRequestId,
                                           const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager = do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
   requestManager->NotifyReadMessageListFailed(aRequestId, aError);
@@ -233,11 +213,9 @@ SmsChild::RecvNotifyRequestMarkedMessageRead(const bool& aRead,
                                              const int32_t& aRequestId,
                                              const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager =
     do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);
@@ -250,11 +228,9 @@ SmsChild::RecvNotifyRequestMarkMessageReadFailed(const int32_t& aError,
                                                  const int32_t& aRequestId,
                                                  const uint64_t& aProcessId)
 {
-#ifdef MOZ_IPC
   if (ContentChild::GetSingleton()->GetID() != aProcessId) {
     return true;
   }
-#endif
 
   nsCOMPtr<nsISmsRequestManager> requestManager =
     do_GetService(SMS_REQUEST_MANAGER_CONTRACTID);

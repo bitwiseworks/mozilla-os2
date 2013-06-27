@@ -84,12 +84,8 @@
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PathHelpers.h"
-#ifdef MOZ_IPC
 #include "mozilla/ipc/DocumentRendererParent.h"
 #include "mozilla/ipc/PDocumentRendererParent.h"
-#else
-#include <vector>
-#endif
 #include "mozilla/Preferences.h"
 #include "mozilla/unused.h"
 #include "nsCCUncollectableMarker.h"
@@ -990,7 +986,6 @@ nsCanvasRenderingContext2DAzure::SetIsOpaque(bool isOpaque)
 NS_IMETHODIMP
 nsCanvasRenderingContext2DAzure::SetIsIPC(bool isIPC)
 {
-#ifdef MOZ_IPC
   if (isIPC == mIPC)
       return NS_OK;
 
@@ -1004,9 +999,6 @@ nsCanvasRenderingContext2DAzure::SetIsIPC(bool isIPC)
   }
 
   return NS_OK;
-#else
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
 }
 
 NS_IMETHODIMP

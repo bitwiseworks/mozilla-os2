@@ -119,9 +119,7 @@ nsLayoutStatics::Initialize()
 
   nsresult rv;
 
-#ifdef MOZ_IPC
   ContentParent::StartUp();
-#endif
 
   // Register all of our atoms once
   nsCSSAnonBoxes::AddRefAtoms();
@@ -352,7 +350,5 @@ nsLayoutStatics::Shutdown()
   nsEditorSpellCheck::ShutDown();
   nsDOMMutationObserver::Shutdown();
 
-#ifdef MOZ_IPC
   ContentParent::ShutDown();
-#endif
 }

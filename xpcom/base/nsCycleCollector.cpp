@@ -138,11 +138,7 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/StandardInteger.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#else
-#include "mozilla/TimeStamp.h"
-#endif
 
 using namespace mozilla;
 
@@ -1373,19 +1369,9 @@ public:
 
         // Dump the JS heap.
         char gcname[MAXPATHLEN] = {'\0'};
-        sprintf(gcname,
-#ifdef MOZ_IPC
-                "%s%sgc-edges-%d.%d.log",
-#else
-                "%s%sgc-edges-%d.log",
-#endif
-                basename,
+        sprintf(gcname, "%s%sgc-edges-%d.%d.log", basename,
                 XPCOM_FILE_PATH_SEPARATOR,
-                gLogCounter
-#ifdef MOZ_IPC
-                , base::GetCurrentProcId()
-#endif
-               );
+                gLogCounter, base::GetCurrentProcId());
 
         FILE* gcDumpFile = fopen(gcname, "w");
         if (!gcDumpFile)
@@ -2665,10 +2651,8 @@ nsCycleCollector::FixGrayBits(bool aForceGC)
         mJSRuntime->FixWeakMappingGrayBits();
 
         bool needGC = mJSRuntime->NeedCollect();
-#ifdef MOZ_IPC
         // Only do a telemetry ping for non-shutdown CCs.
         Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_NEED_GC, needGC);
-#endif
         if (!needGC)
             return;
         if (mResults)
@@ -2728,9 +2712,7 @@ nsCycleCollector::CleanupAfterCollection()
     _heapmin();
 #endif
 
-#if defined(COLLECT_TIME_DEBUG) || defined(MOZ_IPC)
     uint32_t interval = (uint32_t) ((TimeStamp::Now() - mCollectionStart).ToMilliseconds());
-#endif
 #ifdef COLLECT_TIME_DEBUG
     printf("cc: total cycle collector time was %ums\n", interval);
     if (mResults) {
@@ -2748,12 +2730,10 @@ nsCycleCollector::CleanupAfterCollection()
         mResults->mVisitedGCed = mVisitedGCed;
         mResults = nullptr;
     }
-#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR, interval);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_VISITED_REF_COUNTED, mVisitedRefCounted);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_VISITED_GCED, mVisitedGCed);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_COLLECTED, mWhiteNodeCount);
-#endif
 }
 
 void

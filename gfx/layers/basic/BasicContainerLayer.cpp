@@ -62,7 +62,6 @@ BasicContainerLayer::ChildrenPartitionVisibleRegion(const nsIntRect& aInRect)
 
 
 
-#ifdef MOZ_IPC
 class BasicShadowableContainerLayer : public BasicContainerLayer,
                                       public BasicShadowableLayer {
 public:
@@ -207,7 +206,6 @@ private:
     return static_cast<BasicShadowLayerManager*>(mManager);
   }
 };
-#endif
 
 already_AddRefed<ContainerLayer>
 BasicLayerManager::CreateContainerLayer()
@@ -217,7 +215,6 @@ BasicLayerManager::CreateContainerLayer()
   return layer.forget();
 }
 
-#ifdef MOZ_IPC
 already_AddRefed<ContainerLayer>
 BasicShadowLayerManager::CreateContainerLayer()
 {
@@ -253,7 +250,6 @@ BasicShadowLayerManager::CreateShadowRefLayer()
   // FIXME/IMPL
   return nullptr;
 }
-#endif
 
 }
 }

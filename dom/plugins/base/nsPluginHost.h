@@ -172,11 +172,9 @@ public:
 
   static nsresult PostPluginUnloadEvent(PRLibrary* aLibrary);
 
-#ifdef MOZ_IPC
   void PluginCrashed(nsNPAPIPlugin* plugin,
                      const nsAString& pluginDumpID,
                      const nsAString& browserDumpID);
-#endif
 
   nsNPAPIPluginInstance *FindInstance(const char *mimetype);
   nsNPAPIPluginInstance *FindOldestStoppedInstance();

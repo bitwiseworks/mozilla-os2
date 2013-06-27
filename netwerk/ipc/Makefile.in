@@ -26,13 +26,11 @@ EXPORTS_mozilla/net = \
   ChannelEventQueue.h \
   $(NULL)
 
-ifdef MOZ_IPC
 CPPSRCS =               \
   NeckoChild.cpp        \
   NeckoParent.cpp       \
   ChannelEventQueue.cpp \
   $(NULL)
-endif
 
 LOCAL_INCLUDES +=                  \
   -I$(srcdir)/../protocol/http \

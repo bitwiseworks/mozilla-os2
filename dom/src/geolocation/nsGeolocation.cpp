@@ -2,11 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_IPC
 #include "nsContentPermissionHelper.h"
-#else
-#include "base/basictypes.h"
-#endif
 #include "nsXULAppAPI.h"
 
 #include "mozilla/dom/PBrowserChild.h"
@@ -486,7 +482,6 @@ nsGeolocationRequest::Shutdown()
   mErrorCallback = nullptr;
 }
 
-#ifdef MOZ_IPC
 bool nsGeolocationRequest::Recv__delete__(const bool& allow)
 {
   if (allow) {
@@ -496,7 +491,6 @@ bool nsGeolocationRequest::Recv__delete__(const bool& allow)
   }
   return true;
 }
-#endif
 ////////////////////////////////////////////////////
 // nsGeolocationService
 ////////////////////////////////////////////////////
@@ -734,13 +728,11 @@ nsGeolocationService::StartDevice()
   // inactivivity
   SetDisconnectTimer();
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     ContentChild* cpc = ContentChild::GetSingleton();
     cpc->SendAddGeolocationListener();
     return NS_OK;
   }
-#endif
 
   // Start them up!
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -799,13 +791,11 @@ nsGeolocationService::StopDevice()
     mDisconnectTimer = nullptr;
   }
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     ContentChild* cpc = ContentChild::GetSingleton();
     cpc->SendRemoveGeolocationListener();
     return; // bail early
   }
-#endif
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (!obs) {
@@ -1162,7 +1152,6 @@ nsGeolocation::RegisterRequestWithPrompt(nsGeolocationRequest* request)
     return true;
   }
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mOwner);
     if (!window) {
@@ -1186,7 +1175,6 @@ nsGeolocation::RegisterRequestWithPrompt(nsGeolocationRequest* request)
     request->Sendprompt();
     return true;
   }
-#endif
 
   nsCOMPtr<nsIRunnable> ev  = new RequestPromptEvent(request);
   NS_DispatchToMainThread(ev);

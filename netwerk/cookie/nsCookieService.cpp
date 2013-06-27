@@ -9,9 +9,7 @@
 #define FORCE_PR_LOG // Allow logging in the release build
 #endif
 
-#ifdef MOZ_IPC
 #include "mozilla/net/CookieServiceChild.h"
-#endif
 #include "mozilla/net/NeckoCommon.h"
 
 #include "nsCookieService.h"
@@ -542,10 +540,8 @@ NS_IMPL_ISUPPORTS1(CloseCookieDBListener, mozIStorageCompletionCallback)
 nsICookieService*
 nsCookieService::GetXPCOMSingleton()
 {
-#ifdef MOZ_IPC
   if (IsNeckoChild())
     return CookieServiceChild::GetSingleton();
-#endif
 
   return GetSingleton();
 }
@@ -553,9 +549,7 @@ nsCookieService::GetXPCOMSingleton()
 nsCookieService*
 nsCookieService::GetSingleton()
 {
-#ifdef MOZ_IPC
   NS_ASSERTION(!IsNeckoChild(), "not a parent process");
-#endif
 
   if (gCookieService) {
     NS_ADDREF(gCookieService);

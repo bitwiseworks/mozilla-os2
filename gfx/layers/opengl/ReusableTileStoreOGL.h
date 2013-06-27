@@ -17,7 +17,6 @@ class GLContext;
 
 namespace layers {
 
-#ifdef MOZ_IPC
 // A storage class for the information required to render a single tile from
 // a TiledLayerBufferOGL.
 class ReusableTiledTextureOGL
@@ -103,7 +102,6 @@ private:
   // This stores harvested tiles, in the order in which they were harvested.
   nsTArray< nsAutoPtr<ReusableTiledTextureOGL> > mTiles;
 };
-#endif
 
 } // layers
 } // mozilla

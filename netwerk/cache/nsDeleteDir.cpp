@@ -7,9 +7,7 @@
 #include "nsDeleteDir.h"
 #include "nsIFile.h"
 #include "nsString.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "nsITimer.h"
 #include "nsISimpleEnumerator.h"
 #include "nsAutoPtr.h"
@@ -164,9 +162,7 @@ nsDeleteDir::DestroyThread()
 void
 nsDeleteDir::TimerCallback(nsITimer *aTimer, void *arg)
 {
-#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::NETWORK_DISK_CACHE_DELETEDIR> timer;
-#endif
   {
     MutexAutoLock lock(gInstance->mLock);
 
@@ -204,9 +200,7 @@ nsDeleteDir::TimerCallback(nsITimer *aTimer, void *arg)
 nsresult
 nsDeleteDir::DeleteDir(nsIFile *dirIn, bool moveToTrash, uint32_t delay)
 {
-#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::NETWORK_DISK_CACHE_TRASHRENAME> timer;
-#endif
 
   if (!gInstance)
     return NS_ERROR_NOT_INITIALIZED;

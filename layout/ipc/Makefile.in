@@ -23,12 +23,10 @@ EXPORTS_mozilla/layout = \
   RenderFrameUtils.h \
   $(NULL)
 
-ifdef MOZ_IPC
 CPPSRCS = \
   RenderFrameChild.cpp \
   RenderFrameParent.cpp \
   $(NULL)
-endif
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

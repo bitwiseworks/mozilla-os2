@@ -18,9 +18,7 @@
 #if defined(XP_OS2)
 #include "nsIRandomGenerator.h"
 #endif
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 using namespace mozilla::storage;
 
@@ -451,9 +449,7 @@ namespace places {
     NS_ENSURE_SUCCESS(rv, rv);
     NS_ASSERTION(numEntries > 0, "unexpected number of arguments");
 
-#ifdef MOZ_IPC
     Telemetry::AutoTimer<Telemetry::PLACES_FRECENCY_CALC_TIME_MS> timer;
-#endif
 
     int64_t pageId = aArguments->AsInt64(0);
     int32_t typed = numEntries > 1 ? aArguments->AsInt32(1) : 0;

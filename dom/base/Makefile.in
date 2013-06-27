@@ -105,6 +105,7 @@ CPPSRCS =			\
 	nsScriptNameSpaceManager.cpp \
 	nsDOMScriptObjectFactory.cpp \
 	nsQueryContentEventResult.cpp \
+	nsContentPermissionHelper.cpp \
 	nsStructuredCloneContainer.cpp \
 	nsDOMNavigationTiming.cpp \
 	nsPerformance.cpp	\
@@ -113,12 +114,6 @@ CPPSRCS =			\
 	DOMRequest.cpp \
 	Navigator.cpp \
 	$(NULL)
-
-ifdef MOZ_IPC
-CPPSRCS += \
-	nsContentPermissionHelper.cpp \
-	$(NULL)
-endif
 
 include $(topsrcdir)/dom/dom-config.mk
 

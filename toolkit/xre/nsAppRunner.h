@@ -108,13 +108,11 @@ WriteStatusApplied(LPCWSTR updateDirPath);
 
 #define NS_NATIVEAPPSUPPORT_CONTRACTID "@mozilla.org/toolkit/native-app-support;1"
 
-#ifdef MOZ_IPC
 namespace mozilla {
 namespace startup {
 extern GeckoProcessType sChildProcessType;
 }
 }
-#endif
 
 /**
  * Set up platform specific error handling such as suppressing DLL load dialog

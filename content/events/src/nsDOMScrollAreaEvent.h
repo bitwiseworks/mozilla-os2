@@ -31,7 +31,6 @@ public:
   {
     return nsDOMEvent::DuplicatePrivateData();
   }
-
   NS_IMETHOD_(void) Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType);
   NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg, void** aIter);
 

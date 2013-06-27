@@ -29,9 +29,7 @@
 #include "nsLayoutUtils.h"
 #include "nsTextFrame.h"
 #include "nsFontFaceList.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 using namespace mozilla;
 
@@ -209,10 +207,8 @@ nsRange::~nsRange()
 {
   NS_ASSERTION(!IsInSelection(), "deleting nsRange that is in use");
 
-#ifdef MOZ_IPC
   // Maybe we can remove Detach() -- bug 702948.
   Telemetry::Accumulate(Telemetry::DOM_RANGE_DETACHED, mIsDetached);
-#endif
 
   // we want the side effects (releases and list removals)
   DoSetRange(nullptr, 0, nullptr, 0, nullptr);

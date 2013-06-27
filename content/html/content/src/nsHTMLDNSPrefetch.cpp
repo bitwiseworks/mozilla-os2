@@ -75,10 +75,8 @@ nsHTMLDNSPrefetch::Initialize()
   rv = CallGetService(kDNSServiceCID, &sDNSService);
   if (NS_FAILED(rv)) return rv;
   
-#ifdef MOZ_IPC
   if (IsNeckoChild())
     NeckoChild::InitNeckoChild();
-#endif
 
   sInitialized = true;
   return NS_OK;
@@ -136,7 +134,6 @@ nsHTMLDNSPrefetch::PrefetchHigh(Link *aElement)
 nsresult
 nsHTMLDNSPrefetch::Prefetch(const nsAString &hostname, uint16_t flags)
 {
-#ifdef MOZ_IPC
   if (IsNeckoChild()) {
     // We need to check IsEmpty() because net_IsValidHostName()
     // considers empty strings to be valid hostnames
@@ -146,7 +143,6 @@ nsHTMLDNSPrefetch::Prefetch(const nsAString &hostname, uint16_t flags)
     }
     return NS_OK;
   }
-#endif
 
   if (!(sInitialized && sDNSService && sPrefetches && sDNSListener))
     return NS_ERROR_NOT_AVAILABLE;
@@ -195,7 +191,6 @@ nsHTMLDNSPrefetch::CancelPrefetch(const nsAString &hostname,
                                   uint16_t flags,
                                   nsresult aReason)
 {
-#ifdef MOZ_IPC
   // Forward this request to Necko Parent if we're a child process
   if (IsNeckoChild()) {
     // We need to check IsEmpty() because net_IsValidHostName()
@@ -207,7 +202,6 @@ nsHTMLDNSPrefetch::CancelPrefetch(const nsAString &hostname,
     }
     return NS_OK;
   }
-#endif
 
   if (!(sInitialized && sDNSService && sPrefetches && sDNSListener))
     return NS_ERROR_NOT_AVAILABLE;
@@ -323,13 +317,10 @@ nsHTMLDNSPrefetch::nsDeferrals::SubmitQueue()
           hrefURI->GetAsciiHost(hostName);
 
         if (!hostName.IsEmpty()) {
-#ifdef MOZ_IPC
           if (IsNeckoChild()) {
             gNeckoChild->SendHTMLDNSPrefetch(NS_ConvertUTF8toUTF16(hostName),
                                            mEntries[mTail].mFlags);
-          } else
-#endif
-          {
+          } else {
             nsCOMPtr<nsICancelable> tmpOutstanding;
 
             nsresult rv = sDNSService->AsyncResolve(hostName, 

@@ -8409,12 +8409,10 @@ PLDHashOperator UnlockEnumerator(imgIRequest* aKey,
 nsresult
 nsDocument::SetImageLockingState(bool aLocked)
 {
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content &&
       !Preferences::GetBool("content.image.allow_locking", true)) {
     return NS_OK;
   }
-#endif // MOZ_IPC
 
   // If there's no change, there's nothing to do.
   if (mLockingImages == aLocked)

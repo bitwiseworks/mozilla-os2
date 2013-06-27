@@ -1096,13 +1096,13 @@ done:
 
   return;
 }
-#ifdef MOZ_IPC
+
 Telemetry::ID
 nsGIFDecoder2::SpeedHistogram()
 {
   return Telemetry::IMAGE_DECODE_SPEED_GIF;
 }
-#endif
+
 
 } // namespace image
 } // namespace mozilla

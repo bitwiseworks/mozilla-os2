@@ -164,12 +164,6 @@
 #define PROFILER_MODULE
 #endif
 
-#if defined(MOZ_IPC)
-#define TELEMETRY_MODULE MODULE(nsTelemetryModule)
-#else
-#define TELEMETRY_MODULE
-#endif
-
 #define XUL_MODULES                          \
     MODULE(nsUConvModule)                    \
     MODULE(nsI18nModule)                     \
@@ -223,7 +217,7 @@
     MODULE(identity)                         \
     MODULE(nsServicesCryptoModule)           \
     MOZ_APP_COMPONENT_MODULES                \
-    TELEMETRY_MODULE                         \
+    MODULE(nsTelemetryModule)                \
     MODULE(jsinspector)                      \
     MODULE(jsdebugger)                       \
     /* end of list */

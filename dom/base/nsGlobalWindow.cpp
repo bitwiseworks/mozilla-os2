@@ -216,9 +216,7 @@
 #include "nsRefreshDriver.h"
 #include "mozAutoDocUpdate.h"
 
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "nsLocation.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsDOMEventTargetHelper.h"
@@ -868,10 +866,8 @@ nsGlobalWindow::~nsGlobalWindow()
       PR_REMOVE_AND_INIT_LINK(w);
     }
   } else {
-#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::INNERWINDOWS_WITH_MUTATION_LISTENERS,
                           mMutationBits ? 1 : 0);
-#endif
 
     if (mListenerManager) {
       mListenerManager->Disconnect();
@@ -2216,10 +2212,8 @@ nsGlobalWindow::InnerSetNewDocument(nsIDocument* aDocument)
   mLastOpenedURI = aDocument->GetDocumentURI();
 #endif
 
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::INNERWINDOWS_WITH_MUTATION_LISTENERS,
                         mMutationBits ? 1 : 0);
-#endif
 
   // Clear our mutation bitfield.
   mMutationBits = 0;
@@ -9796,9 +9790,7 @@ nsGlobalWindow::RunTimeout(nsTimeout *aTimeout)
       now - gLastRecordedRecentTimeouts > recordingInterval) {
     uint32_t count = gTimeoutsRecentlySet;
     gTimeoutsRecentlySet = 0;
-#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::DOM_TIMERS_RECENTLY_SET, count);
-#endif
     gLastRecordedRecentTimeouts = now;
   }
 
@@ -9821,9 +9813,7 @@ nsGlobalWindow::RunTimeout(nsTimeout *aTimeout)
   // the logic in ResetTimersForNonBackgroundWindow will need to change.
   mTimeoutInsertionPoint = &dummy_timeout;
 
-#ifdef MOZ_IPC
   Telemetry::AutoCounter<Telemetry::DOM_TIMERS_FIRED_PER_NATIVE_TIMEOUT> timeoutsRan;
-#endif
 
   for (timeout = FirstTimeout();
        timeout != &dummy_timeout && !IsFrozen();
@@ -9872,9 +9862,7 @@ nsGlobalWindow::RunTimeout(nsTimeout *aTimeout)
     }
 
     // This timeout is good to run
-#ifdef MOZ_IPC
     ++timeoutsRan;
-#endif
     bool timeout_was_cleared = RunTimeoutHandler(timeout, scx);
 
     if (timeout_was_cleared) {

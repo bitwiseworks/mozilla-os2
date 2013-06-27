@@ -130,7 +130,6 @@ DispatchOpenWindowEvent(Element* aOpenerFrameElement,
 
 namespace mozilla {
 
-#ifdef MOZ_IPC
 /*static*/ bool
 BrowserElementParent::OpenWindowOOP(mozilla::dom::TabParent* aOpenerTabParent,
                                     mozilla::dom::TabParent* aPopupTabParent,
@@ -172,7 +171,6 @@ BrowserElementParent::OpenWindowOOP(mozilla::dom::TabParent* aOpenerTabParent,
 
   return true;
 }
-#endif
 
 /* static */ bool
 BrowserElementParent::OpenWindowInProcess(nsIDOMWindow* aOpenerWindow,

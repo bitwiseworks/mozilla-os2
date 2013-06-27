@@ -6,10 +6,8 @@
 #include "mozilla/HangMonitor.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Preferences.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
 #include "mozilla/ProcessedStack.h"
-#endif
 #include "nsXULAppAPI.h"
 #include "nsThreadUtils.h"
 #include "nsStackWalk.h"
@@ -335,10 +333,8 @@ NotifyActivity(ActivityType activityType)
     // Mozilla's UI responsiveness goal is 50ms
     static const uint32_t kUIResponsivenessThresholdMS = 50;
     if (cumulativeUILagMS > kUIResponsivenessThresholdMS) {
-#ifdef MOZ_IPC
       mozilla::Telemetry::Accumulate(mozilla::Telemetry::EVENTLOOP_UI_LAG_EXP_MS,
                                      cumulativeUILagMS);
-#endif
     }
     cumulativeUILagMS = 0;
   }

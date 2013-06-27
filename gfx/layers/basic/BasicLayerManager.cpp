@@ -955,7 +955,6 @@ BasicLayerManager::CreateReadbackLayer()
   return layer.forget();
 }
 
-#ifdef MOZ_IPC
 BasicShadowLayerManager::BasicShadowLayerManager(nsIWidget* aWidget) :
   BasicLayerManager(aWidget), mTargetRotation(ROTATION_0),
   mRepeatTransaction(false)
@@ -1215,7 +1214,6 @@ BasicShadowableLayer::~BasicShadowableLayer()
   }
   MOZ_COUNT_DTOR(BasicShadowableLayer);
 }
-#endif
 
 }
 }

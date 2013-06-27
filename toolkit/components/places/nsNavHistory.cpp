@@ -3756,7 +3756,6 @@ nsNavHistory::DecayFrecency()
   );
   NS_ENSURE_STATE(deleteAdaptive);
 
-#ifdef MOZ_IPC
   mozIStorageBaseStatement *stmts[] = {
     decayFrecency.get(),
     decayAdaptive.get(),
@@ -3768,7 +3767,6 @@ nsNavHistory::DecayFrecency()
   rv = mDB->MainConn()->ExecuteAsync(stmts, ArrayLength(stmts), cb,
                                      getter_AddRefs(ps));
   NS_ENSURE_SUCCESS(rv, rv);
-#endif
 
   return NS_OK;
 }

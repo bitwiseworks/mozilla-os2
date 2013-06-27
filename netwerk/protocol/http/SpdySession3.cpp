@@ -10,9 +10,7 @@
 #include "nsHttpConnection.h"
 #include "nsHttpHandler.h"
 #include "prnetdb.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "mozilla/Preferences.h"
 #include "prprf.h"
 
@@ -148,12 +146,10 @@ SpdySession3::~SpdySession3()
   deflateEnd(&mUpstreamZlib);
   
   mStreamTransactionHash.Enumerate(ShutdownEnumerator, this);
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::SPDY_PARALLEL_STREAMS, mConcurrentHighWater);
   Telemetry::Accumulate(Telemetry::SPDY_REQUEST_PER_CONN, (mNextStreamID - 1) / 2);
   Telemetry::Accumulate(Telemetry::SPDY_SERVER_INITIATED_STREAMS,
                         mServerPushedResources);
-#endif
 }
 
 void
@@ -294,14 +290,12 @@ SpdySession3::ClearPing(bool pingOK)
           this, PR_IntervalToSeconds(mPingThreshold),
           pingOK ? "pass" :"fail"));
 
-#ifdef MOZ_IPC
     if (pingOK)
       Telemetry::Accumulate(Telemetry::SPDY_PING_EXPERIMENT_PASS,
                             PR_IntervalToSeconds(mPingThreshold));
     else
       Telemetry::Accumulate(Telemetry::SPDY_PING_EXPERIMENT_FAIL,
                             PR_IntervalToSeconds(mPingThreshold));
-#endif
     mPingThreshold = gHttpHandler->SpdyPingThreshold();
     mPingThresholdExperiment = false;
   }
@@ -1139,7 +1133,6 @@ SpdySession3::HandleSettings(SpdySession3 *self)
 
     LOG3(("Settings ID %d, Flags %X, Value %d", id, flags, value));
 
-#ifdef MOZ_IPC
     switch (id)
     {
     case SETTINGS_TYPE_UPLOAD_BW:
@@ -1182,7 +1175,6 @@ SpdySession3::HandleSettings(SpdySession3 *self)
     default:
       break;
     }
-#endif
     
   }
   
@@ -1648,10 +1640,8 @@ SpdySession3::WriteSegments(nsAHttpSegmentWriter *writer,
     else {
       ChangeDownstreamState(PROCESSING_DATA_FRAME);
 
-#ifdef MOZ_IPC
       Telemetry::Accumulate(Telemetry::SPDY_CHUNK_RECVD,
                             mInputFrameDataSize >> 10);
-#endif
       mLastDataReadEpoch = mLastReadEpoch;
 
       uint32_t streamID =

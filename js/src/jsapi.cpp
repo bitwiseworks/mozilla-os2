@@ -840,9 +840,7 @@ JSRuntime::JSRuntime()
     DOMcallbacks(NULL),
     destroyPrincipals(NULL),
     structuredCloneCallbacks(NULL),
-#ifdef MOZ_IPC
     telemetryCallback(NULL),
-#endif
     propertyRemovals(0),
     thousandsSeparator(0),
     decimalSeparator(0),

@@ -3,10 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_IPC
 #include "OfflineCacheUpdateChild.h"
 #include "OfflineCacheUpdateParent.h"
-#endif
 #include "nsXULAppAPI.h"
 #include "OfflineCacheUpdateGlue.h"
 #include "nsOfflineCacheUpdate.h"
@@ -48,10 +46,8 @@ using namespace mozilla;
 
 static nsOfflineCacheUpdateService *gOfflineCacheUpdateService = nullptr;
 
-#ifdef MOZ_IPC
 typedef mozilla::docshell::OfflineCacheUpdateParent OfflineCacheUpdateParent;
 typedef mozilla::docshell::OfflineCacheUpdateChild OfflineCacheUpdateChild;
-#endif
 typedef mozilla::docshell::OfflineCacheUpdateGlue OfflineCacheUpdateGlue;
 
 #if defined(PR_LOGGING)
@@ -445,13 +441,10 @@ nsOfflineCacheUpdateService::Schedule(nsIURI *aManifestURI,
                                       nsIOfflineCacheUpdate **aUpdate)
 {
     nsCOMPtr<nsIOfflineCacheUpdate> update;
-#ifdef MOZ_IPC
     if (GeckoProcessType_Default != XRE_GetProcessType()) {
         update = new OfflineCacheUpdateChild(aWindow);
     }
-    else
-#endif
-    {
+    else {
         update = new OfflineCacheUpdateGlue();
     }
 

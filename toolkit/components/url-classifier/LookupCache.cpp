@@ -6,9 +6,7 @@
 #include "LookupCache.h"
 #include "HashStore.h"
 #include "nsISeekableStream.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "prlog.h"
 #include "prprf.h"
 
@@ -159,10 +157,8 @@ nsresult
 LookupCache::Build(AddPrefixArray& aAddPrefixes,
                    AddCompleteArray& aAddCompletes)
 {
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::URLCLASSIFIER_LC_COMPLETIONS,
                         static_cast<uint32_t>(aAddCompletes.Length()));
-#endif
 
   mCompletions.Clear();
   mCompletions.SetCapacity(aAddCompletes.Length());
@@ -172,10 +168,8 @@ LookupCache::Build(AddPrefixArray& aAddPrefixes,
   aAddCompletes.Clear();
   mCompletions.Sort();
 
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::URLCLASSIFIER_LC_PREFIXES,
                         static_cast<uint32_t>(aAddPrefixes.Length()));
-#endif
 
   nsresult rv = ConstructPrefixSet(aAddPrefixes);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -689,9 +683,7 @@ static void EnsureSorted(T* aArray)
 nsresult
 LookupCache::ConstructPrefixSet(AddPrefixArray& aAddPrefixes)
 {
-#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_PS_CONSTRUCT_TIME> timer;
-#endif
 
   nsTArray<uint32_t> array;
   array.SetCapacity(aAddPrefixes.Length());
@@ -723,9 +715,7 @@ LookupCache::ConstructPrefixSet(AddPrefixArray& aAddPrefixes)
   return NS_OK;
 
  error_bailout:
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::URLCLASSIFIER_PS_FAILURE, 1);
-#endif
   return rv;
 }
 

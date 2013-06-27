@@ -172,6 +172,7 @@ CPPSRCS	= \
 	gfxUtils.cpp \
 	gfxScriptItemizer.cpp \
 	gfxHarfBuzzShaper.cpp \
+	gfxSharedImageSurface.cpp \
 	gfxReusableSurfaceWrapper.cpp \
 	nsSurfaceTexture.cpp \
 	$(NULL)
@@ -190,12 +191,6 @@ endif
 # Are we targeting x86 or x64?  If so, build gfxAlphaRecoverySSE2.cpp.
 ifneq (,$(INTEL_ARCHITECTURE))
 CPPSRCS += gfxAlphaRecoverySSE2.cpp
-endif
-
-ifdef MOZ_IPC
-CPPSRCS += \
-	gfxSharedImageSurface.cpp \
-	$(NULL)
 endif
 
 SHARED_LIBRARY_LIBS += \

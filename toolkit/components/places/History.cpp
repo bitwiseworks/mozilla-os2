@@ -4,9 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef MOZ_IPC
-#include "base/basictypes.h"
-#endif
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "nsXULAppAPI.h"
@@ -312,7 +309,6 @@ public:
 
   // If we are a content process, always remote the request to the
   // parent process.
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     URIParams uri;
     SerializeURI(aURI, uri);
@@ -323,7 +319,6 @@ public:
     (void)cpc->SendStartVisitedQuery(uri);
     return NS_OK;
   }
-#endif
 
     nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
     NS_ENSURE_STATE(navHistory);
@@ -1466,7 +1461,6 @@ History::NotifyVisited(nsIURI* aURI)
 
   nsAutoScriptBlocker scriptBlocker;
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Default) {
     nsTArray<ContentParent*> cplist;
     ContentParent::GetAll(cplist);
@@ -1485,7 +1479,6 @@ History::NotifyVisited(nsIURI* aURI)
   if (!mObservers.IsInitialized()) {
     return;
   }
-#endif
 
   // Additionally, if we have no observers for this URI, we have nothing to
   // notify about.
@@ -1808,7 +1801,6 @@ History::VisitURI(nsIURI* aURI,
     return NS_OK;
   }
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     URIParams uri;
     SerializeURI(aURI, uri);
@@ -1821,8 +1813,7 @@ History::VisitURI(nsIURI* aURI,
     NS_ASSERTION(cpc, "Content Protocol is NULL!");
     (void)cpc->SendVisitURI(uri, lastVisitedURI, aFlags);
     return NS_OK;
-  }
-#endif
+  } 
 
   nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
   NS_ENSURE_TRUE(navHistory, NS_ERROR_OUT_OF_MEMORY);
@@ -1924,13 +1915,9 @@ History::RegisterVisitedCallback(nsIURI* aURI,
                                  Link* aLink)
 {
   NS_ASSERTION(aURI, "Must pass a non-null URI!");
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     NS_PRECONDITION(aLink, "Must pass a non-null Link!");
   }
-#else
-  NS_PRECONDITION(aLink, "Must pass a non-null Link!");
-#endif
 
   // First, ensure that our hash table is setup.
   if (!mObservers.IsInitialized()) {
@@ -1964,7 +1951,6 @@ History::RegisterVisitedCallback(nsIURI* aURI,
       return rv;
     }
   }
-#ifdef MOZ_IPC
   // In IPC builds, we are passed a NULL Link from
   // ContentParent::RecvStartVisitedQuery.  All of our code after this point
   // assumes aLink is non-NULL, so we have to return now.
@@ -1973,7 +1959,6 @@ History::RegisterVisitedCallback(nsIURI* aURI,
                  "We should only ever get a null Link in the default process!");
     return NS_OK;
   }
-#endif
 
   // Sanity check that Links are not registered more than once for a given URI.
   // This will not catch a case where it is registered for two different URIs.
@@ -2025,7 +2010,6 @@ History::SetURITitle(nsIURI* aURI, const nsAString& aTitle)
     return NS_OK;
   }
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     URIParams uri;
     SerializeURI(aURI, uri);
@@ -2036,7 +2020,6 @@ History::SetURITitle(nsIURI* aURI, const nsAString& aTitle)
     (void)cpc->SendSetURITitle(uri, nsString(aTitle));
     return NS_OK;
   } 
-#endif
 
   nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
 

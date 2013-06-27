@@ -119,13 +119,11 @@ nsJPEGDecoder::~nsJPEGDecoder()
           this));
 }
 
-#ifdef MOZ_IPC
 Telemetry::ID
 nsJPEGDecoder::SpeedHistogram()
 {
   return Telemetry::IMAGE_DECODE_SPEED_JPEG;
 }
-#endif
 
 void
 nsJPEGDecoder::InitInternal()

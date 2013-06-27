@@ -102,9 +102,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports *, REFNSIID, void **)
 #include "mozilla/FunctionTimer.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/HangMonitor.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 #include "nsChromeRegistry.h"
 #include "nsChromeProtocolHandler.h"
@@ -112,22 +110,17 @@ extern nsresult nsStringInputStreamConstructor(nsISupports *, REFNSIID, void **)
 
 #include "mozilla/scache/StartupCache.h"
 
-#ifdef MOZ_IPC
 #include "base/at_exit.h"
-#endif
 #include "base/command_line.h"
-#ifdef MOZ_IPC
 #include "base/message_loop.h"
 
 #include "mozilla/ipc/BrowserProcessSubThread.h"
-#endif
 #include "mozilla/MapsMemoryReporter.h"
 #include "mozilla/AvailableMemoryTracker.h"
 #include "mozilla/ClearOnShutdown.h"
 
 #include "mozilla/VisualEventTracer.h"
 
-#ifdef MOZ_IPC
 using base::AtExitManager;
 using mozilla::ipc::BrowserProcessSubThread;
 
@@ -139,7 +132,6 @@ static bool sCommandLineWasInitialized;
 static BrowserProcessSubThread* sIOThread;
 
 } /* anonymous namespace */
-#endif
 
 // Registry Factory creation function defined in nsRegistry.cpp
 // We hook into this function locally to create and register the registry
@@ -338,7 +330,6 @@ NS_InitXPCOM2(nsIServiceManager* *result,
 
     NS_LogInit();
 
-#ifdef MOZ_IPC
     NS_TIME_FUNCTION_MARK("Next: IPC init");
 
     // Set up chromium libs
@@ -366,7 +357,6 @@ NS_InitXPCOM2(nsIServiceManager* *result,
 
         sIOThread = ioThread.release();
     }
-#endif
 
     NS_TIME_FUNCTION_MARK("Next: thread manager init");
 
@@ -438,7 +428,6 @@ NS_InitXPCOM2(nsIServiceManager* *result,
         mozilla::Omnijar::Init();
     }
 
-#ifdef MOZ_IPC
     if ((sCommandLineWasInitialized = !CommandLine::IsInitialized())) {
         NS_TIME_FUNCTION_MARK("Next: IPC command line init");
 
@@ -462,7 +451,6 @@ NS_InitXPCOM2(nsIServiceManager* *result,
         CommandLine::Init(1, &argv);
 #endif
     }
-#endif
 
     NS_ASSERTION(nsComponentManagerImpl::gComponentManager == NULL, "CompMgr not null at init");
 
@@ -518,9 +506,7 @@ NS_InitXPCOM2(nsIServiceManager* *result,
 
     mozilla::HangMonitor::Startup();
 
-#ifdef MOZ_IPC
     mozilla::Telemetry::Init();
-#endif
 
     mozilla::eventtracer::Init();
 
@@ -717,7 +703,6 @@ ShutdownXPCOM(nsIServiceManager* servMgr)
 
     NS_IF_RELEASE(gDebug);
 
-#ifdef MOZ_IPC
     if (sIOThread) {
         delete sIOThread;
         sIOThread = nullptr;
@@ -734,7 +719,6 @@ ShutdownXPCOM(nsIServiceManager* servMgr)
         delete sExitManager;
         sExitManager = nullptr;
     }
-#endif
 
     Omnijar::CleanUp();
 

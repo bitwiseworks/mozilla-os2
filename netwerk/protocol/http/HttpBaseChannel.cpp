@@ -1438,11 +1438,7 @@ HttpBaseChannel::AddCookiesToRequest()
   }
 
   bool useCookieService = 
-#ifdef MOZ_IPC
     (XRE_GetProcessType() == GeckoProcessType_Default);
-#else
-    true;
-#endif
   nsXPIDLCString cookie;
   if (useCookieService) {
     nsICookieService *cs = gHttpHandler->GetCookieService();

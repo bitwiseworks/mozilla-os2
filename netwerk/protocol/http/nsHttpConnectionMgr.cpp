@@ -18,9 +18,7 @@
 
 #include "nsISSLSocketControl.h"
 #include "prnetdb.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -703,10 +701,8 @@ nsHttpConnectionMgr::GetSpdyPreferredEnt(nsConnectionEntry *aOriginalEntry)
              "with %s connections. rv=%x isJoined=%d",
              preferred->mConnInfo->Host(), aOriginalEntry->mConnInfo->Host(),
              rv, isJoined));
-#ifdef MOZ_IPC
         mozilla::Telemetry::Accumulate(mozilla::Telemetry::SPDY_NPN_JOIN,
                                        false);
-#endif
         return nullptr;
     }
 
@@ -716,9 +712,7 @@ nsHttpConnectionMgr::GetSpdyPreferredEnt(nsConnectionEntry *aOriginalEntry)
          "so %s will be coalesced with %s",
          preferred->mConnInfo->Host(), aOriginalEntry->mConnInfo->Host(),
          aOriginalEntry->mConnInfo->Host(), preferred->mConnInfo->Host()));
-#ifdef MOZ_IPC
     mozilla::Telemetry::Accumulate(mozilla::Telemetry::SPDY_NPN_JOIN, true);
-#endif
     return preferred;
 }
 

@@ -3,9 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_IPC
 #include "base/histogram.h"
-#endif
 #include "nsComponentManagerUtils.h"
 #include "imgIContainerObserver.h"
 #include "nsError.h"
@@ -33,9 +31,7 @@
 
 #include "mozilla/Preferences.h"
 #include "mozilla/StandardInteger.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "mozilla/TimeStamp.h"
 #include "mozilla/ClearOnShutdown.h"
 
@@ -179,9 +175,7 @@ RasterImage::RasterImage(imgStatusTracker* aStatusTracker) :
 {
   // Set up the discard tracker node.
   mDiscardTrackerNode.img = this;
-#ifdef MOZ_IPC
   Telemetry::GetHistogramById(Telemetry::IMAGE_DECODE_COUNT)->Add(0);
-#endif
 
   // Statistics
   num_containers++;
@@ -490,7 +484,7 @@ RasterImage::ExtractFrame(uint32_t aWhichFrame,
 
   if (!ApplyDecodeFlags(aFlags))
     return NS_ERROR_NOT_AVAILABLE;
-
+  
   // If a synchronous decode was requested, do it
   if (aFlags & FLAG_SYNC_DECODE) {
     rv = SyncDecode();
@@ -880,7 +874,7 @@ RasterImage::GetImageContainer(ImageContainer **_retval)
     NS_ADDREF(*_retval);
     return NS_OK;
   }
-
+  
   CairoImage::Data cairoData;
   nsRefPtr<gfxASurface> imageSurface;
   nsresult rv = GetFrame(FRAME_CURRENT, FLAG_SYNC_DECODE, getter_AddRefs(imageSurface));
@@ -891,7 +885,7 @@ RasterImage::GetImageContainer(ImageContainer **_retval)
   GetHeight(&cairoData.mSize.height);
 
   mImageContainer = LayerManager::CreateImageContainer();
-
+  
   // Now create a CairoImage to display the surface.
   ImageFormat cairoFormat = CAIRO_SURFACE;
   nsRefPtr<layers::Image> image = mImageContainer->CreateImage(&cairoFormat, 1);
@@ -909,7 +903,7 @@ RasterImage::GetImageContainer(ImageContainer **_retval)
 size_t
 RasterImage::HeapSizeOfSourceWithComputedFallback(nsMallocSizeOfFun aMallocSizeOf) const
 {
-  // n == 0 is possible for two reasons.
+  // n == 0 is possible for two reasons. 
   // - This is a zero-length image.
   // - We're on a platform where moz_malloc_size_of always returns 0.
   // In either case the fallback works appropriately.
@@ -989,7 +983,7 @@ RasterImage::InternalAddFrameHelper(uint32_t framenum, imgFrame *aFrame,
 
   return NS_OK;
 }
-
+                                  
 nsresult
 RasterImage::InternalAddFrame(uint32_t framenum,
                               int32_t aX, int32_t aY,
@@ -1023,14 +1017,14 @@ RasterImage::InternalAddFrame(uint32_t framenum,
   }
 
   if (mFrames.Length() == 0) {
-    return InternalAddFrameHelper(framenum, frame.forget(), imageData, imageLength,
+    return InternalAddFrameHelper(framenum, frame.forget(), imageData, imageLength, 
                                   paletteData, paletteLength);
   }
 
   if (mFrames.Length() == 1) {
     // Since we're about to add our second frame, initialize animation stuff
     EnsureAnimExists();
-
+    
     // If we dispose of the first frame by clearing it, then the
     // First Frame's refresh area is all of itself.
     // RESTORE_PREVIOUS is invalid (assumed to be DISPOSE_CLEAR)
@@ -1044,15 +1038,15 @@ RasterImage::InternalAddFrame(uint32_t framenum,
   // Some gifs are huge but only have a small area that they animate
   // We only need to refresh that small area when Frame 0 comes around again
   nsIntRect frameRect = frame->GetRect();
-  mAnim->firstFrameRefreshArea.UnionRect(mAnim->firstFrameRefreshArea,
+  mAnim->firstFrameRefreshArea.UnionRect(mAnim->firstFrameRefreshArea, 
                                          frameRect);
-
+  
   rv = InternalAddFrameHelper(framenum, frame.forget(), imageData, imageLength,
                               paletteData, paletteLength);
-
+  
   // We may be able to start animating, if we now have enough frames
   EvaluateAnimation();
-
+  
   return rv;
 }
 
@@ -1134,13 +1128,13 @@ RasterImage::EnsureFrame(uint32_t aFrameNum, int32_t aX, int32_t aY,
 
   // Adding a frame that doesn't already exist.
   if (aFrameNum == mFrames.Length())
-    return InternalAddFrame(aFrameNum, aX, aY, aWidth, aHeight, aFormat,
+    return InternalAddFrame(aFrameNum, aX, aY, aWidth, aHeight, aFormat, 
                             aPaletteDepth, imageData, imageLength,
                             paletteData, paletteLength);
 
   imgFrame *frame = GetImgFrame(aFrameNum);
   if (!frame)
-    return InternalAddFrame(aFrameNum, aX, aY, aWidth, aHeight, aFormat,
+    return InternalAddFrame(aFrameNum, aX, aY, aWidth, aHeight, aFormat, 
                             aPaletteDepth, imageData, imageLength,
                             paletteData, paletteLength);
 
@@ -1353,7 +1347,7 @@ RasterImage::StartAnimation()
     // this is used in AdvanceFrame().
     mAnim->currentAnimationFrameTime = TimeStamp::Now();
   }
-
+  
   return NS_OK;
 }
 
@@ -1378,7 +1372,7 @@ RasterImage::ResetAnimation()
   if (mError)
     return NS_ERROR_FAILURE;
 
-  if (mAnimationMode == kDontAnimMode ||
+  if (mAnimationMode == kDontAnimMode || 
       !mAnim || mAnim->currentAnimationFrameIndex == 0)
     return NS_OK;
 
@@ -1680,7 +1674,7 @@ RasterImage::DoComposite(nsIntRect* aDirtyRect,
 
   // Optimization: DisposeClearAll if the previous frame is the same size as
   //               container and it's clearing itself
-  if (isFullPrevFrame &&
+  if (isFullPrevFrame && 
       (prevFrameDisposalMethod == kDisposeClear))
     prevFrameDisposalMethod = kDisposeClearAll;
 
@@ -1697,7 +1691,7 @@ RasterImage::DoComposite(nsIntRect* aDirtyRect,
       aDirtyRect->SetRect(0, 0, mSize.width, mSize.height);
       return NS_OK;
     }
-
+  
     // Optimization: Skip compositing if this frame is the same size as the
     //               container and it's fully drawing over prev frame (no alpha)
     if (isFullNextFrame &&
@@ -1761,22 +1755,22 @@ RasterImage::DoComposite(nsIntRect* aDirtyRect,
     needToBlankComposite = true;
   } else if (aNextFrameIndex != mAnim->lastCompositedFrameIndex+1) {
 
-    // If we are not drawing on top of last composited frame,
+    // If we are not drawing on top of last composited frame, 
     // then we are building a new composite frame, so let's clear it first.
     needToBlankComposite = true;
   }
 
   // More optimizations possible when next frame is not transparent
   // But if the next frame has kDisposeRestorePrevious,
-  // this "no disposal" optimization is not possible,
-  // because the frame in "after disposal operation" state
-  // needs to be stored in compositingFrame, so it can be
+  // this "no disposal" optimization is not possible, 
+  // because the frame in "after disposal operation" state 
+  // needs to be stored in compositingFrame, so it can be 
   // copied into compositingPrevFrame later.
   bool doDisposal = true;
   if (!aNextFrame->GetHasAlpha() &&
       nextFrameDisposalMethod != kDisposeRestorePrevious) {
     if (isFullNextFrame) {
-      // Optimization: No need to dispose prev.frame when
+      // Optimization: No need to dispose prev.frame when 
       // next frame is full frame and not transparent.
       doDisposal = false;
       // No need to blank the composite frame
@@ -1786,11 +1780,11 @@ RasterImage::DoComposite(nsIntRect* aDirtyRect,
           (prevFrameRect.y >= nextFrameRect.y) &&
           (prevFrameRect.x + prevFrameRect.width <= nextFrameRect.x + nextFrameRect.width) &&
           (prevFrameRect.y + prevFrameRect.height <= nextFrameRect.y + nextFrameRect.height)) {
-        // Optimization: No need to dispose prev.frame when
+        // Optimization: No need to dispose prev.frame when 
         // next frame fully overlaps previous frame.
         doDisposal = false;
       }
-    }
+    }      
   }
 
   if (doDisposal) {
@@ -1806,17 +1800,17 @@ RasterImage::DoComposite(nsIntRect* aDirtyRect,
           ClearFrame(mAnim->compositingFrame, prevFrameRect);
         }
         break;
-
+  
       case kDisposeClearAll:
         ClearFrame(mAnim->compositingFrame);
         break;
-
+  
       case kDisposeRestorePrevious:
         // It would be better to copy only the area changed back to
         // compositingFrame.
         if (mAnim->compositingPrevFrame) {
           CopyFrameImage(mAnim->compositingPrevFrame, mAnim->compositingFrame);
-
+  
           // destroy only if we don't need it for this frame's disposal
           if (nextFrameDisposalMethod != kDisposeRestorePrevious)
             mAnim->compositingPrevFrame = nullptr;
@@ -1824,7 +1818,7 @@ RasterImage::DoComposite(nsIntRect* aDirtyRect,
           ClearFrame(mAnim->compositingFrame);
         }
         break;
-
+      
       default:
         // Copy previous frame into compositingFrame before we put the new frame on top
         // Assumes that the previous frame represents a full frame (it could be
@@ -1889,9 +1883,9 @@ RasterImage::DoComposite(nsIntRect* aDirtyRect,
   }
 
   // We don't want to keep composite images for 8bit frames.
-  // Also this optimization won't work if the next frame has
-  // kDisposeRestorePrevious, because it would need to be restored
-  // into "after prev disposal but before next blend" state,
+  // Also this optimization won't work if the next frame has 
+  // kDisposeRestorePrevious, because it would need to be restored 
+  // into "after prev disposal but before next blend" state, 
   // not into empty frame.
   if (isFullNextFrame && mAnimationMode == kNormalAnimMode && mLoopCount != 0 &&
       nextFrameDisposalMethod != kDisposeRestorePrevious &&
@@ -1992,7 +1986,7 @@ RasterImage::CopyFrameImage(imgFrame *aSrcFrame,
 }
 
 //******************************************************************************
-/*
+/* 
  * aSrc is the current frame being drawn,
  * aDst is the composition frame where the current frame is drawn into.
  * aSrcRect is the size of the current frame, and the position of that frame
@@ -2088,7 +2082,7 @@ RasterImage::DrawFrameTo(imgFrame *aSrc,
   gfxContext dst(dstSurf);
   dst.Translate(gfxPoint(aSrcRect.x, aSrcRect.y));
   dst.Rectangle(gfxRect(0, 0, aSrcRect.width, aSrcRect.height), true);
-
+  
   // first clear the surface if the blend flag says so
   int32_t blendMethod = aSrc->GetBlendMethod();
   if (blendMethod == kBlendSource) {
@@ -2241,7 +2235,7 @@ RasterImage::InitDecoder(bool aDoSizeDecode)
 {
   // Ensure that the decoder is not already initialized
   NS_ABORT_IF_FALSE(!mDecoder, "Calling InitDecoder() while already decoding!");
-
+  
   // We shouldn't be firing up a decoder if we already have the frames decoded
   NS_ABORT_IF_FALSE(!mDecoded, "Calling InitDecoder() but already decoded!");
 
@@ -2283,13 +2277,11 @@ RasterImage::InitDecoder(bool aDoSizeDecode)
   mDecoder->Init();
   CONTAINER_ENSURE_SUCCESS(mDecoder->GetDecoderError());
 
-#ifdef MOZ_IPC
   if (!aDoSizeDecode) {
     Telemetry::GetHistogramById(Telemetry::IMAGE_DECODE_COUNT)->Subtract(mDecodeCount);
     mDecodeCount++;
     Telemetry::GetHistogramById(Telemetry::IMAGE_DECODE_COUNT)->Add(mDecodeCount);
   }
-#endif
 
   return NS_OK;
 }
@@ -2297,7 +2289,7 @@ RasterImage::InitDecoder(bool aDoSizeDecode)
 // Flushes, closes, and nulls-out a decoder. Cleans up any related decoding
 // state. It is an error to call this function when there is no initialized
 // decoder.
-//
+// 
 // aIntent specifies the intent of the shutdown. If aIntent is
 // eShutdownIntent_Done, an error is flagged if we didn't get what we should
 // have out of the decode. If aIntent is eShutdownIntent_Interrupted, we don't
@@ -2387,7 +2379,7 @@ RasterImage::WriteToDecoder(const char *aBuffer, uint32_t aCount)
 
   if (!mDecoder)
     return NS_ERROR_FAILURE;
-
+    
   CONTAINER_ENSURE_SUCCESS(mDecoder->GetDecoderError());
 
   // Keep track of the total number of bytes written over the lifetime of the
@@ -2469,7 +2461,7 @@ RasterImage::RequestDecode()
     CONTAINER_ENSURE_SUCCESS(rv);
   }
 
-  // If we don't have a decoder, create one
+  // If we don't have a decoder, create one 
   if (!mDecoder) {
     NS_ABORT_IF_FALSE(mFrames.IsEmpty(), "Trying to decode to non-empty frame-array");
     rv = InitDecoder(/* aDoSizeDecode = */ false);
@@ -2525,7 +2517,7 @@ RasterImage::SyncDecode()
     CONTAINER_ENSURE_SUCCESS(rv);
   }
 
-  // If we don't have a decoder, create one
+  // If we don't have a decoder, create one 
   if (!mDecoder) {
     NS_ABORT_IF_FALSE(mFrames.IsEmpty(), "Trying to decode to non-empty frame-array");
     rv = InitDecoder(/* aDoSizeDecode = */ false);
@@ -2628,7 +2620,7 @@ RasterImage::Draw(gfxContext *aContext,
   }
 
   nsIntRect framerect = frame->GetRect();
-  nsIntMargin padding(framerect.x, framerect.y,
+  nsIntMargin padding(framerect.x, framerect.y, 
                       mSize.width - framerect.XMost(),
                       mSize.height - framerect.YMost());
 
@@ -2636,9 +2628,7 @@ RasterImage::Draw(gfxContext *aContext,
 
   if (mDecoded && !mDrawStartTime.IsNull()) {
       TimeDuration drawLatency = TimeStamp::Now() - mDrawStartTime;
-#ifdef MOZ_IPC
       Telemetry::Accumulate(Telemetry::IMAGE_DECODE_ON_DRAW_LATENCY, int32_t(drawLatency.ToMicroseconds()));
-#endif
       // clear the value of mDrawStartTime
       mDrawStartTime = TimeStamp();
   }
@@ -2996,10 +2986,8 @@ RasterImage::DecodeWorker::Run()
     EnsurePendingInEventLoop();
   }
 
-#ifdef MOZ_IPC
   Telemetry::Accumulate(Telemetry::IMAGE_DECODE_LATENCY,
                         uint32_t((TimeStamp::Now() - eventStart).ToMilliseconds()));
-#endif
 
   return NS_OK;
 }
@@ -3069,11 +3057,9 @@ RasterImage::DecodeWorker::DecodeSomeOfImage(
 
   aImg->mDecodeRequest.mDecodeTime += (TimeStamp::Now() - start);
 
-#ifdef MOZ_IPC
   if (chunkCount && !aImg->mDecoder->IsSizeDecode()) {
     Telemetry::Accumulate(Telemetry::IMAGE_DECODE_CHUNKS, chunkCount);
   }
-#endif
 
   // Flush invalidations (and therefore paint) now that we've decoded all the
   // chunks we're going to.
@@ -3104,7 +3090,6 @@ RasterImage::DecodeWorker::DecodeSomeOfImage(
   if (aImg->mDecoder && aImg->IsDecodeFinished()) {
 
     // Do some telemetry if this isn't a size decode.
-#ifdef MOZ_IPC
     DecodeRequest* request = &aImg->mDecodeRequest;
     if (!aImg->mDecoder->IsSizeDecode()) {
       Telemetry::Accumulate(Telemetry::IMAGE_DECODE_TIME,
@@ -3119,7 +3104,6 @@ RasterImage::DecodeWorker::DecodeSomeOfImage(
           Telemetry::Accumulate(id, KBps);
       }
     }
-#endif
 
     nsresult rv = aImg->ShutdownDecoder(RasterImage::eShutdownIntent_Done);
     if (NS_FAILED(rv)) {

@@ -28,7 +28,7 @@ class nsLoadGroup : public nsILoadGroup,
 {
 public:
     NS_DECL_AGGREGATED
-
+    
     ////////////////////////////////////////////////////////////////////////////
     // nsIRequest methods:
     NS_DECL_NSIREQUEST
@@ -54,11 +54,9 @@ protected:
     nsresult MergeLoadFlags(nsIRequest *aRequest, nsLoadFlags& flags);
 
 private:
-#ifdef MOZ_IPC
     void TelemetryReport();
     void TelemetryReportChannel(nsITimedChannel *timedChannel,
                                 bool defaultRequest);
-#endif
 
 protected:
     uint32_t                        mForegroundCount;
@@ -71,18 +69,16 @@ protected:
     PLDHashTable                    mRequests;
 
     nsWeakPtr                       mObserver;
-
+    
     nsresult                        mStatus;
     int32_t                         mPriority;
     bool                            mIsCanceling;
 
-#ifdef MOZ_IPC
     /* Telemetry */
     mozilla::TimeStamp              mDefaultRequestCreationTime;
     bool                            mDefaultLoadIsTimed;
     uint32_t                        mTimedRequests;
     uint32_t                        mCachedRequests;
-#endif
 };
 
 #endif // nsLoadGroup_h__

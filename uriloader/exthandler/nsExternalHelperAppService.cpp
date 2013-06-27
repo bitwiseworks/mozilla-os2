@@ -13,9 +13,7 @@
 /* This must occur *after* base/basictypes.h to avoid typedefs conflicts. */
 #include "mozilla/Util.h"
 
-#ifdef MOZ_IPC
 #include "mozilla/dom/ContentChild.h"
-#endif
 #include "nsXULAppAPI.h"
 
 #include "nsExternalHelperAppService.h"
@@ -107,10 +105,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDocShellTreeItem.h"
-
-#ifdef MOZ_IPC
 #include "ExternalHelperAppChild.h"
-#endif
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "AndroidBridge.h"
@@ -573,7 +568,6 @@ NS_IMETHODIMP nsExternalHelperAppService::DoContent(const nsACString& aMimeConte
   if (channel)
     channel->GetURI(getter_AddRefs(uri));
 
-#ifdef MOZ_IPC
   int64_t contentLength = GetContentLengthAsInt64(aRequest);
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     // We need to get a hold of a ContentChild so that we can begin forwarding
@@ -622,7 +616,6 @@ NS_IMETHODIMP nsExternalHelperAppService::DoContent(const nsACString& aMimeConte
 
     return NS_OK;
   }
-#endif
 
   if (channel) {
     // Check if we have a POST request, in which case we don't want to use
@@ -851,7 +844,6 @@ nsExternalHelperAppService::LoadURI(nsIURI *aURI,
 {
   NS_ENSURE_ARG_POINTER(aURI);
 
-#ifdef MOZ_IPC
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     URIParams uri;
     SerializeURI(aURI, uri);
@@ -859,7 +851,6 @@ nsExternalHelperAppService::LoadURI(nsIURI *aURI,
     mozilla::dom::ContentChild::GetSingleton()->SendLoadURIExternal(uri);
     return NS_OK;
   }
-#endif
 
   nsCAutoString spec;
   aURI->GetSpec(spec);
@@ -1498,12 +1489,10 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest *request, nsISuppo
     encChannel->SetApplyConversion( applyConversion );
   }
 
-#ifdef MOZ_IPC
   // At this point, the child process has done everything it can usefully do
   // for OnStartRequest.
   if (XRE_GetProcessType() == GeckoProcessType_Content)
      return NS_OK;
-#endif
 
   rv = SetUpTempFile(aChannel);
   if (NS_FAILED(rv)) {
@@ -1736,11 +1725,7 @@ void nsExternalAppHandler::SendStatusChange(ErrorType type, nsresult rv, nsIRequ
                 mWebProgressListener->OnStatusChange(nullptr, (type == kReadError) ? aRequest : nullptr, rv, msgText);
               }
               else
-#ifdef MOZ_IPC
-              if (XRE_GetProcessType() == GeckoProcessType_Default)
-#endif
-      {
-
+              if (XRE_GetProcessType() == GeckoProcessType_Default) {
                 // We don't have a listener.  Simply show the alert ourselves.
                 nsCOMPtr<nsIPrompt> prompter(do_GetInterface(mWindowContext));
                 nsXPIDLString title;

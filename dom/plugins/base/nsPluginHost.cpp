@@ -117,9 +117,7 @@
 #include "nsIContentPolicy.h"
 #include "nsContentPolicyUtils.h"
 #include "mozilla/TimeStamp.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "nsIImageLoadingContent.h"
 #include "mozilla/Preferences.h"
 #include "nsVersionComparator.h"
@@ -1672,11 +1670,7 @@ static nsresult CreateNPAPIPlugin(nsPluginTag *aPluginTag,
                                   nsNPAPIPlugin **aOutNPAPIPlugin)
 {
   // If this is an in-process plugin we'll need to load it here if we haven't already.
-#ifdef MOZ_IPC
   if (!nsNPAPIPlugin::RunPluginOOP(aPluginTag)) {
-#else
-  if (!aPluginTag->mLibrary) {
-#endif
     if (aPluginTag->mFullPath.IsEmpty())
       return NS_ERROR_FAILURE;
     nsCOMPtr<nsIFile> file = do_CreateInstance("@mozilla.org/file/local;1");
@@ -2242,8 +2236,7 @@ nsresult nsPluginHost::ScanPluginsDirectory(nsIFile *pluginsDir,
       // We have a valid new plugin so report that plugins have changed.
       *aPluginsChanged = true;
     }
-
-#ifdef MOZ_IPC
+    
     // Avoid adding different versions of the same plugin if they are running 
     // in-process, otherwise we risk undefined behaviour.
     if (!nsNPAPIPlugin::RunPluginOOP(pluginTag)) {
@@ -2251,8 +2244,7 @@ nsresult nsPluginHost::ScanPluginsDirectory(nsIFile *pluginsDir,
         continue;
       }
     }
-#endif
-
+    
     // Don't add the same plugin again if it hasn't changed
     if (nsPluginTag* duplicate = FirstPluginWithPath(pluginTag->mFullPath)) {
       if (LL_EQ(pluginTag->mLastModifiedTime, duplicate->mLastModifiedTime)) {
@@ -2377,9 +2369,7 @@ nsresult nsPluginHost::LoadPlugins()
 // This is needed in ReloadPlugins to prevent possible recursive reloads
 nsresult nsPluginHost::FindPlugins(bool aCreatePluginList, bool * aPluginsChanged)
 {
-#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::FIND_PLUGINS> telemetry;
-#endif
 
 #ifdef CALL_SAFETY_ON
   // check preferences on whether or not we want to try safe calls to plugins
@@ -3357,10 +3347,8 @@ nsPluginHost::StopPluginInstance(nsNPAPIPluginInstance* aInstance)
     return NS_OK;
   }
 
-#ifdef MOZ_IPC
   Telemetry::AutoTimer<Telemetry::PLUGIN_SHUTDOWN_MS> timer;
   aInstance->Stop();
-#endif
 
   // if the instance does not want to be 'cached' just remove it
   bool doCache = aInstance->ShouldCache();
@@ -3968,7 +3956,6 @@ NS_IMETHODIMP nsPluginHost::Notify(nsITimer* timer)
   return NS_ERROR_FAILURE;
 }
 
-#ifdef MOZ_IPC
 #ifdef XP_WIN
 // Re-enable any top level browser windows that were disabled by modal dialogs
 // displayed by the crashed plugin.
@@ -4077,7 +4064,6 @@ nsPluginHost::PluginCrashed(nsNPAPIPlugin* aPlugin,
   CheckForDisabledWindows();
 #endif
 }
-#endif // MOZ_IPC
 
 nsNPAPIPluginInstance*
 nsPluginHost::FindInstance(const char *mimetype)

@@ -32,14 +32,9 @@ CPPSRCS		= \
 		nsWyciwyg.cpp \
 		nsWyciwygChannel.cpp \
 		nsWyciwygProtocolHandler.cpp \
+		WyciwygChannelParent.cpp \
+		WyciwygChannelChild.cpp \
 		$(NULL)
-
-ifdef MOZ_IPC
-CPPSRCS += \
-  WyciwygChannelParent.cpp \
-  WyciwygChannelChild.cpp \
-  $(NULL)
-endif
 
 LOCAL_INCLUDES = \
   -I$(srcdir)/../../base/src \

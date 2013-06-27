@@ -26,15 +26,10 @@ XPIDLSRCS = \
 
 CPPSRCS = \
   WebSocketChannel.cpp \
-  BaseWebSocketChannel.cpp \
-  $(NULL)
-
-ifdef MOZ_IPC
-CPPSRCS += \
   WebSocketChannelParent.cpp \
   WebSocketChannelChild.cpp \
+  BaseWebSocketChannel.cpp \
   $(NULL)
-endif
 
 EXPORTS_mozilla/net = \
   WebSocketChannel.h \

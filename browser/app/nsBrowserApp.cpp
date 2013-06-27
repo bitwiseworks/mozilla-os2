@@ -36,9 +36,7 @@
 
 #include "nsXPCOMPrivate.h" // for MAXPATHLEN and XPCOM_DLL
 
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 static void Output(const char *fmt, ... )
 {
@@ -106,9 +104,7 @@ XRE_FreeAppDataType XRE_FreeAppData;
 #ifdef XRE_HAS_DLL_BLOCKLIST
 XRE_SetupDllBlocklistType XRE_SetupDllBlocklist;
 #endif
-#ifdef MOZ_IPC
 XRE_TelemetryAccumulateType XRE_TelemetryAccumulate;
-#endif
 XRE_StartupTimelineRecordType XRE_StartupTimelineRecord;
 XRE_mainType XRE_main;
 
@@ -119,9 +115,7 @@ static const nsDynamicFunctionLoad kXULFuncs[] = {
 #ifdef XRE_HAS_DLL_BLOCKLIST
     { "XRE_SetupDllBlocklist", (NSFuncPtr*) &XRE_SetupDllBlocklist },
 #endif
-#ifdef MOZ_IPC
     { "XRE_TelemetryAccumulate", (NSFuncPtr*) &XRE_TelemetryAccumulate },
-#endif
     { "XRE_StartupTimelineRecord", (NSFuncPtr*) &XRE_StartupTimelineRecord },
     { "XRE_main", (NSFuncPtr*) &XRE_main },
     { nullptr, nullptr }
@@ -255,7 +249,6 @@ int main(int argc, char* argv[])
   XRE_SetupDllBlocklist();
 #endif
 
-#ifdef MOZ_IPC
   if (gotCounters) {
 #if defined(XP_WIN)
     XRE_TelemetryAccumulate(mozilla::Telemetry::EARLY_GLUESTARTUP_READ_OPS,
@@ -279,7 +272,6 @@ int main(int argc, char* argv[])
     }
 #endif
   }
-#endif
 
   int result;
   {

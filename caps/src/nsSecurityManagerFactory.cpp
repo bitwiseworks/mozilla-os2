@@ -27,9 +27,7 @@
 #include "jsfriendapi.h"
 #include "xpcprivate.h"
 #include "mozilla/Preferences.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 
 using namespace mozilla;
 
@@ -51,9 +49,7 @@ static JSBool
 netscape_security_enablePrivilege(JSContext *cx, unsigned argc, jsval *vp)
 {
     xpc::EnableUniversalXPConnect(cx);
-#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::ENABLE_PRIVILEGE_EVER_CALLED, true);
-#endif
     return JS_TRUE;
 }
 
@@ -66,7 +62,7 @@ static JSFunctionSpec PrivilegeManager_static_methods[] = {
  * "Steal" calls to netscape.security.PrivilegeManager.enablePrivilege,
  * et al. so that code that worked with 4.0 can still work.
  */
-NS_IMETHODIMP
+NS_IMETHODIMP 
 nsSecurityNameSet::InitializeNameSet(nsIScriptContext* aScriptContext)
 {
     JSContext* cx = aScriptContext->GetNativeContext();

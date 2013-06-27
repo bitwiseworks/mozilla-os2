@@ -347,28 +347,19 @@ nsFrameMessageManager::BroadcastAsyncMessage(const nsAString& aMessageName,
 NS_IMETHODIMP
 nsFrameMessageManager::GetChildCount(uint32_t* aChildCount)
 {
-#ifdef MOZ_IPC
   *aChildCount = static_cast<uint32_t>(mChildManagers.Count()); 
   return NS_OK;
-#else
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
 }
 
 NS_IMETHODIMP
 nsFrameMessageManager::GetChildAt(uint32_t aIndex, 
                                   nsIMessageListenerManager** aMM)
 {
-#ifdef MOZ_IPC
   *aMM = nullptr;
   nsCOMPtr<nsIMessageListenerManager> mm =
     do_QueryInterface(mChildManagers.SafeObjectAt(static_cast<uint32_t>(aIndex)));
   mm.swap(*aMM);
   return NS_OK;
-#else
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
-
 }
 
 
@@ -996,7 +987,6 @@ nsFrameMessageManager* nsFrameMessageManager::sParentProcessManager = nullptr;
 nsFrameMessageManager* nsFrameMessageManager::sSameProcessParentManager = nullptr;
 nsTArray<nsCOMPtr<nsIRunnable> >* nsFrameMessageManager::sPendingSameProcessAsyncMessages = nullptr;
 
-#ifdef MOZ_IPC
 bool SendAsyncMessageToChildProcess(void* aCallbackData,
                                     const nsAString& aMessage,
                                     const StructuredCloneData& aData)
@@ -1201,13 +1191,11 @@ bool SendAsyncMessageToSameProcessParent(void* aCallbackData,
   NS_DispatchToCurrentThread(ev);
   return true;
 }
-#endif
 
 // This creates the global parent process message manager.
 nsresult
 NS_NewParentProcessMessageManager(nsIMessageBroadcaster** aResult)
 {
-#ifdef MOZ_IPC
   NS_ASSERTION(!nsFrameMessageManager::sParentProcessManager,
                "Re-creating sParentProcessManager");
   NS_ENSURE_TRUE(IsChromeProcess(), NS_ERROR_NOT_AVAILABLE);
@@ -1225,16 +1213,11 @@ NS_NewParentProcessMessageManager(nsIMessageBroadcaster** aResult)
   nsFrameMessageManager::sParentProcessManager = mm;
   nsFrameMessageManager::NewProcessMessageManager(nullptr); // Create same process message manager.
   return CallQueryInterface(mm, aResult);
-#else
-  return NS_ERROR_NOT_AVAILABLE;
-#endif
-
 }
 
 nsFrameMessageManager*
 nsFrameMessageManager::NewProcessMessageManager(mozilla::dom::ContentParent* aProcess)
 {
-#ifdef MOZ_IPC
   if (!nsFrameMessageManager::sParentProcessManager) {
      nsCOMPtr<nsIMessageBroadcaster> dummy;
      NS_NewParentProcessMessageManager(getter_AddRefs(dummy));
@@ -1255,16 +1238,11 @@ nsFrameMessageManager::NewProcessMessageManager(mozilla::dom::ContentParent* aPr
     sSameProcessParentManager = mm;
   }
   return mm;
-#else
-  return nullptr;
-#endif
-
 }
 
 nsresult
 NS_NewChildProcessMessageManager(nsISyncMessageSender** aResult)
 {
-#ifdef MOZ_IPC
   NS_ASSERTION(!nsFrameMessageManager::sChildProcessManager,
                "Re-creating sChildProcessManager");
   bool isChrome = IsChromeProcess();
@@ -1282,10 +1260,6 @@ NS_NewChildProcessMessageManager(nsISyncMessageSender** aResult)
   NS_ENSURE_TRUE(mm, NS_ERROR_OUT_OF_MEMORY);
   nsFrameMessageManager::sChildProcessManager = mm;
   return CallQueryInterface(mm, aResult);
-#else
-  return NS_ERROR_NOT_AVAILABLE;
-#endif
-
 }
 
 bool

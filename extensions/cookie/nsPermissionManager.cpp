@@ -5,9 +5,7 @@
 
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
-#ifdef MOZ_IPC
 #include "mozilla/unused.h"
-#endif
 #include "nsPermissionManager.h"
 #include "nsPermission.h"
 #include "nsCRT.h"
@@ -29,7 +27,6 @@
 
 static nsPermissionManager *gPermissionManager = nullptr;
 
-#ifdef MOZ_IPC
 using mozilla::dom::ContentParent;
 using mozilla::dom::ContentChild;
 using mozilla::unused; // ha!
@@ -56,7 +53,6 @@ ChildProcess()
 
   return nullptr;
 }
-#endif
 
 
 #define ENSURE_NOT_CHILD_PROCESS_(onError) \
@@ -305,7 +301,6 @@ nsPermissionManager::Init()
     mObserverService->AddObserver(this, "profile-do-change", true);
   }
 
-#ifdef MOZ_IPC
   if (IsChildProcess()) {
     // Get the permissions from the parent process
     InfallibleTArray<IPC::Permission> perms;
@@ -325,7 +320,6 @@ nsPermissionManager::Init()
     // Stop here; we don't need the DB in the child process
     return NS_OK;
   }
-#endif
 
   // ignore failure here, since it's non-fatal (we can run fine without
   // persistent storage - e.g. if there's no profile).
@@ -537,10 +531,7 @@ nsPermissionManager::AddFromPrincipal(nsIPrincipal* aPrincipal,
                                       const char* aType, uint32_t aPermission,
                                       uint32_t aExpireType, int64_t aExpireTime)
 {
-#ifdef MOZ_IPC
   ENSURE_NOT_CHILD_PROCESS;
-#endif
-
   NS_ENSURE_ARG_POINTER(aPrincipal);
   NS_ENSURE_ARG_POINTER(aType);
   NS_ENSURE_TRUE(aExpireType == nsIPermissionManager::EXPIRE_NEVER ||
@@ -578,7 +569,6 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
   nsresult rv = GetHostForPrincipal(aPrincipal, host);
   NS_ENSURE_SUCCESS(rv, rv);
 
-#ifdef MOZ_IPC
   if (!IsChildProcess()) {
     uint32_t appId;
     rv = aPrincipal->GetAppId(&appId);
@@ -599,7 +589,6 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
         unused << cp->SendAddPermission(permission);
     }
   }
-#endif
 
   // look up the type index
   int32_t typeIndex = GetTypeIndex(aType.get(), true);
@@ -766,9 +755,7 @@ NS_IMETHODIMP
 nsPermissionManager::RemoveFromPrincipal(nsIPrincipal* aPrincipal,
                                          const char* aType)
 {
-#ifdef MOZ_IPC
   ENSURE_NOT_CHILD_PROCESS;
-#endif
   NS_ENSURE_ARG_POINTER(aPrincipal);
   NS_ENSURE_ARG_POINTER(aType);
 
@@ -791,9 +778,7 @@ nsPermissionManager::RemoveFromPrincipal(nsIPrincipal* aPrincipal,
 NS_IMETHODIMP
 nsPermissionManager::RemoveAll()
 {
-#ifdef MOZ_IPC
   ENSURE_NOT_CHILD_PROCESS;
-#endif
   return RemoveAllInternal(true);
 }
 
@@ -1065,9 +1050,7 @@ NS_IMETHODIMP nsPermissionManager::GetEnumerator(nsISimpleEnumerator **aEnum)
 
 NS_IMETHODIMP nsPermissionManager::Observe(nsISupports *aSubject, const char *aTopic, const PRUnichar *someData)
 {
-#ifdef MOZ_IPC
   ENSURE_NOT_CHILD_PROCESS;
-#endif
 
   if (!nsCRT::strcmp(aTopic, "profile-before-change")) {
     // The profile is about to change,
@@ -1165,9 +1148,7 @@ nsPermissionManager::NotifyObservers(nsIPermission   *aPermission,
 nsresult
 nsPermissionManager::Read()
 {
-#ifdef MOZ_IPC
   ENSURE_NOT_CHILD_PROCESS;
-#endif
 
   nsresult rv;
 
@@ -1264,9 +1245,7 @@ static const char kMatchTypeHost[] = "host";
 nsresult
 nsPermissionManager::Import()
 {
-#ifdef MOZ_IPC
   ENSURE_NOT_CHILD_PROCESS;
-#endif
 
   nsresult rv;
 
@@ -1364,9 +1343,7 @@ nsPermissionManager::UpdateDB(OperationType         aOp,
                               uint32_t              aAppId,
                               bool                  aIsInBrowserElement)
 {
-#ifdef MOZ_IPC
   ENSURE_NOT_CHILD_PROCESS_NORET;
-#endif
 
   nsresult rv;
 

@@ -15,9 +15,7 @@
 #include "nsUnicodeProperties.h"
 
 #include "mozilla/Preferences.h"
-#ifdef MOZ_IPC
 #include "mozilla/Telemetry.h"
-#endif
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Attributes.h"
 
@@ -204,9 +202,7 @@ gfxPlatformFontList::InitOtherFamilyNames()
 {
     mOtherFamilyNamesInitialized = true;
 
-#ifdef MOZ_IPC
     Telemetry::AutoTimer<Telemetry::FONTLIST_INITOTHERFAMILYNAMES> timer;
-#endif
     // iterate over all font families and read in other family names
     mFontFamilies.Enumerate(gfxPlatformFontList::InitOtherFamilyNamesProc, this);
 }
@@ -227,9 +223,7 @@ gfxPlatformFontList::InitFaceNameLists()
     mFaceNamesInitialized = true;
 
     // iterate over all font families and read in other family names
-#ifdef MOZ_IPC
     Telemetry::AutoTimer<Telemetry::FONTLIST_INITFACENAMELISTS> timer;
-#endif
     mFontFamilies.Enumerate(gfxPlatformFontList::InitFaceNameListsProc, this);
 }
 
@@ -455,18 +449,14 @@ gfxPlatformFontList::SystemFindFontForChar(const uint32_t aCh,
     static bool first = true;
     int32_t intElapsed = int32_t(first ? elapsed.ToMilliseconds() :
                                          elapsed.ToMicroseconds());
-#ifdef MOZ_IPC
     Telemetry::Accumulate((first ? Telemetry::SYSTEM_FONT_FALLBACK_FIRST :
                                    Telemetry::SYSTEM_FONT_FALLBACK),
                           intElapsed);
-#endif
     first = false;
 
     // track the script for which fallback occurred (incremented one make it
     // 1-based)
-#ifdef MOZ_IPC
     Telemetry::Accumulate(Telemetry::SYSTEM_FONT_FALLBACK_SCRIPT, aRunScript + 1);
-#endif
 
     return fontEntry;
 }

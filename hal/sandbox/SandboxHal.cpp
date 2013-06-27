@@ -18,7 +18,6 @@
 #include "mozilla/unused.h"
 #include "WindowIdentifier.h"
 
-#ifdef MOZ_IPC
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::hal;
@@ -699,4 +698,3 @@ PHalParent* CreateHalParent() {
 
 } // namespace hal_sandbox
 } // namespace mozilla
-#endif
