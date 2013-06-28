@@ -15,6 +15,8 @@
 #include "base/base_paths_mac.h"
 #elif defined(OS_LINUX)
 #include "base/base_paths_linux.h"
+#elif defined(OS_OS2)
+#include "base/base_paths_os2.h"
 #endif
 #include "base/path_service.h"
 

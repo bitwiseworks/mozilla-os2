@@ -153,7 +153,6 @@ CPPSRCS += \
   lock_impl_posix.cc \
   message_pump_libevent.cc \
   platform_file_posix.cc \
-  platform_thread_posix.cc \
   process_posix.cc \
   process_util_posix.cc \
   rand_util_posix.cc \
@@ -169,6 +168,12 @@ CPPSRCS += \
   ipc_channel_posix.cc \
   process_watcher_posix_sigchld.cc \
   $(NULL)
+
+ifndef OS_OS2 # {
+CPPSRCS += \
+  platform_thread_posix.cc \
+  $(NULL)
+endif # }
 
 ifeq ($(OS_TARGET),Android)
 DEFINES += -DANDROID -D_POSIX_MONOTONIC_CLOCK=0
@@ -239,6 +244,13 @@ CPPSRCS += \
 endif
 
 endif # } OS_LINUX
+
+ifdef OS_OS2 # {
+CPPSRCS += \
+  platform_thread_os2.cc \
+  base_paths_os2.cc \
+  $(NULL)
+endif # } OS_OS2
 
 # libevent
 

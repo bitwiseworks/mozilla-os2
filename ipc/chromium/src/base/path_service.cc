@@ -26,6 +26,8 @@ namespace base {
   bool PathProviderMac(int key, FilePath* result);
 #elif defined(OS_LINUX)
   bool PathProviderLinux(int key, FilePath* result);
+#elif defined(OS_OS2)
+  bool PathProviderOS2(int key, FilePath* result);
 #endif
 }
 
@@ -92,6 +94,18 @@ static Provider base_provider_linux = {
 };
 #endif
 
+#if defined(OS_OS2)
+static Provider base_provider_os2 = {
+  base::PathProviderOS2,
+  &base_provider,
+#ifndef NDEBUG
+  base::PATH_OS2_START,
+  base::PATH_OS2_END,
+#endif
+  true
+};
+#endif
+
 
 struct PathData {
   Lock      lock;
@@ -106,6 +120,8 @@ struct PathData {
     providers = &base_provider_mac;
 #elif defined(OS_LINUX)
     providers = &base_provider_linux;
+#elif defined(OS_OS2)
+    providers = &base_provider_os2;
 #endif
   }
 
