@@ -79,6 +79,10 @@
 #include <fcntl.h>
 #endif
 
+#ifdef OS_OS2
+#include <arpa/inet.h> // for inet_ntoa
+#endif
+
 #undef timeout_pending
 #undef timeout_initialized
 

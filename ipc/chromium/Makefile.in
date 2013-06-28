@@ -259,11 +259,16 @@ CSRCS += \
   evutil.c \
   http.c \
   log.c \
-  poll.c \
   select.c \
   signal.c \
   strlcpy.c \
   $(NULL)
+
+ifndef OS_OS2 # {
+CSRCS += \
+  poll.c \
+  $(NULL)
+endif # }
 
 ifdef OS_MACOSX # {
 LOCAL_INCLUDES += -I$(srcdir)/src/third_party/libevent/mac
@@ -276,6 +281,10 @@ CSRCS += \
   epoll.c \
   epoll_sub.c \
   $(NULL)
+endif # }
+
+ifdef OS_OS2 # {
+LOCAL_INCLUDES += -I$(srcdir)/src/third_party/libevent/os2
 endif # }
 
 endif # }

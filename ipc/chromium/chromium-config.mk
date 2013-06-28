@@ -61,6 +61,17 @@ DEFINES += -DCOMPILER_MSVC
 endif
 
 else # } {
+ifeq ($(OS_ARCH),OS2) # {
+
+OS_POSIX = 1
+OS_OS2 = 1
+
+DEFINES += \
+  -DOS_POSIX=1 \
+  -DOS_OS2=1 \
+  $(NULL)
+
+else # } {
 
 OS_LINUX = 1
 OS_POSIX = 1
@@ -73,6 +84,7 @@ DEFINES += \
 # NB: to stop gcc warnings about exporting template instantiation
 OS_CXXFLAGS := $(filter-out -pedantic,$(OS_CXXFLAGS))
 
+endif # }
 endif # }
 endif # }
 
