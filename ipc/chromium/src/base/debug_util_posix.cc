@@ -5,7 +5,7 @@
 #include "build/build_config.h"
 #include "base/debug_util.h"
 
-#define MOZ_HAVE_EXECINFO_H (!defined(ANDROID) && !defined(__OpenBSD__))
+#define MOZ_HAVE_EXECINFO_H (!defined(ANDROID) && !defined(__OpenBSD__) && !defined(OS_OS2))
 
 #include <errno.h>
 #include <fcntl.h>
@@ -110,7 +110,14 @@ bool DebugUtil::BeingDebugged() {
   return pid_index < status.size() && status[pid_index] != '0';
 }
 
-#endif  // OS_LINUX
+#elif defined(OS_OS2)
+
+bool DebugUtil::BeingDebugged() {
+  // @todo later
+  return false;
+}
+
+#endif
 
 // static
 void DebugUtil::BreakDebugger() {

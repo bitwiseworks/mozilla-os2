@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_OS2)
 #include "base/shared_memory.h"
 #endif
 
@@ -70,6 +70,9 @@ class TransportDIB {
   typedef base::SharedMemoryHandle Handle;
   // On Mac, the inode number of the backing file is used as an id.
   typedef base::SharedMemoryId Id;
+#elif defined(OS_OS2)
+  typedef base::SharedMemoryHandle Handle;
+  typedef base::SharedMemoryHandle Id;
 #elif defined(OS_LINUX)
   typedef int Handle;  // These two ints are SysV IPC shared memory keys
   typedef int Id;
@@ -108,7 +111,7 @@ class TransportDIB {
 
  private:
   TransportDIB();
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_OS2)
   explicit TransportDIB(base::SharedMemoryHandle dib);
   base::SharedMemory shared_memory_;
   uint32 sequence_num_;

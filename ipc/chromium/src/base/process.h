@@ -8,8 +8,12 @@
 #include "base/basictypes.h"
 
 #include <sys/types.h>
-#ifdef OS_WIN
+#if defined(OS_WIN)
 #include <windows.h>
+#elif defined(OS_OS2)
+#define INCL_DOS
+#define INCL_DOSERRORS
+#include <os2.h>
 #endif
 
 namespace base {

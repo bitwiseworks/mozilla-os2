@@ -156,7 +156,6 @@ CPPSRCS += \
   process_posix.cc \
   process_util_posix.cc \
   rand_util_posix.cc \
-  shared_memory_posix.cc \
   string16.cc \
   system_monitor_posix.cc \
   sys_info_posix.cc \
@@ -172,6 +171,7 @@ CPPSRCS += \
 ifndef OS_OS2 # {
 CPPSRCS += \
   platform_thread_posix.cc \
+  shared_memory_posix.cc \
   $(NULL)
 endif # }
 
@@ -248,7 +248,9 @@ endif # } OS_LINUX
 ifdef OS_OS2 # {
 CPPSRCS += \
   platform_thread_os2.cc \
+  shared_memory_os2.cc \
   base_paths_os2.cc \
+  transport_dib_os2.cc \
   $(NULL)
 endif # } OS_OS2
 

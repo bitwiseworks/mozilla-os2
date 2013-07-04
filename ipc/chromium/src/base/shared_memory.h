@@ -8,9 +8,12 @@
 #include "build/build_config.h"
 
 #if defined(OS_POSIX)
+#if defined(OS_OS2)
+#else
 #include <sys/types.h>
 #include <semaphore.h>
 #include "base/file_descriptor_posix.h"
+#endif
 #endif
 #include <string>
 
@@ -24,6 +27,9 @@ namespace base {
 #if defined(OS_WIN)
 typedef HANDLE SharedMemoryHandle;
 typedef HANDLE SharedMemoryLock;
+#elif defined(OS_OS2)
+typedef void *SharedMemoryHandle;
+typedef HMTX SharedMemoryLock;
 #elif defined(OS_POSIX)
 // A SharedMemoryId is sufficient to identify a given shared memory segment on a
 // system, but insufficient to map it.
@@ -106,7 +112,7 @@ class SharedMemory {
   // identifier is not portable.
   SharedMemoryHandle handle() const;
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_OS2)
   // Return a unique identifier for this shared memory segment. Inode numbers
   // are technically only unique to a single filesystem. However, we always
   // allocate shared memory backing files from the same directory, so will end
@@ -155,7 +161,7 @@ class SharedMemory {
   void Unlock();
 
  private:
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_OS2)
   bool CreateOrOpen(const std::wstring &name, int posix_flags, size_t size);
   bool FilenameForMemoryName(const std::wstring &memname,
                              std::wstring *filename);
@@ -169,6 +175,10 @@ class SharedMemory {
 #if defined(OS_WIN)
   std::wstring       name_;
   HANDLE             mapped_file_;
+#elif defined(OS_OS2)
+  std::string        name_;
+  void*              base_;
+  size_t             committed_;
 #elif defined(OS_POSIX)
   int                mapped_file_;
   ino_t              inode_;
@@ -176,7 +186,7 @@ class SharedMemory {
   void*              memory_;
   bool               read_only_;
   size_t             max_size_;
-#if !defined(OS_POSIX)
+#if !defined(OS_POSIX) || defined(OS_OS2)
   SharedMemoryLock   lock_;
 #endif
 
