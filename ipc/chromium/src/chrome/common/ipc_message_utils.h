@@ -640,6 +640,23 @@ struct ParamTraits<POINT> {
 };
 #endif  // defined(OS_WIN)
 
+#if defined(OS_OS2)
+template <>
+struct ParamTraits<void*> {
+  typedef void* param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteIntPtr(reinterpret_cast<intptr_t>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    DCHECK_EQ(sizeof(param_type), sizeof(intptr_t));
+    return m->ReadIntPtr(iter, reinterpret_cast<intptr_t*>(r));
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(StringPrintf(L"0x%X", p));
+  }
+};
+#endif // defined(OS_OS2)
+
 template <>
 struct ParamTraits<FilePath> {
   typedef FilePath param_type;

@@ -16,6 +16,15 @@
 #include "base/message_loop.h"
 #include "chrome/common/file_descriptor_set_posix.h"
 
+#if defined(__EMX__)
+#ifndef CMSG_SPACE
+#define CMSG_SPACE(l)           (_ALIGN(sizeof(struct cmsghdr)) + _ALIGN(l))
+#endif
+#ifndef CMSG_LEN
+#define CMSG_LEN(l)             (_ALIGN(sizeof(struct cmsghdr)) + (l))
+#endif
+#endif
+
 namespace IPC {
 
 // An implementation of ChannelImpl for POSIX systems that works via

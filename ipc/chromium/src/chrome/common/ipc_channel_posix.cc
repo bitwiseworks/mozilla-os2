@@ -13,6 +13,10 @@
 #include <sys/un.h>
 #include <sys/uio.h>
 
+#if defined(__EMX__)
+#include <unistd.h>
+#endif
+
 #include <string>
 #include <map>
 
