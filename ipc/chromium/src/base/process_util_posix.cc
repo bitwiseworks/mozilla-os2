@@ -104,6 +104,7 @@ class ScopedDIRClose {
 typedef scoped_ptr_malloc<DIR, ScopedDIRClose> ScopedDIR;
 
 
+#if !defined(OS_OS2)
 void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
   // DANGER: no calls to malloc are allowed from now on:
   // http://crbug.com/36678
@@ -225,6 +226,7 @@ void SetAllFDsToCloseOnExec() {
     }
   }
 }
+#endif // !defined(OS_OS2)
 
 ProcessMetrics::ProcessMetrics(ProcessHandle process) : process_(process),
                                                         last_time_(0),
@@ -476,7 +478,9 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
         if (!ShuffleFileDescriptors(&fd_shuffle1))
           _exit(127);
 
+#if !defined(OS_OS2)
         CloseSuperfluousFds(fd_shuffle2);
+#endif
 
         for (size_t i = 0; i < argv.size(); i++)
           argv_cstr[i] = const_cast<char*>(argv[i].c_str());

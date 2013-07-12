@@ -68,9 +68,9 @@ static mozilla::EnvironmentLog gProcessLog("MOZ_PROCESS_LOG");
 namespace base {
 
 #ifdef HAVE_PR_DUPLICATE_ENVIRONMENT
-/* 
- * I tried to put PR_DuplicateEnvironment down in mozglue, but on android 
- * this winds up failing because the strdup/free calls wind up mismatching. 
+/*
+ * I tried to put PR_DuplicateEnvironment down in mozglue, but on android
+ * this winds up failing because the strdup/free calls wind up mismatching.
  */
 
 static char **
@@ -225,6 +225,7 @@ bool LaunchApp(const std::vector<std::string>& argv,
     if (!ShuffleFileDescriptors(&fd_shuffle1))
       _exit(127);
 
+#if !defined(OS_OS2)
     CloseSuperfluousFds(fd_shuffle2);
 
     for (size_t i = 0; i < argv.size(); i++)
@@ -243,6 +244,7 @@ bool LaunchApp(const std::vector<std::string>& argv,
       if (chdir("/") != 0)
         gProcessLog.print("==> could not chdir()\n");
     }
+#endif
 
 #ifdef HAVE_PR_DUPLICATE_ENVIRONMENT
     execve(argv_cstr[0], argv_cstr.get(), envp);
@@ -277,6 +279,7 @@ bool LaunchApp(const CommandLine& cl,
   return LaunchApp(cl.argv(), no_files, wait, process_handle);
 }
 
+#if !defined(OS_OS2)
 NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
                                            const ProcessFilter* filter)
     : executable_name_(executable_name), filter_(filter) {
@@ -428,5 +431,6 @@ bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
   }
   return true;
 }
+#endif // !defined(OS_OS2)
 
 }  // namespace base

@@ -22,6 +22,7 @@ typedef void* PlatformThreadHandle;  // HANDLE
 #elif defined(OS_POSIX)
 #include <pthread.h>
 #if defined(OS_OS2)
+#define INCL_BASE
 #include <os2.h>
 typedef LHANDLE PlatformThreadId;
 typedef LHANDLE PlatformThreadHandle;

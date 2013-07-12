@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#define INCL_DOS
+#define INCL_BASE
 #include <os2.h>
 
 #include <limits>

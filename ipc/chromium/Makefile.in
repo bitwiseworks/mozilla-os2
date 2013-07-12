@@ -251,6 +251,9 @@ CPPSRCS += \
   shared_memory_os2.cc \
   base_paths_os2.cc \
   transport_dib_os2.cc \
+  process_util_linux.cc \
+  process_util_os2.cc \
+  sys_info_os2.cc \
   $(NULL)
 endif # } OS_OS2
 
