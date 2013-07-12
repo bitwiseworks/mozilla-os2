@@ -87,7 +87,7 @@ GeckoChildProcessHost::GeckoChildProcessHost(GeckoProcessType aProcessType,
 #endif
 {
     MOZ_COUNT_CTOR(GeckoChildProcessHost);
-    
+
     MessageLoop* ioLoop = XRE_GetIOMessageLoop();
     ioLoop->PostTask(FROM_HERE,
                      NewRunnableMethod(this,
@@ -274,11 +274,11 @@ void GeckoChildProcessHost::InitWindowsGroupID()
 #endif
 
 bool
-GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int aTimeoutMs, base::ProcessArchitecture arch)
+GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int32 aTimeoutMs, base::ProcessArchitecture arch)
 {
   PrepareLaunch();
 
-  PRIntervalTime timeoutTicks = (aTimeoutMs > 0) ? 
+  PRIntervalTime timeoutTicks = (aTimeoutMs > 0) ?
     PR_MillisecondsToInterval(aTimeoutMs) : PR_INTERVAL_NO_TIMEOUT;
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
   NS_ASSERTION(MessageLoop::current() != ioLoop, "sync launch from the IO thread NYI");
@@ -437,7 +437,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // and passing wstrings from one config to the other is unsafe.  So
   // we split the logic here.
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_OS2)
   base::environment_map newEnvVars;
   base::ChildPrivileges privs = kLowRightsSubprocesses ?
                                 base::UNPRIVILEGED :
@@ -494,7 +494,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
       }
     }
   }
-#endif  // OS_LINUX || OS_MACOSX
+#endif  // OS_LINUX || OS_MACOSX || OS_OS2
 
   FilePath exePath;
   GetPathToBinary(exePath);
@@ -612,7 +612,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
 #endif
 
   base::LaunchApp(childArgv, mFileMap,
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_OS2)
                   newEnvVars, privs,
 #endif
                   false, &process, arch);
