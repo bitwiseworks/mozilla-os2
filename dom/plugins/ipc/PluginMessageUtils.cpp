@@ -50,11 +50,11 @@ namespace plugins {
 
 NPRemoteWindow::NPRemoteWindow() :
   window(0), x(0), y(0), width(0), height(0), type(NPWindowTypeDrawable)
-#if defined(MOZ_X11) && defined(XP_UNIX) && !defined(XP_MACOSX)
+#if defined(MOZ_X11) && defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(XP_OS2)
   , visualID(0)
   , colormap(0)
 #endif /* XP_UNIX */
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   ,surfaceHandle(0)
 #endif
 {

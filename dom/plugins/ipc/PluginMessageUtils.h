@@ -100,16 +100,16 @@ struct NPRemoteWindow
   uint32_t height;
   NPRect clipRect;
   NPWindowType type;
-#if defined(MOZ_X11) && defined(XP_UNIX) && !defined(XP_MACOSX)
+#if defined(MOZ_X11) && defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(XP_OS2)
   VisualID visualID;
   Colormap colormap;
 #endif /* XP_UNIX */
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   base::SharedMemoryHandle surfaceHandle;
 #endif
 };
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
 typedef HWND NativeWindowHandle;
 #elif defined(MOZ_X11)
 typedef XID NativeWindowHandle;
@@ -122,6 +122,9 @@ typedef intptr_t NativeWindowHandle; // never actually used, will always be 0
 #ifdef XP_WIN
 typedef base::SharedMemoryHandle WindowsSharedMemoryHandle;
 typedef HANDLE DXGISharedSurfaceHandle;
+#elif XP_OS2
+typedef base::SharedMemoryHandle WindowsSharedMemoryHandle;
+typedef mozilla::null_t DXGISharedSurfaceHandle;
 #else
 typedef mozilla::null_t WindowsSharedMemoryHandle;
 typedef mozilla::null_t DXGISharedSurfaceHandle;
@@ -379,7 +382,7 @@ struct ParamTraits<mozilla::plugins::NPRemoteWindow>
     aMsg->WriteULong(aParam.visualID);
     aMsg->WriteULong(aParam.colormap);
 #endif
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
     WriteParam(aMsg, aParam.surfaceHandle);
 #endif
   }
@@ -408,7 +411,7 @@ struct ParamTraits<mozilla::plugins::NPRemoteWindow>
       return false;
 #endif
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
     base::SharedMemoryHandle surfaceHandle;
     if (!ReadParam(aMsg, aIter, &surfaceHandle))
       return false;
@@ -425,7 +428,7 @@ struct ParamTraits<mozilla::plugins::NPRemoteWindow>
     aResult->visualID = visualID;
     aResult->colormap = colormap;
 #endif
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
     aResult->surfaceHandle = surfaceHandle;
 #endif
     return true;
@@ -891,7 +894,7 @@ struct ParamTraits<NPCoordinateSpace>
 #elif defined(XP_WIN)
 #  include "mozilla/plugins/NPEventWindows.h"
 #elif defined(XP_OS2)
-#  error Sorry, OS/2 is not supported
+#  include "mozilla/plugins/NPEventOS2.h"
 #elif defined(ANDROID)
 #  include "mozilla/plugins/NPEventAndroid.h"
 #elif defined(XP_UNIX)

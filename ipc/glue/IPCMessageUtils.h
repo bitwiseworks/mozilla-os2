@@ -7,6 +7,14 @@
 #ifndef __IPC_GLUE_IPCMESSAGEUTILS_H__
 #define __IPC_GLUE_IPCMESSAGEUTILS_H__
 
+#if defined(OS_OS2)
+// include everything from os2.h early to make sure we have all defs later
+// (once os.2 is included, you can't change the set of included defs)
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+#endif
+
 #include "chrome/common/ipc_message_utils.h"
 
 #include "mozilla/TimeStamp.h"
