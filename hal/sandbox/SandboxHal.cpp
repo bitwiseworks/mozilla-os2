@@ -512,7 +512,7 @@ public:
   }
 
   virtual bool
-  RecvAdjustSystemClock(const int32_t &aDeltaMilliseconds) MOZ_OVERRIDE
+  RecvAdjustSystemClock(const int32 &aDeltaMilliseconds) MOZ_OVERRIDE
   {
     if (!AppProcessHasPermission(this, "systemclock-write")) {
       return false;
