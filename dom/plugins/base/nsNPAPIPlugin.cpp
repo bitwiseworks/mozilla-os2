@@ -64,8 +64,10 @@
 #endif
 
 #ifdef XP_OS2
-#define INCL_DOS
-#define INCL_DOSERRORS
+// include everything from os2.h early to make sure we have all defs later
+// (once os.2 is included, you can't change the set of included defs)
+#define INCL_BASE
+#define INCL_PM
 #include <os2.h>
 #endif
 
