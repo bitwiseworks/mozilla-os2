@@ -36,6 +36,18 @@ CPPSRCS += \
   $(NULL)
 endif
 
+ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
+EXPORTS_mozilla/gfx += \
+  SharedDIBOS2.h \
+  SharedDIBSurface.h \
+  $(NULL)
+
+CPPSRCS += \
+  SharedDIBOS2.cpp \
+  SharedDIBSurface.cpp \
+  $(NULL)
+endif
+
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 

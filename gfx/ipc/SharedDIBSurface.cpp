@@ -14,6 +14,19 @@ static const cairo_user_data_key_t SHAREDDIB_KEY = {0};
 
 static const long kBytesPerPixel = 4;
 
+#if defined(XP_OS2)
+bool
+SharedDIBSurface::Create(HPS aps, uint32_t aWidth, uint32_t aHeight,
+                         bool aTransparent)
+{
+  nsresult rv = mSharedDIB.Create(aps, aWidth, aHeight, aTransparent);
+  if (NS_FAILED(rv) || !mSharedDIB.IsValid())
+    return false;
+
+  InitSurface(aWidth, aHeight, aTransparent);
+  return true;
+}
+#else
 bool
 SharedDIBSurface::Create(HDC adc, uint32_t aWidth, uint32_t aHeight,
                          bool aTransparent)
@@ -25,6 +38,7 @@ SharedDIBSurface::Create(HDC adc, uint32_t aWidth, uint32_t aHeight,
   InitSurface(aWidth, aHeight, aTransparent);
   return true;
 }
+#endif
 
 bool
 SharedDIBSurface::Attach(Handle aHandle, uint32_t aWidth, uint32_t aHeight,
@@ -45,7 +59,11 @@ SharedDIBSurface::InitSurface(uint32_t aWidth, uint32_t aHeight,
   long stride = long(aWidth * kBytesPerPixel);
   unsigned char* data = reinterpret_cast<unsigned char*>(mSharedDIB.GetBits());
 
+#if defined(XP_OS2)
+  gfxImageFormat format = ImageFormatRGB24;
+#else
   gfxImageFormat format = aTransparent ? ImageFormatARGB32 : ImageFormatRGB24;
+#endif
 
   gfxImageSurface::InitWithData(data, gfxIntSize(aWidth, aHeight),
                                 stride, format);

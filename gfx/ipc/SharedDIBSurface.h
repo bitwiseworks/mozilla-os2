@@ -7,9 +7,13 @@
 #define mozilla_gfx_SharedDIBSurface_h
 
 #include "gfxImageSurface.h"
-#include "SharedDIBWin.h"
 
+#if defined(XP_OS2)
+#include "SharedDIBOS2.h"
+#else
+#include "SharedDIBWin.h"
 #include <windows.h>
+#endif
 
 namespace mozilla {
 namespace gfx {
@@ -28,7 +32,11 @@ public:
   /**
    * Create this image surface backed by shared memory.
    */
+#if defined(XP_OS2)
+  bool Create(HPS aps, uint32_t aWidth, uint32_t aHeight, bool aTransparent);
+#else
   bool Create(HDC adc, uint32_t aWidth, uint32_t aHeight, bool aTransparent);
+#endif
 
   /**
    * Attach this surface to shared memory from another process.
@@ -40,9 +48,17 @@ public:
    * After drawing to a surface via GDI, GDI must be flushed before the bitmap
    * is valid.
    */
+#if defined(XP_OS2)
+  void Flush() { mSharedDIB.FlushBits(); }
+#else
   void Flush() { ::GdiFlush(); }
+#endif
 
+#if defined(XP_OS2)
+  HPS GetHPS() { return mSharedDIB.GetHPS(); }
+#else
   HDC GetHDC() { return mSharedDIB.GetHDC(); }
+#endif
 
   nsresult ShareToProcess(base::ProcessHandle aChildProcess, Handle* aChildHandle) {
     return mSharedDIB.ShareToProcess(aChildProcess, aChildHandle);
@@ -51,7 +67,11 @@ public:
   static bool IsSharedDIBSurface(gfxASurface* aSurface);
 
 private:
+#if defined(XP_OS2)
+  SharedDIBOS2 mSharedDIB;
+#else
   SharedDIBWin mSharedDIB;
+#endif
 
   void InitSurface(uint32_t aWidth, uint32_t aHeight, bool aTransparent);
 };
