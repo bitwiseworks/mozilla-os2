@@ -15,6 +15,8 @@
 #include "nsClassHashtable.h"
 #if defined(OS_WIN)
 #include "mozilla/gfx/SharedDIBWin.h"
+#elif defined(OS_OS2)
+#include "mozilla/gfx/SharedDIBOS2.h"
 #elif defined(MOZ_WIDGET_COCOA)
 #include "PluginUtilsOSX.h"
 #include "mozilla/gfx/QuartzSupport.h"
@@ -354,6 +356,20 @@ private:
     };
 
 #endif
+
+#if defined(OS_OS2)
+    static bool RegisterWindowClass();
+    bool CreatePluginWindow();
+    void DestroyPluginWindow();
+    void ReparentPluginWindow(HWND hWndParent);
+    void SizePluginWindow(int width, int height);
+    int16_t WinlessHandleEvent(NPEvent& event);
+    static MRESULT EXPENTRY PluginWindowProc(HWND hWnd,
+                                             ULONG message,
+                                             MPARAM mp1,
+                                             MPARAM mp2);
+#endif
+
     const NPPluginFuncs* mPluginIface;
     NPP_t mData;
     NPWindow mWindow;
@@ -392,6 +408,11 @@ private:
     nsIntPoint mPluginSize;
     WNDPROC mWinlessThrottleOldWndProc;
     HWND mWinlessHiddenMsgHWND;
+#elif defined(OS_OS2)
+    HWND mPluginWindowHWND;
+    HWND mPluginParentHWND;
+    HWND mCachedWinlessPluginHWND;
+    nsIntPoint mPluginSize;
 #endif
 
     friend class ChildAsyncCall;
@@ -430,6 +451,13 @@ private:
       HBITMAP         bmp;
     } mAlphaExtract;
 #endif // defined(OS_WIN)
+
+#if defined(OS_OS2)
+    bool SharedSurfaceSetWindow(const NPRemoteWindow& aWindow);
+    void SharedSurfaceRelease();
+    gfx::SharedDIBOS2 mSharedSurfaceDib;
+#endif // defined(OS_OS2)
+
 #if defined(MOZ_WIDGET_COCOA)
 private:
 #if defined(__i386__)
@@ -559,7 +587,7 @@ private:
     // alpha recovery otherwise.
     nsRefPtr<gfxASurface> mBackground;
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
     // These actors mirror mCurrentSurface/mBackSurface
     PPluginSurfaceChild* mCurrentSurfaceActor;
     PPluginSurfaceChild* mBackSurfaceActor;

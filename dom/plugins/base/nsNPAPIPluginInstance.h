@@ -35,7 +35,7 @@ class nsNPAPIPluginStreamListener; // plugin-initiated stream class
 class nsIPluginInstanceOwner;
 class nsIOutputStream;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(XP_OS2)
 const NPDrawingModel kDefaultDrawingModel = NPDrawingModelSyncWin;
 #elif defined(MOZ_X11)
 const NPDrawingModel kDefaultDrawingModel = NPDrawingModelSyncX;

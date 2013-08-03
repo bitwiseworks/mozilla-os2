@@ -16,6 +16,12 @@
 #include "NestedLoopTimer.h"
 #endif
 
+#if defined(XP_OS2)
+#define INCL_DOS
+#define INCL_PM
+#include <os2.h>
+#endif
+
 #include "base/process_util.h"
 
 #include "mozilla/Preferences.h"
@@ -570,7 +576,7 @@ PluginModuleParent::SetPluginFuncs(NPPluginFuncs* aFuncs)
     }
 }
 
-NPError
+NPError NP_CALLBACK
 PluginModuleParent::NPP_Destroy(NPP instance,
                                 NPSavedData** /*saved*/)
 {
@@ -594,7 +600,7 @@ PluginModuleParent::NPP_Destroy(NPP instance,
     return retval;
 }
 
-NPError
+NPError NP_CALLBACK
 PluginModuleParent::NPP_NewStream(NPP instance, NPMIMEType type,
                                   NPStream* stream, NPBool seekable,
                                   uint16_t* stype)
@@ -608,7 +614,7 @@ PluginModuleParent::NPP_NewStream(NPP instance, NPMIMEType type,
                             stype);
 }
 
-NPError
+NPError NP_CALLBACK
 PluginModuleParent::NPP_SetWindow(NPP instance, NPWindow* window)
 {
     PluginInstanceParent* i = InstCast(instance);
@@ -618,7 +624,7 @@ PluginModuleParent::NPP_SetWindow(NPP instance, NPWindow* window)
     return i->NPP_SetWindow(window);
 }
 
-NPError
+NPError NP_CALLBACK
 PluginModuleParent::NPP_DestroyStream(NPP instance,
                                       NPStream* stream,
                                       NPReason reason)
@@ -630,7 +636,7 @@ PluginModuleParent::NPP_DestroyStream(NPP instance,
     return i->NPP_DestroyStream(stream, reason);
 }
 
-int32_t
+int32_t NP_CALLBACK
 PluginModuleParent::NPP_WriteReady(NPP instance,
                                    NPStream* stream)
 {
@@ -641,7 +647,7 @@ PluginModuleParent::NPP_WriteReady(NPP instance,
     return s->WriteReady();
 }
 
-int32_t
+int32_t NP_CALLBACK
 PluginModuleParent::NPP_Write(NPP instance,
                               NPStream* stream,
                               int32_t offset,
@@ -655,7 +661,7 @@ PluginModuleParent::NPP_Write(NPP instance,
     return s->Write(offset, len, buffer);
 }
 
-void
+void NP_CALLBACK
 PluginModuleParent::NPP_StreamAsFile(NPP instance,
                                      NPStream* stream,
                                      const char* fname)
@@ -667,7 +673,7 @@ PluginModuleParent::NPP_StreamAsFile(NPP instance,
     s->StreamAsFile(fname);
 }
 
-void
+void NP_CALLBACK
 PluginModuleParent::NPP_Print(NPP instance, NPPrint* platformPrint)
 {
     PluginInstanceParent* i = InstCast(instance);
@@ -675,7 +681,7 @@ PluginModuleParent::NPP_Print(NPP instance, NPPrint* platformPrint)
         i->NPP_Print(platformPrint);
 }
 
-int16_t
+int16_t NP_CALLBACK
 PluginModuleParent::NPP_HandleEvent(NPP instance, void* event)
 {
     PluginInstanceParent* i = InstCast(instance);
@@ -685,7 +691,7 @@ PluginModuleParent::NPP_HandleEvent(NPP instance, void* event)
     return i->NPP_HandleEvent(event);
 }
 
-void
+void NP_CALLBACK
 PluginModuleParent::NPP_URLNotify(NPP instance, const char* url,
                                   NPReason reason, void* notifyData)
 {
@@ -696,7 +702,7 @@ PluginModuleParent::NPP_URLNotify(NPP instance, const char* url,
     i->NPP_URLNotify(url, reason, notifyData);
 }
 
-NPError
+NPError NP_CALLBACK
 PluginModuleParent::NPP_GetValue(NPP instance,
                                  NPPVariable variable, void *ret_value)
 {
@@ -707,7 +713,7 @@ PluginModuleParent::NPP_GetValue(NPP instance,
     return i->NPP_GetValue(variable, ret_value);
 }
 
-NPError
+NPError NP_CALLBACK
 PluginModuleParent::NPP_SetValue(NPP instance, NPNVariable variable,
                                  void *value)
 {
@@ -732,7 +738,7 @@ PluginModuleParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
     return true;
 }
 
-void
+void NP_CALLBACK
 PluginModuleParent::NPP_URLRedirectNotify(NPP instance, const char* url,
                                           int32_t status, void* notifyData)
 {

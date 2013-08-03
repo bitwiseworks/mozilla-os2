@@ -11,7 +11,7 @@
 #include "nsAutoPtr.h"
 #include "mozilla/plugins/PluginMessageUtils.h"
 
-#ifndef XP_WIN
+#if !defined(XP_WIN) && !defined(XP_OS2)
 #error "This header is for Windows only."
 #endif
 

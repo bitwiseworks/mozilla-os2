@@ -13,6 +13,8 @@
 #include "mozilla/gfx/SharedDIBWin.h"
 #include <d3d10_1.h>
 #include "nsRefPtrHashtable.h"
+#elif defined(XP_OS2)
+#include "mozilla/gfx/SharedDIBOS2.h"
 #elif defined(MOZ_WIDGET_COCOA)
 #include "mozilla/gfx/QuartzSupport.h"
 #endif
@@ -345,6 +347,26 @@ private:
     // This will automatically release the textures when this object goes away.
     nsRefPtrHashtable<nsPtrHashKey<void>, ID3D10Texture2D> mTextureMap;
 #endif // defined(XP_WIN)
+#if defined(XP_OS2)
+private:
+    // Used in rendering windowless plugins in other processes.
+    bool SharedSurfaceSetWindow(const NPWindow* aWindow, NPRemoteWindow& aRemoteWindow);
+    void SharedSurfaceBeforePaint(RECTL &rcl, RECTL & dr, HPS parentHps, NPRemoteEvent& npremoteevent);
+    void SharedSurfaceAfterPaint(RECTL & dr, HPS parentHps);
+    void SharedSurfaceRelease();
+    // Used in handling parent/child forwarding of events.
+    static MRESULT EXPENTRY PluginWindowHookProc(HWND hWnd, ULONG message,
+                                                 MPARAM mp1, MPARAM mp2);
+    void SubclassPluginWindow(HWND aWnd);
+    void UnsubclassPluginWindow();
+
+    gfx::SharedDIBOS2  mSharedSurfaceDib;
+    nsIntRect          mPluginPort;
+    nsIntRect          mSharedSize;
+    HWND               mPluginHWND;
+    PFNWP              mPluginWndProc;
+    bool               mNestedEventState;
+#endif // defined(XP_OS2)
 #if defined(MOZ_WIDGET_COCOA)
 private:
     Shmem                  mShSurface; 

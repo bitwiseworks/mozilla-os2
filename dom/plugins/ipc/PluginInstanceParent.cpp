@@ -37,6 +37,8 @@ extern const PRUnichar* kOOPPPluginFocusEventId;
 UINT gOOPPPluginFocusEvent =
     RegisterWindowMessage(kOOPPPluginFocusEventId);
 extern const PRUnichar* kFlashFullscreenClass;
+#elif defined(XP_OS2)
+#include "mozilla/plugins/PluginSurfaceParent.h"
 #elif defined(MOZ_WIDGET_GTK)
 #include <gdk/gdk.h>
 #elif defined(XP_MACOSX)
@@ -62,11 +64,11 @@ PluginInstanceParent::PluginInstanceParent(PluginModuleParent* parent,
     , mNPNIface(npniface)
     , mWindowType(NPWindowTypeWindow)
     , mDrawingModel(kDefaultDrawingModel)
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(XP_OS2)
     , mPluginHWND(NULL)
     , mPluginWndProc(NULL)
     , mNestedEventState(false)
-#endif // defined(XP_WIN)
+#endif // defined(XP_WIN) || defined(XP_OS2)
 #if defined(XP_MACOSX)
     , mShWidth(0)
     , mShHeight(0)
@@ -83,7 +85,7 @@ PluginInstanceParent::~PluginInstanceParent()
     if (mNPP)
         mNPP->pdata = NULL;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(XP_OS2)
     NS_ASSERTION(!(mPluginHWND || mPluginWndProc),
         "Subclass was not reset correctly before the dtor was reached!");
 #endif
@@ -116,7 +118,7 @@ PluginInstanceParent::Init()
 void
 PluginInstanceParent::ActorDestroy(ActorDestroyReason why)
 {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(XP_OS2)
     if (why == AbnormalShutdown) {
         // If the plugin process crashes, this is the only
         // chance we get to destroy resources.
@@ -146,7 +148,7 @@ PluginInstanceParent::Destroy()
     if (!CallNPP_Destroy(&retval))
         retval = NPERR_GENERIC_ERROR;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(XP_OS2)
     SharedSurfaceRelease();
     UnsubclassPluginWindow();
 #endif
@@ -216,7 +218,7 @@ bool
 PluginInstanceParent::AnswerNPN_GetValue_NPNVnetscapeWindow(NativeWindowHandle* value,
                                                             NPError* result)
 {
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
     HWND id;
 #elif defined(MOZ_X11)
     XID id;
@@ -427,7 +429,7 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
 
         container->SetCompositionNotifySink(mNotifySink);
     } else if (
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
                drawingModel == NPDrawingModelSyncWin
 #elif defined(XP_MACOSX)
 #ifndef NP_NO_QUICKDRAW
@@ -620,7 +622,7 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
         surface = newSurface.get_SurfaceDescriptorX11().OpenForeign();
     }
 #endif
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
     else if (newSurface.type() == SurfaceDescriptor::TPPluginSurfaceParent) {
         PluginSurfaceParent* s =
             static_cast<PluginSurfaceParent*>(newSurface.get_PPluginSurfaceParent());
@@ -674,7 +676,11 @@ PluginInstanceParent::AsyncSetWindow(NPWindow* aWindow)
 {
     NPRemoteWindow window;
     mWindowType = aWindow->type;
+#if defined(XP_OS2)
+    window.window = aWindow->window;
+#else
     window.window = reinterpret_cast<uint64_t>(aWindow->window);
+#endif
     window.x = aWindow->x;
     window.y = aWindow->y;
     window.width = aWindow->width;
@@ -995,7 +1001,7 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
     NPRemoteWindow window;
     mWindowType = aWindow->type;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(XP_OS2)
     // On windowless controls, reset the shared memory surface as needed.
     if (mWindowType == NPWindowTypeDrawable) {
         // SharedSurfaceSetWindow will take care of NPRemoteWindow.
@@ -1006,7 +1012,11 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
     else {
         SubclassPluginWindow(reinterpret_cast<HWND>(aWindow->window));
 
+#if defined(XP_OS2)
+        window.window = aWindow->window;
+#else
         window.window = reinterpret_cast<uint64_t>(aWindow->window);
+#endif
         window.x = aWindow->x;
         window.y = aWindow->y;
         window.width = aWindow->width;
@@ -1243,6 +1253,38 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
                   !wcscmp(szClass, kFlashFullscreenClass)) {
                   return 0;
               }
+            }
+            break;
+
+            case WM_WINDOWPOSCHANGED:
+            {
+                // We send this in nsObjectFrame just before painting
+                return SendWindowPosChanged(npremoteevent);
+            }
+            break;
+        }
+    }
+#endif
+
+#if defined(XP_OS2)
+    if (mWindowType == NPWindowTypeDrawable) {
+        if (IsAsyncDrawing()) {
+            // No support fo async drawing so far.
+            return handled;
+        }
+
+        switch (npevent->event) {
+            case WM_PAINT:
+            {
+                RECTL rcl;
+                RECTL dr;
+                HPS parentHps = ::WinBeginPaint(mPluginHWND, NULLHANDLE, &dr);
+                SharedSurfaceBeforePaint(rcl, dr, parentHps, npremoteevent);
+                if (!CallPaint(npremoteevent, &handled)) {
+                    handled = false;
+                }
+                SharedSurfaceAfterPaint(dr, parentHps);
+                return handled;
             }
             break;
 
@@ -1603,7 +1645,7 @@ PluginInstanceParent::AllocPPluginSurface(const WindowsSharedMemoryHandle& handl
                                           const gfxIntSize& size,
                                           const bool& transparent)
 {
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
     return new PluginSurfaceParent(handle, size, transparent);
 #else
     NS_ERROR("This shouldn't be called!");
@@ -1614,7 +1656,7 @@ PluginInstanceParent::AllocPPluginSurface(const WindowsSharedMemoryHandle& handl
 bool
 PluginInstanceParent::DeallocPPluginSurface(PPluginSurfaceParent* s)
 {
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
     delete s;
     return true;
 #else
@@ -2022,6 +2064,166 @@ PluginInstanceParent::SharedSurfaceAfterPaint(NPEvent* npevent)
 }
 
 #endif // defined(OS_WIN)
+
+#if defined(XP_OS2)
+
+// static
+MRESULT EXPENTRY
+PluginInstanceParent::PluginWindowHookProc(HWND hWnd,
+                                           ULONG message,
+                                           MPARAM mp1,
+                                           MPARAM mp2)
+{
+    PluginInstanceParent* self = reinterpret_cast<PluginInstanceParent*>(
+        ::WinQueryWindowPtr(hWnd, QWL_PENDATA));
+    if (!self) {
+        NS_NOTREACHED("PluginInstanceParent::PluginWindowHookProc null this ptr!");
+        return ::WinDefWindowProc(hWnd, message, mp1, mp2);
+    }
+
+    NS_ASSERTION(self->mPluginHWND == hWnd, "Wrong window!");
+
+    switch (message) {
+        case WM_SETFOCUS:
+        if (SHORT1FROMMP(mp2) == TRUE) {
+            // Let the child plugin window know it should take focus.
+            unused << self->CallSetPluginFocus();
+        }
+        break;
+
+        case WM_CLOSE:
+        self->UnsubclassPluginWindow();
+        break;
+    }
+
+    if (self->mPluginWndProc == PluginWindowHookProc) {
+      NS_NOTREACHED(
+        "PluginWindowHookProc invoking mPluginWndProc w/"
+        "mPluginWndProc == PluginWindowHookProc????");
+        return ::WinDefWindowProc(hWnd, message, mp1, mp2);
+    }
+    return self->mPluginWndProc(hWnd, message, mp1, mp2);
+}
+
+void
+PluginInstanceParent::SubclassPluginWindow(HWND aWnd)
+{
+    NS_ASSERTION(!(mPluginHWND && aWnd != mPluginHWND),
+      "PluginInstanceParent::SubclassPluginWindow hwnd is not our window!");
+
+    if (!mPluginHWND) {
+        mPluginHWND = aWnd;
+        mPluginWndProc = ::WinSubclassWindow(mPluginHWND, PluginWindowHookProc);
+        DebugOnly<BOOL> bRes = ::WinSetWindowPtr(mPluginHWND, QWL_PENDATA, this);
+        NS_ASSERTION(mPluginWndProc,
+          "PluginInstanceParent::SubclassPluginWindow failed to set subclass!");
+        NS_ASSERTION(bRes,
+          "PluginInstanceParent::SubclassPluginWindow failed to set prop!");
+   }
+}
+
+void
+PluginInstanceParent::UnsubclassPluginWindow()
+{
+    if (mPluginHWND && mPluginWndProc) {
+        ::WinSubclassWindow(mPluginHWND, mPluginWndProc);
+        ::WinSetWindowPtr(mPluginHWND, QWL_PENDATA, NULL);
+
+        mPluginWndProc = NULL;
+        mPluginHWND = NULL;
+    }
+}
+
+/* windowless drawing helpers */
+
+void
+PluginInstanceParent::SharedSurfaceRelease()
+{
+    mSharedSurfaceDib.Close();
+}
+
+bool
+PluginInstanceParent::SharedSurfaceSetWindow(const NPWindow* aWindow,
+                                             NPRemoteWindow& aRemoteWindow)
+{
+    aRemoteWindow.window = 0;
+    aRemoteWindow.x      = aWindow->x;
+    aRemoteWindow.y      = aWindow->y;
+    aRemoteWindow.width  = aWindow->width;
+    aRemoteWindow.height = aWindow->height;
+    aRemoteWindow.type   = aWindow->type;
+
+    nsIntRect newPort(aWindow->x, aWindow->y, aWindow->width, aWindow->height);
+
+    // save the the rect location within the browser window.
+    mPluginPort = newPort;
+
+    // move the port to our shared surface origin
+    newPort.MoveTo(0,0);
+
+    // check to see if we have the room in shared surface
+    if (mSharedSurfaceDib.IsValid() && mSharedSize.Contains(newPort)) {
+      // ok to paint
+      aRemoteWindow.surfaceHandle = 0;
+      return true;
+    }
+
+    // allocate a new shared surface
+    SharedSurfaceRelease();
+    if (NS_FAILED(mSharedSurfaceDib.Create(reinterpret_cast<HPS>(aWindow->window),
+                                           newPort.width, newPort.height, false)))
+      return false;
+
+    // save the new shared surface size we just allocated
+    mSharedSize = newPort;
+
+    base::SharedMemoryHandle handle;
+    if (NS_FAILED(mSharedSurfaceDib.ShareToProcess(mParent->ChildProcessHandle(), &handle)))
+      return false;
+
+    aRemoteWindow.surfaceHandle = handle;
+
+    return true;
+}
+
+void
+PluginInstanceParent::SharedSurfaceBeforePaint(RECTL& rcl, RECTL& dr, HPS parentHps,
+                                               NPRemoteEvent& npremoteevent)
+{
+    nsIntRect dirtyRect(dr.xLeft, dr.yBottom, dr.xRight-dr.xLeft, dr.yTop-dr.yBottom);
+    dirtyRect.MoveBy(-mPluginPort.x, -mPluginPort.y); // should always be smaller than dirtyRect
+
+    POINTL ptls[3] = { { dirtyRect.x, dirtyRect.y },
+                       { dirtyRect.x + dirtyRect.width, dirtyRect.y + dirtyRect.height },
+                       { dr.xLeft, dr.yBottom } };
+    ::GpiBitBlt(mSharedSurfaceDib.GetHPS(), parentHps, 3, ptls, ROP_SRCCOPY, BBO_IGNORE);
+
+    // setup the translated dirty rect we'll send to the child
+    rcl.xLeft   = dirtyRect.x;
+    rcl.yBottom = dirtyRect.y;
+    rcl.xRight  = dirtyRect.x + dirtyRect.width;
+    rcl.yTop    = dirtyRect.y + dirtyRect.height;
+
+    npremoteevent.event.wParam = 0;
+    npremoteevent.event.lParam = (uint32_t)&rcl;
+}
+
+void
+PluginInstanceParent::SharedSurfaceAfterPaint(RECTL& dr, HPS parentHps)
+{
+    nsIntRect dirtyRect(dr.xLeft, dr.yBottom, dr.xRight-dr.xLeft, dr.yTop-dr.yBottom);
+    dirtyRect.MoveBy(-mPluginPort.x, -mPluginPort.y);
+
+    POINTL ptls[3] = { { dr.xLeft, dr.yBottom },
+                       { dr.xLeft + dr.xRight, dr.yBottom + dr.yTop },
+                       { dirtyRect.x, dirtyRect.y } };
+
+
+    // src copy the shared dib into the parent surface we are handed.
+    ::GpiBitBlt(parentHps, mSharedSurfaceDib.GetHPS(), 3, ptls, ROP_SRCCOPY, BBO_IGNORE);
+}
+
+#endif // defined(XP_OS2)
 
 bool
 PluginInstanceParent::AnswerPluginFocusChange(const bool& gotFocus)

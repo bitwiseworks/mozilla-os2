@@ -278,7 +278,7 @@ typedef enum {
   NPDrawingModelCoreAnimation = 3,
   NPDrawingModelInvalidatingCoreAnimation = 4,
 #endif
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   NPDrawingModelSyncWin = 5,
 #endif
 #if defined(MOZ_X11)

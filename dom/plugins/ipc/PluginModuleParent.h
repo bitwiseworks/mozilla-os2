@@ -34,6 +34,24 @@
 #include "nsExceptionHandler.h"
 #endif
 
+// NOTE: stolen from nsNPAPIPlugin.h
+
+/*
+ * Use this macro before each exported function
+ * (between the return address and the function
+ * itself), to ensure that the function has the
+ * right calling conventions on OS/2.
+ */
+#define NP_CALLBACK NP_LOADDS
+
+#if defined(XP_WIN)
+#define NS_NPAPIPLUGIN_CALLBACK(_type, _name) _type (__stdcall * _name)
+#elif defined(XP_OS2)
+#define NS_NPAPIPLUGIN_CALLBACK(_type, _name) _type (_System * _name)
+#else
+#define NS_NPAPIPLUGIN_CALLBACK(_type, _name) _type (* _name)
+#endif
+
 namespace mozilla {
 namespace dom {
 class PCrashReporterParent;
@@ -213,28 +231,28 @@ private:
     // messages then get forwarded along to the plugin instance,
     // and then eventually the child process.
 
-    static NPError NPP_Destroy(NPP instance, NPSavedData** save);
+    static NPError NP_CALLBACK NPP_Destroy(NPP instance, NPSavedData** save);
 
-    static NPError NPP_SetWindow(NPP instance, NPWindow* window);
-    static NPError NPP_NewStream(NPP instance, NPMIMEType type, NPStream* stream,
-                                 NPBool seekable, uint16_t* stype);
-    static NPError NPP_DestroyStream(NPP instance,
-                                     NPStream* stream, NPReason reason);
-    static int32_t NPP_WriteReady(NPP instance, NPStream* stream);
-    static int32_t NPP_Write(NPP instance, NPStream* stream,
-                             int32_t offset, int32_t len, void* buffer);
-    static void NPP_StreamAsFile(NPP instance,
-                                 NPStream* stream, const char* fname);
-    static void NPP_Print(NPP instance, NPPrint* platformPrint);
-    static int16_t NPP_HandleEvent(NPP instance, void* event);
-    static void NPP_URLNotify(NPP instance, const char* url,
-                              NPReason reason, void* notifyData);
-    static NPError NPP_GetValue(NPP instance,
-                                NPPVariable variable, void *ret_value);
-    static NPError NPP_SetValue(NPP instance, NPNVariable variable,
-                                void *value);
-    static void NPP_URLRedirectNotify(NPP instance, const char* url,
-                                      int32_t status, void* notifyData);
+    static NPError NP_CALLBACK NPP_SetWindow(NPP instance, NPWindow* window);
+    static NPError NP_CALLBACK NPP_NewStream(NPP instance, NPMIMEType type, NPStream* stream,
+                                             NPBool seekable, uint16_t* stype);
+    static NPError NP_CALLBACK NPP_DestroyStream(NPP instance,
+                                                 NPStream* stream, NPReason reason);
+    static int32_t NP_CALLBACK NPP_WriteReady(NPP instance, NPStream* stream);
+    static int32_t NP_CALLBACK NPP_Write(NPP instance, NPStream* stream,
+                                         int32_t offset, int32_t len, void* buffer);
+    static void NP_CALLBACK NPP_StreamAsFile(NPP instance,
+                                             NPStream* stream, const char* fname);
+    static void NP_CALLBACK NPP_Print(NPP instance, NPPrint* platformPrint);
+    static int16_t NP_CALLBACK NPP_HandleEvent(NPP instance, void* event);
+    static void NP_CALLBACK NPP_URLNotify(NPP instance, const char* url,
+                                          NPReason reason, void* notifyData);
+    static NPError NP_CALLBACK NPP_GetValue(NPP instance,
+                                            NPPVariable variable, void *ret_value);
+    static NPError NP_CALLBACK NPP_SetValue(NPP instance, NPNVariable variable,
+                                            void *value);
+    static void NP_CALLBACK NPP_URLRedirectNotify(NPP instance, const char* url,
+                                                  int32_t status, void* notifyData);
 
     virtual bool HasRequiredFunctions();
     virtual nsresult AsyncSetWindow(NPP instance, NPWindow* window);

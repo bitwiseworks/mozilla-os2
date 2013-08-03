@@ -91,7 +91,7 @@ PluginModuleChild::PluginModuleChild()
   , mQuirks(QUIRKS_NOT_INITIALIZED)
   , mShutdownFunc(0)
   , mInitializeFunc(0)
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(XP_OS2) || defined(OS_MACOSX)
   , mGetEntryPointsFunc(0)
 #elif defined(MOZ_WIDGET_GTK)
   , mNestedLoopTimerId(0)
@@ -206,7 +206,7 @@ PluginModuleChild::Init(const std::string& aPluginFilename,
         (NP_PLUGINUNIXINIT) PR_FindFunctionSymbol(mLibrary, "NP_Initialize");
     NS_ASSERTION(mInitializeFunc, "couldn't find NP_Initialize()");
 
-#elif defined(OS_WIN) || defined(OS_MACOSX)
+#elif defined(OS_WIN) || defined(XP_OS2) || defined(OS_MACOSX)
     mShutdownFunc =
         (NP_PLUGINSHUTDOWN)PR_FindFunctionSymbol(mLibrary, "NP_Shutdown");
 
@@ -1829,7 +1829,7 @@ PluginModuleChild::AnswerNP_GetEntryPoints(NPError* _retval)
 
 #if defined(OS_LINUX)
     return true;
-#elif defined(OS_WIN) || defined(OS_MACOSX)
+#elif defined(OS_WIN) || defined(XP_OS2) || defined(OS_MACOSX)
     *_retval = mGetEntryPointsFunc(&mFunctions);
     return true;
 #else
@@ -1859,7 +1859,7 @@ PluginModuleChild::AnswerNP_Initialize(const uint32_t& aFlags, NPError* _retval)
 #if defined(OS_LINUX)
     *_retval = mInitializeFunc(&sBrowserFuncs, &mFunctions);
     return true;
-#elif defined(OS_WIN) || defined(OS_MACOSX)
+#elif defined(OS_WIN) || defined(XP_OS2) || defined(OS_MACOSX)
     *_retval = mInitializeFunc(&sBrowserFuncs);
     return true;
 #else

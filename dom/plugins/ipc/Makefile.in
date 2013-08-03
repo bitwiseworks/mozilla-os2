@@ -106,6 +106,16 @@ EXPORTS_mozilla/plugins += \
   $(NULL)
 endif
 
+ifeq (OS2,$(OS_ARCH))
+CPPSRCS += \
+  PluginSurfaceParent.cpp \
+  $(NULL)
+
+EXPORTS_mozilla/plugins += \
+  PluginSurfaceParent.h \
+  $(NULL)
+endif
+
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 DIRS += \
     interpose \
