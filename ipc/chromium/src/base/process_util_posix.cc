@@ -397,6 +397,53 @@ int64 TimeValToMicroseconds(const struct timeval& tv) {
 }
 
 int ProcessMetrics::GetCPUUsage() {
+#ifdef OS_OS2
+  static ULONG timer_interval = 0;
+  if (timer_interval == 0) {
+    // First time, get the granularity of counters (in 1/10 ms)
+    DosQuerySysInfo (QSV_TIMER_INTERVAL, QSV_TIMER_INTERVAL, (PVOID)&timer_interval, sizeof(ULONG));
+  }
+
+  enum { ProcSysStateSize = 4 * 1024 }; // 4K should be enough for one process
+  char *sys_state [ProcSysStateSize];
+
+  APIRET arc = DosQuerySysState (QS_PROCESS, 0, getpid(), 0, sys_state, ProcSysStateSize);
+  if (arc != 0)
+      return 0;
+
+  QSPTRREC *ptr_rec = (QSPTRREC *)sys_state;
+  QSPREC *proc_rec = ptr_rec->pProcRec;
+  QSTREC *thrd_rec = proc_rec->pThrdRec;
+  int64 system_time = 0;
+  int i;
+  for (i = 0; i < proc_rec->cTCB; ++i) {
+      system_time += thrd_rec->systime + thrd_rec->usertime;
+      ++thrd_rec;
+  }
+
+  // Convert to ms
+  system_time = system_time * timer_interval / 10;
+
+  if (system_time < last_system_time_) {
+      // Most likely a heavy load thread has ended. Reset the counte to avoid
+      // getting the negative delta. Note that the delta of other will be lost
+      // but it will only affect the current estimation (by returning 0%).
+      last_system_time_ = system_time;
+  }
+
+  int64 time = clock() * 1000 / CLOCKS_PER_SEC;
+  int cpu = 0;
+
+  int64 time_delta = time - last_time_;
+  if (time_delta > 0) {
+    // We add time_delta / 2 so the result is rounded.
+    cpu = ((system_time - last_system_time_) * 100 + time_delta / 2) / time_delta;
+    last_system_time_ = system_time;
+    last_time_ = time;
+  }
+
+  return cpu;
+#else
   struct timeval now;
   struct rusage usage;
 
@@ -433,6 +480,7 @@ int ProcessMetrics::GetCPUUsage() {
   last_time_ = time;
 
   return cpu;
+#endif
 }
 
 bool GetAppOutput(const CommandLine& cl, std::string* output) {
