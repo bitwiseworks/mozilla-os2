@@ -12,6 +12,11 @@
 
 #include "base/logging.h"
 
+#ifdef OS_OS2
+// vswprintf is defined in string_util_os2.cc, read there for more details
+int vswprintf (wchar_t *buffer, size_t n, const wchar_t *format, va_list arg_ptr);
+#endif
+
 namespace base {
 
 // Chromium code style is to not use malloc'd strings; this is only for use
@@ -33,13 +38,11 @@ inline int vsnprintf(char* buffer, size_t size,
   return ::vsnprintf(buffer, size, format, arguments);
 }
 
-#ifndef OS_OS2
 inline int vswprintf(wchar_t* buffer, size_t size,
                      const wchar_t* format, va_list arguments) {
   DCHECK(IsWprintfFormatPortable(format));
   return ::vswprintf(buffer, size, format, arguments);
 }
-#endif
 
 }  // namespace base
 
