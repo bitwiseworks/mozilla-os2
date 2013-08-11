@@ -17,6 +17,13 @@
 #include <unistd.h>
 #endif
 
+#if defined(__EMX__)
+// for gethrtime()
+#include <sys/time.h>
+// for setenv/getenv
+#include <stdlib.h>
+#endif
+
 #include <limits>
 
 #include "base/basictypes.h"
@@ -65,8 +72,10 @@ Time Time::FromExploded(bool is_local, const Exploded& exploded) {
   timestruct.tm_wday   = exploded.day_of_week;  // mktime/timegm ignore this
   timestruct.tm_yday   = 0;     // mktime/timegm ignore this
   timestruct.tm_isdst  = -1;    // attempt to figure it out
+#ifndef __EMX__
   timestruct.tm_gmtoff = 0;     // not a POSIX field, so mktime/timegm ignore
   timestruct.tm_zone   = NULL;  // not a POSIX field, so mktime/timegm ignore
+#endif
 
   time_t seconds;
 #ifdef ANDROID
@@ -75,7 +84,25 @@ Time Time::FromExploded(bool is_local, const Exploded& exploded) {
   if (is_local)
     seconds = mktime(&timestruct);
   else
+#ifdef __EMX__
+  {
+    char *tz = getenv("TZ");
+    if (tz)
+      tz = strdup(tz);
+    setenv("TZ", "", 1);
+    tzset();
+    seconds = mktime(&timestruct);
+    if (tz) {
+      setenv("TZ", tz, 1);
+      free(tz);
+    } else {
+      unsetenv("TZ");
+    }
+    tzset();
+  }
+#else
     seconds = timegm(&timestruct);
+#endif
 #endif
 
   int64 milliseconds;
@@ -140,9 +167,8 @@ void Time::Explode(bool is_local, Exploded* exploded) const {
 
 // static
 TimeTicks TimeTicks::Now() {
-  uint64_t absolute_micro;
-
 #if defined(OS_MACOSX)
+  uint64_t absolute_micro;
   static mach_timebase_info_data_t timebase_info;
   if (timebase_info.denom == 0) {
     // Zero-initialization of statics guarantees that denom will be 0 before
@@ -170,6 +196,7 @@ TimeTicks TimeTicks::Now() {
 #elif defined(__OpenBSD__) || defined(OS_POSIX) && \
       defined(_POSIX_MONOTONIC_CLOCK) && _POSIX_MONOTONIC_CLOCK >= 0
 
+  int64 absolute_micro;
   struct timespec ts;
   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
     NOTREACHED() << "clock_gettime(CLOCK_MONOTONIC) failed.";
@@ -180,16 +207,26 @@ TimeTicks TimeTicks::Now() {
       (static_cast<int64>(ts.tv_sec) * Time::kMicrosecondsPerSecond) +
       (static_cast<int64>(ts.tv_nsec) / Time::kNanosecondsPerMicrosecond);
 
-#else  // _POSIX_MONOTONIC_CLOCK
+#elif defined(OS_POSIX)
+  int64 absolute_micro;
+  absolute_micro = clock() * Time::kMicrosecondsPerSecond / CLOCKS_PER_SEC;
+#else
 #error No usable tick clock function on this platform.
-#endif  // _POSIX_MONOTONIC_CLOCK
+#endif
 
   return TimeTicks(absolute_micro);
 }
 
 // static
 TimeTicks TimeTicks::HighResNow() {
+#if defined(__EMX__)
+  hrtime_t nano = gethrtime();
+  if (nano < 0)
+      return TimeTicks();
+  return TimeTicks(nano / Time::kNanosecondsPerMicrosecond);
+#else
   return Now();
+#endif
 }
 
 }  // namespace base

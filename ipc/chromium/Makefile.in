@@ -247,12 +247,14 @@ endif # } OS_LINUX
 
 ifdef OS_OS2 # {
 CPPSRCS += \
+  atomicops_internals_x86_gcc.cc \
   platform_thread_os2.cc \
   shared_memory_os2.cc \
   base_paths_os2.cc \
   transport_dib_os2.cc \
   process_util_linux.cc \
   process_util_os2.cc \
+  time_posix.cc \
   sys_info_os2.cc \
   string_util_os2.cc \
   $(NULL)
