@@ -96,7 +96,7 @@ XPCOMGlueLoad(const char *xpcomFile, GetFrozenFunctionsFunc *func)
     ulrc = DosLoadModule(pszError, _MAX_PATH, xpcomFile, &h);
 
     if (ulrc != NO_ERROR)
-        return nullptr;
+        return NS_ERROR_FAILURE;
 
     AppendDependentLib(h);
 
