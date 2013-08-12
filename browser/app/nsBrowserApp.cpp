@@ -32,6 +32,9 @@
 #define snprintf _snprintf
 #define strcasecmp _stricmp
 #endif
+#ifdef __EMX__
+#include <sys/time.h>
+#endif
 #include "BinaryPath.h"
 
 #include "nsXPCOMPrivate.h" // for MAXPATHLEN and XPCOM_DLL
