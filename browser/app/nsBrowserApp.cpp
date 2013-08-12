@@ -48,6 +48,14 @@ static void Output(const char *fmt, ... )
 
 #ifndef XP_WIN
   vfprintf(stderr, fmt, ap);
+#ifdef XP_OS2
+  char msg[2048];
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  HAB hab = WinInitialize(0);
+  WinCreateMsgQueue(hab, 0);
+  WinMessageBox(HWND_DESKTOP, 0, msg, "Firefox", 0,
+                MB_OK | MB_ERROR | MB_MOVEABLE);
+#endif
 #else
   char msg[2048];
   vsnprintf_s(msg, _countof(msg), _TRUNCATE, fmt, ap);
