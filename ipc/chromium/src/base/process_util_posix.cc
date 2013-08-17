@@ -28,6 +28,10 @@
 #include "base/waitable_event.h"
 #include "base/dir_reader_posix.h"
 
+#if defined(OS_OS2)
+#include "base/os2_pipe.h"
+#endif
+
 const int kMicrosecondsPerSecond = 1000000;
 
 namespace base {

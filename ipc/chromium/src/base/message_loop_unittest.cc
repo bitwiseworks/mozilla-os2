@@ -16,6 +16,9 @@
 #if defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
 #endif
+#if defined(OS_OS2)
+#include "base/os2_pipe.h"
+#endif
 
 using base::Thread;
 using base::Time;

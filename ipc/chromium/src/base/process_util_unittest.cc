@@ -23,6 +23,9 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
+#if defined(OS_OS2)
+#include "base/os2_pipe.h"
+#endif
 
 namespace base {
 
