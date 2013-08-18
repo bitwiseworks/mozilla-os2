@@ -41,20 +41,6 @@ SHELL_CONFIG_VARS = \
 	MOZ_APP_DISPLAYNAME MOZ_UA_BUILDID \
 	NSPR_MAJOR_VERSION NSPR_MINOR_VERSION NSPR_PATCH_VERSION
 
-# Variables put to generated mozilla-config.h unquoted
-H_CONFIG_VARS = \
-    FIREFOX_VERSION MOZ_UPDATER MOZ_PHOENIX \
-    MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
-    MOZ_SERVICES_SYNC MOZ_MEDIA_NAVIGATOR \
-    MOZ_BUILD_APP MOZ_MACBUNDLE_ID MOZ_UPDATE_CHANNEL \
-    MOZILLA_VERSION_U=$(MOZILLA_VERSION)
-
-# Variables put to generated mozilla-config.h quoted
-H_CONFIG_VARS_QUOTED = \
-    MOZILLA_VERSION MOZILLA_UAVERSION \
-    MOZ_APP_UA_NAME MOZ_APP_UA_VERSION=$(MOZ_APP_VERSION) \
-    MOZ_DISTRIBUTION_ID MOZ_UA_BUILDID MOZ_USER_DIR
-
 FILE_SUB_FOOTER     = $(PATH_ROOT)/config/footer.kmk
 CACHED_CONFIG       = $(PATH_OBJ)/CachedConfig.kmk
 
@@ -143,32 +129,6 @@ endif
 #------------------------------------------------------------------------------
 # Explicit rules
 #------------------------------------------------------------------------------
-
-MOZILLA_CONFIG_GEN_H = $(PATH_OBJ)/mozilla-config.gen.h
-
-$$(MOZILLA_CONFIG_GEN_H): | $$(call DIRDEP,$$(dir $$@))
-	%$(call MSG_GENERATE,,$@)
-	$(QUIET)$(RM) -f $@
-	$(QUIET)$(APPEND_EXT) -n $@ \
-        $(foreach v, $(H_CONFIG_VARS), \
-            "#define $(firstword $(subst =, ,$(v))) \
-                $(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))")
-	$(QUIET)$(APPEND_EXT) -n $@ \
-        $(foreach v, $(H_CONFIG_VARS_QUOTED), \
-            "#define $(firstword $(subst =, ,$(v))) \
-                \"$(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))\"")
-	$(QUIET)$(ECHO_EXT) "#include \"$(PATH_ROOT)/mozilla-config.os2.h\"" >> $@
-
-$$(MOZILLA_CONFIG_H): $(PATH_ROOT)/mozilla-config.h.in $$(MOZILLA_CONFIG_GEN_H)
-	%$(call MSG_GENERATE,,$@)
-	$(QUIET)$(SED) -e "s/@ALLDEFINES@/\#include \"$(notdir $(MOZILLA_CONFIG_GEN_H))\"/" < $< > $@
-
-BLDDIRS += $(call DIRDEP,$(dir $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)))
-OTHER_CLEAN += $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
-
-redo-mozilla-config: clean-mozilla-config $$(MOZILLA_CONFIG_H)
-clean-mozilla-config:
-	$(RM) -f $(MOZILLA_CONFIG_H) $(MOZILLA_CONFIG_GEN_H)
 
 $$(XPCOM_CONFIG_H): $(PATH_ROOT)/xpcom/xpcom-config.os2.h | $$(call DIRDEP,$$(dir $$@))
 	%$(call MSG_GENERATE,,$@)
