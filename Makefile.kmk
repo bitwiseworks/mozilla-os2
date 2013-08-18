@@ -42,6 +42,17 @@ xpcom_private_CONFIG_H_VARS.os2 = \
     HAVE_SYS_MOUNT_H HAVE_SYS_VFS_H=1 HAVE_WCRTOMB=1
 
 #
+# Install global headers.
+#
+INSTALLS += global_headers
+
+global_headers_INST     = include/
+global_headers_SOURCES += \
+    $(MOZILLA_CONFIG_H) \
+    config/nsStaticComponents.h \
+    $(XPCOM_CONFIG_H)
+
+#
 # Include sub-makefiles.
 #
 
