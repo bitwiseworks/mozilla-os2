@@ -6,8 +6,10 @@ SUB_DEPTH = ../../..
 include $(KBUILD_PATH)/subheader.kmk
 
 # Sanity
-ifndef NSPR_MAJOR_VERSION
-$(error NSPR_MAJOR_VERSION is not defined! Run kmk configure in $(PATH_ROOT))
+ifn1of (configure, $(MAKECMDGOALS))
+ ifndef NSPR_MAJOR_VERSION
+  $(error NSPR_MAJOR_VERSION is not defined! Run kmk configure in $(PATH_ROOT))
+ endif
 endif
 
 DLLS += plds
@@ -27,7 +29,7 @@ plds_SOURCES   += \
 plvrsion.c_DEPS = $(plds_0_OUTDIR)/_pl_bld.h
 plvrsion.c_INCS = $(plds_0_OUTDIR)
 
-$$(plds_0_OUTDIR)/_pl_bld.h: $$(plds_MAKEFILE) $(PATH_OBJ)/now/now$(HOSTSUFF_EXE)
+$$(plds_0_OUTDIR)/_pl_bld.h: $$(plds_MAKEFILE) $(PATH_OBJ)/now/now$(HOSTSUFF_EXE) | $$(call DIRDEP,$$(dir $$@))
 	$(QUIET)$(RM) -f $@
 	$(QUIET)$(APPEND_EXT) -n $@ \
 		'#define _BUILD_STRING "$(shell date "+%Y-%m-%d %T")"' \

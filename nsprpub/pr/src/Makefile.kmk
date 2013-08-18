@@ -6,8 +6,10 @@ SUB_DEPTH = ../../..
 include $(KBUILD_PATH)/subheader.kmk
 
 # Sanity
-ifndef NSPR_MAJOR_VERSION
-$(error NSPR_MAJOR_VERSION is not defined! Run kmk configure in $(PATH_ROOT))
+ifn1of (configure, $(MAKECMDGOALS))
+ ifndef NSPR_MAJOR_VERSION
+  $(error NSPR_MAJOR_VERSION is not defined! Run kmk configure in $(PATH_ROOT))
+ endif
 endif
 
 DLLS = nspr
@@ -194,7 +196,7 @@ nspr_SOURCES   += prvrsion.c
 prvrsion.c_DEPS = $(nspr_0_OUTDIR)/_pr_bld.h
 prvrsion.c_INCS = $(nspr_0_OUTDIR)
 
-$$(nspr_0_OUTDIR)/_pr_bld.h: $$(nspr_MAKEFILE) $(PATH_OBJ)/now/now$(HOSTSUFF_EXE)
+$$(nspr_0_OUTDIR)/_pr_bld.h: $$(nspr_MAKEFILE) $(PATH_OBJ)/now/now$(HOSTSUFF_EXE) | $$(call DIRDEP,$$(dir $$@))
 	$(QUIET)$(RM) -f $@
 	$(QUIET)$(APPEND_EXT) -n $@ \
 		'#define _BUILD_STRING "$(shell date "+%Y-%m-%d %T")"' \
