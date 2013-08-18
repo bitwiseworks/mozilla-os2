@@ -88,44 +88,65 @@ NSPR_LIBS   = $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
 # Templates
 #------------------------------------------------------------------------------
 
-TEMPLATE_Cxx            = C/C++ sources
-TEMPLATE_Cxx_TOOL       = GXX3OMF
-TEMPLATE_Cxx_INCS       = $(PATH_STAGE)/include
-TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H) \
-                          -Wall -Wpointer-arith -Wdeclaration-after-statement \
-                          -Werror=return-type -Wtype-limits -Wempty-body \
-                          -Wno-unused -Wno-overlength-strings -Wcast-align \
-                          -fno-strict-aliasing
-TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H) \
-                          -Wall -Wpointer-arith -Woverloaded-virtual \
-                          -Werror=return-type -Wtype-limits -Wempty-body \
-                          -Wctor-dtor-privacy -Wno-overlength-strings \
-                          -Wno-invalid-offsetof -Wno-variadic-macros -Wcast-align \
-                          -fno-exceptions -fno-strict-aliasing -fno-rtti
-TEMPLATE_Cxx_DEFS       = XP_OS2 NO_X11 MOZILLA_CLIENT
-TEMPLATE_Cxx_DEPS       = $(MOZILLA_CONFIG_H) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
+TEMPLATE_CxxBase            = Base template for C/C++ sources
+TEMPLATE_CxxBase_TOOL.os2   = GXX3OMF
+TEMPLATE_CxxBase_INCS       = $(PATH_STAGE)/include
 
-TEMPLATE_Cxx_CFLAGS.release     = -O2 -fomit-frame-pointer
-TEMPLATE_Cxx_CXXFLAGS.release   = -O2 -fomit-frame-pointer
-TEMPLATE_Cxx_DEFS.release       = NDEBUG TRIMMED
-TEMPLATE_Cxx_LDFLAGS.release    =
+TEMPLATE_CxxBase_CFLAGS = \
+    -Wall -Wpointer-arith -Wdeclaration-after-statement \
+    -Werror=return-type -Wtype-limits -Wempty-body \
+    -Wno-unused -Wno-overlength-strings -Wcast-align \
+    -fno-strict-aliasing
 
-TEMPLATE_Cxx_CFLAGS.debug       = -fno-omit-frame-pointer
-TEMPLATE_Cxx_CXXFLAGS.debug     = -fno-omit-frame-pointer
-TEMPLATE_Cxx_DEFS.debug         = DEBUG _DEBUG TRACING
-TEMPLATE_Cxx_LDFLAGS.debug      = -fno-inline
+TEMPLATE_CxxBase_CXXFLAGS = \
+    -Wall -Wpointer-arith -Woverloaded-virtual \
+    -Werror=return-type -Wtype-limits -Wempty-body \
+    -Wctor-dtor-privacy -Wno-overlength-strings \
+    -Wno-invalid-offsetof -Wno-variadic-macros -Wcast-align \
+    -fno-exceptions -fno-strict-aliasing -fno-rtti
+
+TEMPLATE_CxxBase_DEFS       = MOZILLA_CLIENT
+
+TEMPLATE_CxxBase_CFLAGS.release     = -O2 -fomit-frame-pointer
+TEMPLATE_CxxBase_CXXFLAGS.release   = -O2 -fomit-frame-pointer
+TEMPLATE_CxxBase_DEFS.release       = NDEBUG TRIMMED
+TEMPLATE_CxxBase_LDFLAGS.release    =
+
+TEMPLATE_CxxBase_CFLAGS.debug       = -fno-omit-frame-pointer
+TEMPLATE_CxxBase_CXXFLAGS.debug     = -fno-omit-frame-pointer
+TEMPLATE_CxxBase_DEFS.debug         = DEBUG _DEBUG TRACING
+TEMPLATE_CxxBase_LDFLAGS.debug      = -fno-inline
 
 # generate .sym files but don't put them in a separate dir
-TEMPLATE_Cxx_LD_DEBUG       = split
-TEMPLATE_Cxx_DEBUG_STAGE    = nul
+TEMPLATE_CxxBase_LD_DEBUG.os2       = split
+TEMPLATE_CxxBase_DEBUG_STAGE.os2    = nul
 
-TEMPLATE_Bin                = DLL or EXE
+#
+
+TEMPLATE_Cxx            = Generic Mozilla C/C++ sources
+TEMPLATE_Cxx_EXTENDS    = CxxBase
+TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H) $(TEMPLATE_CxxBase_CFLAGS)
+TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H) $(TEMPLATE_CxxBase_CXXFLAGS)
+
+TEMPLATE_Cxx_DEPS       = $(MOZILLA_CONFIG_H) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
+
+TEMPLATE_Lib                = Generic Mozilla library
+TEMPLATE_Lib_EXTENDS        = Cxx
+
+TEMPLATE_Bin                = Generic Mozilla DLL or EXE
 TEMPLATE_Bin_EXTENDS        = Cxx
-TEMPLATE_Bin_LDFLAGS        = -Zmap -Zlinker /ST:0x100000 -Zhigh-mem
+
+TEMPLATE_Bin_LDFLAGS.os2    = -Zmap -Zlinker /ST:0x100000 -Zhigh-mem
 
 ifn1of ($(EMXOMFLD_TYPE),WLINK wlink)
-TEMPLATE_Bin_LDFLAGS       += -Zlinker '"DISABLE 1121"'
+TEMPLATE_Bin_LDFLAGS.os2   += -Zlinker '"DISABLE 1121"'
 endif
+
+TEMPLATE_Dll                = Generic Mozilla DLL
+TEMPLATE_Dll_EXTENDS        = Bin
+
+TEMPLATE_Exe                = Generic Mozilla EXE
+TEMPLATE_Exe_EXTENDS        = Bin
 
 #------------------------------------------------------------------------------
 # Explicit rules

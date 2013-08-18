@@ -7,7 +7,7 @@ include $(KBUILD_PATH)/subheader.kmk
 
 BLDPROGS = now
 
-now_TEMPLATE    = Cxx
+now_TEMPLATE    = Bin
 now_SOURCES     = now.c
 
 include $(FILE_SUB_FOOTER)

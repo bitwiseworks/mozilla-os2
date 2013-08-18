@@ -7,7 +7,7 @@ include $(KBUILD_PATH)/subheader.kmk
 
 LIBRARIES += mfbt
 
-mfbt_TEMPLATE   = Cxx
+mfbt_TEMPLATE   = Lib
 mfbt_DEFS       = IMPL_MFBT
 mfbt_SOURCES    = HashFunctions.cpp SHA1.cpp \
                   $(addprefix double-conversion/, \

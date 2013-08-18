@@ -7,7 +7,7 @@ include $(KBUILD_PATH)/subheader.kmk
 
 LIBRARIES += mozglue
 
-mozglue_TEMPLATE    = Cxx
+mozglue_TEMPLATE    = Lib
 mozglue_SOURCES     = \
 	dummy.cpp
 

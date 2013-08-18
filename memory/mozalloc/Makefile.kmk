@@ -7,7 +7,7 @@ include $(KBUILD_PATH)/subheader.kmk
 
 DLLS += mozalloc
 
-mozalloc_TEMPLATE   = Cxx
+mozalloc_TEMPLATE   = Dll
 mozalloc_INCS       = $(dir $(XPCOM_CONFIG_H))
 mozalloc_SOURCES    = \
 	mozalloc.cpp \

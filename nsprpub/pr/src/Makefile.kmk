@@ -15,7 +15,7 @@ endif
 DLLS = nspr
 
 nspr_NAME       = nspr$(NSPR_MAJOR_VERSION)
-nspr_TEMPLATE   = Cxx
+nspr_TEMPLATE   = Dll
 nspr_DEFS       = _NSPR_BUILD_
 nspr_INCS       = \
     $(PATH_STAGE)/include/nspr \

@@ -15,7 +15,7 @@ endif
 DLLS += plc
 
 plc_NAME        = plc$(NSPR_MAJOR_VERSION)
-plc_TEMPLATE    = Cxx
+plc_TEMPLATE    = Dll
 plc_DEFS        =
 plc_INCS        = \
     $(PATH_STAGE)/include/nspr include
