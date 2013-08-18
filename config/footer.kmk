@@ -164,7 +164,7 @@ define def_unit_config_headers_target_pre_config_h_rule
 
 includedep $(dep)
 
-$(out): $(src) $(value TARGET_OUT_DEP_CHECK) | $$(call DIRDEP,$$(dir $$@))
+$(out): $(src) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
 	%$$(call MSG_GENERATE,$(target),$(out),$(src))
 	$(QUIET)$(RM) -f $(out) $(dep)
 	$(QUIET)$(SED) -r $(foreach v, $(cfg_h_vars), \
@@ -183,7 +183,7 @@ define def_unit_config_headers_target_pre_confdefs_h_rule
 
 includedep $(dep)
 
-$(out) +| $(out).tmp: $(src) $(cfdefs_h_static) $(value TARGET_OUT_DEP_CHECK) | $$(call DIRDEP,$$(dir $$@))
+$(out) +| $(out).tmp: $(src) $(cfdefs_h_static) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
 	%$$(call MSG_GENERATE,$(target),$(out),$(src))
 	$(QUIET)$(RM) -f $(out) $(out).tmp $(dep)
 	$(QUIET)$(APPEND_EXT) -n $(out).tmp \
