@@ -47,6 +47,7 @@ CACHED_CONFIG       = $(PATH_OBJ)/CachedConfig.kmk
 MOZILLA_CONFIG_H    = $(PATH_OBJ)/mozilla-config.h
 XPCOM_CONFIG_H 	    = $(PATH_OBJ)/xpcom/xpcom-config.h
 XPCOM_PRIVATE_H     = $(PATH_OBJ)/xpcom/xpcom-private.h
+
 BUILDID             = $(PATH_OBJ)/buildid
 
 # Suffix for long long integer constants in C
@@ -129,21 +130,6 @@ endif
 #------------------------------------------------------------------------------
 # Explicit rules
 #------------------------------------------------------------------------------
-
-$$(XPCOM_CONFIG_H): $(PATH_ROOT)/xpcom/xpcom-config.os2.h | $$(call DIRDEP,$$(dir $$@))
-	%$(call MSG_GENERATE,,$@)
-	$(QUIET)$(CP) $< $@
-
-$$(XPCOM_PRIVATE_H): $(PATH_ROOT)/xpcom/xpcom-private.os2.h | $$(call DIRDEP,$$(dir $$@))
-	%$(call MSG_GENERATE,,$@)
-	$(QUIET)$(CP) $< $@
-
-BLDDIRS += $(call DIRDEP,$(dir $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)))
-OTHER_CLEAN += $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
-
-redo-xpcom-config: clean-xpcom-config $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
-clean-xpcom-config:
-	$(RM) -f $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 
 $$(BUILDID): | $$(call DIRDEP,$$(dir $$@))
 ifdef MOZ_BUILD_DATE
