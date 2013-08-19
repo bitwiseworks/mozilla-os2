@@ -46,4 +46,19 @@ endif # MOZ_APP_STATIC_INI
 
 endif # MOZ_APP_BASENAME
 
+#
+# Mozilla Build ID.
+#
+
+$$(BUILDID): | $$(call DIRDEP,$$(dir $$@))
+ifdef MOZ_BUILD_DATE
+	printf "%s" $(MOZ_BUILD_DATE) > $@
+else
+	$(PYTHON) $(PATH_ROOT)/toolkit/xre/make-platformini.py --print-buildid > $@
+endif
+
+OTHERS += $(BUILDID)
+BLDDIRS += $(call DIRDEP,$(dir $(BUILDID)))
+OTHER_CLEAN += $(BUILDID)
+
 include $(FILE_SUB_FOOTER)

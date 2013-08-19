@@ -149,62 +149,6 @@ TEMPLATE_Exe                = Generic Mozilla EXE
 TEMPLATE_Exe_EXTENDS        = Bin
 
 #------------------------------------------------------------------------------
-# Explicit rules
-#------------------------------------------------------------------------------
-
-$$(BUILDID): | $$(call DIRDEP,$$(dir $$@))
-ifdef MOZ_BUILD_DATE
-	printf "%s" $(MOZ_BUILD_DATE) > $@
-else
-	$(PYTHON) $(PATH_ROOT)/toolkit/xre/make-platformini.py --print-buildid > $@
-endif
-
-BLDDIRS += $(call DIRDEP,$(dir $(BUILDID)))
-OTHER_CLEAN += $(BUILDID)
-clean-buildid:
-	$(RM) $(BUILDID)
-
-#
-# Configure target prepares cached settings by putting them to a dedicated
-# .kmk file that is included by Config.kmk. It is intended for variables that
-# require running other programs (like text processors) to get their values
-# so they would slow down the build process if evaluated each time kmk is run.
-#
-.PHONY: configure
-configure: | $$(call DIRDEP,$$(dir $$(CACHED_CONFIG)))
-	$(QUIET)$(ECHO) Obtaining and saving build settings to $(CACHED_CONFIG)...
-	$(QUIET)$(RM) -f $(CACHED_CONFIG)
-
-	$(QUIET)$(SHELL) -c ' \
-	\
-	MOZILLA_VERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) 2>nul` ; \
-	MOZILLA_UAVERSION=`$(PERL) $(PATH_ROOT)/config/milestone.pl -topsrcdir $(PATH_ROOT) -uaversion 2>nul` ; \
-	FIREFOX_VERSION=`cat $(PATH_ROOT)/browser/config/version.txt` ; \
-	\
-	test -f $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh && . $(PATH_ROOT)/$(MOZ_BUILD_APP)/confvars.sh ; \
-	\
-	test -z "$$MOZ_BRANDING_DIRECTORY" || MOZ_BRANDING_DIRECTORY=$(MOZ_BUILD_APP)/branding/nightly ; \
-	test -f $(PATH_ROOT)/$$MOZ_BRANDING_DIRECTORY/configure.sh && . $(PATH_ROOT)/$$MOZ_BRANDING_DIRECTORY/configure.sh ; \
-	\
-	$(shell $(SED) -nre " \
-		s:^MOD_MAJOR_VERSION=+([0-9]+)$$:NSPR_MAJOR_VERSION=\1\;:p; \
-		s:^MOD_MINOR_VERSION=+([0-9]+)$$:NSPR_MINOR_VERSION=\1\;:p; \
-		s:^MOD_PATCH_VERSION=+([0-9]+)$$:NSPR_PATCH_VERSION=\1\;:p; \
-		" < $(PATH_ROOT)/nsprpub/configure.in) \
-	\
-	$(APPEND_EXT) -n $(CACHED_CONFIG) \
-		$(foreach var, $(SHELL_CONFIG_VARS), "$(var) ?= $$$(var)") \
-	\
-'
-	$(QUIET)$(CAT) $(CACHED_CONFIG)
-
-	$(QUIET)$(APPEND) $(CACHED_CONFIG) 'CACHED_CONFIG_INCLUDED := 1'
-	$(QUIET)$(ECHO) Done.
-
-BLDDIRS += $(call DIRDEP,$(dir $(CACHED_CONFIG)))
-OTHER_CLEAN += $(CACHED_CONFIG)
-
-#------------------------------------------------------------------------------
 # Footer
 #------------------------------------------------------------------------------
 
