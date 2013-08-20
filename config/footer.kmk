@@ -52,7 +52,7 @@ endif
 # additon to the suffix variables.
 # @param 1  Target variable name (w/o underscore).
 #
-TARGET_PROP_ALL = \
+TARGET_PROP_ALL = $(strip \
     $($(target)_$(1).$(bld_trg).$(bld_trg_arch).$(bld_type)) \
     $($(target)_$(1).$(bld_trg).$(bld_trg_arch)) \
     $($(target)_$(1).$(bld_trg).$(bld_type)) \
@@ -60,7 +60,8 @@ TARGET_PROP_ALL = \
     $($(target)_$(1).$(bld_trg_arch)) \
     $($(target)_$(1).$(bld_trg)) \
     $($(target)_$(1).$(bld_type)) \
-    $($(target)_$(1))
+    $($(target)_$(1)) \
+)
 
 #
 # Hook that adds support for _PP_SOURCES to INSTALLS targets.
@@ -102,214 +103,6 @@ $(foreach src,$($(target)_PP_SOURCES),$(evalval def_installs_pp_src))
 endef # def_installs_pp_sources
 
 $(foreach target,$(INSTALLS),$(evalval def_installs_pp_sources))
-
-#
-# config_headers unit to generate config.h and confdefs.h for the given target.
-# -----------------------------------------------------------------------------
-#
-# The following target variables are recognized on input for config.h generation:
-#
-# - _CONFIG_H_NAME: name of the generated config header, e.g. `config.h` (required);
-# - _CONFIG_H_IN: template name, defaults to $(_CONFIG_H_NAME).in, e.g. `config.h.in`;
-# - _CONFIG_H_VARS: macros recognized in the template (required).
-#
-# The following target variables are set after processing:
-#
-# - _CONFIG_H: full path to the generated config.h file.
-#
-# _CONFIG_NAME may contain a path (relative to the target's output directory). The value of
-# _CONFIG_H_IN is assumed relative to the target's source directory.
-
-# _CONFIG_H_VARS contains a list of macros whose values should be set up according to the values
-# of the corresponding kmk variables: if the variable is not empty and there is a corresponding
-# macro in the template, the macro is defined with its value, otherwise it is commented out. If
-# there is no direct correspondence between the macro and the kmk variable, the `MACRO=$(KMK_VAR)`
-# syntax may be used in the list. This causes the KMK_VAR's value to be used for the MACRO's value.
-# Note that if the macro is not in the list, its definitoin from the template is left untouched.
-# Therefore normally _CONFIG_H_VARS simply lists all configurable macros from the template.
-#
-# The _CONFIG_H variable may be used in other targets which need access to the resulting file
-# (e.g. for installing).
-#
-# The following target variables are recognized on input for confdefs.h generation:
-#
-# - _CONFDEFS_H_NAME: name of the generated confdefs header, e.g. `confdefs.h` (required);
-# - _CONFDEFS_H_IN: template name, defaults to $(_CONFDEFS_H_NAME).in, e.g. `confdefs.h.in`;
-# - _CONFDEFS_H_VARS: macros to put to the generated header;
-# - _CONFDEFS_H_VARS_QUOTED: macros to put to the generated header with quoted values.
-#
-# The following target variables are set after processing:
-#
-# - _CONFDEFS_H: full path to the generated confdefs.h file.
-#
-# _CONFDEFS_NAME may contain a path (relative to the target's output directory). The value of
-# _CONFDEFS_H_IN is assumed relative to the target's source directory. Currently, only the
-# `@ALLDEFINES@` substitution is recognized in the template file. `@ALLDEFINES@` is replaced
-# with the macro definition statements.
-#
-# Each item in the _CONFDEFS_H_VARS and _CONFDEFS_H_VARS_QUOTED listsis a macro whose definition
-# will be added to the generated header. The value of the macro is set to the value of the
-# corresponding kmk variable. If there is no direct correspondence between the macro and the
-# kmk variable, the `MACRO=$(KMK_VAR)` syntax may be used in the list. This causes the
-# KMK_VAR's value to be used for the MACRO's value.
-#
-# The _CONFDEFS_H variable may be used in other targets which need access to the resulting file
-# (e.g. for installing).
-#
-
-UNIT_config_headers = config_headers
-
-#
-# Generates a rule for config.h.
-#
-define def_unit_config_headers_target_pre_config_h_rule
-
-includedep $(dep)
-
-$(out): $(src) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
-	%$$(call MSG_GENERATE,$(target),$(out),$(src))
-	$(QUIET)$(RM) -f $(out) $(dep)
-	$(QUIET)$(SED) -r $(foreach v, $(cfg_h_vars), \
-		$(foreach vl, $(firstword $(subst =, ,$(v))), \
-			-e "s:^#undef $(vl)$$$$:$(if $(findstring =,$(v)),$(foreach vr,$(lastword $(subst =, ,$(v))),$(if $(vr),#define $(vl) $(vr),/* #undef $(vl) */)),$(if $($(vl)),#define $(vl) $($(vl)),/* #undef $(vl) */)):")) \
-		< $(src) > $(out)
-
-$(TARGET_OUT_DEP_CMDS)
-
-endef # def_unit_config_headers_target_pre_config_h_rule
-
-#
-# Generates a rule for confdefs.h.
-#
-define def_unit_config_headers_target_pre_confdefs_h_rule
-
-includedep $(dep)
-
-$(out) +| $(out).tmp: $(src) $(cfdefs_h_static) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
-	%$$(call MSG_GENERATE,$(target),$(out),$(src))
-	$(QUIET)$(RM) -f $(out) $(out).tmp $(dep)
-	$(QUIET)$(APPEND_EXT) -n $(out).tmp \
-		$(foreach v, $(cfdefs_h_vars), \
-			"#define $(firstword $(subst =, ,$(v))) \
-				$(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))") ""
-	$(QUIET)$(APPEND_EXT) -n $(out).tmp \
-		$(foreach v, $(cfdefs_h_vars_q), \
-			"#define $(firstword $(subst =, ,$(v))) \
-				\"$(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))\"") ""
-	$(QUIET)$(CAT_EXT) $(cfdefs_h_static) >> $(out).tmp
-	$(QUIET)$(SED) -e '/@ALLDEFINES@/{r $(out).tmp' -e 'd}' $(src) > $(out)
-	$(QUIET)$(RM) -f $(out).tmp
-
-$(TARGET_OUT_DEP_CMDS)
-
-endef # def_unit_config_headers_target_pre_confdefs_h_rule
-
-#
-# Injects config unit logic for the target before compile rules are generated.
-#
-define def_unit_config_headers_target_pre
-
-# config.h
-
-ifeq ($($(target)_CONFIG_H_NAME)$($(target)_CONFDEFS_H_NAME),)
- $(error Using config_headers unit in $(target) requires either $(target)_CONFIG_H_NAME or $(target)_CONFDEFS_H_NAME))
-endif
-
-local out := $($(target)_CONFIG_H_NAME)
-ifneq ($(out),)
-
-local src := $($(target)_CONFIG_H_IN)
-ifeq ($(src),)
- local src := $(out).in
-endif
-
-local out := $(abspathex $(out), $($(target)_0_OUTDIR))
-local src := $(abspathex $(src), $(defpath))
-local dep := $(out).dep
-
-local cfg_h_vars := $(call TARGET_PROP_ALL,CONFIG_H_VARS)
-
-ifeq ($(strip $(cfg_h_vars)),)
- $(error Variable $(target)_CONFIG_H_VARS is empty))
-endif
-
-$(target)_CONFIG_H := $(out)
-
-$(eval $(target)_DEPS      += $(out))
-$(eval $(target)_CLEAN     += $(out) $(dep))
-$(eval $(target)_BLDDIRS   += $(call DIRDEP,$(dir $(out))))
-
-$(eval $(def_unit_config_headers_target_pre_config_h_rule))
-
-endif # ifneq ($(out),)
-
-# confdefs.h
-
-local out := $($(target)_CONFDEFS_H_NAME)
-ifneq ($(out),)
-
-local src := $($(target)_CONFDEFS_H_IN)
-ifeq ($(src),)
- local src := $(out).in
-endif
-
-local out := $(abspathex $(out), $($(target)_0_OUTDIR))
-local src := $(abspathex $(src), $(defpath))
-local dep := $(out).dep
-
-local cfdefs_h_vars   := $(call TARGET_PROP_ALL,CONFDEFS_H_VARS)
-local cfdefs_h_vars_q := $(call TARGET_PROP_ALL,CONFDEFS_H_VARS_QUOTED)
-local cfdefs_h_static := $(call TARGET_PROP_ALL,CONFDEFS_H_STATIC)
-
-local cfdefs_h_static := $(abspathex $(cfdefs_h_static),$(defpath))
-
-$(target)_CONFDEFS_H := $(out)
-
-$(eval $(target)_DEPS      += $(out))
-$(eval $(target)_CLEAN     += $(out) $(dep))
-$(eval $(target)_BLDDIRS   += $(call DIRDEP,$(dir $(out))))
-
-$(eval $(def_unit_config_headers_target_pre_confdefs_h_rule))
-
-endif # ifneq ($(out),)
-
-endef # def_unit_config_headers_target_pre
-
-#
-# Processor for CONFIG_HEADERS targets.
-# -------------------------------------
-#
-# CONFIG_HEADERS targets are special targets that only accept variables of the
-# config_headers unit. They are intended for generating config headers not bound to any
-# specific library or executable (e.g. global config headers). See the config_headers
-# unit usage description for more information.
-#
-# Note that there is one significant difference from normal targets: the generated
-# header's path is calculated relative to the global output directory (PATH_OBJ),
-# not to the target's output directory. The same goes for the default source directory
-# for template files which is always PATH_ROOT for now. This may be changed in the
-# future and therefore it is recommended to use CONFIG_TARGETS only in the top-level
-# makefile.
-#
-
-define def_unit_config_headers_target
-
-$(target)_0_OUTDIR := $(PATH_OBJ)
-local defpath      := $(PATH_ROOT)
-
-local bld_trg      := $(KBUILD_TARGET)
-local bld_trg_arch := $(KBUILD_TARGET_ARCH)
-local bld_type     := $(KBUILD_TYPE)
-
-$(evalval def_unit_config_headers_target_pre)
-
-$(eval OTHERS += $($(target)_DEPS))
-$(eval OTHER_CLEAN += $($(target)_CLEAN))
-$(eval BLDDIRS += $($(target)_BLDDIRS))
-
-endef # def_unit_config_headers_target
-
-$(foreach target,$(CONFIG_HEADERS),$(evalval def_unit_config_headers_target))
 
 #
 # This is included from each sub-makefile.

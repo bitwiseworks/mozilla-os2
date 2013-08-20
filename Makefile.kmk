@@ -50,36 +50,40 @@ OTHER_CLEAN += $(CACHED_CONFIG)
 # Global config headers.
 #
 
-CONFIG_HEADERS += mozilla
+USES += config-files
 
-mozilla_CONFDEFS_H_NAME          = $(MOZILLA_CONFIG_H)
-mozilla_CONFDEFS_H_IN            = mozilla-config.h.in
-mozilla_CONFDEFS_H_STATIC.os2    = mozilla-config.os2.h
-mozilla_CONFDEFS_H_VARS          = \
+CONFIG_FILES += mozilla_confdefs_h
+
+mozilla_confdefs_h_SOURCE             = mozilla-config.h.in
+mozilla_confdefs_h_TARGET             = $(MOZILLA_CONFIG_H)
+mozilla_confdefs_h_ALLDEFS_STATIC.os2 = mozilla-config.os2.h
+mozilla_confdefs_h_ALLDEFS_VARS.os2   = \
     FIREFOX_VERSION MOZ_UPDATER MOZ_PHOENIX \
     MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
     MOZ_SERVICES_SYNC MOZ_MEDIA_NAVIGATOR \
     MOZ_BUILD_APP MOZ_MACBUNDLE_ID MOZ_UPDATE_CHANNEL \
     MOZILLA_VERSION_U=$(MOZILLA_VERSION)
-mozilla_CONFDEFS_H_VARS_QUOTED   = \
+mozilla_confdefs_h_ALLDEFS_VARS_QUOTED.os2 = \
     MOZILLA_VERSION MOZILLA_UAVERSION \
     MOZ_APP_UA_NAME MOZ_APP_UA_VERSION=$(MOZ_APP_VERSION) \
     MOZ_DISTRIBUTION_ID MOZ_UA_BUILDID MOZ_USER_DIR
 
-CONFIG_HEADERS += xpcom xpcom_private
+CONFIG_FILES += xpcom_config_h xpcom_private_h
 
-xpcom_CONFIG_H_NAME     = $(XPCOM_CONFIG_H)
-xpcom_CONFIG_H_IN       = xpcom/xpcom-config.h.in
-xpcom_CONFIG_H_VARS.os2 = \
+xpcom_config_h_MODE     = cdefs
+xpcom_config_h_SOURCE   = xpcom/xpcom-config.h.in
+xpcom_config_h_TARGET   = $(XPCOM_CONFIG_H)
+xpcom_config_h_VARS.os2 = \
     CPP_THROW_NEW=throw() HAVE_CPP_2BYTE_WCHAR_T=1 HAVE_CPP_AMBIGUITY_RESOLVING_USING=1 \
     HAVE_CPP_CHAR16_T HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR=1 HAVE_CPP_PARTIAL_SPECIALIZATION=1 \
     HAVE_CPP_TROUBLE_COMPARING_TO_ZERO HAVE_STATVFS=1 NEED_CPP_UNUSED_IMPLEMENTATIONS=1 \
     NEW_H=<new> NS_ATTR_MALLOC=__attribute__((malloc)) \
     NS_WARN_UNUSED_RESULT=__attribute__((warn_unused_result))
 
-xpcom_private_CONFIG_H_NAME     = $(XPCOM_PRIVATE_H)
-xpcom_private_CONFIG_H_IN       = xpcom/xpcom-private.h.in
-xpcom_private_CONFIG_H_VARS.os2 = \
+xpcom_private_h_MODE       = cdefs
+xpcom_private_h_SOURCE     = xpcom/xpcom-private.h.in
+xpcom_private_h_TARGET     = $(XPCOM_PRIVATE_H)
+xpcom_private_h_VARS.os2 = \
     HAVE_GETPAGESIZE=1 HAVE_ICONV HAVE_ICONV_WITH_CONST_INPUT HAVE_MBRTOWC=1 \
     HAVE_SYS_MOUNT_H HAVE_SYS_VFS_H=1 HAVE_WCRTOMB=1
 
