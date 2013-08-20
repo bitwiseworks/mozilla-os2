@@ -58,6 +58,15 @@ LONGLONG_SUFF = LL
 endif
 
 #
+# Unit settings.
+#
+
+KBUILD_UNIT_PATHS += $(PATH_ROOT)/config
+
+# Global use of the config-files unit requires this:
+ALL_TARGETS += $(CONFIG_FILES)
+
+#
 # Include cached build settings.
 #
 ifn1of (configure, $(MAKECMDGOALS))

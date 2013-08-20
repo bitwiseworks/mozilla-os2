@@ -23,7 +23,7 @@ ifeq ($(_SUB_MAKEFILE_STACK),)
 # Expects the standard vars to be set ($(target), $(dep) and $(out)).
 # Requires `includedep $(dep)` somewhere in the makefile in order to work.
 #
-ifndef NO_COMPILE_CMFS_DEPS
+ifndef NO_COMPILE_CMDS_DEPS
 define TARGET_OUT_DEP_CMDS
 	%$$(QUIET2)$$(APPEND) '$(dep)'
 	%$$(QUIET2)$$(APPEND) '$(dep)' 'define $(target)_$(subst :,_,$(out))_CMDS_PREV_'
@@ -40,21 +40,23 @@ endif
 # Expects the standard vars to be set ($(target), $(dep) and $(out)).
 # Requires `includedep $(dep)` somewhere in the makefile in order to work.
 #
-ifndef NO_COMPILE_CMFS_DEPS
+ifndef NO_COMPILE_CMDS_DEPS
  TARGET_OUT_DEP_CHECK = $$(comp-cmds-ex $$($(target)_$(subst :,_,$(out))_CMDS_PREV_),$$(commands $(out)),FORCE)
 else
  TARGET_OUT_DEP_CHECK =
 endif
 
 ##
-# Gathers all variants of the given target variable taking $(bld_trg), $(bld_trg_arch) and
-# $(bld_type) suffixes into account. Requires $(target) to be set in additon to these.
+# Gathers all variants of the given target property taking $(bld_trg), $(bld_trg_arch),
+# $(bld_cpu) and $(bld_type) suffixes into account. Requires $(target) to be set in
+# additon to the suffix variables.
 # @param 1  Target variable name (w/o underscore).
 #
-TARGET_BLD_TRG_ARCH_TYPE_VARIANTS = \
+TARGET_PROP_ALL = \
     $($(target)_$(1).$(bld_trg).$(bld_trg_arch).$(bld_type)) \
     $($(target)_$(1).$(bld_trg).$(bld_trg_arch)) \
     $($(target)_$(1).$(bld_trg).$(bld_type)) \
+    $($(target)_$(1).$(bld_trg_cpu)) \
     $($(target)_$(1).$(bld_trg_arch)) \
     $($(target)_$(1).$(bld_trg)) \
     $($(target)_$(1).$(bld_type)) \
@@ -225,7 +227,7 @@ local out := $(abspathex $(out), $($(target)_0_OUTDIR))
 local src := $(abspathex $(src), $(defpath))
 local dep := $(out).dep
 
-local cfg_h_vars := $(call TARGET_BLD_TRG_ARCH_TYPE_VARIANTS,CONFIG_H_VARS)
+local cfg_h_vars := $(call TARGET_PROP_ALL,CONFIG_H_VARS)
 
 ifeq ($(strip $(cfg_h_vars)),)
  $(error Variable $(target)_CONFIG_H_VARS is empty))
@@ -255,9 +257,9 @@ local out := $(abspathex $(out), $($(target)_0_OUTDIR))
 local src := $(abspathex $(src), $(defpath))
 local dep := $(out).dep
 
-local cfdefs_h_vars   := $(call TARGET_BLD_TRG_ARCH_TYPE_VARIANTS,CONFDEFS_H_VARS)
-local cfdefs_h_vars_q := $(call TARGET_BLD_TRG_ARCH_TYPE_VARIANTS,CONFDEFS_H_VARS_QUOTED)
-local cfdefs_h_static := $(call TARGET_BLD_TRG_ARCH_TYPE_VARIANTS,CONFDEFS_H_STATIC)
+local cfdefs_h_vars   := $(call TARGET_PROP_ALL,CONFDEFS_H_VARS)
+local cfdefs_h_vars_q := $(call TARGET_PROP_ALL,CONFDEFS_H_VARS_QUOTED)
+local cfdefs_h_static := $(call TARGET_PROP_ALL,CONFDEFS_H_STATIC)
 
 local cfdefs_h_static := $(abspathex $(cfdefs_h_static),$(defpath))
 
@@ -274,8 +276,8 @@ endif # ifneq ($(out),)
 endef # def_unit_config_headers_target_pre
 
 #
-# Processor for CONFIGH_HEADERS targets.
-# --------------------------------------
+# Processor for CONFIG_HEADERS targets.
+# -------------------------------------
 #
 # CONFIG_HEADERS targets are special targets that only accept variables of the
 # config_headers unit. They are intended for generating config headers not bound to any
