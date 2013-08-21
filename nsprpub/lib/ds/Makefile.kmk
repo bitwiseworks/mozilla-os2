@@ -39,7 +39,7 @@ $$(plds_0_OUTDIR)/_pl_bld.h: $$(plds_MAKEFILE) $(PATH_OBJ)/now/now$(HOSTSUFF_EXE
 
 OTHER_CLEAN += $(plds_0_OUTDIR)/_pl_bld.h
 
-plds_LIBS += $(NSPR_LIBS)
+plds_LIBS += $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
 
 INSTALLS += plds_headers
 

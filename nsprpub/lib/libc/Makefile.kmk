@@ -51,7 +51,7 @@ $$(plc_0_OUTDIR)/_pl_bld.h: $$(plc_MAKEFILE) $(PATH_OBJ)/now/now$(HOSTSUFF_EXE) 
 
 OTHER_CLEAN += $(plc_0_OUTDIR)/_pl_bld.h
 
-plc_LIBS += $(NSPR_LIBS)
+plc_LIBS += $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
 
 INSTALLS += plc_headers
 

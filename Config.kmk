@@ -91,7 +91,10 @@ endif # ifn1of (configure, $(MAKECMDGOALS))
 # Common libraries referenced by components
 #------------------------------------------------------------------------------
 
-NSPR_LIBS   = $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
+NSPR_INCS   = $(PATH_STAGE)/include/nspr
+NSPR_LIBS   = $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB) \
+              $(PATH_STAGE_LIB)/plc$(NSPR_MAJOR_VERSION)$(SUFF_LIB) \
+              $(PATH_STAGE_LIB)/plds$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
 
 #------------------------------------------------------------------------------
 # Templates
