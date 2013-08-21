@@ -86,7 +86,7 @@ $(out): $(src) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
 	$(QUIET)$(RM) -f $(out) $(dep)
 	$(QUIET)$(SED) -r $(foreach v, $(vars), \
 		$(foreach vl, $(firstword $(subst =, ,$(v))), \
-			-e "s:^#undef $(vl)$$$$:$(if $(findstring =,$(v)),$(foreach vr,$(lastword $(subst =, ,$(v))),$(if $(vr),#define $(vl) $(vr),/* #undef $(vl) */)),$(if $($(vl)),#define $(vl) $($(vl)),/* #undef $(vl) */)):")) \
+			-e "s:(^ *# *undef +$(vl) *$$$$):$(if $(findstring =,$(v)),$(foreach vr,$(lastword $(subst =, ,$(v))),$(if $(vr),#define $(vl) $(subst :,\:,$(subst ",\",$(vr))),/\* \1 \*/)),$(if $($(vl)),#define $(vl) $(subst :,\:,$(subst ",\",$($(vl)))),/\* \1 \*/)):")) \
 		$(src) > $(out)
 
 $(TARGET_OUT_DEP_CMDS)
@@ -121,7 +121,7 @@ ifneq ($(alldefs),)
 endif
 	$(QUIET)$(SED) -r $(foreach v, $(vars), \
 		$(foreach vl, $(firstword $(subst =, ,$(v))), \
-			-e "s:@$(vl)@:$(if $(findstring =,$(v)),$(foreach vr,$(lastword $(subst =, ,$(v))),$(if $(vr),$(vr))),$(if $($(vl)),$($(vl)))):")) \
+			-e "s:@$(vl)@:$(if $(findstring =,$(v)),$(foreach vr,$(lastword $(subst =, ,$(v))),$(if $(vr),$(subst :,\:,$(subst ",\",$(vr))))),$(if $($(vl)),$(subst :,\:,$(subst ",\",$($(vl)))))):")) \
 		$(if $(alldefs),-e '/@ALLDEFINES@/{r $(tmp)' -e 'd}') \
 		$(src) > $(out)
 ifneq ($(alldefs),)
@@ -196,7 +196,7 @@ $(target)_0_OUTDIR := $($(parent_target)_0_OUTDIR)
 
 $(evalval def_unit_config-files_target_common)
 
-$(eval $($(target)_ORDERDEPS += $(out)))
+$(eval $(parent_target)_ORDERDEPS += $(out))
 
 endef # def_unit_config-files_target
 
