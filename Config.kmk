@@ -26,6 +26,30 @@ MOZ_USER_DIR           ?= Mozilla
 
 MOZ_UPDATE_CHANNEL     ?= default
 
+MOZ_NATIVE_FFI         ?=
+
+JS_NATIVE_EDITLINE                 ?= 1
+JS_DISABLE_SHELL                   ?=
+JS_HAS_CTYPES                      ?= 1
+JS_ENABLE_METHODJIT                ?= 1
+JS_ENABLE_METHODJIT_SPEW           ?=
+JS_ENABLE_METHODJIT_TYPED_ARRAY    ?= 1
+JS_ENABLE_MONOIC                   ?= 1
+JS_ENABLE_POLYIC                   ?= 1
+JS_THREADSAFE                      ?= 1
+JS_HAVE_ENDIAN_H                   ?= 1
+JS_HAVE_MACHINE_ENDIAN_H           ?= 1
+JS_BYTES_PER_WORD                  ?= 4
+JS_HAS_XML_SUPPORT                 ?= 1
+
+ifneq (,$(filter arm% sparc %86 x86_64 mips%,$(KBUILD_TARGET_CPU)))
+JS_ENABLE_YARR_JIT                 ?= 1
+endif
+
+#
+# All further variables are normally not altered
+#
+
 MOZ_MACBUNDLE_ID        = \
     $(MOZ_DISTRIBUTION_ID).$(tolower $(MOZ_APP_DISPLAYNAME))$(filter-out release,$(BUILD_TYPE))
 
@@ -47,6 +71,7 @@ CACHED_CONFIG       = $(PATH_OBJ)/CachedConfig.kmk
 MOZILLA_CONFIG_H    = $(PATH_OBJ)/mozilla-config.h
 XPCOM_CONFIG_H 	    = $(PATH_OBJ)/xpcom/xpcom-config.h
 XPCOM_PRIVATE_H     = $(PATH_OBJ)/xpcom/xpcom-private.h
+JS_CONFDEFS_H       = $(PATH_OBJ)/js/js-confdefs.h
 
 BUILDID             = $(PATH_OBJ)/buildid
 
@@ -95,6 +120,11 @@ NSPR_INCS   = $(PATH_STAGE)/include/nspr
 NSPR_LIBS   = $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB) \
               $(PATH_STAGE_LIB)/plc$(NSPR_MAJOR_VERSION)$(SUFF_LIB) \
               $(PATH_STAGE_LIB)/plds$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
+ZLIB_LIBS   = $(PATH_STAGE_LIB)/mozz$(SUFF_LIB)
+
+MFBT_LIBS   = $(PATH_STAGE_LIB)/mfbt$(SUFF_LIB)
+
+MOZGLUE_LIBS = $(PATH_STAGE_LIB)/mozglue$(SUFF_LIB)
 
 #------------------------------------------------------------------------------
 # Templates
@@ -150,15 +180,37 @@ TEMPLATE_Bin_EXTENDS        = Cxx
 
 TEMPLATE_Bin_LDFLAGS.os2    = -Zmap -Zlinker /ST:0x100000 -Zhigh-mem
 
-ifn1of ($(EMXOMFLD_TYPE),WLINK wlink)
+if1of ($(EMXOMFLD_TYPE),WLINK wlink)
 TEMPLATE_Bin_LDFLAGS.os2   += -Zlinker '"DISABLE 1121"'
 endif
 
 TEMPLATE_Dll                = Generic Mozilla DLL
 TEMPLATE_Dll_EXTENDS        = Bin
+TEMPLATE_Dll_LIBS           = $(MOZGLUE_LIBS)
 
 TEMPLATE_Exe                = Generic Mozilla EXE
 TEMPLATE_Exe_EXTENDS        = Bin
+
+#
+
+TEMPLATE_JsCxx          = JavaScript C/C++ sources
+TEMPLATE_JsCxx_EXTENDS  = CxxBase
+TEMPLATE_JsCxx_CFLAGS   = -include $(JS_CONFDEFS_H) $(TEMPLATE_CxxBase_CFLAGS)
+TEMPLATE_JsCxx_CXXFLAGS = -include $(JS_CONFDEFS_H) $(TEMPLATE_CxxBase_CXXFLAGS)
+
+TEMPLATE_JsCxx_DEPS     = $(JS_CONFDEFS_H)
+
+TEMPLATE_JsBin              = JavaScript DLL or EXE
+TEMPLATE_JsBin_EXTENDS      = JsCxx
+TEMPLATE_JsBin_LDFLAGS      = $(TEMPLATE_Bin_LDFLAGS)
+TEMPLATE_JsBin_LDFLAGS.os2  = $(TEMPLATE_Bin_LDFLAGS.os2)
+
+TEMPLATE_JsDll              = JavaScript DLL
+TEMPLATE_JsDll_EXTENDS      = JsBin
+TEMPLATE_JsDll_LIBS         = $(TEMPLATE_Dll_LIBS)
+
+TEMPLATE_JsExe              = JavaScript EXE
+TEMPLATE_JsExe_EXTENDS      = JsBin
 
 #------------------------------------------------------------------------------
 # Footer

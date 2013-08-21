@@ -9,6 +9,6 @@ LIBRARIES += mozglue
 
 mozglue_TEMPLATE    = Lib
 mozglue_SOURCES     = \
-	dummy.cpp
+    dummy.cpp $(MFBT_LIBS)
 
 include $(FILE_SUB_FOOTER)
