@@ -105,17 +105,17 @@ TEMPLATE_CxxBase_TOOL.os2   = GXX3OMF
 TEMPLATE_CxxBase_INCS       = $(PATH_STAGE)/include
 
 TEMPLATE_CxxBase_CFLAGS = \
-    -Wall -Wpointer-arith -Wdeclaration-after-statement \
+    -pedantic -Wall -Wpointer-arith -Wdeclaration-after-statement \
     -Werror=return-type -Wtype-limits -Wempty-body \
     -Wno-unused -Wno-overlength-strings -Wcast-align \
-    -fno-strict-aliasing
+    -Wno-long-long -fno-strict-aliasing
 
 TEMPLATE_CxxBase_CXXFLAGS = \
-    -Wall -Wpointer-arith -Woverloaded-virtual \
+    -pedantic -Wall -Wpointer-arith -Woverloaded-virtual \
     -Werror=return-type -Wtype-limits -Wempty-body \
-    -Wctor-dtor-privacy -Wno-overlength-strings \
+    -Wno-ctor-dtor-privacy -Wno-overlength-strings \
     -Wno-invalid-offsetof -Wno-variadic-macros -Wcast-align \
-    -fno-exceptions -fno-strict-aliasing -fno-rtti
+    -Wno-long-long -fno-exceptions -fno-strict-aliasing -fno-rtti
 
 TEMPLATE_CxxBase_DEFS       = MOZILLA_CLIENT
 
