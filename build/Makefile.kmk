@@ -38,7 +38,7 @@ OTHERS += $(PATH_OBJ)/application.ini.h
 
 $(PATH_OBJ)/application.ini.h: $(PATH_ROOT)/build/appini_header.py $$(application_ini_0_OUTDIR)/application.ini
 	%$(call MSG_GENERATE,,$@)
-	$(PYTHON) $^ > $@
+	$(QUIET)$(PYTHON) $^ > $@
 
 OTHER_CLEAN += $(PATH_OBJ)/application.ini.h
 
@@ -51,10 +51,11 @@ endif # MOZ_APP_BASENAME
 #
 
 $$(BUILDID): | $$(call DIRDEP,$$(dir $$@))
+	%$(call MSG_GENERATE,,$@)
 ifdef MOZ_BUILD_DATE
-	printf "%s" $(MOZ_BUILD_DATE) > $@
+	$(QUIET)printf "%s" $(MOZ_BUILD_DATE) > $@
 else
-	$(PYTHON) $(PATH_ROOT)/toolkit/xre/make-platformini.py --print-buildid > $@
+	$(QUIET)$(PYTHON) $(PATH_ROOT)/toolkit/xre/make-platformini.py --print-buildid > $@
 endif
 
 OTHERS += $(BUILDID)
