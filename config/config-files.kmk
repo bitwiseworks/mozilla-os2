@@ -67,6 +67,8 @@
 
 UNIT_config-files = config-files
 
+include $(dir $(lastword $(MAKEFILE_LIST)))helpers.kmk
+
 #
 # Sanity
 #
