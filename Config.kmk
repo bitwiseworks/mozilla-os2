@@ -91,6 +91,9 @@ KBUILD_UNIT_PATHS += $(PATH_ROOT)/config
 # Global use of the config-files unit requires this:
 ALL_TARGETS += $(CONFIG_FILES)
 
+# Global use of the tasks unit requires this:
+ALL_TARGETS += $(TASKS)
+
 #
 # Include cached build settings.
 #

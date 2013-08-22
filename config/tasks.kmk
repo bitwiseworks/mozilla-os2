@@ -1,0 +1,148 @@
+## @file
+# tasks unit.
+#
+# This unit allows to execute arbitrary tasks that generate some kind of output
+# from some kind of source.
+#
+# Using the tasks unit starts with the following code:
+#
+#     USES += tasks
+#     ALL_TARGETS += $(TASKS)
+#
+# Here are the key usage patterns:
+#
+# 1. Generate a single target from one or more sources using a simple command.
+#
+#     TASKS + mytask
+#     mytask_SOURCE = mysrc1 mysrc2
+#     mytask_TARGET = mytgt
+#     mytask_COMMAND = echo $(src) > $(out)
+#
+#    Note that paths to files given in _SOURCE are taken relative to the makefile
+#    location (accessible as $(mytask_DEFPATH) in deferred context) . Path to files
+#    given in _TARGET are relative to the targets's default output directory (accessible
+#    as $(mytask_0_OUTDIR)). The full path to the generated target is stored in
+#    $(mytask_1_TARGET).
+#
+#    The following local variables may be used within the _COMMAND body:
+#
+#    - $(src)     All source files from _SOURCE with the default path applied.
+#    - $(out)     Full path to the _TARGET file.
+#    - $(defpath) Full path to the target's source directory (makefile location).
+#    - $(outdir)  Full path to the target's output directory.
+#
+# 2. Generate several targets and an intermediate file from several sources using
+#    a complex command.
+#
+#     TASKS + mytask
+#     mytask_SOURCE = mysrc1 mysrc2 mysrc3
+#     mytask_OUTPUT = mytgt1 mytgt2
+#     mytask_INTERMEDIATE = mymap
+#     define mytask_COMMANDS
+#         $(QUIET)echo $(src) mode1 > $(word 1,$(output))
+#         $(QUIET)echo $(src) mode2 > $(word 2,$(output))
+#         $(QUIET)cd $(outdir) && echo $(src) > mymap
+#     endef
+#
+#     As with _TARGET from the example above, paths in _OUTPUT and _INTERMEDIATE are
+#     relative to the target's default output directory. Note that lines for the the
+#     complex command must start with a TAB character (you may optionally use $(TAB)
+#     instead) and if you want to suppress echoing the commands by default you should
+#     manually use $(QUIET) in front of them.
+#
+#    In addition to the above the following local variables for _COMMANDS are available:
+#
+#    - $(output)  All output files from _OUTPUT with the default path applied.
+#    - $(maybe)   All intermediate files from _INTERMEDIATE with the default path applied.
+#
+
+UNIT_tasks = tasks
+
+#
+#
+#
+define def_unit_tasks_global_target_rule
+
+$(out) + $(output) +| $(maybe) : $(src) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
+$(TAB)$(msg)
+$(TAB)$(QUIET2)$(RM) -f $(out) $(output) $(maybe) $(dep)
+$(cmds)
+$(TARGET_OUT_DEP_CMDS)
+
+endef # def_unit_tasks_global_target_rule
+
+#
+# Worker for global TASKS targets.
+#
+define def_unit_tasks_global_target
+
+local bld_trg      := $(KBUILD_TARGET)
+local bld_trg_arch := $(KBUILD_TARGET_ARCH)
+local bld_trg_cpu  := $(KBUILD_TARGET_CPU)
+local bld_type     := $(KBUILD_TYPE)
+
+local outbase := $(call TARGET_BASE,$(target),$(target))
+
+local defpath := $($(target)_DEFPATH)
+local outdir  := $($(target)_0_OUTDIR)
+
+local src    := $(call TARGET_PROP_ALL,SOURCE) $(call TARGET_PROP_ALL,SOURCES)
+local out    := $(evalcall def_fn_prop_get_first_defined,TARGET,,)
+local output := $(call TARGET_PROP_ALL,OUTPUT)
+local maybe  := $(call TARGET_PROP_ALL,INTERMEDIATE)
+local cmds   := $(evalcall def_fn_prop_get_first_defined,COMMANDS,,)
+local msg    := $(evalcall def_fn_prop_get_first_defined,MESSAGE,,)
+
+ifeq ($(src),)
+ $(error Variable $(target)_SOURCE must not be empty)
+endif
+
+ifeq ($(cmds),)
+ local cmds := $(evalcall def_fn_prop_get_first_defined,COMMAND)
+ ifneq ($(cmds),)
+  local cmds := $(TAB)$(QUIET)$(cmds)
+ else
+  $(error Variable $(target)_COMMAND or $(target)_COMMANDS must not be empty)
+ endif
+endif
+
+# apply default paths
+local src    := $(abspathex $(src),$(defpath))
+local out    := $(abspathex $(out),$(outdir))
+local output := $(abspathex $(output),$(outdir))
+local maybe  := $(abspathex $(maybe),$(outdir))
+
+ifeq ($(out),)
+ local out := $(outbase).task
+ local dep := $(outbase).dep
+ local cmds := $(cmds)$(NLTAB)$(QUIET2)$(APPEND) $(out)
+else
+ local dep := $(out).dep
+endif
+
+ifeq ($(msg),)
+ local msg := $(call MSG_GENERATE,$(target),$(out),$(src))
+else
+ local msg := %@$(msg)
+endif
+
+$(eval $(def_unit_tasks_global_target_rule))
+
+$(target)_1_TARGET := $(out)
+$(target)_1_OUTPUT := $(output)
+$(target)_1_MAYBE  := $(maybe)
+
+$(eval _OUT_FILES += $(out) $(output) $(maybe))
+$(eval _DEPFILES += $(dep))
+
+$(eval $(target): $(out))
+
+$(eval OTHERS += $(target))
+
+endef # def_unit_tasks_global_target
+
+#
+# Unit hook for global TASKS targets.
+#
+$(foreach target,$(TASKS),$(evalval def_unit_tasks_global_target))
+
