@@ -5,7 +5,8 @@
 SUB_DEPTH = ../../../..
 include $(KBUILD_PATH)/subheader.kmk
 
-VERSION           := 3.0.10rc0
+VERSION           := $(shell $(SED) -nre "s/^AC_INIT\(\[.*\], *\[(.*)\],.*\)/\1/p" \
+                             $(PATH_SUB_CURRENT)/configure.ac)
 
 PACKAGE           := "libffi"
 PACKAGE_BUGREPORT := "http://gcc.gnu.org/bugs.html"
