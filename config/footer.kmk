@@ -5,16 +5,34 @@
 # $(FILE_KBUILD_SUB_FOOTER) in order to perform extra processing.
 #
 
+#------------------------------------------------------------------------------
+# Part included in all makefiles
+#------------------------------------------------------------------------------
+
+include $(PATH_ROOT)/config/helpers.kmk
+
+#
+# Hook that turns each word in INCLUDE_SUBDIRS into an include statement using
+# the word as a name of the subdirectory (relative to the location of the
+# current makefile) that contains Makefile.kmk to include.
+#
+
+define def_include_subdirs
+INCLUDE_SUBDIRS :=
+include $(PATH_SUB_CURRENT)/$(subdir)/Makefile.kmk
+endef # define def_include_subdirs
+
+$(foreach subdir,$(call GLOBAL_VAR_ALL,INCLUDE_SUBDIRS),\
+    $(eval $(def_include_subdirs)))
+
+#------------------------------------------------------------------------------
+# Part included at the end of the top-most makefile
+#------------------------------------------------------------------------------
+
 ifeq ($(_SUB_MAKEFILE_STACK),)
 
 #
-# Part included at the end of the top-most makefile.
-# ==================================================
-#
-
-#
 # Hook that adds support for _PP_SOURCES to INSTALLS targets.
-# -----------------------------------------------------------
 #
 
 ##
@@ -53,10 +71,9 @@ endef # def_installs_pp_sources
 
 $(foreach target,$(INSTALLS),$(evalval def_installs_pp_sources))
 
-#
-# Part included from each sub-makefile.
-# =====================================
-#
+#------------------------------------------------------------------------------
+# Part included from each sub-makefile (excluding the top one)
+#------------------------------------------------------------------------------
 
 else # ifeq ($(_SUB_MAKEFILE_STACK),)
 

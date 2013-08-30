@@ -6,6 +6,22 @@ ifndef HELPERS_INCLUDED
 HELPERS_INCLUDED := 1
 
 ##
+# Gathers all variants of the given global variable taking $(KBUILD_TARGET), $(KBUILD_TARGET_ARCH),
+# $(KBUILD_TARGET_CPU) and $(KBUILD_TYPE) suffixes into account.
+# @param 1  Global variable name (w/o underscore).
+#
+GLOBAL_VAR_ALL = $(strip \
+    $($(1).$(KBUILD_TARGET).$(KBUILD_TARGET_ARCH).$(KBUILD_TYPE)) \
+    $($(1).$(KBUILD_TARGET).$(KBUILD_TARGET_ARCH)) \
+    $($(1).$(KBUILD_TARGET).$(KBUILD_TYPE)) \
+    $($(1).$(KBUILD_TARGET_CPU)) \
+    $($(1).$(KBUILD_TARGET_ARCH)) \
+    $($(1).$(KBUILD_TARGET)) \
+    $($(1).$(KBUILD_TYPE)) \
+    $($(1)) \
+)
+
+##
 # Emits commands to generate a dep file containing the commands to produce the given output.
 # Used as $(TARGET_OUT_DEP_CMDS) in the output generation rule.
 # Expects the standard vars to be set ($(target), $(dep) and $(out)).

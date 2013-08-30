@@ -7,16 +7,16 @@ include $(KBUILD_PATH)/subheader.kmk
 
 ifdef JS_NATIVE_EDITLINE
 # @todo: later
-#include $(PATH_SUB_CURRENT)/editline/Makefile.kmk
+#INCLUDE_SUBDIRS += editline
 endif
 
 ifndef JS_DISABLE_SHELL
 # @todo: later
-#include $(PATH_SUB_CURRENT)/shell/Makefile.kmk
+#INCLUDE_SUBDIRS += shell
 endif
 
 ifdef JS_HAS_CTYPES
-include $(PATH_SUB_CURRENT)/ctypes/libffi/Makefile.kmk
+INCLUDE_SUBDIRS += ctypes/libffi
 endif
 
 #

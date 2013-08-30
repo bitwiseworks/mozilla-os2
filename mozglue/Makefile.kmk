@@ -5,9 +5,6 @@
 SUB_DEPTH = ..
 include $(KBUILD_PATH)/subheader.kmk
 
-#
-# Include sub-makefiles.
-#
-include $(PATH_SUB_CURRENT)/build/Makefile.kmk
+INCLUDE_SUBDIRS = build
 
 include $(FILE_SUB_FOOTER)

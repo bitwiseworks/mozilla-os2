@@ -104,15 +104,13 @@ global_headers_SOURCES += \
 # Include sub-makefiles.
 #
 
-include $(PATH_SUB_CURRENT)/build/Makefile.kmk
+# tier base
+INCLUDE_SUBDIRS += build mfbt modules/zlib mozglue memory/mozalloc
 
-include $(PATH_SUB_CURRENT)/mfbt/Makefile.kmk
-include $(PATH_SUB_CURRENT)/modules/zlib/Makefile.kmk
-include $(PATH_SUB_CURRENT)/mozglue/Makefile.kmk
-include $(PATH_SUB_CURRENT)/memory/mozalloc/Makefile.kmk
+# tier nspr
+INCLUDE_SUBDIRS += nsprpub
 
-include $(PATH_SUB_CURRENT)/nsprpub/Makefile.kmk
-
-include $(PATH_SUB_CURRENT)/js/src/Makefile.kmk
+# tier js
+INCLUDE_SUBDIRS += js/src
 
 include $(FILE_SUB_FOOTER)

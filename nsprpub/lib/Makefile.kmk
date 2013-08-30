@@ -5,10 +5,6 @@
 SUB_DEPTH = ../..
 include $(KBUILD_PATH)/subheader.kmk
 
-#
-# Include sub-makefiles.
-#
-include $(PATH_SUB_CURRENT)/ds/Makefile.kmk
-include $(PATH_SUB_CURRENT)/libc/Makefile.kmk
+INCLUDE_SUBDIRS = ds libc
 
 include $(FILE_SUB_FOOTER)
