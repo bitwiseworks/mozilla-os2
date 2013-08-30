@@ -67,7 +67,6 @@
 #define MOZ_LOGGING 1
 #define MOZ_MEDIA 1
 #define MOZ_OGG 1
-#define MOZ_OMNIJAR 1
 #define MOZ_OPUS 1
 #define MOZ_OS2_HIGH_MEMORY 1
 #define MOZ_PDF_PRINTING 1
@@ -84,7 +83,6 @@
 #define MOZ_WAVE 1
 #define MOZ_WEBM 1
 #define MOZ_XTF 1
-#define MOZ_XUL 1
 #define NO_X11 1
 #define NS_ALWAYS_INLINE __attribute__((always_inline))
 #define NS_ATTR_MALLOC __attribute__((malloc))

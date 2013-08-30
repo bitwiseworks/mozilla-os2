@@ -28,6 +28,9 @@ MOZ_UPDATE_CHANNEL     ?= default
 
 MOZ_NATIVE_FFI         ?=
 
+MOZ_XUL                            ?= 1
+MOZ_OMNIJAR                        ?= 1
+
 JS_NATIVE_EDITLINE                 ?= 1
 JS_DISABLE_SHELL                   ?=
 JS_HAS_CTYPES                      ?= 1
