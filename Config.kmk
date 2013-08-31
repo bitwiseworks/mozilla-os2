@@ -219,6 +219,16 @@ TEMPLATE_JsExe              = JavaScript EXE
 TEMPLATE_JsExe_EXTENDS      = JsBin
 
 #------------------------------------------------------------------------------
+# Miscellaneous
+#------------------------------------------------------------------------------
+
+#
+# kBuild bug fix: file hook properties are named as PRE_FILE_CMDS and POST_FILE_CMDS when
+# inheriting but PRE_XFILE_CMDS and POST_XFILE_CMDS when actually using them.
+#
+PROPS_INSTALLS_DEFERRED := $(PROPS_INSTALLS_DEFERRED) PRE_XFILE_CMDS POST_XFILE_CMDS
+
+#------------------------------------------------------------------------------
 # Footer
 #------------------------------------------------------------------------------
 
