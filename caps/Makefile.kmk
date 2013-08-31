@@ -1,0 +1,22 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += caps
+
+caps_EXTENDS = typelib
+caps_DEFPATH := $(PATH_SUB_CURRENT)/idl
+caps_INCS = \
+    $(PATH_ROOT)/js/xpconnect/idl
+caps_SOURCES = \
+    nsIScriptSecurityManager.idl \
+    nsIPrincipal.idl \
+    nsISignatureVerifier.idl \
+    nsISecurityCheckedComponent.idl
+
+include $(FILE_SUB_FOOTER)

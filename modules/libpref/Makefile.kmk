@@ -1,0 +1,29 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += pref
+
+pref_EXTENDS = typelib
+pref_DEFPATH := $(PATH_SUB_CURRENT)/public
+pref_SOURCES = \
+    nsIPrefService.idl \
+    nsIPrefBranch.idl \
+    nsIPrefBranch2.idl \
+    nsIPrefLocalizedString.idl \
+    nsIPrefBranchInternal.idl \
+    nsIRelativeFilePref.idl
+
+INSTALLS += pref_exports_mozilla
+
+pref_exports_mozilla_INST = include/mozilla/
+pref_exports_mozilla_DEFPATH := $(PATH_SUB_CURRENT)/public
+pref_exports_mozilla_SOURCES = \
+    Preferences.h
+
+include $(FILE_SUB_FOOTER)

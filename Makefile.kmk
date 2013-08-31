@@ -115,6 +115,8 @@ INCLUDE_SUBDIRS += js/src
 
 # tier platform
 INCLUDE_SUBDIRS += \
-    ipc
+    xpcom modules/libpref intl netwerk ipc js/xpconnect modules/libjar \
+    caps dom widget toolkit gfx content layout docshell accessible \
+    xpfe/appshell startupcache
 
 include $(FILE_SUB_FOOTER)

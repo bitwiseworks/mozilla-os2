@@ -5,6 +5,7 @@
 SUB_DEPTH = ..
 include $(KBUILD_PATH)/subheader.kmk
 
-INCLUDE_SUBDIRS = glue ipdl
+INCLUDE_SUBDIRS = \
+    2d src layers thebes
 
 include $(FILE_SUB_FOOTER)

@@ -2,9 +2,10 @@
 # Module makefile
 #
 
-SUB_DEPTH = ..
+SUB_DEPTH = ../..
 include $(KBUILD_PATH)/subheader.kmk
 
-INCLUDE_SUBDIRS = glue ipdl
+INCLUDE_SUBDIRS = \
+    document
 
 include $(FILE_SUB_FOOTER)

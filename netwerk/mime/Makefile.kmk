@@ -1,0 +1,25 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += mimetype
+
+mimetype_EXTENDS = typelib
+mimetype_SOURCES = \
+    nsIMIMEHeaderParam.idl \
+    nsIMIMEInfo.idl \
+    nsIMIMEService.idl
+
+INSTALLS += nkmime_exports
+
+nkmime_exports_INST = include/
+nkmime_exports_SOURCES =\
+    nsMimeTypes.h
+
+
+include $(FILE_SUB_FOOTER)

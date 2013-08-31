@@ -2,9 +2,12 @@
 # Module makefile
 #
 
-SUB_DEPTH = ..
+SUB_DEPTH = ../..
 include $(KBUILD_PATH)/subheader.kmk
 
-INCLUDE_SUBDIRS = glue ipdl
+INCLUDE_SUBDIRS = \
+    file \
+    http \
+    res
 
 include $(FILE_SUB_FOOTER)

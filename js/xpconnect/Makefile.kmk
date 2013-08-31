@@ -1,0 +1,33 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += xpconnect
+
+xpconnect_EXTENDS = typelib
+xpconnect_DEFPATH := $(PATH_SUB_CURRENT)/idl
+xpconnect_INCS = \
+    $(PATH_ROOT)/xpcom/reflect/xptinfo/public
+xpconnect_SOURCES = \
+    mozIJSSubScriptLoader.idl \
+    xpccomponents.idl \
+    xpcjsid.idl \
+    xpcexception.idl \
+    xpcIJSModuleLoader.idl \
+    nsIJSContextStack.idl \
+    nsIJSRuntimeService.idl \
+    nsIXPConnect.idl \
+    nsIXPCSecurityManager.idl \
+    nsIXPCScriptable.idl \
+    nsIScriptError.idl \
+    nsIXPCScriptNotify.idl \
+    xpcIJSWeakReference.idl \
+    xpcIJSGetFactory.idl \
+    nsIJSEngineTelemetryStats.idl
+
+include $(FILE_SUB_FOOTER)

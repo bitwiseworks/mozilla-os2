@@ -5,6 +5,7 @@
 SUB_DEPTH = ..
 include $(KBUILD_PATH)/subheader.kmk
 
-INCLUDE_SUBDIRS = glue ipdl
+INCLUDE_SUBDIRS = \
+    base
 
 include $(FILE_SUB_FOOTER)

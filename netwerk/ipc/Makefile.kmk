@@ -1,0 +1,18 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+INSTALLS += neckoipc_exports_mozilla_net
+
+neckoipc_exports_mozilla_net_INST = include/mozilla/net/
+neckoipc_exports_mozilla_net_SOURCES = \
+    NeckoParent.h \
+    NeckoChild.h \
+    NeckoCommon.h \
+    NeckoMessageUtils.h \
+    ChannelEventQueue.h \
+
+include $(FILE_SUB_FOOTER)

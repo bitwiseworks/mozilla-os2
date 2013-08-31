@@ -1,0 +1,17 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += necko_file
+
+necko_file_EXTENDS = typelib
+necko_file_SOURCES = \
+    nsIFileChannel.idl \
+    nsIFileProtocolHandler.idl
+
+include $(FILE_SUB_FOOTER)

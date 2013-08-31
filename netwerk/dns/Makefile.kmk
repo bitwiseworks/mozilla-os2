@@ -1,0 +1,21 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += necko_dns
+
+necko_dns_EXTENDS = typelib
+necko_dns_SOURCES = \
+    nsIDNSListener.idl \
+    nsIDNSRecord.idl \
+    nsIDNSService.idl \
+    nsIEffectiveTLDService.idl \
+    nsIIDNService.idl \
+    nsPIDNSService.idl
+
+include $(FILE_SUB_FOOTER)

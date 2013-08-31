@@ -28,10 +28,19 @@ MOZ_USER_DIR           ?= Mozilla
 
 MOZ_UPDATE_CHANNEL     ?= default
 
-MOZ_NATIVE_FFI         ?=
+MOZ_WIDGET_TOOLKIT     ?= os2
+
+MOZ_NATIVE_FFI                     ?=
 
 MOZ_XUL                            ?= 1
 MOZ_OMNIJAR                        ?= 1
+MOZ_CRASHREPORTER                  ?=
+MOZ_INSTRUMENT_EVENT_LOOP          ?=
+MOZ_ZIPWRITER                      ?= 1
+
+OMNIJAR_NAME                       ?= omni.ja
+
+TARGET_XPCOM_ABI                   ?= x86-gcc4
 
 JS_NATIVE_EDITLINE                 ?= 1
 JS_DISABLE_SHELL                   ?=
@@ -231,6 +240,115 @@ TEMPLATE_JsDll_LIBS         = $(TEMPLATE_Dll_LIBS)
 
 TEMPLATE_JsExe              = JavaScript EXE
 TEMPLATE_JsExe_EXTENDS      = JsBin
+
+#
+
+TEMPLATE_LibXpCom            = XPCOM library
+TEMPLATE_LibXpCom_EXTENDS    = Lib
+TEMPLATE_LibXpCom_EXTENDS_BY = appending
+TEMPLATE_LibXpCom_DEFS       = \
+	MOZILLA_INTERNAL_API \
+	_IMPL_NS_COM
+TEMPLATE_LibXpCom_INCS       = \
+    $(dir $(XPCOM_PRIVATE_H)) \
+    $(PATH_ROOT)/xpcom/base \
+    $(PATH_ROOT)/xpcom/build \
+    $(PATH_ROOT)/xpcom/ds \
+    $(PATH_ROOT)/xpcom/io \
+    $(PATH_ROOT)/xpcom/threads \
+    $(PATH_ROOT)/xpcom/components \
+    $(PATH_ROOT)/xpcom/reflect/xptcall/public \
+    $(PATH_ROOT)/xpcom/reflect/xptinfo/public \
+    $(PATH_ROOT)/xpcom/typelib/xpt/public \
+    $(PATH_ROOT)/xpcom/glue \
+    $(PATH_ROOT)/intl/unicharutil/util \
+    $(NSPR_INCS)
+
+#
+
+TEMPLATE_LibXul            = XUL library
+TEMPLATE_LibXul_EXTENDS    = LibXpCom
+TEMPLATE_LibXul_EXTENDS_BY = appending
+TEMPLATE_LibXul_DEFS       = \
+	EXPORT_XPT_API \
+	EXPORT_XPTC_API \
+	_IMPL_NS_GFX \
+	_IMPL_NS_WIDGET \
+	IMPL_XREAPI \
+	IMPL_NS_NET \
+	IMPL_THEBES
+
+#
+
+TEMPLATE_LibChromium            = Chromium library
+TEMPLATE_LibChromium_EXTENDS    = Lib
+TEMPLATE_LibChromium_EXTENDS_BY = appending
+TEMPLATE_LibChromium_DEFS       = \
+    EXCLUDE_SKIA_DEPENDENCIES
+TEMPLATE_LibChromium_INCS       = \
+    $(PATH_ROOT)/ipc/chromium/src \
+    $(PATH_ROOT)/ipc/glue \
+    $(PATH_OBJ)/ipdl/ipdlheaders
+
+# cause ipdl headers to be generated when building from root
+TEMPLATE_LibChromium_ORDERDEPS = $(ipdl_1_TARGET)
+
+# includes needed by ipdl headers
+TEMPLATE_LibChromium_INCS += \
+    $(PATH_ROOT)/gfx/thebes \
+    $(PATH_ROOT)/gfx/src \
+    $(PATH_ROOT)/gfx/layers/basic \
+    $(PATH_ROOT)/gfx/layers/ipc \
+    $(PATH_ROOT)/gfx/layers/opengl \
+    $(PATH_ROOT)/gfx/layers \
+    $(PATH_ROOT)/layout/style
+
+TEMPLATE_LibChromium_DEFS.darwin = \
+    OS_MACOSX=1 \
+    OS_POSIX=1
+
+TEMPLATE_LibChromium_DEFS.win = \
+    UNICODE \
+    _UNICODE \
+    NOMINMAX \
+    _CRT_RAND_S \
+    CERT_CHAIN_PARA_HAS_EXTRA_FIELDS \
+    _SECURE_ATL \
+    CHROMIUM_BUILD \
+    U_STATIC_IMPLEMENTATION \
+    OS_WIN=1 \
+    WIN32 \
+    _WIN32 \
+    _WINDOWS \
+    WIN32_LEAN_AND_MEAN \
+    COMPILER_MSVC
+TEMPLATE_LibChromium_LIBS.win = \
+    psapi shell32 dbghelp
+
+TEMPLATE_LibChromium_DEFS.os2 = \
+    OS_POSIX=1 \
+    OS_OS2=1 \
+
+TEMPLATE_LibChromium_DEFS.linux = \
+    OS_LINUX=1 \
+    OS_POSIX=1
+
+#
+
+TEMPLATE_LibXulChromium            = XUL + Chromium library
+TEMPLATE_LibXulChromium_EXTENDS    = LibXul
+TEMPLATE_LibXulChromium_EXTENDS_BY = appending
+
+$(call COPY_PROPS,TEMPLATE_LibChromium,DEFS INCS DEPS ORDERDEPS,TEMPLATE_LibXulChromium)
+
+#
+# INSTALLS base targets
+#
+
+components_install_INST = bin/components/
+components_install_POST_XFILE_CMDS = \
+	$$(if $$(filter %.manifest,$$<), $(QUIET) \
+		$(PYTHON) $(PATH_ROOT)/config/buildlist.py $$(dir $$@)../chrome.manifest "manifest components/$$(notdir $$(basename $$<)).manifest")
 
 #
 # TASKS base target for generating .xpt/.h from .idl

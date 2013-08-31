@@ -1,0 +1,20 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += necko_socket
+
+necko_socket_EXTENDS = typelib
+necko_socket_SOURCES = \
+    nsISocketProvider.idl \
+    nsISocketProviderService.idl \
+    nsISOCKSSocketInfo.idl \
+    nsISSLSocketControl.idl \
+    nsITransportSecurityInfo.idl
+
+include $(FILE_SUB_FOOTER)

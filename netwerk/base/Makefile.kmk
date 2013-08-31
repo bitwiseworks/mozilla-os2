@@ -1,0 +1,140 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += necko
+
+necko_EXTENDS = typelib
+necko_DEFPATH := $(PATH_SUB_CURRENT)/public
+necko_SOURCES = \
+    nsIChannel.idl \
+    nsILoadGroup.idl \
+    nsIProtocolHandler.idl \
+    nsIRequest.idl \
+    nsIRequestObserver.idl \
+    nsIStreamListener.idl \
+    nsIIOService.idl \
+    nsIURI.idl \
+    nsIURL.idl \
+    nsIFileURL.idl \
+    nsIUploadChannel.idl \
+    nsITraceableChannel.idl \
+    nsIApplicationCache.idl \
+    nsIApplicationCacheChannel.idl \
+    nsIApplicationCacheContainer.idl \
+    nsIApplicationCacheService.idl \
+    nsIAuthInformation.idl \
+    nsIAuthPrompt.idl \
+    nsIAuthPrompt2.idl \
+    nsIAuthPromptAdapterFactory.idl \
+    nsIAuthPromptCallback.idl \
+    nsIAsyncStreamCopier.idl \
+    nsIAsyncVerifyRedirectCallback.idl \
+    nsIBufferedStreams.idl \
+    nsICancelable.idl \
+    nsIChannelPolicy.idl \
+    nsICryptoHash.idl \
+    nsICryptoHMAC.idl \
+    nsIDownloader.idl \
+    nsIEncodedChannel.idl \
+    nsIFileStreams.idl \
+    nsIIncrementalDownload.idl \
+    nsIInputStreamPump.idl \
+    nsIInputStreamChannel.idl \
+    nsIIOService2.idl \
+    nsIMIMEInputStream.idl \
+    nsINetAddr.idl \
+    nsINetworkLinkService.idl \
+    nsIPermission.idl \
+    nsIPermissionManager.idl \
+    nsIPrivateBrowsingService.idl \
+    nsIProgressEventSink.idl \
+    nsIPrompt.idl \
+    nsIProtocolProxyService.idl \
+    nsIProtocolProxyService2.idl \
+    nsIProtocolProxyFilter.idl \
+    nsIProtocolProxyCallback.idl \
+    nsIProxiedProtocolHandler.idl \
+    nsIProxyAutoConfig.idl \
+    nsIProxyInfo.idl \
+    nsITransport.idl \
+    nsISocketTransport.idl \
+    nsISocketTransportService.idl \
+    nsISpeculativeConnect.idl \
+    nsIServerSocket.idl \
+    nsIResumableChannel.idl \
+    nsIRequestObserverProxy.idl \
+    nsISecurityInfoProvider.idl \
+    nsIStreamListenerTee.idl \
+    nsISimpleStreamListener.idl \
+    nsIStreamTransportService.idl \
+    nsIStreamLoader.idl \
+    nsISyncStreamListener.idl \
+    nsISystemProxySettings.idl \
+    nsITimedChannel.idl \
+    nsIUnicharStreamLoader.idl \
+    nsIUploadChannel2.idl \
+    nsIStandardURL.idl \
+    nsINestedURI.idl \
+    nsIURLParser.idl \
+    nsIURIChecker.idl \
+    nsISecurityEventSink.idl \
+    nsISecretDecoderRing.idl \
+    nsISecureBrowserUI.idl \
+    nsICryptoFIPSInfo.idl \
+    nsINSSErrorsService.idl \
+    nsICacheInfoChannel.idl \
+    nsICachingChannel.idl \
+    nsIByteRangeRequest.idl \
+    nsIMultiPartChannel.idl \
+    nsIExternalProtocolHandler.idl \
+    nsIAuthModule.idl \
+    nsIContentSniffer.idl \
+    nsIAuthPromptProvider.idl \
+    nsPISocketTransportService.idl \
+    nsIChannelEventSink.idl \
+    nsINetUtil.idl \
+    nsIProxiedChannel.idl \
+    nsIRandomGenerator.idl \
+    nsIStrictTransportSecurityService.idl \
+    nsIURIWithPrincipal.idl \
+    nsIURIClassifier.idl \
+    nsIRedirectResultListener.idl \
+    mozIThirdPartyUtil.idl \
+    nsISerializationHelper.idl \
+    nsIChildChannel.idl \
+    nsIParentChannel.idl \
+    nsIParentRedirectingChannel.idl \
+    nsIRedirectChannelRegistrar.idl
+
+ifdef MOZ_TOOLKIT_SEARCH
+necko_SOURCES = \
+    nsIBrowserSearchService.idl
+endif
+
+INSTALLS += neckobase_exports
+
+neckobase_exports_INST = include/
+neckobase_exports_SOURCES = \
+    $(addprefix public/,\
+        netCore.h \
+        nsNetUtil.h \
+        nsNetStrings.h \
+        nsChannelProperties.h \
+        nsURIHashKey.h \
+        nsReadLine.h \
+        nsASocketHandler.h \
+        nsAsyncRedirectVerifyHelper.h \
+        nsStreamListenerWrapper.h \
+    ) \
+    $(addprefix src/,\
+        nsMIMEInputStream.h \
+        nsURLHelper.h \
+    )
+
+include $(FILE_SUB_FOOTER)
