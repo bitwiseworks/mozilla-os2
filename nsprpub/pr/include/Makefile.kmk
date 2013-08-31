@@ -5,33 +5,33 @@
 SUB_DEPTH = ../../..
 include $(KBUILD_PATH)/subheader.kmk
 
-INSTALLS += nspr_headers
+INSTALLS += nspr_exports
 
-nspr_headers_INST       = include/nspr/
-nspr_headers_SOURCES    = $(wildcard $(nspr_headers_DEFPATH)/*.h)
+nspr_exports_INST       = include/nspr/
+nspr_exports_SOURCES    = $(wildcard $(nspr_exports_DEFPATH)/*.h)
 
-nspr_headers_SOURCES.os2    = md/_os2.cfg=>prcpucfg.h
+nspr_exports_SOURCES.os2    = md/_os2.cfg=>prcpucfg.h
 
-INSTALLS += nspr_headers_md_cfg
+INSTALLS += nspr_exports_md_cfg
 
-nspr_headers_md_cfg_INST    = include/nspr/md/
-nspr_headers_md_cfg_SOURCES = $(wildcard $(nspr_headers_md_cfg_DEFPATH)/md/*.cfg)
+nspr_exports_md_cfg_INST    = include/nspr/md/
+nspr_exports_md_cfg_SOURCES = $(wildcard $(nspr_exports_md_cfg_DEFPATH)/md/*.cfg)
 
-INSTALLS += nspr_headers_private
+INSTALLS += nspr_exports_private
 
-nspr_headers_private_INST       = include/nspr/private/
-nspr_headers_private_SOURCES    = $(addprefix private/, pprio.h pprthred.h prpriv.h)
+nspr_exports_private_INST       = include/nspr/private/
+nspr_exports_private_SOURCES    = $(addprefix private/, pprio.h pprthred.h prpriv.h)
 
-INSTALLS += nspr_headers_obsolete
+INSTALLS += nspr_exports_obsolete
 
-nspr_headers_obsolete_INST      = include/nspr/obsolete/
-nspr_headers_obsolete_SOURCES   = $(wildcard $(nspr_headers_obsolete_DEFPATH)/obsolete/*.h)
+nspr_exports_obsolete_INST      = include/nspr/obsolete/
+nspr_exports_obsolete_SOURCES   = $(wildcard $(nspr_exports_obsolete_DEFPATH)/obsolete/*.h)
 
-# All headers targets (used for modules that depend on installed headers)
-NSPR_HEADERS_ALL = \
-    $(nspr_headers_1_TARGET) \
-    $(nspr_headers_md_cfg_1_TARGET) \
-    $(nspr_headers_private_1_TARGET) \
-    $(nspr_headers_obsolete_1_TARGET)
+# Also install all include/nspr/ header to include/ (this is required by some code)
+
+INSTALLS += nspr_exports_stage
+
+nspr_exports_stage_EXTENDS     = nspr_exports
+nspr_exports_stage_INST        = include/
 
 include $(FILE_SUB_FOOTER)

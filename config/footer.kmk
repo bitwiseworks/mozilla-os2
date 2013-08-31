@@ -72,6 +72,18 @@ endef # def_installs_pp_sources
 $(foreach target,$(INSTALLS),$(evalval def_installs_pp_sources))
 
 #------------------------------------------------------------------------------
+
+#
+# Hook that gathers all *_exports* targets to EXPORT_HEADERS_ALL_TARGETS.
+# This is used in e.g. templates to easily depend on the installed headers.
+#
+
+EXPORT_HEADERS_ALL_TARGETS =
+
+$(foreach target,$(INSTALLS),$(if $(findstring _exports,$(target)),\
+	$(eval EXPORT_HEADERS_ALL_TARGETS += $$($(target)_1_TARGET))))
+
+#------------------------------------------------------------------------------
 # Part included from each sub-makefile (excluding the top one)
 #------------------------------------------------------------------------------
 

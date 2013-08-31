@@ -92,10 +92,10 @@ xpcom_private_h_VARS.os2 = \
 # Install global headers.
 #
 
-INSTALLS += global_headers
+INSTALLS += global_exports
 
-global_headers_INST     = include/
-global_headers_SOURCES += \
+global_exports_INST     = include/
+global_exports_SOURCES += \
     $(MOZILLA_CONFIG_H) \
     config/nsStaticComponents.h \
     $(XPCOM_CONFIG_H)

@@ -210,7 +210,4 @@ ifdef NSPR_USE_PTHREADS
 nspr_LIBS  += pthread
 endif
 
-# Make sure exported headers are installed before compiling the module
-nspr_DEPS += $(NSPR_HEADERS_ALL)
-
 include $(FILE_SUB_FOOTER)

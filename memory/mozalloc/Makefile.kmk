@@ -14,10 +14,10 @@ mozalloc_SOURCES    = \
 	mozalloc_abort.cpp \
 	mozalloc_oom.cpp
 
-INSTALLS += mozalloc_Exports
+INSTALLS += mozalloc_exports_mozilla
 
-mozalloc_Exports_INST     = include/mozilla/
-mozalloc_Exports_SOURCES  = \
+mozalloc_exports_mozilla_INST     = include/mozilla/
+mozalloc_exports_mozilla_SOURCES  = \
 	fallible.h \
 	mozalloc.h \
 	mozalloc_abort.h \
@@ -26,6 +26,6 @@ mozalloc_Exports_SOURCES  = \
 	mozalloc_undef_macro_wrappers.h
 
 # Make sure exported headers are installed before compiling the module
-mozalloc_DEPS += $(mozalloc_Exports_1_TARGET)
+mozalloc_DEPS += $(mozalloc_exports_mozilla_1_TARGET)
 
 include $(FILE_SUB_FOOTER)

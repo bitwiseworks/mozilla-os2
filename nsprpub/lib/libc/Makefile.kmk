@@ -53,9 +53,9 @@ OTHER_CLEAN += $(plc_0_OUTDIR)/_pl_bld.h
 
 plc_LIBS += $(PATH_STAGE_LIB)/nspr$(NSPR_MAJOR_VERSION)$(SUFF_LIB)
 
-INSTALLS += plc_headers
+INSTALLS += plc_exports
 
-plc_headers_INST        = include/nspr/
-plc_headers_SOURCES     = $(wildcard $(plc_headers_DEFPATH)/include/*.h)
+plc_exports_INST        = include/nspr/
+plc_exports_SOURCES     = $(wildcard $(plc_exports_DEFPATH)/include/*.h)
 
 include $(FILE_SUB_FOOTER)
