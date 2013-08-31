@@ -113,4 +113,8 @@ INCLUDE_SUBDIRS += nsprpub
 # tier js
 INCLUDE_SUBDIRS += js/src
 
+# tier platform
+INCLUDE_SUBDIRS += \
+    ipc
+
 include $(FILE_SUB_FOOTER)

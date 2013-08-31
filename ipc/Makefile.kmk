@@ -1,0 +1,10 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ..
+include $(KBUILD_PATH)/subheader.kmk
+
+INCLUDE_SUBDIRS = ipdl
+
+include $(FILE_SUB_FOOTER)
