@@ -114,4 +114,47 @@ TARGET_PROP_FIRST = $($(firstdefined \
     2 \
 ))
 
+##
+# Assigns a value of one variable to another variable only if the first one is defined.
+# The resulting variable will be a deferred reference to the source to make sure it
+# is not expanded before the references in the source get their values.
+# @param 1  Source variable.
+# @param 2  Target variable.
+#
+# Call it with $(eval $(call)).
+#
+define ASSIGN_IF_DEFIND
+ifneq ($(origin $(1)),undefined)
+$(2) = $$($(1))
+endif
+endef # ASSIGN_IF_DEFIND
+
+##
+# Copies one property of one stem to another including all variants (build, arch, etc).
+# @param 1  Source stem (template, target, etc).
+# @param 2  Property name (w/o underscore).
+# @param 3  Target stem.
+#
+define COPY_PROP
+$(foreach keyword, \
+    $(KBUILD_TARGET).$(KBUILD_TARGET_ARCH).$(KBUILD_TYPE) \
+    $(KBUILD_TARGET).$(KBUILD_TARGET_ARCH) \
+    $(KBUILD_TARGET).$(KBUILD_TYPE) \
+    $(KBUILD_TARGET_CPU) \
+    $(KBUILD_TARGET_ARCH) \
+    $(KBUILD_TARGET) \
+    $(KBUILD_TYPE), \
+    $(eval $(call ASSIGN_IF_DEFIND,$(1)_$(2).$(keyword),$(3)_$(2).$(keyword))))\
+$(eval $(call ASSIGN_IF_DEFIND,$(1)_$(2),$(3)_$(2)))
+endef # COPY_PROP
+
+##
+# Copies given properties of one stem to another including all variants (build, arch, etc).
+# @param 1  Source stem (template, target, etc).
+# @param 2  Target stem.
+#
+define COPY_PROPS
+$(foreach prop,$(2),$(call COPY_PROP,$(1),$(prop),$(3)))
+endef # COPY_PROPS
+
 endif # ifndef HELPERS_INCLUDED
