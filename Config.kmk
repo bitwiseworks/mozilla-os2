@@ -16,6 +16,8 @@ LOCAL_CONFIG_PRE = 1
 include $(LOCAL_CONFIG)
 LOCAL_CONFIG_PRE =
 
+include $(PATH_ROOT)/config/helpers.kmk
+
 #------------------------------------------------------------------------------
 # Global definitions
 #------------------------------------------------------------------------------
@@ -55,6 +57,15 @@ endif
 
 MOZ_MACBUNDLE_ID        = \
     $(MOZ_DISTRIBUTION_ID).$(tolower $(MOZ_APP_DISPLAYNAME))$(filter-out release,$(BUILD_TYPE))
+
+PYTHON_PATH = $(PYTHON) $(PATH_ROOT)/config/pythonpath.py
+
+ifndef MOZ_SYSTEM_PLY
+PLY_INCLUDE = -I$(PATH_ROOT)/other-licenses/ply
+PLY_PROGS = \
+    $(PATH_ROOT)/other-licenses/ply/ply/lex.py \
+    $(PATH_ROOT)/other-licenses/ply/ply/yacc.py
+endif
 
 # Variables read from the environment (normally after config scripts)
 SHELL_CONFIG_VARS = \
@@ -178,6 +189,7 @@ TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H) $(TEMPLATE_CxxBase_CXXFLA
 
 TEMPLATE_Cxx_ORDERDEPS  = \
     $(MOZILLA_CONFIG_H) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H) \
+    $(TYPELIB_HEADERS_ALL_TARGETS) \
     $(EXPORT_HEADERS_ALL_TARGETS)
 
 TEMPLATE_Lib                = Generic Mozilla library
@@ -219,6 +231,91 @@ TEMPLATE_JsDll_LIBS         = $(TEMPLATE_Dll_LIBS)
 
 TEMPLATE_JsExe              = JavaScript EXE
 TEMPLATE_JsExe_EXTENDS      = JsBin
+
+#
+# TASKS base target for generating .xpt/.h from .idl
+#
+
+typelib_INST = bin/components/
+typelib_IDL_INST = idl/
+typelib_HEADER_INST = include/
+
+typelib_DEFAULT_INCS = \
+	$(PATH_ROOT)/xpcom/base \
+	$(PATH_ROOT)/xpcom/io \
+	$(PATH_ROOT)/xpcom/ds \
+	$(PATH_ROOT)/xpcom/threads \
+	$(PATH_ROOT)/xpcom/components \
+	$(PATH_ROOT)/netwerk/base/public
+
+typelib_SOURCE_DEPS = \
+	$(PATH_STAGE)/sdk/bin/header.py \
+	$(PATH_STAGE)/sdk/bin/typelib.py \
+	$(PATH_STAGE)/sdk/bin/xpidl.py \
+	$(PATH_STAGE)/sdk/bin/xpidllex.py \
+	$(PATH_STAGE)/sdk/bin/xpidlyacc.py \
+	$(XPT_BINARIES)
+
+typelib_SOURCE_TARGET = $(notdir $(basename $(src))).h
+typelib_SOURCE_OUTPUT = $(notdir $(basename $(src))).xpt
+typelib_SOURCE_INTERMEDIATE = $(out).tmp
+
+define typelib_SOURCE_COMMANDS
+	$(QUIET)cd $(outdir) && $(PYTHON_PATH) \
+		$(PLY_INCLUDE) \
+		$(PATH_STAGE)/sdk/bin/header.py -I$(defpath) \
+		$(addprefix -I,$(typelib_DEFAULT_INCS) $(incs)) $(flags) \
+		$(src) -d $(dep) -o $(out)
+	$(QUIET)cd $(outdir) && $(PYTHON_PATH) \
+		$(PLY_INCLUDE) -I$(PATH_ROOT)/xpcom/typelib/xpt/tools \
+		$(PATH_STAGE)/sdk/bin/typelib.py -I$(defpath) \
+		$(addprefix -I,$(typelib_DEFAULT_INCS) $(incs)) $(flags) \
+		$(src) -d $(out).tmp -o $(output)
+	$(QUIET)$(CAT_EXT) $(out).tmp >> $(dep)
+	$(QUIET)$(RM) -f $(out).tmp
+endef
+
+typelib_TARGET = $(outbase).xpt
+
+define typelib_COMMANDS
+	$(QUIET)cd $(outdir) && $(PYTHON) $(PATH_STAGE)/sdk/bin/xpt.py link \
+		$(out) $(src_output)
+endef
+
+typelib_POST_HOOK = typelib_POST_HOOK_func
+define typelib_POST_HOOK_func
+
+# Install the module .xpt
+local inst := $(call TARGET_PROP_FIRST,INST)
+ifneq ($(inst),)
+ $(target)_INST_INST    := $(inst)
+ $(target)_INST_SOURCES := $($(target)_1_TARGET)
+ $(target)_INST_POST_XFILE_CMDS := $(QUIET) \
+  $(PYTHON) $(PATH_ROOT)/config/buildlist.py $$(dir $$@)interfaces.manifest "interfaces $(name).xpt" && \
+  $(PYTHON) $(PATH_ROOT)/config/buildlist.py $$(dir $$@)../chrome.manifest "manifest components/interfaces.manifest"
+ $(eval _ALL_INSTALLS += $(target)_INST)
+endif
+
+# Install the .idl
+local idl_inst := $(call TARGET_PROP_FIRST,IDL_INST)
+ifneq ($(idl_inst),)
+ $(target)_IDL_INST_INST    := $(idl_inst)
+ $(target)_IDL_INST_SOURCES := $(abspathex $($(target)_SOURCES),$(defpath))
+ $(eval _ALL_INSTALLS += $(target)_IDL_INST)
+endif
+
+# Install the .h
+local hdr_inst := $(call TARGET_PROP_FIRST,HEADER_INST)
+ifneq ($(hdr_inst),)
+ $(target)_HEADER_INST_INST    := $(hdr_inst)
+ $(target)_HEADER_INST_SOURCES := $($(target)_1_SOURCE_TARGET)
+ $(eval _ALL_INSTALLS += $(target)_HEADER_INST)
+endif
+
+# memorize the targets
+$(eval TYPELIB_HEADERS_ALL_TARGETS += $($(target)_HEADER_INST_1_TARGET))
+
+endef # typelib_POST_HOOK_func
 
 #------------------------------------------------------------------------------
 # Miscellaneous
