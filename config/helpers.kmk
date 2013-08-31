@@ -67,4 +67,51 @@ TARGET_PROP_ALL = $(strip \
     $($(target)_$(1)) \
 )
 
+TARGET_PROP_ALL_VAL = $(strip \
+    $(value $(target)_$(1).$(bld_trg).$(bld_trg_arch).$(bld_type)) \
+    $(value $(target)_$(1).$(bld_trg).$(bld_trg_arch)) \
+    $(value $(target)_$(1).$(bld_trg).$(bld_type)) \
+    $(value $(target)_$(1).$(bld_trg_cpu)) \
+    $(value $(target)_$(1).$(bld_trg_arch)) \
+    $(value $(target)_$(1).$(bld_trg)) \
+    $(value $(target)_$(1).$(bld_type)) \
+    $(value $(target)_$(1)) \
+)
+
+##
+# Gets the name of the first defined variant of the given target property taking $(bld_trg), $(bld_trg_arch),
+# $(bld_cpu) and $(bld_type) suffixes into account. Requires $(target) to be set in
+# additon to the suffix variables. The returned name must be expanded to get the value.
+# @param 1  Target variable name (w/o underscore).
+#
+TARGET_PROP_FIRST_VAR = $(firstdefined \
+    $(target)_$(1).$(bld_trg).$(bld_trg_arch).$(bld_type) \
+    $(target)_$(1).$(bld_trg).$(bld_trg_arch) \
+    $(target)_$(1).$(bld_trg).$(bld_type) \
+    $(target)_$(1).$(bld_trg_cpu) \
+    $(target)_$(1).$(bld_trg_arch) \
+    $(target)_$(1).$(bld_trg) \
+    $(target)_$(1).$(bld_type) \
+    $(target)_$(1) \
+)
+
+##
+# Gets the value of the first defined variant of the given target property taking $(bld_trg), $(bld_trg_arch),
+# $(bld_cpu) and $(bld_type) suffixes into account. Requires $(target) to be set in
+# additon to the suffix variables. The returned name must be expanded to get the value.
+# @param 1  Target variable name (w/o underscore).
+# @param 2  Default valueif all variants are unefined.
+#
+TARGET_PROP_FIRST = $($(firstdefined \
+    $(target)_$(1).$(bld_trg).$(bld_trg_arch).$(bld_type) \
+    $(target)_$(1).$(bld_trg).$(bld_trg_arch) \
+    $(target)_$(1).$(bld_trg).$(bld_type) \
+    $(target)_$(1).$(bld_trg_cpu) \
+    $(target)_$(1).$(bld_trg_arch) \
+    $(target)_$(1).$(bld_trg) \
+    $(target)_$(1).$(bld_type) \
+    $(target)_$(1) \
+    2 \
+))
+
 endif # ifndef HELPERS_INCLUDED
