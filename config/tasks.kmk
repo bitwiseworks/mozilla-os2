@@ -304,6 +304,14 @@ $(eval $(target): $(out))
 
 $(eval OTHERS += $(target))
 
+# add install target if requested
+local inst := $(call TARGET_PROP_FIRST,INST)
+ifneq ($(inst),)
+ $(target)_INST_INST    := $(inst)
+ $(target)_INST_SOURCES := $(out)
+ $(eval _ALL_INSTALLS += $(target)_INST)
+endif
+
 # call the custom post-procedure
 $(evalval $($(call TARGET_PROP_FIRST_VAR,POST_HOOK)))
 
@@ -315,7 +323,7 @@ endef # def_unit_tasks_global_target
 
 # Perform inheritance.
 properties := \
-    INST IDL_INST HEADER_INST SOURCE PRE_HOOK POST_HOOK
+    $(PROPS_TASKS_SINGLE) INST SOURCE PRE_HOOK POST_HOOK
 properties_now_l := SOURCES INCS CLEAN BLDDIRS
 properties_now_r := FLAGS
 properties_deferred := \
