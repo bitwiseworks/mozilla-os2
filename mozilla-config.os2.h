@@ -63,11 +63,8 @@
 #define MOZ_DEBUG_SYMBOLS 1
 #define MOZ_DLL_SUFFIX ".dll"
 #define MOZ_FEEDS 1
-#define MOZ_GRAPHITE 1
 #define MOZ_LOGGING 1
 #define MOZ_MEDIA 1
-#define MOZ_OGG 1
-#define MOZ_OPUS 1
 #define MOZ_OS2_HIGH_MEMORY 1
 #define MOZ_PDF_PRINTING 1
 #define MOZ_PLACES 1
@@ -80,8 +77,6 @@
 #define MOZ_URL_CLASSIFIER 1
 #define MOZ_VORBIS 1
 #define MOZ_VP8 1
-#define MOZ_WAVE 1
-#define MOZ_WEBM 1
 #define MOZ_XTF 1
 #define NO_X11 1
 #define NS_ALWAYS_INLINE __attribute__((always_inline))
@@ -94,5 +89,4 @@
 #define STDC_HEADERS 1
 #define VA_COPY va_copy
 #define VPX_X86_ASM 1
-#define XP_OS2 1
 #define X_DISPLAY_MISSING 1

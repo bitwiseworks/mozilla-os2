@@ -300,7 +300,7 @@ $(eval _DEPFILES    += $(dep))
 $(eval _CLEAN_FILES += $(clean))
 $(eval _DIRS        += $(blddirs))
 
-$(eval $(target): $(out))
+$(eval $(target):: $(out))
 
 $(eval OTHERS += $(target))
 
