@@ -113,12 +113,14 @@ else
 ifneq ($(alldefs),)
 	$(QUIET)$(APPEND_EXT) -n $(tmp) \
 		$(foreach v, $(alldefs_vars), \
-			"#define $(firstword $(subst =, ,$(v))) \
-				$(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))") ""
+			$(foreach vl,$(firstword $(subst =, ,$(v))), \
+				$(foreach vr,$(firstword $(word 2,$(subst =, ,$(v))) $($(v))), \
+					"#define $(vl) $(vr)"))) ""
 	$(QUIET)$(APPEND_EXT) -n $(tmp) \
 		$(foreach v, $(alldefs_vars_q), \
-			"#define $(firstword $(subst =, ,$(v))) \
-				\"$(if $(findstring =,$(v)),$(word 2,$(subst =, ,$(v))),$($(v)))\"") ""
+			$(foreach vl,$(firstword $(subst =, ,$(v))), \
+				$(foreach vr,\"$(firstword $(word 2,$(subst =, ,$(v))) $($(v)))\", \
+					"#define $(vl) $(vr)"))) ""
 	$(QUIET)$(CAT_EXT) $(alldefs_static) >> $(tmp)
 endif
 	$(QUIET)$(SED) -r $(foreach v, $(vars), \
