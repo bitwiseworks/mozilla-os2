@@ -88,6 +88,21 @@ SHELL_CONFIG_VARS = \
 	MOZ_APP_DISPLAYNAME MOZ_UA_BUILDID \
 	NSPR_MAJOR_VERSION NSPR_MINOR_VERSION NSPR_PATCH_VERSION
 
+# Variables passed to the compilers as defines
+CONFIG_VARS = \
+    FIREFOX_VERSION MOZ_UPDATER MOZ_PHOENIX \
+    MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
+    MOZ_SERVICES_SYNC MOZ_MEDIA_NAVIGATOR \
+    MOZ_BUILD_APP MOZ_MACBUNDLE_ID MOZ_UPDATE_CHANNEL \
+    MOZ_XUL MOZ_OMNIJAR \
+    MOZILLA_VERSION_U=$(MOZILLA_VERSION)
+
+# Variables passed to the compilers as defines, quoted
+CONFIG_VARS_QUOTED = \
+    MOZILLA_VERSION MOZILLA_UAVERSION \
+    MOZ_APP_UA_NAME MOZ_APP_UA_VERSION=$(MOZ_APP_VERSION) \
+    MOZ_DISTRIBUTION_ID MOZ_UA_BUILDID MOZ_USER_DIR
+
 FILE_SUB_FOOTER     = $(PATH_ROOT)/config/footer.kmk
 CACHED_CONFIG       = $(PATH_OBJ)/CachedConfig.kmk
 
@@ -455,3 +470,23 @@ PROPS_INSTALLS_DEFERRED := $(PROPS_INSTALLS_DEFERRED) PRE_XFILE_CMDS POST_XFILE_
 # Include site-specific configuration for local overrides.
 #
 include $(LOCAL_CONFIG)
+
+# Configurable variables turned into defines (DEF=VAL, w/o the -D prefix)
+CONFIG_DEFS = \
+    $(strip \
+        $(foreach v,$(CONFIG_VARS), \
+            $(foreach vl,$(firstword $(subst =, ,$(v))), \
+                $(foreach vr,$(firstword $(word 2,$(subst =, ,$(v))) $($(v))), \
+                    $(vl)=$(vr))))) \
+    $(foreach v,$(CONFIG_VARS_QUOTED), \
+        $(foreach vl,$(firstword $(subst =, ,$(v))), \
+            $(foreach vr,\"$(subst $$(SP),\$$(SP),$(firstword $(word 2,$(subst =, ,$(v))) $($(v))))\", \
+                $(vl)=$(vr))))
+
+# The same as above but with -D
+$(eval CONFIG_DEFS_D := $(addprefix -D,$(CONFIG_DEFS)))
+
+# Expand CONFIG_DEFS once and for all (also to cause $$(SP) expansion to spaces)
+$(eval CONFIG_DEFS := $(CONFIG_DEFS))
+
+#$(error [$(CONFIG_DEFS_D)])

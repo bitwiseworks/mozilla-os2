@@ -57,17 +57,8 @@ CONFIG_FILES += mozilla_confdefs_h
 mozilla_confdefs_h_SOURCE             = mozilla-config.h.in
 mozilla_confdefs_h_TARGET             = $(MOZILLA_CONFIG_H)
 mozilla_confdefs_h_ALLDEFS_STATIC.os2 = mozilla-config.os2.h
-mozilla_confdefs_h_ALLDEFS_VARS.os2   = \
-    FIREFOX_VERSION MOZ_UPDATER MOZ_PHOENIX \
-    MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
-    MOZ_SERVICES_SYNC MOZ_MEDIA_NAVIGATOR \
-    MOZ_BUILD_APP MOZ_MACBUNDLE_ID MOZ_UPDATE_CHANNEL \
-    MOZ_XUL MOZ_OMNIJAR \
-    MOZILLA_VERSION_U=$(MOZILLA_VERSION)
-mozilla_confdefs_h_ALLDEFS_VARS_QUOTED.os2 = \
-    MOZILLA_VERSION MOZILLA_UAVERSION \
-    MOZ_APP_UA_NAME MOZ_APP_UA_VERSION=$(MOZ_APP_VERSION) \
-    MOZ_DISTRIBUTION_ID MOZ_UA_BUILDID MOZ_USER_DIR
+mozilla_confdefs_h_ALLDEFS_VARS       = $(CONFIG_VARS)
+mozilla_confdefs_h_ALLDEFS_VARS_QUOTED = $(CONFIG_VARS_QUOTED)
 
 CONFIG_FILES += xpcom_config_h xpcom_private_h
 
