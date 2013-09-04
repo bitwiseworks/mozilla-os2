@@ -88,7 +88,7 @@ SHELL_CONFIG_VARS = \
 	MOZ_APP_DISPLAYNAME MOZ_UA_BUILDID \
 	NSPR_MAJOR_VERSION NSPR_MINOR_VERSION NSPR_PATCH_VERSION
 
-# Variables passed to the compilers as defines
+# Variables passed to the compilers as defines (except C/C++ using mozilla-config.h)
 CONFIG_VARS = \
     FIREFOX_VERSION MOZ_UPDATER MOZ_PHOENIX \
     MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
@@ -179,14 +179,16 @@ TEMPLATE_CxxBase_CFLAGS = \
     -pedantic -Wall -Wpointer-arith -Wdeclaration-after-statement \
     -Werror=return-type -Wtype-limits -Wempty-body \
     -Wno-unused -Wno-overlength-strings -Wcast-align \
-    -Wno-long-long -fno-strict-aliasing
+    -Wno-long-long -fno-strict-aliasing \
+    -std=gnu9x
 
 TEMPLATE_CxxBase_CXXFLAGS = \
     -pedantic -Wall -Wpointer-arith -Woverloaded-virtual \
     -Werror=return-type -Wtype-limits -Wempty-body \
     -Wno-ctor-dtor-privacy -Wno-overlength-strings \
     -Wno-invalid-offsetof -Wno-variadic-macros -Wcast-align \
-    -Wno-long-long -fno-exceptions -fno-strict-aliasing -fno-rtti
+    -Wno-long-long -fno-exceptions -fno-strict-aliasing -fno-rtti \
+    -std=gnu++0x
 
 TEMPLATE_CxxBase_DEFS       = MOZILLA_CLIENT
 
@@ -488,5 +490,3 @@ $(eval CONFIG_DEFS_D := $(addprefix -D,$(CONFIG_DEFS)))
 
 # Expand CONFIG_DEFS once and for all (also to cause $$(SP) expansion to spaces)
 $(eval CONFIG_DEFS := $(CONFIG_DEFS))
-
-#$(error [$(CONFIG_DEFS_D)])
