@@ -52,7 +52,7 @@ $(eval $$(subst :,_,$$(srcsrc))_DEFS = $$($(src)_DEFS))
 
 $(tgt): $(srcsrc) $($(src)_DEPS) | $$(call DIRDEP,$$(dir $$@))
 	%$(call MSG_GENERATE,,$@)
-	$(QUIET)$(PYTHON) $(PATH_ROOT)/config/Preprocessor.py $(addprefix -D,$($(subst :,_,$<)_DEFS)) $< > $@
+	$(QUIET)$(PYTHON) $(PATH_ROOT)/config/Preprocessor.py $(addprefix -D,$($(subst :,_,$<)_DEFS)) $(CONFIG_DEFS_D) $< > $@
 
 $(eval OTHER_CLEAN += $(tgt))
 
