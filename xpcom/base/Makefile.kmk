@@ -82,8 +82,7 @@ xpcombase_s_TEMPLATE = LibXulChromium
 xpcombase_s_INCS     = \
     $(PATH_ROOT)/js/xpconnect/public \
     $(PATH_ROOT)/js/xpconnect/src \
-    $(PATH_ROOT)/dom/base \
-    $(PATH_ROOT)/tools/profiler
+    $(PATH_ROOT)/dom/base
 xpcombase_s_SOURCES  = \
     nsVersionComparatorImpl.cpp \
     nsConsoleMessage.cpp \

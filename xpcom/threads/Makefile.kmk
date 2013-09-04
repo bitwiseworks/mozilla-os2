@@ -40,8 +40,6 @@ xpcomthreads_exports_mozilla_SOURCES = \
 LIBRARIES += xpcomthreads_s
 
 xpcomthreads_s_TEMPLATE = LibXul
-xpcomthreads_s_INCS = \
-    $(PATH_ROOT)/tools/profiler
 xpcomthreads_s_SOURCES = \
     nsEventQueue.cpp \
     nsEnvironment.cpp \

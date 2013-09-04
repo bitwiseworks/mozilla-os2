@@ -314,6 +314,7 @@ TEMPLATE_LibXpCom_INCS       = \
     $(PATH_ROOT)/xpcom/typelib/xpt/public \
     $(PATH_ROOT)/xpcom/glue \
     $(PATH_ROOT)/intl/unicharutil/util \
+    $(PATH_ROOT)/tools/profiler \
     $(NSPR_INCS)
 
 #
