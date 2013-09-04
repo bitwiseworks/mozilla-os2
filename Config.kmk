@@ -42,6 +42,9 @@ OMNIJAR_NAME                       ?= omni.ja
 
 TARGET_XPCOM_ABI                   ?= x86-gcc4
 
+MOZ_DEBUG_ENABLE_DEFS  := DEBUG _DEBUG TRACING
+MOZ_DEBUG_DISABLE_DEFS := NDEBUG TRIMMED
+
 JS_NATIVE_EDITLINE                 ?= 1
 JS_DISABLE_SHELL                   ?=
 JS_HAS_CTYPES                      ?= 1
@@ -64,8 +67,14 @@ endif
 # All further variables are normally not altered
 #
 
-MOZ_MACBUNDLE_ID        = \
-    $(MOZ_DISTRIBUTION_ID).$(tolower $(MOZ_APP_DISPLAYNAME))$(filter-out release,$(BUILD_TYPE))
+ifeq ($(KBUILD_TYPE),debug)
+MOZ_DEBUG := 1
+else
+MOZ_DEBUG :=
+endif
+
+MOZ_MACBUNDLE_ID = \
+    $(MOZ_DISTRIBUTION_ID).$(tolower $(MOZ_APP_DISPLAYNAME))$(filter-out release,$(KBUILD_TYPE))
 
 PYTHON_PATH = $(PYTHON) $(PATH_ROOT)/config/pythonpath.py
 
@@ -194,12 +203,12 @@ TEMPLATE_CxxBase_DEFS       = MOZILLA_CLIENT
 
 TEMPLATE_CxxBase_CFLAGS.release     = -O2 -fomit-frame-pointer
 TEMPLATE_CxxBase_CXXFLAGS.release   = -O2 -fomit-frame-pointer
-TEMPLATE_CxxBase_DEFS.release       = NDEBUG TRIMMED
+TEMPLATE_CxxBase_DEFS.release       = $(MOZ_DEBUG_DISABLE_DEFS)
 TEMPLATE_CxxBase_LDFLAGS.release    =
 
 TEMPLATE_CxxBase_CFLAGS.debug       = -fno-omit-frame-pointer
 TEMPLATE_CxxBase_CXXFLAGS.debug     = -fno-omit-frame-pointer
-TEMPLATE_CxxBase_DEFS.debug         = DEBUG _DEBUG TRACING
+TEMPLATE_CxxBase_DEFS.debug         = $(MOZ_DEBUG_ENABLE_DEFS)
 TEMPLATE_CxxBase_LDFLAGS.debug      = -fno-inline
 
 # generate .sym files but don't put them in a separate dir
@@ -485,7 +494,14 @@ CONFIG_DEFS = \
             $(foreach vr,\"$(subst $$(SP),\$$(SP),$(firstword $(word 2,$(subst =, ,$(v))) $($(v))))\", \
                 $(vl)=$(vr))))
 
-# The same as above but with -D
+# Add debug/nodebug defs
+ifdef MOZ_DEBUG
+CONFIG_DEFS += $(MOZ_DEBUG_ENABLE_DEFS)
+else
+CONFIG_DEFS += $(MOZ_DEBUG_DISABLE_DEFS)
+endif
+
+# This is as CONFIG_DEFS but with -D
 $(eval CONFIG_DEFS_D := $(addprefix -D,$(CONFIG_DEFS)))
 
 # Expand CONFIG_DEFS once and for all (also to cause $$(SP) expansion to spaces)
