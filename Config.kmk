@@ -459,7 +459,7 @@ ifneq ($(hdr_inst),)
 endif
 
 # memorize the targets
-$(eval TYPELIB_HEADERS_ALL_TARGETS += $($(target)_HEADER_INST_1_TARGET))
+$(eval TYPELIB_HEADERS_ALL_TARGETS += $$($(target)_HEADER_INST_1_TARGET))
 
 endef # typelib_POST_HOOK_func
 
