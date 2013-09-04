@@ -13,7 +13,11 @@ INCLUDE_SUBDIRS += \
     interfaces/geolocation \
     interfaces/stylesheets \
     interfaces/xul \
+    base \
     bindings \
     ipc
+
+INCLUDE_SUBDIRS += \
+    src/geolocation
 
 include $(FILE_SUB_FOOTER)

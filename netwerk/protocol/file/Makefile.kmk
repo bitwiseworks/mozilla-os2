@@ -14,4 +14,12 @@ necko_file_SOURCES = \
     nsIFileChannel.idl \
     nsIFileProtocolHandler.idl
 
+LIBRARIES += nkfile_s
+
+nkfile_s_EXTENDS    = netwerk_s_base
+nkfile_s_EXTENDS_BY = appending
+nkfile_s_SOURCES    = \
+    nsFileProtocolHandler.cpp \
+    nsFileChannel.cpp
+
 include $(FILE_SUB_FOOTER)

@@ -6,6 +6,9 @@ SUB_DEPTH = ../..
 include $(KBUILD_PATH)/subheader.kmk
 
 INCLUDE_SUBDIRS = \
-    style
+    style \
+    base \
+    generic \
+    ipc
 
 include $(FILE_SUB_FOOTER)

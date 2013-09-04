@@ -17,4 +17,14 @@ necko_socket_SOURCES = \
     nsISSLSocketControl.idl \
     nsITransportSecurityInfo.idl
 
+LIBRARIES += neckosocket_s
+
+neckosocket_s_EXTENDS    = netwerk_s_base
+neckosocket_s_EXTENDS_BY = appending
+neckosocket_s_SOURCES    = \
+    nsSocketProviderService.cpp \
+    nsSOCKSSocketProvider.cpp \
+    nsSOCKSIOLayer.cpp \
+    nsUDPSocketProvider.cpp
+
 include $(FILE_SUB_FOOTER)

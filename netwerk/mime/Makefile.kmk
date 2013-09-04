@@ -21,5 +21,11 @@ nkmime_exports_INST = include/
 nkmime_exports_SOURCES =\
     nsMimeTypes.h
 
+LIBRARIES += nkmime_s
+
+nkmime_s_TEMPLATE = LibXul
+nkmime_s_EXTENDS  = netwerk_s_base
+nkmime_s_SOURCES  = \
+  nsMIMEHeaderParamImpl.cpp
 
 include $(FILE_SUB_FOOTER)

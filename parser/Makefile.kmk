@@ -1,0 +1,14 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ..
+include $(KBUILD_PATH)/subheader.kmk
+
+INSTALLS += parser_exports
+
+parser_exports_INST = include/
+parser_exports_SOURCES = \
+    nsCharsetSource.h
+
+include $(FILE_SUB_FOOTER)

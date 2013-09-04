@@ -6,8 +6,23 @@ SUB_DEPTH = ../..
 include $(KBUILD_PATH)/subheader.kmk
 
 INCLUDE_SUBDIRS = \
+    about \
+    data \
+    device \
     file \
+    ftp \
     http \
-    res
+    res \
+    viewsource \
+    websocket \
+    wyciwyg
+
+INSTALLS += neckoapp_components
+
+neckoapp_components_EXTENDS = components_install
+neckoapp_components_DEFPATH := $(PATH_SUB_CURRENT)/app
+neckoapp_components_SOURCES = \
+    AppProtocolHandler.js \
+    AppProtocolHandler.manifest
 
 include $(FILE_SUB_FOOTER)

@@ -5,8 +5,10 @@
 SUB_DEPTH = ..
 include $(KBUILD_PATH)/subheader.kmk
 
-INCLUDE_SUBDIRS += \
+INCLUDE_SUBDIRS = \
     locale \
-    strres
+    strres \
+    unicharutil \
+    uconv
 
 include $(FILE_SUB_FOOTER)

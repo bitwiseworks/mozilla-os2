@@ -22,15 +22,19 @@ include $(PATH_ROOT)/config/helpers.kmk
 # Global definitions
 #------------------------------------------------------------------------------
 
+ifeq ($(KBUILD_TARGET),os2)
+XP_OS2                 ?= 1
+MOZ_WIDGET_TOOLKIT     ?= os2
+endif
+
 MOZ_BUILD_APP          ?= browser
 MOZ_DISTRIBUTION_ID    ?= org.mozilla
 MOZ_USER_DIR           ?= Mozilla
 
 MOZ_UPDATE_CHANNEL     ?= default
 
-MOZ_WIDGET_TOOLKIT     ?= os2
-
 MOZ_NATIVE_FFI                     ?=
+MOZ_NATIVE_SQLITE                  ?=
 
 MOZ_XUL                            ?= 1
 MOZ_OMNIJAR                        ?= 1
@@ -38,9 +42,28 @@ MOZ_CRASHREPORTER                  ?=
 MOZ_INSTRUMENT_EVENT_LOOP          ?=
 MOZ_ZIPWRITER                      ?= 1
 
+MOZ_RAW                            ?=
+MOZ_OGG                            ?= 1
+MOZ_OPUS                           ?= 1
+MOZ_WAVE                           ?= 1
+MOZ_WEBM                           ?= 1
+MOZ_GSTREAMER                      ?=
+MOZ_WEBRTC                         ?=
+
+MOZ_GRAPHITE                       ?= 1
+
 OMNIJAR_NAME                       ?= omni.ja
 
 TARGET_XPCOM_ABI                   ?= x86-gcc4
+
+NS_PRINTING ?= 1
+
+NECKO_PROTOCOLS ?= about data file ftp http res viewsource websocket wyciwyg device
+NECKO_COOKIES   ?= 1
+NECKO_WIFI      ?=
+
+MOZ_ENABLE_LIBCONIC  ?=
+MOZ_ENABLE_QTNETWORK ?=
 
 MOZ_DEBUG_ENABLE_DEFS  := DEBUG _DEBUG TRACING
 MOZ_DEBUG_DISABLE_DEFS := NDEBUG TRIMMED
@@ -103,7 +126,10 @@ CONFIG_VARS = \
     MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
     MOZ_SERVICES_SYNC MOZ_MEDIA_NAVIGATOR \
     MOZ_BUILD_APP MOZ_MACBUNDLE_ID MOZ_UPDATE_CHANNEL \
-    MOZ_XUL MOZ_OMNIJAR \
+    MOZ_XUL MOZ_OMNIJAR MOZ_RAW MOZ_OGG MOZ_OPUS MOZ_WAVE MOZ_WEBM \
+    MOZ_GSTREAMER MOZ_WEBRTC MOZ_GRAPHITE \
+    XP_LINUX XP_WIN XP_OS2 XP_MACOSX NS_ENABLE_TSF ANDROID SOLARIS \
+    MOZ_E10S_COMPAT \
     MOZILLA_VERSION_U=$(MOZILLA_VERSION)
 
 # Variables passed to the compilers as defines, quoted
@@ -368,6 +394,21 @@ TEMPLATE_LibXulChromium_EXTENDS_BY = appending
 $(call COPY_PROPS,TEMPLATE_LibChromium,DEFS INCS DEPS ORDERDEPS,TEMPLATE_LibXulChromium)
 
 #
+
+TEMPLATE_LibComponent            = XUL library
+TEMPLATE_LibComponent_EXTENDS    = LibXulChromium
+TEMPLATE_LibComponent_EXTENDS_BY = appending
+TEMPLATE_LibComponent_DEFS       = \
+	DXPCOM_TRANSLATE_NSGM_ENTRY_POINT=1
+TEMPLATE_LibComponent_INST       = $(STAGE_LIB)components/
+
+#
+
+netwerk_s_base_TEMPLATE = LibXul
+netwerk_s_base_DEFS		= IMPL_NS_NET
+netwerk_s_base_INCS		= $(PATH_ROOT)/netwerk/base/src
+
+#
 # INSTALLS base targets
 #
 
@@ -375,6 +416,8 @@ components_install_INST = bin/components/
 components_install_POST_XFILE_CMDS = \
 	$$(if $$(filter %.manifest,$$<), $(QUIET) \
 		$(PYTHON) $(PATH_ROOT)/config/buildlist.py $$(dir $$@)../chrome.manifest "manifest components/$$(notdir $$(basename $$<)).manifest")
+
+modules_install_INST = bin/modules/
 
 #
 # TASKS base target for generating .xpt/.h from .idl

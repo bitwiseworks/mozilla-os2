@@ -1,0 +1,80 @@
+## @file
+# Module makefile
+#
+
+SUB_DEPTH = ../../..
+include $(KBUILD_PATH)/subheader.kmk
+
+USES += tasks
+
+TASKS += pipnss
+
+pipnss_EXTENDS = typelib
+pipnss_DEFPATH := $(PATH_SUB_CURRENT)/public
+pipnss_INCS    = \
+    $(PATH_ROOT)/dom/interfaces/base \
+    $(PATH_ROOT)/layout/xul/base/src/tree/public
+pipnss_SOURCES = \
+    nsIASN1Object.idl \
+    nsIASN1Sequence.idl \
+    nsICertificateDialogs.idl \
+    nsICRLInfo.idl \
+    nsIX509Cert.idl \
+    nsIX509CertDB.idl \
+    nsIX509CertValidity.idl \
+    nsINSSVersion.idl \
+    nsISSLCertErrorDialog.idl \
+    nsIBadCertListener2.idl \
+    nsISSLErrorListener.idl \
+    nsIIdentityInfo.idl \
+    nsIAssociatedContentSecurity.idl \
+    nsICertOverrideService.idl \
+    nsIRecentBadCertsService.idl \
+    nsIFormSigningDialog.idl \
+    nsIX509Cert2.idl \
+    nsIX509Cert3.idl \
+    nsIX509CertDB2.idl \
+    nsIX509CertList.idl \
+    nsIPKCS11.idl \
+    nsIPKCS11Slot.idl \
+    nsIPK11TokenDB.idl \
+    nsICertPickDialogs.idl \
+    nsIClientAuthDialogs.idl \
+    nsIDOMCryptoDialogs.idl \
+    nsIGenKeypairInfoDlg.idl \
+    nsITokenDialogs.idl \
+    nsITokenPasswordDialogs.idl \
+    nsISSLStatus.idl \
+    nsIKeygenThread.idl \
+    nsICMSSecureMessage.idl \
+    nsIUserCertPicker.idl \
+    nsIASN1PrintableItem.idl \
+    nsICMSDecoder.idl \
+    nsICMSEncoder.idl \
+    nsICMSMessageErrors.idl \
+    nsICMSMessage.idl \
+    nsICMSMessage2.idl \
+    nsINSSCertCache.idl \
+    nsIOCSPResponder.idl \
+    nsIPK11Token.idl \
+    nsIPKCS11ModuleDB.idl \
+    nsIPKCS11Module.idl \
+    nsICRLManager.idl \
+    nsISMimeCert.idl \
+    nsIStreamCipher.idl \
+    nsIKeyModule.idl \
+    nsIProtectedAuthThread.idl \
+    nsIDataSignatureVerifier.idl
+
+ifdef MOZ_XUL
+pipnss_SOURCES += nsICertTree.idl
+endif
+
+INSTALLS += pipnss_exports
+
+pipnss_exports_INST = include/
+pipnss_exports_DEFPATH := $(PATH_SUB_CURRENT)/src
+pipnss_exports_SOURCES = \
+    nsNSSShutDown.h
+
+include $(FILE_SUB_FOOTER)

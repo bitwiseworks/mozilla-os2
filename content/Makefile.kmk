@@ -7,6 +7,10 @@ include $(KBUILD_PATH)/subheader.kmk
 
 INCLUDE_SUBDIRS += \
     base \
-    xul
+    events \
+    html/content \
+    html/document \
+    xul \
+    xbl
 
 include $(FILE_SUB_FOOTER)

@@ -137,4 +137,109 @@ neckobase_exports_SOURCES = \
         nsURLHelper.h \
     )
 
+INSTALLS += neckobase_components
+
+neckobase_components_EXTENDS = components_install
+neckobase_components_DEFPATH := $(PATH_SUB_CURRENT)/src
+neckobase_components_SOURCES = \
+    nsProxyAutoConfig.js \
+    nsProxyAutoConfig.manifest
+
+INSTALLS += neckobase_modules
+
+neckobase_modules_EXTENDS = modules_install
+neckobase_modules_DEFPATH := $(PATH_SUB_CURRENT)/src
+neckobase_modules_SOURCES = \
+    NetUtil.jsm
+
+LIBRARIES += neckobase_s
+
+neckobase_s_TEMPLATE   = LibXulChromium
+neckobase_s_EXTENDS    = netwerk_s_base
+neckobase_s_EXTENDS_BY = appending
+neckobase_s_DEFPATH   := $(PATH_SUB_CURRENT)/src
+neckobase_s_INCS       = \
+    $(PATH_ROOT)/content/base/src \
+    $(PATH_ROOT)/content/events/src
+neckobase_s_SOURCES    = \
+    nsTransportUtils.cpp \
+    nsAsyncStreamCopier.cpp \
+    nsAsyncRedirectVerifyHelper.cpp \
+    nsAuthInformationHolder.cpp \
+    nsBaseChannel.cpp \
+    nsBaseContentStream.cpp \
+    nsBufferedStreams.cpp \
+    nsChannelClassifier.cpp \
+    nsDirectoryIndexStream.cpp \
+    nsDownloader.cpp \
+    nsFileStreams.cpp \
+    nsIncrementalDownload.cpp \
+    nsInputStreamChannel.cpp \
+    nsInputStreamPump.cpp \
+    nsStreamTransportService.cpp \
+    nsIOService.cpp \
+    nsLoadGroup.cpp \
+    nsMIMEInputStream.cpp \
+    nsProtocolProxyService.cpp \
+    nsProxyInfo.cpp \
+    nsPACMan.cpp \
+    nsRequestObserverProxy.cpp \
+    nsSimpleStreamListener.cpp \
+    nsSimpleURI.cpp \
+    nsSimpleNestedURI.cpp \
+    nsStandardURL.cpp \
+    nsSocketTransport2.cpp \
+    nsSocketTransportService2.cpp \
+    nsServerSocket.cpp \
+    nsStreamListenerTee.cpp \
+    nsStreamLoader.cpp \
+    nsSyncStreamListener.cpp \
+    nsUnicharStreamLoader.cpp \
+    nsURIChecker.cpp \
+    nsURLHelper.cpp \
+    nsURLParsers.cpp \
+    nsNetAddr.cpp \
+    nsNetStrings.cpp \
+    nsBase64Encoder.cpp \
+    nsSerializationHelper.cpp \
+    nsDNSPrefetch.cpp \
+    RedirectChannelRegistrar.cpp \
+    nsPreloadedStream.cpp \
+    nsStreamListenerWrapper.cpp
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
+neckobase_s_SOURCES += nsURLHelperOS2.cpp
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+neckobase_s_SOURCES += \
+	nsURLHelperWin.cpp
+	nsNativeConnectionHelper.cpp
+	nsAutodialWin.cpp
+else
+ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
+neckobase_s_SOURCES += nsURLHelperOSX.cpp
+else
+neckobase_s_SOURCES += nsURLHelperUnix.cpp
+endif
+endif
+endif
+
+ifdef MOZ_PLATFORM_MAEMO
+neckobase_s_SOURCES += nsNativeConnectionHelper.cpp
+ifdef MOZ_ENABLE_LIBCONIC
+neckobase_s_SOURCES += nsAutodialMaemo.cpp
+neckobase_s_INCS    += ../../system/maemo
+endif
+ifdef MOZ_ENABLE_QTNETWORK
+neckobase_s_SOURCES += nsAutodialQt.cpp
+neckobase_s_INCS    += \
+	../../system/qt
+	$(error MOZ_QT_CFLAGS)
+endif
+endif
+
+ifdef MOZ_ENABLE_LIBCONIC
+neckobase_s_INCS += $(error GLIB_CFLAGS) $(error LIBCONIC_CFLAGS)
+endif
+
 include $(FILE_SUB_FOOTER)

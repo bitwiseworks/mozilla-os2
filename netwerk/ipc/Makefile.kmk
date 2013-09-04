@@ -15,4 +15,16 @@ neckoipc_exports_mozilla_net_SOURCES = \
     NeckoMessageUtils.h \
     ChannelEventQueue.h \
 
+LIBRARIES += neckoipc_s
+
+neckoipc_s_TEMPLATE   = LibXulChromium
+neckoipc_s_EXTENDS    = netwerk_s_base
+neckoipc_s_EXTENDS_BY = appending
+neckoipc_s_INCS       = \
+    ../protocol/http
+neckoipc_s_SOURCES    = \
+    NeckoChild.cpp \
+    NeckoParent.cpp \
+    ChannelEventQueue.cpp
+
 include $(FILE_SUB_FOOTER)

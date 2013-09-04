@@ -44,36 +44,64 @@ content_base_SOURCES = \
 INSTALLS += content_exports
 
 content_exports_INST = include/
-content_exports_DEFPATH := $(PATH_SUB_CURRENT)/public
 content_exports_SOURCES = \
-    mozFlushType.h \
-    nsIContent.h \
-    nsIAttribute.h \
-    nsIContentIterator.h \
-    nsContentPolicyUtils.h \
-    nsContentUtils.h \
-    nsIDocument.h \
-    nsDeprecatedOperationList.h \
-    nsIDocumentObserver.h \
-    nsIMutationObserver.h \
-    nsINameSpaceManager.h \
-    nsINode.h \
-    nsINodeInfo.h \
-    nsINodeList.h \
-    nsIScriptElement.h \
-    nsIStyleSheetLinkingElement.h \
-    nsIContentSerializer.h \
-    nsIXPathEvaluatorInternal.h \
-    nsCaseTreatment.h \
-    nsContentCID.h \
-    nsCopySupport.h \
-    nsContentCreatorFunctions.h \
-    nsDOMFile.h \
-    nsLineBreaker.h \
-    nsReferencedElement.h \
-    nsTreeSanitizer.h \
-    nsXMLNameSpaceMap.h \
-    nsIXFormsUtilityService.h
+    $(addprefix public/, \
+        mozFlushType.h \
+        nsIContent.h \
+        nsIAttribute.h \
+        nsIContentIterator.h \
+        nsContentPolicyUtils.h \
+        nsContentUtils.h \
+        nsIDocument.h \
+        nsDeprecatedOperationList.h \
+        nsIDocumentObserver.h \
+        nsIMutationObserver.h \
+        nsINameSpaceManager.h \
+        nsINode.h \
+        nsINodeInfo.h \
+        nsINodeList.h \
+        nsIScriptElement.h \
+        nsIStyleSheetLinkingElement.h \
+        nsIContentSerializer.h \
+        nsIXPathEvaluatorInternal.h \
+        nsCaseTreatment.h \
+        nsContentCID.h \
+        nsCopySupport.h \
+        nsContentCreatorFunctions.h \
+        nsDOMFile.h \
+        nsLineBreaker.h \
+        nsReferencedElement.h \
+        nsTreeSanitizer.h \
+        nsXMLNameSpaceMap.h \
+        nsIXFormsUtilityService.h \
+    ) \
+    $(addprefix src/, \
+        nsAtomListUtils.h \
+        nsAttrName.h \
+        nsContentList.h \
+        nsContentSink.h \
+        nsGkAtomList.h \
+        nsGkAtoms.h \
+        nsNodeInfoManager.h \
+        nsNodeUtils.h \
+        nsPropertyTable.h \
+        nsRange.h \
+        nsScriptLoader.h \
+        nsStubDocumentObserver.h \
+        nsStubImageDecoderObserver.h \
+        nsStubMutationObserver.h \
+        nsTextFragment.h \
+        mozAutoDocUpdate.h \
+        nsFrameMessageManager.h \
+        nsAttrAndChildArray.h \
+        nsAttrValue.h \
+        nsCrossSiteListenerProxy.h \
+        nsDOMAttributeMap.h \
+        nsGenericElement.h \
+        nsMappedAttributeElement.h \
+        nsStyledElement.h \
+        nsSandboxFlags.h \
+    )
 
 INSTALLS += content_exports_mozilla
 
@@ -85,11 +113,15 @@ content_exports_mozilla_SOURCES = \
 INSTALLS += content_exports_mozilla_dom
 
 content_exports_mozilla_dom_INST = include/mozilla/dom/
-content_exports_mozilla_dom_DEFPATH := $(PATH_SUB_CURRENT)/public
 content_exports_mozilla_dom_SOURCES = \
-    DirectionalityUtils.h \
-    Element.h \
-    FragmentOrElement.h \
-    FromParser.h
+    $(addprefix public/, \
+        DirectionalityUtils.h \
+        Element.h \
+        FragmentOrElement.h \
+        FromParser.h \
+    ) \
+    $(addprefix src/, \
+        Link.h \
+    )
 
 include $(FILE_SUB_FOOTER)

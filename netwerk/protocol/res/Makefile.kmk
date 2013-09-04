@@ -13,4 +13,12 @@ necko_res_EXTENDS = typelib
 necko_res_SOURCES = \
     nsIResProtocolHandler.idl
 
+LIBRARIES += nkres_s
+
+nkres_s_TEMPLATE   = LibXulChromium
+nkres_s_EXTENDS    = netwerk_s_base
+nkres_s_EXTENDS_BY = appending
+nkres_s_SOURCES    = \
+    nsResProtocolHandler.cpp
+
 include $(FILE_SUB_FOOTER)

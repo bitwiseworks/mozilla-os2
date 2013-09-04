@@ -41,4 +41,51 @@ nkhttp_exports_mozilla_net_SOURCES = \
     HttpChannelChild.h  \
     PHttpChannelParams.h
 
+LIBRARIES += nkhttp_s
+
+nkhttp_s_TEMPLATE   = LibXulChromium
+nkhttp_s_EXTENDS    = netwerk_s_base
+nkhttp_s_EXTENDS_BY = appending
+nkhttp_s_INCS       = \
+    . \
+    $(PATH_ROOT)/js/xpconnect/public \
+    $(PATH_ROOT)/js/xpconnect/src
+nkhttp_s_SOURCES    = \
+    nsHttp.cpp \
+    nsHttpHeaderArray.cpp \
+    nsHttpConnectionInfo.cpp \
+    nsHttpConnection.cpp \
+    nsHttpConnectionMgr.cpp \
+    nsHttpRequestHead.cpp \
+    nsHttpResponseHead.cpp \
+    nsHttpChunkedDecoder.cpp \
+    nsHttpAuthCache.cpp \
+    nsHttpAuthManager.cpp \
+    nsHttpBasicAuth.cpp \
+    nsHttpDigestAuth.cpp \
+    nsHttpNTLMAuth.cpp \
+    nsHttpTransaction.cpp \
+    nsHttpHandler.cpp \
+    HttpBaseChannel.cpp \
+    nsHttpChannel.cpp \
+    nsHttpPipeline.cpp \
+    nsHttpActivityDistributor.cpp \
+    nsHttpChannelAuthProvider.cpp \
+    HttpChannelParent.cpp \
+    HttpChannelChild.cpp \
+    HttpChannelParentListener.cpp \
+    NullHttpTransaction.cpp \
+    ASpdySession.cpp \
+    SpdySession2.cpp \
+    SpdyStream2.cpp \
+    SpdySession3.cpp \
+    SpdyStream3.cpp \
+    ConnectionDiagnostics.cpp
+
+INSTALLS += nkhttp_modules
+
+nkhttp_modules_EXTENDS = modules_install
+nkhttp_modules_SOURCES = \
+    UserAgentOverrides.jsm
+
 include $(FILE_SUB_FOOTER)
