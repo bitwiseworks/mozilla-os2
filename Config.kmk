@@ -69,6 +69,8 @@ MOZ_ENABLE_QTNETWORK ?=
 MOZ_DEBUG_ENABLE_DEFS  := DEBUG _DEBUG TRACING
 MOZ_DEBUG_DISABLE_DEFS := NDEBUG TRIMMED
 
+NSS_ENABLE_ECC                     ?= 1
+
 JS_NATIVE_EDITLINE                 ?= 1
 JS_DISABLE_SHELL                   ?=
 JS_HAS_CTYPES                      ?= 1
@@ -410,6 +412,30 @@ TEMPLATE_LibComponent_EXTENDS_BY = appending
 TEMPLATE_LibComponent_DEFS       = \
 	DXPCOM_TRANSLATE_NSGM_ENTRY_POINT=1
 TEMPLATE_LibComponent_INST       = $(STAGE_LIB)components/
+
+#
+
+TEMPLATE_NssLib             = NSS library
+TEMPLATE_NssLib_EXTENDS     = CxxBase
+TEMPLATE_NssLib_EXTENDS_BY  = appending
+TEMPLATE_NssLib_INCS        = \
+	$(NSPR_INCS) \
+	$(PATH_STAGE)/public/nss
+TEMPLATE_NssLib_DEFS        = \
+	$(if $(NSS_ENABLE_ECC),NSS_ENABLE_ECC) \
+	USE_UTIL_DIRECTLY
+
+TEMPLATE_NssLib_DEFS.os2    = \
+    XP_PC=1 \
+    XP_OS2=1
+
+#
+
+TEMPLATE_NssDll             = NSS DLL
+TEMPLATE_NssDll_EXTENDS     = NssLib
+TEMPLATE_NssDll_EXTENDS_BY  = appending
+TEMPLATE_NssDll_USES        = exports-file
+TEMPLATE_NssDll_LIBS        = $(NSPR_LIBS)
 
 #
 

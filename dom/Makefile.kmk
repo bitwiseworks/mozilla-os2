@@ -8,6 +8,7 @@ include $(KBUILD_PATH)/subheader.kmk
 INCLUDE_SUBDIRS += \
     interfaces/base \
     interfaces/core \
+    interfaces/html \
     interfaces/css \
     interfaces/events \
     interfaces/geolocation \
