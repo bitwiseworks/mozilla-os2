@@ -104,6 +104,9 @@ MOZ_MACBUNDLE_ID = \
 
 PYTHON_PATH = $(PYTHON) $(PATH_ROOT)/config/pythonpath.py
 
+AWK  ?= awk
+GREP ?= grep
+
 ifndef MOZ_SYSTEM_PLY
 PLY_INCLUDE = -I$(PATH_ROOT)/other-licenses/ply
 PLY_PROGS = \
