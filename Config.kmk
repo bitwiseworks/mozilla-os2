@@ -25,6 +25,7 @@ include $(PATH_ROOT)/config/helpers.kmk
 ifeq ($(KBUILD_TARGET),os2)
 XP_OS2                 ?= 1
 MOZ_WIDGET_TOOLKIT     ?= os2
+DLL_PREFIX             ?=
 endif
 
 MOZ_BUILD_APP          ?= browser
@@ -96,6 +97,8 @@ else
 MOZ_DEBUG :=
 endif
 
+DLL_SUFFIX ?= $(SUFF_DLL)
+
 MOZ_MACBUNDLE_ID = \
     $(MOZ_DISTRIBUTION_ID).$(tolower $(MOZ_APP_DISPLAYNAME))$(filter-out release,$(KBUILD_TYPE))
 
@@ -120,7 +123,7 @@ SHELL_CONFIG_VARS = \
 	MOZ_APP_DISPLAYNAME MOZ_UA_BUILDID \
 	NSPR_MAJOR_VERSION NSPR_MINOR_VERSION NSPR_PATCH_VERSION
 
-# Variables passed to the compilers as defines (except C/C++ using mozilla-config.h)
+# Variables passed to the compilers as defines (for C/C++ -- via mozilla-config.h)
 CONFIG_VARS = \
     FIREFOX_VERSION MOZ_UPDATER MOZ_PHOENIX \
     MOZ_SAFE_BROWSING MOZ_SERVICES_AITC MOZ_SERVICES_NOTIFICATIONS \
@@ -134,6 +137,7 @@ CONFIG_VARS = \
 
 # Variables passed to the compilers as defines, quoted
 CONFIG_VARS_QUOTED = \
+    MOZ_DLL_PREFIX=$(DLL_PREFIX) MOZ_DLL_SUFFIX=$(DLL_SUFFIX) \
     MOZILLA_VERSION MOZILLA_UAVERSION \
     MOZ_APP_UA_NAME MOZ_APP_UA_VERSION=$(MOZ_APP_VERSION) \
     MOZ_DISTRIBUTION_ID MOZ_UA_BUILDID MOZ_USER_DIR
@@ -283,12 +287,13 @@ TEMPLATE_JsCxx_DEPS     = $(JS_CONFDEFS_H)
 
 TEMPLATE_JsBin              = JavaScript DLL or EXE
 TEMPLATE_JsBin_EXTENDS      = JsCxx
-TEMPLATE_JsBin_LDFLAGS      = $(TEMPLATE_Bin_LDFLAGS)
-TEMPLATE_JsBin_LDFLAGS.os2  = $(TEMPLATE_Bin_LDFLAGS.os2)
+
+$(call COPY_PROPS,TEMPLATE_Bin,LDFLAGS,TEMPLATE_JsBin)
 
 TEMPLATE_JsDll              = JavaScript DLL
 TEMPLATE_JsDll_EXTENDS      = JsBin
-TEMPLATE_JsDll_LIBS         = $(TEMPLATE_Dll_LIBS)
+
+$(call COPY_PROPS,TEMPLATE_Dll,LIBS,TEMPLATE_JsDll)
 
 TEMPLATE_JsExe              = JavaScript EXE
 TEMPLATE_JsExe_EXTENDS      = JsBin

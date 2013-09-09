@@ -61,7 +61,6 @@
 #define MALLOC_H <malloc.h>
 #define MOZ_CRASHREPORTER_ENABLE_PERCENT 100
 #define MOZ_DEBUG_SYMBOLS 1
-#define MOZ_DLL_SUFFIX ".dll"
 #define MOZ_FEEDS 1
 #define MOZ_LOGGING 1
 #define MOZ_MEDIA 1
