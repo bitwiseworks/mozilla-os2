@@ -93,6 +93,11 @@ endif
 # All further variables are normally not altered
 #
 
+PYTHON ?= python
+PERL   ?= perl
+AWK    ?= awk
+GREP   ?= grep
+
 ifeq ($(KBUILD_TYPE),debug)
 MOZ_DEBUG := 1
 else
@@ -105,9 +110,6 @@ MOZ_MACBUNDLE_ID = \
     $(MOZ_DISTRIBUTION_ID).$(tolower $(MOZ_APP_DISPLAYNAME))$(filter-out release,$(KBUILD_TYPE))
 
 PYTHON_PATH = $(PYTHON) $(PATH_ROOT)/config/pythonpath.py
-
-AWK  ?= awk
-GREP ?= grep
 
 ifndef MOZ_SYSTEM_PLY
 PLY_INCLUDE = -I$(PATH_ROOT)/other-licenses/ply

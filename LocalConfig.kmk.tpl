@@ -27,14 +27,24 @@ ifdef LOCAL_CONFIG_PRE
 # PATH_OUT_BASE := out
 
 #
-# Python executable, version 2.6 or above.
+# Python executable, version 2.6 or above. Defaults to `python`.
 #
-PYTHON := python
+# PYTHON := python
 
 #
-# Perl executable, version 5.x or above.
+# Perl executable, version 5.x or above. Defaults to `perl`.
 #
-PERL := perl
+# PERL := perl
+
+#
+# AWK executable, version 4.x or above. Defaults to `awk`.
+#
+# AWK  := awk
+
+#
+# Grep executable, version 2.10 or above. Defaults to `grep`.
+#
+# GREP := grep
 
 #
 # Section included at the bottom of Config.kmk.
