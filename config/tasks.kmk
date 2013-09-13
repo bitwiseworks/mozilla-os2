@@ -232,6 +232,12 @@ $(target)_DEPS_     := $$(abspathex $(deps),$$($(target)_DEFPATH))
 $(target)_ODEPS_    := $$(abspathex $(odeps),$$($(target)_DEFPATH))
 $(target)_SRC_DEPS_ := $$(abspathex $(src_deps),$$($(target)_DEFPATH))
 
+# replace dep vars with the above, expanded once (for using in _COMMAND(S)
+# used in recipes which are deferred by nature as opposed to immediate prereqs)
+$(eval local deps     = $($(target)_DEPS_))
+$(eval local odeps    = $($(target)_ODEPS_))
+$(eval local src_deps = $($(target)_SRC_DEPS_))
+
 ifeq ($(out),)
  local out  := $(outbase).task
  local dep  := $(outbase).dep
