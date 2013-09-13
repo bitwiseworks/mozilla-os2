@@ -6,142 +6,25 @@ SUB_DEPTH = ../..
 include $(KBUILD_PATH)/subheader.kmk
 
 ifndef NSS_DISABLE_DBM
-
-INSTALLS += dbm_exports
-
-dbm_exports_INST     = public/dbm/
-dbm_exports_DEFPATH := $(PATH_ROOT)/dbm/include
-dbm_exports_SOURCES  = \
-    cdefs.h \
-    mcom_db.h \
-    ncompat.h \
-    winfile.h
-
-LIBRARIES += dbm
-
-dbm_TEMPLATE = NssLib
-dbm_DEFS     = \
-    STDC_HEADERS \
-    HAVE_STRERROR \
-    HAVE_SNPRINTF \
-    MEMMOVE \
-    __DBINTERFACE_PRIVATE
-dbm_INCS     = \
-    $(PATH_ROOT)/dbm/include \
-    ../dbm/src
-dbm_SOURCES  = \
-    $(addprefix $(PATH_ROOT)/dbm/src/, \
-        db.c \
-        h_bigkey.c \
-        h_func.c \
-        h_log2.c \
-        h_page.c \
-        hash.c \
-        hash_buf.c \
-        mktemp.c \
-    ) \
-    ../dbm/src/dirent.c
-
+INCLUDE_SUBDIRS += ../dbm
 endif
 
-INSTALLS += nssutil_exports
-
-nssutil_exports_INST     = public/nss/
-nssutil_exports_DEFPATH := $(PATH_SUB_CURRENT)/../nss/lib/util
-nssutil_exports_SOURCES  = \
-    base64.h \
-    ciferfam.h \
-    hasht.h \
-    nssb64.h \
-    nssb64t.h \
-    nsslocks.h \
-    nssilock.h \
-    nssilckt.h \
-    nssrwlk.h \
-    nssrwlkt.h \
-    nssutil.h \
-    pkcs11.h \
-    pkcs11f.h \
-    pkcs11p.h \
-    pkcs11t.h \
-    pkcs11n.h \
-    pkcs11u.h \
-    portreg.h \
-    secasn1.h \
-    secasn1t.h \
-    seccomon.h \
-    secder.h \
-    secdert.h \
-    secdig.h \
-    secdigt.h \
-    secitem.h \
-    secoid.h \
-    secoidt.h \
-    secport.h \
-    secerr.h \
-    utilmodt.h \
-    utilrename.h \
-    utilpars.h \
-    utilparst.h
-
-DLLS += nssutil
-
-nssutil_TEMPLATE     = NssDll
-nssutil_NAME         = nssutil3
-nssutil_DEFPATH     := $(PATH_SUB_CURRENT)/../nss/lib/util
-nssutil_EXPORTS_FILE = nssutil.def
-nssutil_SOURCES      = \
-    quickder.c \
-    secdig.c \
-    derdec.c \
-    derenc.c \
-    dersubr.c \
-    dertime.c \
-    errstrs.c \
-    nssb64d.c \
-    nssb64e.c \
-    nssrwlk.c \
-    nssilock.c \
-    oidstring.c \
-    portreg.c \
-    secalgid.c \
-    secasn1d.c \
-    secasn1e.c \
-    secasn1u.c \
-    secitem.c \
-    secload.c \
-    secoid.c \
-    sectime.c \
-    secport.c \
-    templates.c \
-    utf8.c \
-    utilmod.c \
-    utilpars.c
+INCLUDE_SUBDIRS += \
+    ../nss/lib/util \
+    ../nss/lib/freebl \
+    ../nss/lib/softoken \
+    ../nss/lib/base \
+    ../nss/lib/dev \
+    ../nss/lib/pki \
+    ../nss/lib/certdb \
+    ../nss/lib/ssl \
+    ../nss/lib/pk11wrap \
+    ../nss/lib/cryptohi \
+    ../nss/lib/pkcs7 \
+    ../nss/lib/smime
 
 ifndef USE_SYSTEM_ZLIB
-
-LIBRARIES += zlib
-
-zlib_TEMPLATE = NssLib
-zlib_DEFPATH := $(PATH_SUB_CURRENT)/../nss/lib/zlib
-zlib_DEFS     = verbose=-1
-zlib_SOURCES  = \
-    adler32.c \
-    compress.c \
-    crc32.c \
-    deflate.c \
-    gzclose.c \
-    gzlib.c \
-    gzread.c \
-    gzwrite.c \
-    infback.c \
-    inffast.c \
-    inflate.c \
-    inftrees.c \
-    trees.c \
-    uncompr.c \
-    zutil.c
-
+INCLUDE_SUBDIRS += ../nss/lib/zlib
 endif
 
 include $(FILE_SUB_FOOTER)

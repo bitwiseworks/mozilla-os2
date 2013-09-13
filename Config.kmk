@@ -211,6 +211,12 @@ MFBT_LIBS   = $(PATH_STAGE_LIB)/mfbt$(SUFF_LIB)
 
 MOZGLUE_LIBS = $(PATH_STAGE_LIB)/mozglue$(SUFF_LIB)
 
+ifndef MOZ_NATIVE_SQLITE
+SQLITE_DEFS = $(if $(SQLITE_UNSAFE_THREADS),SQLITE_UNSAFE_THREADS)
+SQLITE_INCS =
+SQLITE_LIBS = $(PATH_STAGE_LIB)/mozsqlt3$(SUFF_LIB)
+endif
+
 #------------------------------------------------------------------------------
 # Templates
 #------------------------------------------------------------------------------
@@ -250,6 +256,10 @@ TEMPLATE_CxxBase_LDFLAGS.debug      = -fno-inline
 TEMPLATE_CxxBase_LD_DEBUG.os2       = split
 TEMPLATE_CxxBase_DEBUG_STAGE.os2    = nul
 
+TEMPLATE_CxxBase_ORDERDEPS  = \
+    $(TYPELIB_HEADERS_ALL_TARGETS) \
+    $(EXPORT_HEADERS_ALL_TARGETS)
+
 #
 
 TEMPLATE_Cxx            = Generic Mozilla C/C++ sources
@@ -258,9 +268,7 @@ TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H) $(TEMPLATE_CxxBase_CFLAGS
 TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H) $(TEMPLATE_CxxBase_CXXFLAGS)
 
 TEMPLATE_Cxx_ORDERDEPS  = \
-    $(MOZILLA_CONFIG_H) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H) \
-    $(TYPELIB_HEADERS_ALL_TARGETS) \
-    $(EXPORT_HEADERS_ALL_TARGETS)
+    $(MOZILLA_CONFIG_H) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 
 TEMPLATE_Lib                = Generic Mozilla library
 TEMPLATE_Lib_EXTENDS        = Cxx
@@ -420,7 +428,8 @@ TEMPLATE_NssLib_EXTENDS     = CxxBase
 TEMPLATE_NssLib_EXTENDS_BY  = appending
 TEMPLATE_NssLib_INCS        = \
 	$(NSPR_INCS) \
-	$(PATH_STAGE)/public/nss
+	$(PATH_STAGE)/public/nss \
+	$(PATH_STAGE)/private/nss
 TEMPLATE_NssLib_DEFS        = \
 	$(if $(NSS_ENABLE_ECC),NSS_ENABLE_ECC) \
 	USE_UTIL_DIRECTLY
