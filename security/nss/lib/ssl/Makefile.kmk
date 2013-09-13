@@ -47,7 +47,7 @@ ssl_SOURCES      = \
     cmpcert.c \
     sslinfo.c \
     ssl3ecc.c
-ssl_LIBS        = \
+ssl_LIBS         = \
     $(PATH_STAGE_LIB)/nssutil3$(SUFF_LIB) \
     $(PATH_STAGE_LIB)/nss3$(SUFF_LIB) \
     $(PATH_STAGE_LIB)/freebl$(SUFF_LIB)

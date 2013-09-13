@@ -16,12 +16,19 @@ INCLUDE_SUBDIRS += \
     ../nss/lib/base \
     ../nss/lib/dev \
     ../nss/lib/pki \
+    ../nss/lib/libpkix \
     ../nss/lib/certdb \
-    ../nss/lib/ssl \
+    ../nss/lib/certhigh \
     ../nss/lib/pk11wrap \
     ../nss/lib/cryptohi \
+    ../nss/lib/nss \
+    ../nss/lib/ssl \
+    ../nss/lib/pkcs12 \
     ../nss/lib/pkcs7 \
-    ../nss/lib/smime
+    ../nss/lib/smime \
+    ../nss/lib/crmf \
+    ../nss/lib/jar \
+    ../nss/lib/ckfw
 
 ifndef USE_SYSTEM_ZLIB
 INCLUDE_SUBDIRS += ../nss/lib/zlib
