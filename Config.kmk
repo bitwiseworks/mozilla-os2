@@ -444,11 +444,23 @@ TEMPLATE_NssLib_DEFS.os2    = \
 
 #
 
+TEMPLATE_NssBin             = NSS Binary
+TEMPLATE_NssBin_EXTENDS     = NssLib
+TEMPLATE_NssBin_EXTENDS_BY  = appending
+TEMPLATE_NssBin_LIBS        = $(NSPR_LIBS)
+
+#
+
 TEMPLATE_NssDll             = NSS DLL
-TEMPLATE_NssDll_EXTENDS     = NssLib
+TEMPLATE_NssDll_EXTENDS     = NssBin
 TEMPLATE_NssDll_EXTENDS_BY  = appending
 TEMPLATE_NssDll_USES        = exports-file
-TEMPLATE_NssDll_LIBS        = $(NSPR_LIBS)
+
+#
+
+TEMPLATE_NssExe             = NSS Executable
+TEMPLATE_NssExe_EXTENDS     = NssBin
+TEMPLATE_NssExe_EXTENDS_BY  = appending
 
 #
 

@@ -5,6 +5,8 @@
 SUB_DEPTH = ../..
 include $(KBUILD_PATH)/subheader.kmk
 
+ifndef MOZ_NATIVE_NSS
+
 ifndef NSS_DISABLE_DBM
 INCLUDE_SUBDIRS += ../dbm
 endif
@@ -30,8 +32,14 @@ INCLUDE_SUBDIRS += \
     ../nss/lib/jar \
     ../nss/lib/ckfw
 
+INCLUDE_SUBDIRS += \
+    ../nss/cmd/lib \
+    ../nss/cmd/shlibsign
+
 ifndef USE_SYSTEM_ZLIB
 INCLUDE_SUBDIRS += ../nss/lib/zlib
 endif
+
+endif # MOZ_NATIVE_NSS
 
 include $(FILE_SUB_FOOTER)
