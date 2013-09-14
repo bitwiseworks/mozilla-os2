@@ -48,7 +48,6 @@ nkhttp_s_EXTENDS    = netwerk_s_base
 nkhttp_s_EXTENDS_BY = appending
 nkhttp_s_INCS       = \
     . \
-    $(PATH_ROOT)/js/xpconnect/public \
     $(PATH_ROOT)/js/xpconnect/src
 nkhttp_s_SOURCES    = \
     nsHttp.cpp \

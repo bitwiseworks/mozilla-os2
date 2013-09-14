@@ -45,8 +45,7 @@ xpcom_core_INCS     = \
     $(PATH_ROOT)/chrome/src \
     $(PATH_ROOT)/docshell/base \
     $(PATH_ROOT)/netwerk/build \
-    $(PATH_ROOT)/netwerk/base/src \
-    $(PATH_ROOT)/js/xpconnect/public
+    $(PATH_ROOT)/netwerk/base/src
 xpcom_core_SOURCES  = \
     $(addprefix ../glue/, \
         $(XPCOM_GLUE_SOURCES) \

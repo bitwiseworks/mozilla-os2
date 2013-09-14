@@ -29,7 +29,6 @@ nkwebsocket_s_TEMPLATE   = LibXulChromium
 nkwebsocket_s_EXTENDS    = netwerk_s_base
 nkwebsocket_s_EXTENDS_BY = appending
 nkwebsocket_s_INCS       = \
-    $(PATH_ROOT)/js/xpconnect/public \
     $(PATH_ROOT)/js/xpconnect/src
 nkwebsocket_s_SOURCES    = \
     WebSocketChannel.cpp \

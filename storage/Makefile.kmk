@@ -70,7 +70,6 @@ LIBRARIES += storage_s
 storage_s_TEMPLATE = LibXul
 storage_s_DEFPATH := $(PATH_SUB_CURRENT)/src
 storage_s_INCS     = \
-    $(PATH_ROOT)/js/xpconnect/public \
     $(PATH_ROOT)/db/sqlite3/src \
     $(PATH_ROOT)/dom/base
 storage_s_SOURCES  = \

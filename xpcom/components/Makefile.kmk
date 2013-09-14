@@ -41,7 +41,6 @@ xpcomcomponents_s_INCS = \
     $(PATH_ROOT)/config \
     $(PATH_ROOT)/chrome/src \
     $(PATH_ROOT)/modules/libjar \
-    $(PATH_ROOT)/js/xpconnect/public \
     $(PATH_ROOT)/netwerk/base/public
 xpcomcomponents_s_SOURCES = \
     nsCategoryManager.cpp \
