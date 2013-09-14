@@ -268,17 +268,20 @@ TEMPLATE_CxxBase_ORDERDEPS  = \
 
 TEMPLATE_Cxx            = Generic Mozilla C/C++ sources
 TEMPLATE_Cxx_EXTENDS    = CxxBase
-TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H) $(TEMPLATE_CxxBase_CFLAGS)
-TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H) $(TEMPLATE_CxxBase_CXXFLAGS)
+TEMPLATE_Cxx_EXTENDS_BY = appending
+TEMPLATE_Cxx_CFLAGS     = -include $(MOZILLA_CONFIG_H)
+TEMPLATE_Cxx_CXXFLAGS   = -include $(MOZILLA_CONFIG_H)
 
 TEMPLATE_Cxx_ORDERDEPS  = \
     $(MOZILLA_CONFIG_H) $(XPCOM_CONFIG_H) $(XPCOM_PRIVATE_H)
 
 TEMPLATE_Lib                = Generic Mozilla library
 TEMPLATE_Lib_EXTENDS        = Cxx
+TEMPLATE_Lib_EXTENDS_BY     = appending
 
 TEMPLATE_Bin                = Generic Mozilla DLL or EXE
 TEMPLATE_Bin_EXTENDS        = Cxx
+TEMPLATE_Bin_EXTENDS_BY     = appending
 
 TEMPLATE_Bin_LDFLAGS.os2    = -Zmap -Zlinker /ST:0x100000 -Zhigh-mem
 
@@ -288,32 +291,38 @@ endif
 
 TEMPLATE_Dll                = Generic Mozilla DLL
 TEMPLATE_Dll_EXTENDS        = Bin
+TEMPLATE_Dll_EXTENDS_BY     = appending
 TEMPLATE_Dll_LIBS           = $(MOZGLUE_LIBS)
 
 TEMPLATE_Exe                = Generic Mozilla EXE
 TEMPLATE_Exe_EXTENDS        = Bin
+TEMPLATE_Exe_EXTENDS_BY     = appending
 
 #
 
-TEMPLATE_JsCxx          = JavaScript C/C++ sources
-TEMPLATE_JsCxx_EXTENDS  = CxxBase
-TEMPLATE_JsCxx_CFLAGS   = -include $(JS_CONFDEFS_H) $(TEMPLATE_CxxBase_CFLAGS)
-TEMPLATE_JsCxx_CXXFLAGS = -include $(JS_CONFDEFS_H) $(TEMPLATE_CxxBase_CXXFLAGS)
+TEMPLATE_JsCxx            = JavaScript C/C++ sources
+TEMPLATE_JsCxx_EXTENDS    = CxxBase
+TEMPLATE_JsCxx_EXTENDS_BY = appending
+TEMPLATE_JsCxx_CFLAGS     = -include $(JS_CONFDEFS_H)
+TEMPLATE_JsCxx_CXXFLAGS   = -include $(JS_CONFDEFS_H)
 
-TEMPLATE_JsCxx_DEPS     = $(JS_CONFDEFS_H)
+TEMPLATE_JsCxx_ORDERDEPS  = $(JS_CONFDEFS_H)
 
 TEMPLATE_JsBin              = JavaScript DLL or EXE
 TEMPLATE_JsBin_EXTENDS      = JsCxx
+TEMPLATE_JsBin_EXTENDS_BY   = appending
 
 $(call COPY_PROPS,TEMPLATE_Bin,LDFLAGS,TEMPLATE_JsBin)
 
 TEMPLATE_JsDll              = JavaScript DLL
 TEMPLATE_JsDll_EXTENDS      = JsBin
+TEMPLATE_JsDll_EXTENDS_BY   = appending
 
 $(call COPY_PROPS,TEMPLATE_Dll,LIBS,TEMPLATE_JsDll)
 
 TEMPLATE_JsExe              = JavaScript EXE
 TEMPLATE_JsExe_EXTENDS      = JsBin
+TEMPLATE_JsExe_EXTENDS_BY   = appending
 
 #
 
