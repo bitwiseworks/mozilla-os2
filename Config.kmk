@@ -193,6 +193,8 @@ ifn1of (configure, $(MAKECMDGOALS))
   $(error FIREFOX_VERSION is unexpectedly blank)
  endif
  endif # ifeq ($(CACHED_CONFIG_INCLUDED),)
+else  # ifn1of (configure, $(MAKECMDGOALS))
+ IN_CONFIGURE := 1
 endif # ifn1of (configure, $(MAKECMDGOALS))
 
 #------------------------------------------------------------------------------

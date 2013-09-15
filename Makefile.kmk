@@ -46,6 +46,8 @@ configure: | $$(call DIRDEP,$$(dir $$(CACHED_CONFIG)))
 BLDDIRS += $(call DIRDEP,$(dir $(CACHED_CONFIG)))
 OTHER_CLEAN += $(CACHED_CONFIG)
 
+ifndef IN_CONFIGURE
+
 #
 # Global config headers.
 #
@@ -110,5 +112,7 @@ INCLUDE_SUBDIRS += \
     storage security/build uriloader caps parser dom widget toolkit gfx \
     image view content layout docshell accessible embedding xpfe/appshell \
     security/manager startupcache
+
+endif # IN_CONFIGURE
 
 include $(FILE_SUB_FOOTER)
