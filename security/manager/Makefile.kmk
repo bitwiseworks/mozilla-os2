@@ -9,9 +9,8 @@ INCLUDE_SUBDIRS = \
     boot \
     ssl
 
-# @ later
-#ifdef MOZ_XUL
-#INCLUDE_SUBDIRS += pki
-#endif
+ifdef MOZ_XUL
+INCLUDE_SUBDIRS += pki
+endif
 
 include $(FILE_SUB_FOOTER)
