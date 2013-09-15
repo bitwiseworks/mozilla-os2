@@ -12,6 +12,11 @@
 include $(PATH_ROOT)/config/helpers.kmk
 
 #
+# Report about the header we've just included to give some feedback.
+#
+$(info kBuild: Included $(abspathex $(MAKEFILE_CURRENT),$(PATH_SUB_CURRENT)))
+
+#
 # Hook that turns each word in INCLUDE_SUBDIRS into an include statement using
 # the word as a name of the subdirectory (relative to the location of the
 # current makefile) that contains Makefile.kmk to include.
