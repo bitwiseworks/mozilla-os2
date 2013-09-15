@@ -43,6 +43,8 @@ MOZ_CRASHREPORTER                  ?=
 MOZ_INSTRUMENT_EVENT_LOOP          ?=
 MOZ_ZIPWRITER                      ?= 1
 
+MOZ_MEDIA                          ?= 1
+MOZ_SYDNEYAUDIO                    ?= 1
 MOZ_RAW                            ?=
 MOZ_OGG                            ?= 1
 MOZ_OPUS                           ?= 1
@@ -574,6 +576,7 @@ endif
 
 # memorize the targets
 $(eval TYPELIB_HEADERS_ALL_TARGETS += $$($(target)_HEADER_INST_1_TARGET))
+$(eval TYPELIB_IDL_ALL_TARGETS     += $$($(target)_IDL_INST_1_TARGET))
 
 endef # typelib_POST_HOOK_func
 

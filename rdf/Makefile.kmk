@@ -6,9 +6,6 @@ SUB_DEPTH = ..
 include $(KBUILD_PATH)/subheader.kmk
 
 INCLUDE_SUBDIRS = \
-    base \
-    components/commandhandler \
-    components/windowwatcher \
-    browser/webBrowser
+    base
 
 include $(FILE_SUB_FOOTER)

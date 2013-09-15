@@ -108,9 +108,9 @@ INCLUDE_SUBDIRS += js/src
 
 # tier platform
 INCLUDE_SUBDIRS += \
-    xpcom modules/libpref intl netwerk ipc js/xpconnect modules/libjar \
-    storage security/build uriloader caps parser dom widget toolkit gfx \
-    image view content layout docshell accessible embedding xpfe/appshell \
+    xpcom modules/libpref intl netwerk ipc js/xpconnect intl/chardet modules/libjar \
+    rdf storage security/build uriloader caps parser dom widget toolkit gfx \
+    image view content layout docshell accessible profile embedding xpfe/appshell \
     security/manager startupcache
 
 endif # IN_CONFIGURE

@@ -19,4 +19,11 @@ caps_SOURCES = \
     nsISignatureVerifier.idl \
     nsISecurityCheckedComponent.idl
 
+INSTALLS += caps_exports
+
+caps_exports_INST = include/
+caps_exports_DEFPATH := $(PATH_SUB_CURRENT)/include
+caps_exports_SOURCES = \
+    nsJSPrincipals.h
+
 include $(FILE_SUB_FOOTER)

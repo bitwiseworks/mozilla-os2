@@ -81,7 +81,6 @@ LIBRARIES += xpcomds_s
 
 xpcomds_s_TEMPLATE = LibXpCom
 xpcomds_s_INCS     = \
-    $(PATH_ROOT)/js/xpconnect/src \
     $(PATH_ROOT)/dom/base
 xpcomds_s_SOURCES  = \
     nsArray.cpp \

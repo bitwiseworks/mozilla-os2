@@ -5,6 +5,10 @@
 SUB_DEPTH = ..
 include $(KBUILD_PATH)/subheader.kmk
 
+INCLUDE_SUBDIRS = \
+    htmlparser \
+    html
+
 INSTALLS += parser_exports
 
 parser_exports_INST = include/
