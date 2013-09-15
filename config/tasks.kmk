@@ -31,6 +31,7 @@
 #    - $(defpath) Full path to the target's source directory (makefile location).
 #    - $(outdir)  Full path to the target's output directory.
 #    - $(outbase) Full path to the target's output base name (w/o extension).
+#    - $(tool)    Files(s) from _TOOL (if any) with the default path applied.
 #
 # 2. Generate several targets and an intermediate file from several sources using
 #    a complex command.
@@ -82,7 +83,7 @@ include $(dir $(lastword $(MAKEFILE_LIST)))helpers.kmk
 #
 define def_unit_tasks_global_target_rule
 
-$(out) + $(output) +| $(maybe) : $(src_) $$($(target)_DEPS_) $(value TARGET_OUT_DEP_CHECK) | $$($(target)_ODEPS_) $(call DIRDEP,$(dir $(out)))
+$(out) + $(output) +| $(maybe) : $(src_) $(tool) $$($(target)_DEPS_) $(value TARGET_OUT_DEP_CHECK) | $$($(target)_ODEPS_) $(call DIRDEP,$(dir $(out)))
 $(TAB)$(msg)
 $(TAB)$(QUIET2)$(RM) -f $(out) $(output) $(maybe) $(dep)
 $(cmds)
@@ -95,7 +96,7 @@ endef # def_unit_tasks_global_target_rule
 #
 define def_unit_tasks_global_target_src_rule
 
-$(out) + $(output) +| $(maybe) : $(src) $$($(target)_SRC_DEPS_) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
+$(out) + $(output) +| $(maybe) : $(src) $(tool) $$($(target)_SRC_DEPS_) $(value TARGET_OUT_DEP_CHECK) | $(call DIRDEP,$(dir $(out)))
 $(TAB)$(src_msg)
 $(TAB)$(QUIET2)$(RM) -f $(out) $(output) $(maybe) $(dep)
 $(src_cmds)
@@ -153,6 +154,7 @@ local out    := $(call TARGET_PROP_FIRST,TARGET)
 local output := $(call TARGET_PROP_ALL,OUTPUT)
 local maybe  := $(call TARGET_PROP_ALL,INTERMEDIATE)
 
+local tool   := $(call TARGET_PROP_ALL,TOOL)
 local incs   := $(call TARGET_PROP_ALL,INCS)
 local flags  := $(call TARGET_PROP_ALL,FLAGS)
 
@@ -224,6 +226,7 @@ local src    := $(abspathex $(src),$(defpath))
 local out    := $(abspathex $(out),$(outdir))
 local output := $(abspathex $(output),$(outdir))
 local maybe  := $(abspathex $(maybe),$(outdir))
+local tool   := $(abspathex $(tool),$(defpath))
 local incs   := $(abspathex $(incs),$(defpath))
 
 # defer absolutization of the dep vars since they may contain
@@ -329,7 +332,7 @@ endef # def_unit_tasks_global_target
 
 # Perform inheritance.
 properties := \
-    $(PROPS_TASKS_SINGLE) INST SOURCE PRE_HOOK POST_HOOK
+    $(PROPS_TASKS_SINGLE) INST SOURCE TOOL PRE_HOOK POST_HOOK
 properties_now_l := SOURCES INCS CLEAN BLDDIRS
 properties_now_r := FLAGS
 properties_deferred := \
