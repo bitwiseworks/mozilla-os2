@@ -3991,7 +3991,7 @@ PluginInstanceChild::InvalidateRect(NPRect* aInvalidRect)
 #ifdef XP_OS2
     // Invalidate and draw locally for windowed plugins.
     if (mWindow.type == NPWindowTypeWindow) {
-      NS_ASSERTION(::WinIsWindow(mPluginWindowHWND), "Bad window?!");
+      NS_ASSERTION(::WinIsWindow(0, mPluginWindowHWND), "Bad window?!");
       RECTL rcl = { aInvalidRect->left, aInvalidRect->top,
                     aInvalidRect->right, aInvalidRect->bottom };
       ::WinInvalidateRect(mPluginWindowHWND, &rcl, FALSE);

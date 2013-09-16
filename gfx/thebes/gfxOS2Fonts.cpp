@@ -721,7 +721,7 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
                     continue; // next font
                 }
 
-                NS_ASSERTION(!IsInvalidChar(ch), "Invalid char detected");
+                NS_ASSERTION(!IsInvalidChar(PRUnichar(ch)), "Invalid char detected");
                 FT_UInt gid = FT_Get_Char_Index(face, ch); // find the glyph id
 
                 if (gid == 0 && i == lastFont) {
