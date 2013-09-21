@@ -499,8 +499,8 @@ PluginModuleParent::AllocPPluginIdentifier(const nsCString& aString,
     }
 
     NPIdentifier npident = aString.IsVoid() ?
-        mozilla::plugins::parent::_getintidentifier(aInt) :
-        mozilla::plugins::parent::_getstringidentifier(aString.get());
+        mozilla::plugins::parent::NPN_getintidentifier(aInt) :
+        mozilla::plugins::parent::NPN_getstringidentifier(aString.get());
 
     if (!npident) {
         NS_WARNING("Failed to get identifier!");
@@ -770,9 +770,9 @@ PluginModuleParent::GetIdentifierForNPIdentifier(NPP npp, NPIdentifier aIdentifi
     nsCString string;
     int32_t intval = -1;
     bool temporary = false;
-    if (mozilla::plugins::parent::_identifierisstring(aIdentifier)) {
+    if (mozilla::plugins::parent::NPN_identifierisstring(aIdentifier)) {
         NPUTF8* chars =
-            mozilla::plugins::parent::_utf8fromidentifier(aIdentifier);
+            mozilla::plugins::parent::NPN_utf8fromidentifier(aIdentifier);
         if (!chars) {
             return nullptr;
         }
@@ -780,7 +780,7 @@ PluginModuleParent::GetIdentifierForNPIdentifier(NPP npp, NPIdentifier aIdentifi
         temporary = !NPStringIdentifierIsPermanent(npp, aIdentifier);
     }
     else {
-        intval = mozilla::plugins::parent::_intfromidentifier(aIdentifier);
+        intval = mozilla::plugins::parent::NPN_intfromidentifier(aIdentifier);
         string.SetIsVoid(true);
     }
 
@@ -1147,7 +1147,7 @@ PluginModuleParent::AnswerNPN_GetValue_WithBoolReturn(const NPNVariable& aVariab
                                                       bool* aBoolVal)
 {
     NPBool boolVal = false;
-    *aError = mozilla::plugins::parent::_getvalue(nullptr, aVariable, &boolVal);
+    *aError = mozilla::plugins::parent::NPN_getvalue(nullptr, aVariable, &boolVal);
     *aBoolVal = boolVal ? true : false;
     return true;
 }
@@ -1359,7 +1359,7 @@ PluginModuleParent::RecvNPN_SetException(PPluginScriptableObjectParent* aActor,
             return false;
         }
     }
-    mozilla::plugins::parent::_setexception(aNPObj, NullableStringGet(aMessage));
+    mozilla::plugins::parent::NPN_setexception(aNPObj, NullableStringGet(aMessage));
     return true;
 }
 
@@ -1368,7 +1368,7 @@ PluginModuleParent::RecvNPN_ReloadPlugins(const bool& aReloadPages)
 {
     PLUGIN_LOG_DEBUG(("%s", FULLFUNCTION));
 
-    mozilla::plugins::parent::_reloadplugins(aReloadPages);
+    mozilla::plugins::parent::NPN_reloadplugins(aReloadPages);
     return true;
 }
 

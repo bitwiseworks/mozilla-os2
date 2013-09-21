@@ -1110,7 +1110,7 @@ nsNPAPIPluginInstance::GetJSObject(JSContext *cx, JSObject** outObject)
 
   *outObject = nsNPObjWrapper::GetNewOrUsed(&mNPP, cx, npobj);
 
-  _releaseobject(npobj);
+  NPN_releaseobject(npobj);
 
   return NS_OK;
 }

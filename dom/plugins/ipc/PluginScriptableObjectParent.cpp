@@ -1049,7 +1049,7 @@ PluginScriptableObjectParent::AnswerEnumerate(InfallibleTArray<PPluginIdentifier
   for (uint32_t index = 0; index < idCount; index++) {
     // Because of GC hazards, all identifiers returned from enumerate
     // must be made permanent.
-    if (_identifierisstring(ids[index])) {
+    if (NPN_identifierisstring(ids[index])) {
       JSString* str = NPIdentifierToString(ids[index]);
       if (!JS_StringHasBeenInterned(cx, str)) {
         DebugOnly<JSString*> str2 = JS_InternJSString(cx, str);

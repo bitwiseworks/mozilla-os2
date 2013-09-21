@@ -202,7 +202,7 @@ DelayedReleaseGCCallback(JSRuntime* rt, JSGCStatus status)
 {
   if (JSGC_END == status) {
     // Take ownership of sDelayedReleases and null it out now. The
-    // _releaseobject call below can reenter GC and double-free these objects.
+    // NPN_releaseobject call below can reenter GC and double-free these objects.
     nsAutoPtr<nsTArray<NPObject*> > delayedReleases(sDelayedReleases);
     sDelayedReleases = nullptr;
 
@@ -210,7 +210,7 @@ DelayedReleaseGCCallback(JSRuntime* rt, JSGCStatus status)
       for (uint32_t i = 0; i < delayedReleases->Length(); ++i) {
         NPObject* obj = (*delayedReleases)[i];
         if (obj)
-          _releaseobject(obj);
+          NPN_releaseobject(obj);
         OnWrapperDestroyed();
       }
     }
@@ -1049,7 +1049,7 @@ nsJSObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, JSObject *obj)
       return nullptr;
 
     if (LookupNPP(npobj) == npp)
-      return _retainobject(npobj);
+      return NPN_retainobject(npobj);
   }
 
   if (!sJSObjWrappers.ops) {
@@ -1087,13 +1087,13 @@ nsJSObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, JSObject *obj)
   if (PL_DHASH_ENTRY_IS_BUSY(entry) && entry->mJSObjWrapper) {
     // Found a live nsJSObjWrapper, return it.
 
-    return _retainobject(entry->mJSObjWrapper);
+    return NPN_retainobject(entry->mJSObjWrapper);
   }
 
   // No existing nsJSObjWrapper, create one.
 
   nsJSObjWrapper *wrapper =
-    (nsJSObjWrapper *)_createobject(npp, &sJSObjWrapperNPClass);
+    (nsJSObjWrapper *)NPN_createobject(npp, &sJSObjWrapperNPClass);
 
   if (!wrapper) {
     // OOM? Remove the stale entry from the hash.
@@ -1116,7 +1116,7 @@ nsJSObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, JSObject *obj)
   if (!::JS_AddNamedObjectRoot(cx, &wrapper->mJSObj, "nsJSObjWrapper::mJSObject")) {
     NS_ERROR("Failed to root JSObject!");
 
-    _releaseobject(wrapper);
+    NPN_releaseobject(wrapper);
 
     PL_DHashTableRawRemove(&sJSObjWrappers, entry);
 
@@ -1280,7 +1280,7 @@ NPObjWrapper_SetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSBoo
   }
 
   JSBool ok = npobj->_class->setProperty(npobj, identifier, &npv);
-  _releasevariantvalue(&npv); // Release the variant
+  NPN_releasevariantvalue(&npv); // Release the variant
   if (!ReportExceptionIfPending(cx))
     return JS_FALSE;
 
@@ -1335,7 +1335,7 @@ NPObjWrapper_GetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSMut
                                               &hasMethod, &npv);
     if (!ReportExceptionIfPending(cx)) {
       if (success)
-        _releasevariantvalue(&npv);
+        NPN_releasevariantvalue(&npv);
       return JS_FALSE;
     }
 
@@ -1346,7 +1346,7 @@ NPObjWrapper_GetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSMut
 
       if (hasProperty) {
         vp.set(NPVariantToJSVal(npp, cx, &npv));
-        _releasevariantvalue(&npv);
+        NPN_releasevariantvalue(&npv);
 
         if (!ReportExceptionIfPending(cx))
           return JS_FALSE;
@@ -1371,7 +1371,7 @@ NPObjWrapper_GetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSMut
     if (npobj->_class->getProperty(npobj, identifier, &npv))
       vp.set(NPVariantToJSVal(npp, cx, &npv));
 
-    _releasevariantvalue(&npv);
+    NPN_releasevariantvalue(&npv);
 
     if (!ReportExceptionIfPending(cx))
       return JS_FALSE;
@@ -1483,7 +1483,7 @@ CallNPMethodInternal(JSContext *cx, JSObject *obj, unsigned argc, jsval *argv,
 
   // Release arguments.
   for (i = 0; i < argc; ++i) {
-    _releasevariantvalue(npargs + i);
+    NPN_releasevariantvalue(npargs + i);
   }
 
   if (npargs != npargs_buf) {
@@ -1502,7 +1502,7 @@ CallNPMethodInternal(JSContext *cx, JSObject *obj, unsigned argc, jsval *argv,
   *rval = NPVariantToJSVal(npp, cx, &v);
 
   // *rval now owns the value, release our reference.
-  _releasevariantvalue(&v);
+  NPN_releasevariantvalue(&v);
 
   return ReportExceptionIfPending(cx);
 }
@@ -1866,7 +1866,7 @@ nsNPObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, NPObject *npobj)
   ::JS_SetPrivate(obj, npobj);
 
   // The new JSObject now holds on to npobj
-  _retainobject(npobj);
+  NPN_retainobject(npobj);
 
   return obj;
 }
@@ -1882,7 +1882,7 @@ JSObjWrapperPluginDestroyedCallback(PLDHashTable *table, PLDHashEntryHdr *hdr,
   nsJSObjWrapper *npobj = entry->mJSObjWrapper;
 
   if (npobj->mNpp == arg) {
-    // Prevent invalidate() and _releaseobject() from touching the hash
+    // Prevent invalidate() and NPN_releaseobject() from touching the hash
     // we're enumerating.
     const PLDHashTableOps *ops = table->ops;
     table->ops = nullptr;
@@ -1891,7 +1891,7 @@ JSObjWrapperPluginDestroyedCallback(PLDHashTable *table, PLDHashEntryHdr *hdr,
       npobj->_class->invalidate(npobj);
     }
 
-    _releaseobject(npobj);
+    NPN_releaseobject(npobj);
 
     table->ops = ops;
 
@@ -2275,7 +2275,7 @@ NPObjectMember_Call(JSContext *cx, unsigned argc, jsval *vp)
 
   // Release arguments.
   for (i = 0; i < argc; ++i) {
-    _releasevariantvalue(npargs + i);
+    NPN_releasevariantvalue(npargs + i);
   }
 
   if (npargs != npargs_buf) {
@@ -2294,7 +2294,7 @@ NPObjectMember_Call(JSContext *cx, unsigned argc, jsval *vp)
   JS_SET_RVAL(cx, vp, NPVariantToJSVal(memberPrivate->npp, cx, &npv));
 
   // *vp now owns the value, release our reference.
-  _releasevariantvalue(&npv);
+  NPN_releasevariantvalue(&npv);
 
   return ReportExceptionIfPending(cx);
 }
