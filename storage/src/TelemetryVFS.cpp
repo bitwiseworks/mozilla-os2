@@ -448,6 +448,9 @@ sqlite3_vfs* ConstructTelemetryVFS()
 #if defined(XP_WIN)
 #define EXPECTED_VFS     "win32"
 #define EXPECTED_VFS_NFS "win32"
+#elif defined(XP_OS2)
+#define EXPECTED_VFS     "os2"
+#define EXPECTED_VFS_NFS "os2"
 #else
 #define EXPECTED_VFS     "unix"
 #define EXPECTED_VFS_NFS "unix-excl"
