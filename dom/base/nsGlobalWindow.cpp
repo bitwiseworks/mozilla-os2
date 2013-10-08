@@ -9560,6 +9560,8 @@ bool
 nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
                                   nsIScriptContext* aScx)
 {
+  NS_TIME_FUNCTION;
+
   // Hold on to the timeout in case mExpr or mFunObj releases its
   // doc.
   nsRefPtr<nsTimeout> timeout = aTimeout;
