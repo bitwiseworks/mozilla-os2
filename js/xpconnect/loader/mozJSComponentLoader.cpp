@@ -802,7 +802,7 @@ mozJSComponentLoader::GlobalForLocation(nsIFile *aComponentFile,
              */
 
             FILE *fileHandle;
-            rv = aComponentFile->OpenANSIFileDesc("r", &fileHandle);
+            rv = aComponentFile->OpenANSIFileDesc("rb", &fileHandle);
             if (NS_FAILED(rv)) {
                 JS_SetOptions(cx, oldopts);
                 return NS_ERROR_FILE_NOT_FOUND;
