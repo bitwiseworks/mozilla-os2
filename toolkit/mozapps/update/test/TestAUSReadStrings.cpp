@@ -23,7 +23,9 @@
   #define NS_tsnprintf snprintf
   #define NS_T(str) str
 #ifdef XP_OS2
+  // On OS/2s, argv[0] can also have forward slashes instead
   #define PATH_SEPARATOR_CHAR '\\'
+  #define ALT_PATH_SEPARATOR_CHAR '/'
 #else
   #define PATH_SEPARATOR_CHAR '/'
 #endif
