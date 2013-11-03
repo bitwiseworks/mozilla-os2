@@ -116,7 +116,10 @@ ifndef LIBXUL_SDK
 INSTALL_SDK = 1
 endif
 
+ifneq ($(OS_ARCH),OS2)
+# Disable this step until SIGFPE in XPCSHELL.EXE (MOZJS.DLL) is fixed
 GENERATE_CACHE = 1
+endif
 
 include $(topsrcdir)/toolkit/mozapps/installer/signing.mk
 include $(topsrcdir)/toolkit/mozapps/installer/packager.mk
