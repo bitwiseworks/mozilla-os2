@@ -128,7 +128,7 @@ XPCOMGlueUnload()
 
     if (sXULLibrary) {
         DosFreeModule(sXULLibrary);
-        sXULLibrary = nullptr;
+        sXULLibrary = NULLHANDLE;
     }
 }
 

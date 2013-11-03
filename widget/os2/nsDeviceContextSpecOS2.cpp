@@ -144,7 +144,7 @@ private:
 //---------------------------------------------------------------------------
 
 nsDeviceContextSpecOS2::nsDeviceContextSpecOS2()
-  : mQueue(nullptr), mPrintDC(nullptr), mPrintingStarted(false), mPages(0),
+  : mQueue(nullptr), mPrintDC(NULLHANDLE), mPrintingStarted(false), mPages(0),
     mXPixels(1), mYPixels(1), mXDpi(-1), mYDpi(-1)
 {
   DBGNX();
