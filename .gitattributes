@@ -1,0 +1,2 @@
+# CRLF is crucial for OS/2 REXX files (also fine for Windows .cmd)
+*.cmd eol=crlf
