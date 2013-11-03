@@ -234,6 +234,9 @@ Very few users have any need for any of these:
 
 * MOZ_NO_RWS=1
     This disables the WPS-integration features provided by RWS.
+    Signs that this is needed include hangs or crashes when viewing or
+    saving attachments or using a default WPS application as a helper
+    application.
 
 * SET NSPR_NO_EXCEPTQ=1
     This disables Exceptq for the Mozilla apps without disabling it for
