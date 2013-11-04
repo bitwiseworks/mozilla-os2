@@ -84,10 +84,16 @@
       http://hobbes.nmsu.edu/h-search.php?button=Search&key=mzfntcfgft_runtime&dir=%2F
       ftp://ftp.netlabs.org/incoming/mozilla
 
-5. Optional: Use mozinst to create icons on desktop.
+5. INSTALL 'pthr01.dll' and 'mmap.dll' from
+      http://rpm.netlabs.org/release/00/zip/pthread-20120924-11_oc00.zip and
+      http://rpm.netlabs.org/release/00/zip/mmap-20111102-8_oc00.zip
+      respectively. If you use RPM/YUM, it will be enough to run
+      'yum install pthread mmap' from the command line.
+
+6. Optional: Use mozinst to create icons on desktop.
       http://hobbes.nmsu.edu/h-search.php?key=mozinst
 
-6. Optional: you may want to install some of the items listed in the
+7. Optional: you may want to install some of the items listed in the
       "OS/2 Add-ons" section below to improve the app's performance.
 
 
