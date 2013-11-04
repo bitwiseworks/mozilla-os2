@@ -20,6 +20,10 @@
 </head>
 <body class="aboutPageWideContainer">
 <h1>about:buildconfig</h1>
+#ifdef BUILDID
+<h2>Build ID</h2>
+<p>@BUILDID@</p>
+#endif
 #ifdef BUILD_HOSTNAME
 <h2>Build Machine</h2>
 <p>@BUILD_HOSTNAME@</p>

@@ -27,6 +27,10 @@ DEFINES += \
   -DMOZ_BUILD_APP=$(MOZ_BUILD_APP) \
   $(NULL)
 
+BUILDID := $(shell cat $(DEPTH)/config/buildid)
+CHROME_DEPS += $(DEPTH)/config/buildid
+DEFINES += -DBUILDID=$(BUILDID)
+
 MOZ_SOURCE_STAMP ?= $(shell hg -R $(topsrcdir) parent --template="{node|short}\n" 2>/dev/null)
 ifdef MOZ_SOURCE_STAMP
 DEFINES += -DSOURCE_CHANGESET="$(MOZ_SOURCE_STAMP)"
@@ -47,7 +51,7 @@ ifeq (http,$(patsubst http%,http,$(SOURCE_REPO)))
 DEFINES += -DSOURCE_REPO="$(SOURCE_REPO)"
 endif
 
-BUILD_HOSTNAME = $(shell hostname -s || hostname)
+BUILD_HOSTNAME = $(shell hostname -s || hostname || echo "$(HOSTNAME)")
 DEFINES += -DBUILD_HOSTNAME="$(BUILD_HOSTNAME)"
 
 ifdef MOZ_TOOLKIT_SEARCH
