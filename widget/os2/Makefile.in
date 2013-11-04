@@ -60,6 +60,7 @@ LOCAL_INCLUDES	= -I. -I$(srcdir)/../xpwidgets -I$(srcdir)
 libs::
 	$(INSTALL) $(srcdir)/MozSounds.cmd $(DIST)/bin/
 	$(INSTALL) $(srcdir)/README.OS2 $(DIST)/bin/
+	$(INSTALL) $(srcdir)/CHANGES.OS2 $(DIST)/bin/
 
 export::
 	test -d ./res || mkdir ./res
