@@ -4,6 +4,13 @@ in the Mozilla product series from release to release.
 
 CHANGES
 
+Firefox 17.0.5 Beta (2013-11-04)
+
+  - First public release of Firefox 17 for OS/2.
+
+  - Make new IPC code work on OS/2 (used by the Content Processes feature and
+    others).
+
 Firefox 10.0.12 and below
 
   - See https://wiki.mozilla.org/Ports/os2/ for more information.

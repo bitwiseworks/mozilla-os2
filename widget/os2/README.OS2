@@ -8,6 +8,13 @@
 * These applications are subject to the terms detailed in the license
   agreement accompanying them.
 
+* OS/2-specific changes to the product are listed in the CHANGES.OS2 file.
+
+* The Mozilla for OS/2 project home page is now located at
+  https://github.com/bitwiseworks/mozilla-os2/wiki. There you will find
+  most recent news, binary downloads and the issue system to report
+  OS/2-specific bugs.
+
 * Community support for the Mozilla applications is available through
   the newsgroups 'mozilla.dev.ports.os2' or 'comp.os.os2.apps'.
   Messages posted to other forums may not be seen by the developers.
@@ -422,8 +429,19 @@ posted to other forums may not be seen by the developers.
 -- Known Problems -------------------------------------------------------------
 ===============================================================================
 
+  The current beta version of Firefox fails to run the Flash plugin (and
+  any other binary plugins). Firefox itself will not crash (since plugin
+  execution is now done in a separate process) but simply not show any content.
+  This will be fixed in future releases.
+
+  The OpenJDK (Java) plugin works but there are some problems with window
+  updates. This is to be addressed in future releases.
+
   Cross-platform problems are usually listed in the release notes of each
   milestone release.
+
+  The @font-face HTML attribute is not yet supported. As a result, tiny boxes
+  with hex numbers are displayed instead of characters on pages that use it.
 
   Fonts with names containing special characters (like Asian Unicode names)
   will not display correctly in the list of fonts in the Options panel.
@@ -441,10 +459,23 @@ posted to other forums may not be seen by the developers.
 -- Links ----------------------------------------------------------------------
 ===============================================================================
 
-* Official Releases
+Main resources:
+
+* Mozilla for OS/2 Home Page
+    https://github.com/bitwiseworks/mozilla-os2/wiki
+
+* Mozilla for OS/2 Binary Releases
+    https://github.com/bitwiseworks/mozilla-os2/releases
+
+* Mozilla for OS/2 Issue Tracker & Bug Reports
+    https://github.com/bitwiseworks/mozilla-os2/issues
+
+Additional information:
+
+* Official Releases (Firefox 10 and earlier versions)
     http://www.mozilla.org/ports/os2/
 
-* Beta Versions
+* Beta Versions (Firefox 10 and earlier versions)
     ftp://ftp.netlabs.org/incoming/mozilla/
 
 * General Information About the Mozilla Apps
