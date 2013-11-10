@@ -944,8 +944,13 @@ NS_IMETHODIMP nsPrinterEnumeratorOS2::GetDefaultPrinterName(
 {
   NS_ENSURE_ARG_POINTER(aDefaultPrinterName);
 
-  *aDefaultPrinterName =
-      ToNewUnicode(*sPrinterList.GetPrinterTitle(0));
+  nsAString *aPrinterName = sPrinterList.GetPrinterTitle(0);
+
+  if (aPrinterName != nullptr)
+    *aDefaultPrinterName = ToNewUnicode(*aPrinterName);
+  else
+    *aDefaultPrinterName = ToNewUnicode(EmptyString());
+
   return NS_OK;
 }
 
