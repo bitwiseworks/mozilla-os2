@@ -49,6 +49,7 @@
 
 *  System Requirements
 
+*  Acknowledgements
 
 ===============================================================================
 -- Installation ---------------------------------------------------------------
@@ -554,5 +555,29 @@ Additional information:
     Do not use the "OS/2 Multimedia Plugin for Netscape".  It does not
     support any MM formats currently in use and is known to cause crashes.
 
+
+===============================================================================
+-- Acknowledgements -----------------------------------------------------------
+===============================================================================
+
+The Mozilla for eCS (OS/2) project is currently supported and maintained by the
+staff of bww bitwiseworks GmbH:
+
+- Dmitriy Kuminov (developer)
+- Silvan Scherrer (project manager)
+
+bww bitwiseworks GmbH would like to thank the following people for their
+prior work on Mozilla for eCS (OS/2). We might not share all your opinions,
+however we still appreciate your work, contributions and input (and will do
+so in the future):
+
+- Mensys BV
+- Mike Kaply
+- Peter Weilbacher
+- Rich Walsh
+- Walter Meinl
+- Dave Yeo
+- Steve Wendt
+- all we missed here!
 
 ===============================================================================
