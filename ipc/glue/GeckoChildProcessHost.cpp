@@ -437,7 +437,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // and passing wstrings from one config to the other is unsafe.  So
   // we split the logic here.
 
-#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_OS2)
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   base::environment_map newEnvVars;
   base::ChildPrivileges privs = kLowRightsSubprocesses ?
                                 base::UNPRIVILEGED :
@@ -494,7 +494,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
       }
     }
   }
-#endif  // OS_LINUX || OS_MACOSX || OS_OS2
+#endif  // OS_LINUX || OS_MACOSX
 
   FilePath exePath;
   GetPathToBinary(exePath);
@@ -612,7 +612,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
 #endif
 
   base::LaunchApp(childArgv, mFileMap,
-#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_OS2)
+#if defined(OS_LINUX) || defined(OS_MACOSX)
                   newEnvVars, privs,
 #endif
                   false, &process, arch);
