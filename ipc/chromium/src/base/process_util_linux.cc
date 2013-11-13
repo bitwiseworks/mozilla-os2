@@ -174,9 +174,9 @@ private:
 
 bool LaunchApp(const std::vector<std::string>& argv,
                const file_handle_mapping_vector& fds_to_remap,
-               bool wait, ProcessHandle* process_handle) {
+               bool wait, ProcessHandle* process_handle, base::ProcessArchitecture arch) {
   return LaunchApp(argv, fds_to_remap, environment_map(),
-                   wait, process_handle);
+                   wait, process_handle, arch);
 }
 
 bool LaunchApp(const std::vector<std::string>& argv,
@@ -186,7 +186,7 @@ bool LaunchApp(const std::vector<std::string>& argv,
                ProcessArchitecture arch) {
   return LaunchApp(argv, fds_to_remap, env_vars_to_set,
                    SAME_PRIVILEGES_AS_PARENT,
-                   wait, process_handle);
+                   wait, process_handle, arch);
 }
 
 bool LaunchApp(const std::vector<std::string>& argv,

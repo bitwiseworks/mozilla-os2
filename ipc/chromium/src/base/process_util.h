@@ -164,7 +164,8 @@ bool LaunchApp(const std::wstring& cmdline,
 typedef std::vector<std::pair<int, int> > file_handle_mapping_vector;
 bool LaunchApp(const std::vector<std::string>& argv,
                const file_handle_mapping_vector& fds_to_remap,
-               bool wait, ProcessHandle* process_handle);
+               bool wait, ProcessHandle* process_handle,
+               ProcessArchitecture arch=GetCurrentProcessArchitecture());
 
 typedef std::map<std::string, std::string> environment_map;
 enum ChildPrivileges {
