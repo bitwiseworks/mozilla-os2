@@ -90,9 +90,9 @@ MessageLoop::MessageLoop(Type type)
       nestable_tasks_allowed_(true),
       exception_restoration_(false),
       state_(NULL),
-#ifdef OS_WIN
+#if defined(OS_WIN) || defined(OS_OS2)
       os_modal_loop_(false),
-#endif  // OS_WIN
+#endif  // OS_WIN || OS_OS2
       next_sequence_num_(0) {
   DCHECK(!current()) << "should only have one message loop per thread";
   lazy_tls_ptr.Pointer()->Set(this);
@@ -119,8 +119,10 @@ MessageLoop::MessageLoop(Type type)
   if (type_ == TYPE_UI) {
 #if defined(OS_MACOSX)
     pump_ = base::MessagePumpMac::Create();
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_OS2)
     pump_ = new base::MessagePumpForUI();
+#else
+#error Sorry!
 #endif  // OS_LINUX
   } else if (type_ == TYPE_IO) {
     pump_ = new base::MessagePumpLibevent();
@@ -544,6 +546,34 @@ void MessageLoopForUI::PumpOutPendingPaintMessages() {
 }
 
 #endif  // defined(OS_WIN)
+
+#if defined(OS_OS2)
+
+void MessageLoopForUI::Run(Dispatcher* dispatcher) {
+  AutoRunState save_state(this);
+  state_->dispatcher = dispatcher;
+  RunHandler();
+}
+
+void MessageLoopForUI::AddObserver(Observer* observer) {
+  pump_os2()->AddObserver(observer);
+}
+
+void MessageLoopForUI::RemoveObserver(Observer* observer) {
+  pump_os2()->RemoveObserver(observer);
+}
+
+void MessageLoopForUI::WillProcessMessage(const QMSG& message) {
+  pump_os2()->WillProcessMessage(message);
+}
+void MessageLoopForUI::DidProcessMessage(const QMSG& message) {
+  pump_os2()->DidProcessMessage(message);
+}
+void MessageLoopForUI::PumpOutPendingPaintMessages() {
+  pump_ui()->PumpOutPendingPaintMessages();
+}
+
+#endif  // defined(OS_OS2)
 
 //------------------------------------------------------------------------------
 // MessageLoopForIO

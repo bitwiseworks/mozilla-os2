@@ -258,6 +258,7 @@ CPPSRCS += \
   sys_info_os2.cc \
   string_util_os2.cc \
   rand_util_os2.cc \
+  message_pump_os2.cc \
   $(NULL)
 endif # } OS_OS2
 
