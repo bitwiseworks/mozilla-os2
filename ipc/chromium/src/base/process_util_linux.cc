@@ -279,6 +279,8 @@ bool LaunchApp(const std::vector<std::string>& argv,
     fd_shuffle1.push_back(InjectionArc(it->first, it->second, false));
     fd_shuffle2.push_back(InjectionArc(it->first, it->second, false));
   }
+  if (!ShuffleFileDescriptors(&fd_shuffle1))
+    return false;
 
   // Prohibit inheriting all handles but the created ones
   LONG delta = 0;
