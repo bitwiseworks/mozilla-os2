@@ -302,26 +302,20 @@ void MessagePumpForUI::InitMessageWnd() {
   ppib->pib_ultype = 3;
 
   HAB hab = WinInitialize(0);
-  printf("*** %s:%d:%s hab %x err %lx\n", __FILE__, __LINE__, __FUNCTION__, hab, WinGetLastError(0));
   hmq_ = WinCreateMsgQueue(hab, 0);
-  printf("*** %s:%d:%s hmq %x err %lx\n", __FILE__, __LINE__, __FUNCTION__, hmq_, WinGetLastError(0));
   DCHECK(hmq_);
 
   BOOL rc = WinRegisterClass(0, kWndClass, WndProcThunk, 0, 0);
   DCHECK(rc);
-  printf("*** %s:%d:%s rc %d err %lx\n", __FILE__, __LINE__, __FUNCTION__, rc, WinGetLastError(0));
 
   message_hwnd_ = WinCreateWindow(HWND_OBJECT, kWndClass, 0, 0,
                                   0, 0, 0, 0, NULLHANDLE, HWND_BOTTOM, 0, 0, 0);
   DCHECK(message_hwnd_);
-  printf("*** %s:%d:%s message_hwnd_ %lx err %lx\n", __FILE__, __LINE__, __FUNCTION__, message_hwnd_, WinGetLastError(0));
 }
 
 void MessagePumpForUI::WaitForWork() {
   // Wait until a message is available.
-  printf("*** %s:%d:%s\n", __FILE__, __LINE__, __FUNCTION__);
   WinWaitMsg(0, 0, 0);
-  printf("*** %s:%d:%s\n", __FILE__, __LINE__, __FUNCTION__);
 }
 
 void MessagePumpForUI::HandleWorkMessage() {
