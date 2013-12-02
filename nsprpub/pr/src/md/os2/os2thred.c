@@ -7,7 +7,7 @@
 #include <string.h>
 #define INCL_BASE
 #include <os2.h>
-#define INCL_LOADEXCEPTQ
+#define INCL_LIBLOADEXCEPTQ
 #include <exceptq.h>
 
 #include "primpl.h"
@@ -164,7 +164,7 @@ static void
 ExcpStartFunc(void* arg)
 {
     EXCEPTIONREGISTRATIONRECORD exceptqreg;
-    LoadExceptq(&exceptqreg, NULL, NULL);
+    LibLoadExceptq(&exceptqreg);
 
     EXCEPTIONREGISTRATIONRECORD excpreg;
     PARAMSTORE params, *pParams = arg;
