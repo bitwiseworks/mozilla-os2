@@ -162,6 +162,24 @@ extern "C" {
          TerminateProcess(GetCurrentProcess(), 3); \
        } while (0)
 #  endif
+#elif defined(__OS2__) && defined(__GNUC__)
+#  ifdef __cplusplus
+#    define MOZ_CRASH() \
+       do { \
+         __asm__ __volatile__ ("int3\n\t" \
+                               "nop\n\t"); \
+         *((volatile int*) NULL) = 123; \
+         ::abort(); \
+       } while (0)
+#  else
+#    define MOZ_CRASH() \
+       do { \
+         __asm__ __volatile__ ("int3\n\t" \
+                               "nop\n\t"); \
+         *((volatile int*) NULL) = 123; \
+         abort(); \
+       } while (0)
+#  endif
 #else
 #  ifdef __cplusplus
 #    define MOZ_CRASH() \
