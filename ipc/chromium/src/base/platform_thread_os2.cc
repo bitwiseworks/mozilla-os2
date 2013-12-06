@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// exceptq trap file generator
+#include <string.h>
+#define INCL_BASE
+#include <os2.h>
+#define INCL_LIBLOADEXCEPTQ
+#include <exceptq.h>
+
 #include "base/platform_thread.h"
 
 #include "base/logging.h"
@@ -9,9 +16,14 @@
 namespace {
 
 void ThreadFunc(void* closure) {
+  EXCEPTIONREGISTRATIONRECORD exceptqreg;
+  LibLoadExceptq(&exceptqreg);
+
   PlatformThread::Delegate* delegate =
       static_cast<PlatformThread::Delegate*>(closure);
   delegate->ThreadMain();
+
+  UninstallExceptq(&exceptqreg);
 }
 
 }  // namespace
