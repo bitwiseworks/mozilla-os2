@@ -218,7 +218,7 @@ struct ParamTraits<long long> {
 };
 #endif
 
-#if !(defined(OS_MACOSX) || defined(OS_OPENBSD) || defined(OS_WIN) || (defined(OS_LINUX) && defined(ARCH_CPU_64_BITS)) || defined(ARCH_CPU_S390))
+#if !(defined(OS_MACOSX) || defined(OS_OPENBSD) || defined(OS_WIN) || defined(OS_OS2) || (defined(OS_LINUX) && defined(ARCH_CPU_64_BITS)) || defined(ARCH_CPU_S390))
 // There size_t is a synonym for |unsigned long| ...
 template <>
 struct ParamTraits<size_t> {
@@ -234,7 +234,7 @@ struct ParamTraits<size_t> {
   }
 };
 
-#elif !defined(OS_MACOSX)
+#elif !(defined(OS_MACOSX) || defined(OS_OS2))
 // ... so we need to define traits for |unsigned int|.
 // XXX duplicating OS_MACOSX version below so as not to conflict
 template <>
@@ -270,6 +270,24 @@ struct ParamTraits<uint32> {
   }
 };
 #endif  // defined(OS_MACOSX)
+
+#if defined(OS_OS2)
+// On OS/2 |uint32| is a synonim for |unsigned long| and
+// |size_t| is |unsigned int| (also 32 bit).
+template <>
+struct ParamTraits<unsigned int> {
+  typedef unsigned int param_type;
+  static void Write(Message* m, const param_type& p) {
+    m->WriteInt(static_cast<int>(p));
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    return m->ReadInt(iter, reinterpret_cast<int*>(r));
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(StringPrintf(L"%u", p));
+  }
+};
+#endif  // defined(OS_OS2)
 
 #if !(defined(OS_LINUX) && defined(ARCH_CPU_64_BITS))
 // int64 is |long int| on 64-bit systems, uint64 is |unsigned long|
