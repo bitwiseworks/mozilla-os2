@@ -8705,6 +8705,8 @@ case "$host" in
     ;;
 esac
 
+if test "${OS_TARGET}" != "OS2"; then
+
 dnl Create a virtualenv where we can install local Python packages
 AC_MSG_RESULT([Creating Python virtualenv])
 rm -rf _virtualenv
@@ -8729,6 +8731,8 @@ MACOSX_DEPLOYMENT_TARGET= LDFLAGS="${HOST_LDFLAGS}" \
   $PYTHON $_topsrcdir/build/virtualenv/populate_virtualenv.py \
     $_topsrcdir $_topsrcdir/build/virtualenv/packages.txt \
   || exit 1
+
+fi
 
 dnl Load the list of Makefiles to generate.
 dnl   To add new Makefiles, edit allmakefiles.sh.
