@@ -126,9 +126,12 @@ PluginProcessChild::Init()
       return false;
     }
 
-    mPlugin.Init(pluginFilename, ParentHandle(),
-                 IOThreadChild::message_loop(),
-                 IOThreadChild::channel());
+    if (!mPlugin.Init(pluginFilename, ParentHandle(),
+                      IOThreadChild::message_loop(),
+                      IOThreadChild::channel())) {
+      NS_ERROR("Could not initialize PluiginModuleChild");
+      return false;
+    }
 
     return true;
 }
