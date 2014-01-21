@@ -176,6 +176,15 @@ nsresult nsPluginFile::LoadPlugin(PRLibrary **outLibrary)
     mPlugin->GetNativePath(temp);
 
     *outLibrary = PR_LoadLibrary(temp.get());
+    // Sometimes it happens that loading NPFLOS2.DLL triggers a strange crash in MMPM's FILT.DLL
+    // which causes DosLoadModule to return ERROR_INVALID_PARAMETER. As it's quite problemmatic
+    // to fix it on the Odin side, we work around this crash here by retrying (which according to
+    // the tests always works). More details are here:
+    // https://github.com/bitwiseworks/mozilla-os2/issues/43
+    if (*outLibrary == nullptr && PR_GetError() == PR_LOAD_LIBRARY_ERROR &&
+        PR_GetOSError() == ERROR_INVALID_PARAMETER) {
+      *outLibrary = PR_LoadLibrary(temp.get());
+    }
     return *outLibrary == nullptr ? NS_ERROR_FAILURE : NS_OK;
 }
 
