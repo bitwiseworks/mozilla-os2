@@ -2174,7 +2174,8 @@ PluginInstanceChild::FlashThrottleMessage(HWND aWnd,
 static const char kWindowClassName[] = "GeckoPluginWindow";
 
 enum {
-    WD_InstanceChild = 0,
+    WD_User          = 0, // this is reserved for QWL_USER (used by e.g. Flash plugin)
+    WD_InstanceChild = 4,
     WD_Last = WD_InstanceChild
 };
 
@@ -2202,7 +2203,7 @@ PluginInstanceChild::CreatePluginWindow()
         return false;
 
     mPluginWindowHWND =
-        WinCreateWindow(NULL, kWindowClassName, NULL,
+        WinCreateWindow(HWND_OBJECT, kWindowClassName, NULL,
                         WS_SAVEBITS | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
                         0, 0, 0, 0, NULL, HWND_BOTTOM, 0, NULL, NULL);
     if (!mPluginWindowHWND)
