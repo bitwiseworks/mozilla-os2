@@ -2581,7 +2581,7 @@ StreamNotifyChild::NPP_URLNotify(NPReason reason)
 {
     PluginInstanceChild* instance = static_cast<PluginInstanceChild*>(Manager());
 
-    if (mClosure)
+    if (mClosure && instance->mPluginIface->urlnotify)
         instance->mPluginIface->urlnotify(instance->GetNPP(), mURL.get(),
                                           reason, mClosure);
 }
