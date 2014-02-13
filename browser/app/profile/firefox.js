@@ -879,6 +879,10 @@ pref("dom.ipc.plugins.enabled.i386.silverlight.plugin", true);
 // x86_64 ipc preferences
 pref("dom.ipc.plugins.enabled.x86_64", true);
 #else
+#ifdef XP_OS2
+// Odin crashes MMPM in OOP mode, disable it for now
+pref("dom.ipc.plugins.enabled.npflos2.dll", false);
+#endif
 pref("dom.ipc.plugins.enabled", true);
 #endif
 
