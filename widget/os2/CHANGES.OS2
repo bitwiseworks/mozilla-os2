@@ -4,6 +4,18 @@ in the Mozilla product series from release to release.
 
 CHANGES
 
+Firefox 17.0.5 Beta 2 (2014-02-19)
+
+  - Fix crash in Print dialog when no printers installed.
+
+  - Port IPC libraries used by the OOP (out-of-process) technology to OS/2.
+
+  - Make Flash plugin work (non-OOP mode by default due to bugs in MMPM).
+
+  - Add EXCEPTQ support to generate verbose trap reports.
+
+  - Fix distorted application icon.
+
 Firefox 17.0.5 Beta (2013-11-04)
 
   - First public release of Firefox 17 for OS/2.

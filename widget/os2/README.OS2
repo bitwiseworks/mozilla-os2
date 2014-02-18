@@ -87,14 +87,19 @@
 
 5. INSTALL 'pthr01.dll' and 'mmap.dll' from
       http://rpm.netlabs.org/release/00/zip/pthread-20120924-11_oc00.zip and
-      http://rpm.netlabs.org/release/00/zip/mmap-20111102-8_oc00.zip
-      respectively. If you use RPM/YUM, it will be enough to run
+      http://rpm.netlabs.org/release/00/zip/mmap-20111102-8_oc00.zip,
+      respectively. If you use RPM/YUM, just run:
       'yum install pthread mmap' from the command line.
 
-6. Optional: Use mozinst to create icons on desktop.
+6. INSTALL 'gcc446.dll' and 'stdcpp.dll' from
+      http://rpm.netlabs.org/release/00/zip/gcc-4_4_6-15_oc00.zip.
+      If you use RPM/YUM, just run:
+      'yum install libgcc446 libstdc++' from the command line.
+
+7. Optional: Use mozinst to create icons on desktop.
       http://hobbes.nmsu.edu/h-search.php?key=mozinst
 
-7. Optional: you may want to install some of the items listed in the
+8. Optional: you may want to install some of the items listed in the
       "OS/2 Add-ons" section below to improve the app's performance.
 
 
@@ -436,16 +441,12 @@ posted to other forums may not be seen by the developers.
 -- Known Problems -------------------------------------------------------------
 ===============================================================================
 
-  The current beta version of Firefox fails to run the Flash plugin (and
-  any other binary plugins). Firefox itself will not crash (since plugin
-  execution is now done in a separate process) but simply not show any content.
-  This will be fixed in future releases.
+  Due to bugs in MMPM, the current version of Firefox runs the Flash plugin in
+  "in-process" (traditional) mode instead of the new OOP (out-of-process) mode
+  used on other platforms. This will be fixed in future releases.
 
   The OpenJDK (Java) plugin works but there are some problems with window
   updates. This is to be addressed in future releases.
-
-  Cross-platform problems are usually listed in the release notes of each
-  milestone release.
 
   The @font-face HTML attribute is not yet supported. As a result, tiny boxes
   with hex numbers are displayed instead of characters on pages that use it.
@@ -457,6 +458,9 @@ posted to other forums may not be seen by the developers.
   This is to alert users that many applications (most notably the system
   editor, EPM, and applications running in VIO windows) cannot paste more
   than this.
+
+  Cross-platform problems are usually listed in the release notes of each
+  milestone release.
 
   Other known problems can be found by following the link "Current Open
   Warpzilla Bugs" on the OS/2 Mozilla page <http://www.mozilla.org/ports/os2/>.
