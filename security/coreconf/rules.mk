@@ -78,6 +78,7 @@ ifdef LIBRARY
 endif
 ifdef SHARED_LIBRARY
 	$(INSTALL) -m 775 $(SHARED_LIBRARY) $(SOURCE_LIB_DIR)
+	$(call PROCESS_SYMFILE,$(SHARED_LIBRARY),$(INSTALL) -m 775,$(SOURCE_LIB_DIR))
 ifdef MOZ_DEBUG_SYMBOLS
 ifeq (,$(filter-out _WIN%,$(NS_USE_GCC)_$(OS_TARGET)))
 	$(INSTALL) -m 644 $(SHARED_LIBRARY:$(DLL_SUFFIX)=pdb) $(SOURCE_LIB_DIR)
@@ -89,6 +90,7 @@ ifdef IMPORT_LIBRARY
 endif
 ifdef PROGRAM
 	$(INSTALL) -m 775 $(PROGRAM) $(SOURCE_BIN_DIR)
+	$(call PROCESS_SYMFILE,$(PROGRAM),$(INSTALL) -m 775,$(SOURCE_BIN_DIR))
 ifdef MOZ_DEBUG_SYMBOLS
 ifeq (,$(filter-out _WIN%,$(NS_USE_GCC)_$(OS_TARGET)))
 	$(INSTALL) -m 644 $(PROGRAM:$(PROG_SUFFIX)=.pdb) $(SOURCE_BIN_DIR)
@@ -97,6 +99,7 @@ endif
 endif
 ifdef PROGRAMS
 	$(INSTALL) -m 775 $(PROGRAMS) $(SOURCE_BIN_DIR)
+	$(call PROCESS_SYMFILE,$(PROGRAMS),$(INSTALL) -m 775,$(SOURCE_BIN_DIR))
 endif
 	+$(LOOP_OVER_DIRS)
 
@@ -250,6 +253,7 @@ ifdef MT
 endif	# MSVC with manifest tool
 else
 	$(MKPROG) -o $@ $(CFLAGS) $(OBJS) $(LDFLAGS) $(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS)
+	$(call GENERATE_SYMFILE,$@)
 endif
 
 get_objs:
@@ -308,6 +312,7 @@ endif
 else
 	$(MKSHLIB) -o $@ $(OBJS) $(SUB_SHLOBJS) $(LD_LIBS) $(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS)
 	chmod +x $@
+	$(call GENERATE_SYMFILE,$@)
 endif
 endif
 
