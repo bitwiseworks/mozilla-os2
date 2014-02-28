@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * ***** BEGIN LICENSE BLOCK *****
  * Copyright (C) 2009 Apple Inc. All rights reserved.
@@ -27,8 +27,8 @@
  * 
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef CodeLocation_h
-#define CodeLocation_h
+#ifndef assembler_assembler_CodeLocation_h
+#define assembler_assembler_CodeLocation_h
 
 #include "assembler/wtf/Platform.h"
 #include "assembler/assembler/MacroAssemblerCodeRef.h"
@@ -186,4 +186,4 @@ inline CodeLocationDataLabel32 CodeLocationCommon::dataLabel32AtOffset(int offse
 
 #endif // ENABLE(ASSEMBLER)
 
-#endif // CodeLocation_h
+#endif /* assembler_assembler_CodeLocation_h */

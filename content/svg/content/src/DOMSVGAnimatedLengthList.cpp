@@ -9,47 +9,56 @@
 #include "nsSVGElement.h"
 #include "nsCOMPtr.h"
 #include "nsSVGAttrTearoffTable.h"
+#include "mozilla/dom/SVGAnimatedLengthListBinding.h"
+#include "nsContentUtils.h"
 
 // See the architecture comment in this file's header.
 
 namespace mozilla {
 
-static nsSVGAttrTearoffTable<SVGAnimatedLengthList, DOMSVGAnimatedLengthList>
-  sSVGAnimatedLengthListTearoffTable;
+static inline
+nsSVGAttrTearoffTable<SVGAnimatedLengthList, DOMSVGAnimatedLengthList>&
+SVGAnimatedLengthListTearoffTable()
+{
+  static nsSVGAttrTearoffTable<SVGAnimatedLengthList, DOMSVGAnimatedLengthList>
+    sSVGAnimatedLengthListTearoffTable;
+  return sSVGAnimatedLengthListTearoffTable;
+}
 
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(DOMSVGAnimatedLengthList, mElement)
+NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(DOMSVGAnimatedLengthList, mElement)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGAnimatedLengthList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGAnimatedLengthList)
 
-} // namespace mozilla
-DOMCI_DATA(SVGAnimatedLengthList, mozilla::DOMSVGAnimatedLengthList)
-namespace mozilla {
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGAnimatedLengthList)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedLengthList)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAnimatedLengthList)
 NS_INTERFACE_MAP_END
 
-NS_IMETHODIMP
-DOMSVGAnimatedLengthList::GetBaseVal(nsIDOMSVGLengthList **_retval)
+JSObject*
+DOMSVGAnimatedLengthList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return dom::SVGAnimatedLengthListBinding::Wrap(aCx, aScope, this);
+}
+
+already_AddRefed<DOMSVGLengthList>
+DOMSVGAnimatedLengthList::BaseVal()
 {
   if (!mBaseVal) {
     mBaseVal = new DOMSVGLengthList(this, InternalAList().GetBaseValue());
   }
-  NS_ADDREF(*_retval = mBaseVal);
-  return NS_OK;
+  nsRefPtr<DOMSVGLengthList> baseVal = mBaseVal;
+  return baseVal.forget();
 }
 
-NS_IMETHODIMP
-DOMSVGAnimatedLengthList::GetAnimVal(nsIDOMSVGLengthList **_retval)
+already_AddRefed<DOMSVGLengthList>
+DOMSVGAnimatedLengthList::AnimVal()
 {
   if (!mAnimVal) {
     mAnimVal = new DOMSVGLengthList(this, InternalAList().GetAnimValue());
   }
-  NS_ADDREF(*_retval = mAnimVal);
-  return NS_OK;
+  nsRefPtr<DOMSVGLengthList> animVal = mAnimVal;
+  return animVal.forget();
 }
 
 /* static */ already_AddRefed<DOMSVGAnimatedLengthList>
@@ -59,10 +68,10 @@ DOMSVGAnimatedLengthList::GetDOMWrapper(SVGAnimatedLengthList *aList,
                                         uint8_t aAxis)
 {
   nsRefPtr<DOMSVGAnimatedLengthList> wrapper =
-    sSVGAnimatedLengthListTearoffTable.GetTearoff(aList);
+    SVGAnimatedLengthListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
     wrapper = new DOMSVGAnimatedLengthList(aElement, aAttrEnum, aAxis);
-    sSVGAnimatedLengthListTearoffTable.AddTearoff(aList, wrapper);
+    SVGAnimatedLengthListTearoffTable().AddTearoff(aList, wrapper);
   }
   return wrapper.forget();
 }
@@ -70,14 +79,14 @@ DOMSVGAnimatedLengthList::GetDOMWrapper(SVGAnimatedLengthList *aList,
 /* static */ DOMSVGAnimatedLengthList*
 DOMSVGAnimatedLengthList::GetDOMWrapperIfExists(SVGAnimatedLengthList *aList)
 {
-  return sSVGAnimatedLengthListTearoffTable.GetTearoff(aList);
+  return SVGAnimatedLengthListTearoffTable().GetTearoff(aList);
 }
 
 DOMSVGAnimatedLengthList::~DOMSVGAnimatedLengthList()
 {
   // Script no longer has any references to us, to our base/animVal objects, or
   // to any of their list items.
-  sSVGAnimatedLengthListTearoffTable.RemoveTearoff(&InternalAList());
+  SVGAnimatedLengthListTearoffTable().RemoveTearoff(&InternalAList());
 }
 
 void
@@ -92,7 +101,7 @@ DOMSVGAnimatedLengthList::InternalBaseValListWillChangeTo(const SVGLengthList& a
 
   nsRefPtr<DOMSVGAnimatedLengthList> kungFuDeathGrip;
   if (mBaseVal) {
-    if (aNewValue.Length() < mBaseVal->Length()) {
+    if (aNewValue.Length() < mBaseVal->LengthNoFlush()) {
       // InternalListLengthWillChange might clear last reference to |this|.
       // Retain a temporary reference to keep from dying before returning.
       kungFuDeathGrip = this;

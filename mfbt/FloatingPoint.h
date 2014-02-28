@@ -10,7 +10,10 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Casting.h"
 #include "mozilla/StandardInteger.h"
+
+namespace mozilla {
 
 /*
  * It's reasonable to ask why we have this header at all.  Don't isnan,
@@ -25,10 +28,6 @@
  * For the aforementioned reasons, be very wary of making changes to any of
  * these algorithms.  If you must make changes, keep a careful eye out for
  * compiler bustage, particularly PGO-specific bustage.
- *
- * Some users require that this file be C-compatible.  Unfortunately, this means
- * no mozilla namespace to contain everything, no detail namespace clarifying
- * MozDoublePun to be an internal data structure, and so on.
  */
 
 /*
@@ -39,172 +38,147 @@
  */
 MOZ_STATIC_ASSERT(sizeof(double) == sizeof(uint64_t), "double must be 64 bits");
 
-/*
- * Constant expressions in C can't refer to consts, unfortunately, so #define
- * these rather than use |const uint64_t|.
- */
-#define MOZ_DOUBLE_SIGN_BIT          0x8000000000000000ULL
-#define MOZ_DOUBLE_EXPONENT_BITS     0x7ff0000000000000ULL
-#define MOZ_DOUBLE_SIGNIFICAND_BITS  0x000fffffffffffffULL
+const unsigned DoubleExponentBias = 1023;
+const unsigned DoubleExponentShift = 52;
 
-#define MOZ_DOUBLE_EXPONENT_BIAS   1023
-#define MOZ_DOUBLE_EXPONENT_SHIFT  52
+const uint64_t DoubleSignBit         = 0x8000000000000000ULL;
+const uint64_t DoubleExponentBits    = 0x7ff0000000000000ULL;
+const uint64_t DoubleSignificandBits = 0x000fffffffffffffULL;
 
-MOZ_STATIC_ASSERT((MOZ_DOUBLE_SIGN_BIT & MOZ_DOUBLE_EXPONENT_BITS) == 0,
+MOZ_STATIC_ASSERT((DoubleSignBit & DoubleExponentBits) == 0,
                   "sign bit doesn't overlap exponent bits");
-MOZ_STATIC_ASSERT((MOZ_DOUBLE_SIGN_BIT & MOZ_DOUBLE_SIGNIFICAND_BITS) == 0,
+MOZ_STATIC_ASSERT((DoubleSignBit & DoubleSignificandBits) == 0,
                   "sign bit doesn't overlap significand bits");
-MOZ_STATIC_ASSERT((MOZ_DOUBLE_EXPONENT_BITS & MOZ_DOUBLE_SIGNIFICAND_BITS) == 0,
+MOZ_STATIC_ASSERT((DoubleExponentBits & DoubleSignificandBits) == 0,
                   "exponent bits don't overlap significand bits");
 
-MOZ_STATIC_ASSERT((MOZ_DOUBLE_SIGN_BIT | MOZ_DOUBLE_EXPONENT_BITS | MOZ_DOUBLE_SIGNIFICAND_BITS)
-                  == ~(uint64_t)0,
+MOZ_STATIC_ASSERT((DoubleSignBit | DoubleExponentBits | DoubleSignificandBits) ==
+                  ~uint64_t(0),
                   "all bits accounted for");
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/*
- * This union is NOT a public data structure, and it is not to be used outside
- * this file!
- */
-union MozDoublePun {
-    /*
-     * Every way to pun the bits of a double introduces an additional layer of
-     * complexity, across a multitude of platforms, architectures, and ABIs.
-     * Use *only* uint64_t to reduce complexity.  Don't add new punning here
-     * without discussion!
-     */
-    uint64_t u;
-    double d;
-};
-
 /** Determines whether a double is NaN. */
-static MOZ_ALWAYS_INLINE int
-MOZ_DOUBLE_IS_NaN(double d)
+static MOZ_ALWAYS_INLINE bool
+IsNaN(double d)
 {
-  union MozDoublePun pun;
-  pun.d = d;
-
   /*
    * A double is NaN if all exponent bits are 1 and the significand contains at
    * least one non-zero bit.
    */
-  return (pun.u & MOZ_DOUBLE_EXPONENT_BITS) == MOZ_DOUBLE_EXPONENT_BITS &&
-         (pun.u & MOZ_DOUBLE_SIGNIFICAND_BITS) != 0;
+  uint64_t bits = BitwiseCast<uint64_t>(d);
+  return (bits & DoubleExponentBits) == DoubleExponentBits &&
+         (bits & DoubleSignificandBits) != 0;
 }
 
 /** Determines whether a double is +Infinity or -Infinity. */
-static MOZ_ALWAYS_INLINE int
-MOZ_DOUBLE_IS_INFINITE(double d)
+static MOZ_ALWAYS_INLINE bool
+IsInfinite(double d)
 {
-  union MozDoublePun pun;
-  pun.d = d;
-
   /* Infinities have all exponent bits set to 1 and an all-0 significand. */
-  return (pun.u & ~MOZ_DOUBLE_SIGN_BIT) == MOZ_DOUBLE_EXPONENT_BITS;
+  uint64_t bits = BitwiseCast<uint64_t>(d);
+  return (bits & ~DoubleSignBit) == DoubleExponentBits;
 }
 
 /** Determines whether a double is not NaN or infinite. */
-static MOZ_ALWAYS_INLINE int
-MOZ_DOUBLE_IS_FINITE(double d)
+static MOZ_ALWAYS_INLINE bool
+IsFinite(double d)
 {
-  union MozDoublePun pun;
-  pun.d = d;
-
   /*
    * NaN and Infinities are the only non-finite doubles, and both have all
    * exponent bits set to 1.
    */
-  return (pun.u & MOZ_DOUBLE_EXPONENT_BITS) != MOZ_DOUBLE_EXPONENT_BITS;
+  uint64_t bits = BitwiseCast<uint64_t>(d);
+  return (bits & DoubleExponentBits) != DoubleExponentBits;
 }
 
 /**
  * Determines whether a double is negative.  It is an error to call this method
  * on a double which is NaN.
  */
-static MOZ_ALWAYS_INLINE int
-MOZ_DOUBLE_IS_NEGATIVE(double d)
+static MOZ_ALWAYS_INLINE bool
+IsNegative(double d)
 {
-  union MozDoublePun pun;
-  pun.d = d;
-
-  MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(d), "NaN does not have a sign");
+  MOZ_ASSERT(!IsNaN(d), "NaN does not have a sign");
 
   /* The sign bit is set if the double is negative. */
-  return (pun.u & MOZ_DOUBLE_SIGN_BIT) != 0;
+  uint64_t bits = BitwiseCast<uint64_t>(d);
+  return (bits & DoubleSignBit) != 0;
 }
 
 /** Determines whether a double represents -0. */
-static MOZ_ALWAYS_INLINE int
-MOZ_DOUBLE_IS_NEGATIVE_ZERO(double d)
+static MOZ_ALWAYS_INLINE bool
+IsNegativeZero(double d)
 {
-  union MozDoublePun pun;
-  pun.d = d;
-
   /* Only the sign bit is set if the double is -0. */
-  return pun.u == MOZ_DOUBLE_SIGN_BIT;
+  uint64_t bits = BitwiseCast<uint64_t>(d);
+  return bits == DoubleSignBit;
 }
 
 /** Returns the exponent portion of the double. */
 static MOZ_ALWAYS_INLINE int_fast16_t
-MOZ_DOUBLE_EXPONENT(double d)
+ExponentComponent(double d)
 {
-  union MozDoublePun pun;
-  pun.d = d;
-
   /*
    * The exponent component of a double is an unsigned number, biased from its
    * actual value.  Subtract the bias to retrieve the actual exponent.
    */
-  return (int_fast16_t)((pun.u & MOZ_DOUBLE_EXPONENT_BITS) >> MOZ_DOUBLE_EXPONENT_SHIFT) -
-                        MOZ_DOUBLE_EXPONENT_BIAS;
+  uint64_t bits = BitwiseCast<uint64_t>(d);
+  return int_fast16_t((bits & DoubleExponentBits) >> DoubleExponentShift) -
+         int_fast16_t(DoubleExponentBias);
 }
 
 /** Returns +Infinity. */
 static MOZ_ALWAYS_INLINE double
-MOZ_DOUBLE_POSITIVE_INFINITY()
+PositiveInfinity()
 {
-  union MozDoublePun pun;
-
   /*
    * Positive infinity has all exponent bits set, sign bit set to 0, and no
    * significand.
    */
-  pun.u = MOZ_DOUBLE_EXPONENT_BITS;
-  return pun.d;
+  return BitwiseCast<double>(DoubleExponentBits);
 }
 
 /** Returns -Infinity. */
 static MOZ_ALWAYS_INLINE double
-MOZ_DOUBLE_NEGATIVE_INFINITY()
+NegativeInfinity()
 {
-  union MozDoublePun pun;
-
   /*
    * Negative infinity has all exponent bits set, sign bit set to 1, and no
    * significand.
    */
-  pun.u = MOZ_DOUBLE_SIGN_BIT | MOZ_DOUBLE_EXPONENT_BITS;
-  return pun.d;
+  return BitwiseCast<double>(DoubleSignBit | DoubleExponentBits);
 }
 
 /** Constructs a NaN value with the specified sign bit and significand bits. */
 static MOZ_ALWAYS_INLINE double
-MOZ_DOUBLE_SPECIFIC_NaN(int signbit, uint64_t significand)
+SpecificNaN(int signbit, uint64_t significand)
 {
-  union MozDoublePun pun;
-
   MOZ_ASSERT(signbit == 0 || signbit == 1);
-  MOZ_ASSERT((significand & ~MOZ_DOUBLE_SIGNIFICAND_BITS) == 0);
-  MOZ_ASSERT(significand & MOZ_DOUBLE_SIGNIFICAND_BITS);
+  MOZ_ASSERT((significand & ~DoubleSignificandBits) == 0);
+  MOZ_ASSERT(significand & DoubleSignificandBits);
 
-  pun.u = (signbit ? MOZ_DOUBLE_SIGN_BIT : 0) |
-          MOZ_DOUBLE_EXPONENT_BITS |
-          significand;
-  MOZ_ASSERT(MOZ_DOUBLE_IS_NaN(pun.d));
-  return pun.d;
+  double d = BitwiseCast<double>((signbit ? DoubleSignBit : 0) |
+                                 DoubleExponentBits |
+                                 significand);
+  MOZ_ASSERT(IsNaN(d));
+  return d;
+}
+
+/** Computes the smallest non-zero positive double value. */
+static MOZ_ALWAYS_INLINE double
+MinDoubleValue()
+{
+  return BitwiseCast<double>(uint64_t(1));
+}
+
+static MOZ_ALWAYS_INLINE bool
+DoubleIsInt32(double d, int32_t* i)
+{
+  /*
+   * XXX Casting a double that doesn't truncate to int32_t, to int32_t, induces
+   *     undefined behavior.  We should definitely fix this (bug 744965), but as
+   *     apparently it "works" in practice, it's not a pressing concern now.
+   */
+  return !IsNegativeZero(d) && d == (*i = int32_t(d));
 }
 
 /**
@@ -212,33 +186,11 @@ MOZ_DOUBLE_SPECIFIC_NaN(int signbit, uint64_t significand)
  * NaN value being returned.
  */
 static MOZ_ALWAYS_INLINE double
-MOZ_DOUBLE_NaN()
+UnspecifiedNaN()
 {
-  return MOZ_DOUBLE_SPECIFIC_NaN(0, 0xfffffffffffffULL);
+  return SpecificNaN(0, 0xfffffffffffffULL);
 }
 
-/** Computes the smallest non-zero positive double value. */
-static MOZ_ALWAYS_INLINE double
-MOZ_DOUBLE_MIN_VALUE()
-{
-  union MozDoublePun pun;
-  pun.u = 1;
-  return pun.d;
-}
-
-static MOZ_ALWAYS_INLINE int
-MOZ_DOUBLE_IS_INT32(double d, int32_t* i)
-{
-  /*
-   * XXX Casting a double that doesn't truncate to int32_t, to int32_t, induces
-   *     undefined behavior.  We should definitely fix this (bug 744965), but as
-   *     apparently it "works" in practice, it's not a pressing concern now.
-   */
-  return !MOZ_DOUBLE_IS_NEGATIVE_ZERO(d) && d == (*i = (int32_t)d);
-}
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
+} /* namespace mozilla */
 
 #endif  /* mozilla_FloatingPoint_h_ */

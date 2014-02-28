@@ -11,42 +11,43 @@ VPATH		= @srcdir@
 include $(DEPTH)/config/autoconf.mk
 CC_WRAPPER =
 CXX_WRAPPER =
+
+ifdef MOZ_FOLD_LIBS
+# TODO: The library name can be changed when bug 845217 is fixed.
+LIBRARY_NAME = nss3
+FORCE_SHARED_LIB = 1
+endif
+
+default::
+
 include $(topsrcdir)/config/config.mk
 
-ifndef MOZ_NATIVE_NSS
-LOADABLE_ROOT_MODULE = $(DLL_PREFIX)nssckbi$(DLL_SUFFIX)
+NSS_LIBS = \
+  nss3 \
+  nssutil3 \
+  smime3 \
+  ssl3 \
+  $(NULL)
+
+ifdef MOZ_FOLD_LIBS
+NSS_DLLS = $(LIBRARY_NAME)
+else
+NSS_DLLS = $(NSS_LIBS)
 endif
 
-NSS3_LIB = $(DLL_PREFIX)nss3$(DLL_SUFFIX)
-NSSUTIL3_LIB = $(DLL_PREFIX)nssutil3$(DLL_SUFFIX)
-SMIME3_LIB = $(DLL_PREFIX)smime3$(DLL_SUFFIX)
-SSL3_LIB =  $(DLL_PREFIX)ssl3$(DLL_SUFFIX)
-SOFTOKEN3_LIB = $(DLL_PREFIX)softokn3$(DLL_SUFFIX)
+NSS_EXTRA_DLLS = \
+  nssckbi \
+  softokn3 \
+  $(NULL)
 
 ifndef NSS_DISABLE_DBM
-NSSDBM3_LIB = $(DLL_PREFIX)nssdbm3$(DLL_SUFFIX)
-else
-NSSDBM3_LIB = 
+NSS_EXTRA_DLLS += nssdbm3
 endif
 
-ifndef MOZ_NATIVE_NSS
+SDK_LIBS = crmf
+
 ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
-SDK_LIBS = \
-  $(DIST)/lib/$(LIB_PREFIX)crmf.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)smime3.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)ssl3.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)nss3.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)nssutil3.$(LIB_SUFFIX) \
-  $(NULL)
-else
-SDK_LIBS = \
-  $(DIST)/lib/$(LIB_PREFIX)crmf.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)smime.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)ssl.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)nss.$(LIB_SUFFIX) \
-  $(DIST)/lib/$(LIB_PREFIX)nssutil.$(LIB_SUFFIX) \
-  $(NULL)
-endif
+SDK_LIBS += $(NSS_DLLS)
 endif
 
 # Default
@@ -57,7 +58,8 @@ ifeq ($(OS_ARCH), HP-UX)
 ifneq ($(OS_TEST), ia64)
 ifndef HAVE_64BIT_OS
 HAVE_FREEBL_LIBS =
-HAVE_FREEBL_LIBS_32 = 1
+HAVE_FREEBL_LIBS_32INT32 = 1
+HAVE_FREEBL_LIBS_32FPU = 1
 endif
 endif
 endif
@@ -70,25 +72,27 @@ HAVE_FREEBL_LIBS =
 HAVE_FREEBL_LIBS_64 = 1
 else
 HAVE_FREEBL_LIBS =
-HAVE_FREEBL_LIBS_32 = 1
+HAVE_FREEBL_LIBS_32FPU = 1
 HAVE_FREEBL_LIBS_32INT64 = 1
 endif
 endif
 endif
 
 ifdef HAVE_FREEBL_LIBS
-FREEBL_LIB = $(DLL_PREFIX)freebl3$(DLL_SUFFIX)
+NSS_EXTRA_DLLS += freebl3
 endif
-ifdef HAVE_FREEBL_LIBS_32
-FREEBL_32INT_LIB = libfreebl_32int_3$(DLL_SUFFIX)
-FREEBL_32FPU_LIB = libfreebl_32fpu_3$(DLL_SUFFIX)
+ifdef HAVE_FREEBL_LIBS_32INT32
+NSS_EXTRA_DLLS += freebl_32int_3
+endif
+ifdef HAVE_FREEBL_LIBS_32FPU
+NSS_EXTRA_DLLS += freebl_32fpu_3
 endif
 ifdef HAVE_FREEBL_LIBS_32INT64
-FREEBL_32INT64_LIB = libfreebl_32int64_3$(DLL_SUFFIX)
+NSS_EXTRA_DLLS += freebl_32int64_3
 endif
 ifdef HAVE_FREEBL_LIBS_64
-FREEBL_64INT_LIB = libfreebl_64int_3$(DLL_SUFFIX)
-FREEBL_64FPU_LIB = libfreebl_64fpu_3$(DLL_SUFFIX)
+NSS_EXTRA_DLLS += freebl_64int_3
+NSS_EXTRA_DLLS += freebl_64fpu_3
 endif
 
 ABS_DIST := $(call core_abspath,$(DIST))
@@ -123,14 +127,7 @@ endif
 # To get debug symbols from NSS
 export MOZ_DEBUG_SYMBOLS
 
-ifdef .PYMAKE
-NSSMAKE = $(GMAKE)
-else
-NSSMAKE = $(MAKE)
-endif
-
-# NSS makefiles are not safe for parallel execution.
-DEFAULT_GMAKE_FLAGS = MAKE="$(NSSMAKE) -j1" -j1
+DEFAULT_GMAKE_FLAGS =
 DEFAULT_GMAKE_FLAGS += CC="$(CC)"
 DEFAULT_GMAKE_FLAGS += SOURCE_MD_DIR=$(ABS_DIST)
 DEFAULT_GMAKE_FLAGS += SOURCE_MDHEADERS_DIR=$(NSPR_INCLUDE_DIR)
@@ -141,16 +138,31 @@ DEFAULT_GMAKE_FLAGS += MOZILLA_CLIENT=1
 DEFAULT_GMAKE_FLAGS += NO_MDUPDATE=1
 DEFAULT_GMAKE_FLAGS += NSS_ENABLE_ECC=1
 DEFAULT_GMAKE_FLAGS += NSINSTALL="$(NSINSTALL)"
+ifeq ($(OS_ARCH),WINNT)
+DEFAULT_GMAKE_FLAGS += INSTALL="$(NSINSTALL) -t"
+endif
+ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_1)
+DEFAULT_GMAKE_FLAGS += OS_DLLFLAGS="-static-libgcc"
+endif
 ifndef MOZ_NATIVE_SQLITE
+ifdef MOZ_FOLD_LIBS
+DEFAULT_GMAKE_FLAGS += SQLITE_LIB_NAME=nss3
+else
 DEFAULT_GMAKE_FLAGS += SQLITE_LIB_NAME=mozsqlite3
+endif # MOZ_FOLD_LIBS
 DEFAULT_GMAKE_FLAGS += SQLITE_INCLUDE_DIR=$(ABS_DIST)/include
 endif
 ifdef NSS_DISABLE_DBM 
 DEFAULT_GMAKE_FLAGS += NSS_DISABLE_DBM=1
 endif
-ABS_topsrcdir   := $(call core_abspath,$(topsrcdir))
+ABS_topsrcdir   := $(shell cd $(topsrcdir); pwd)
+ifeq ($(HOST_OS_ARCH),WINNT)
+ifdef .PYMAKE
+ABS_topsrcdir   := $(shell cd $(topsrcdir); pwd -W)
+endif
+endif
 # Hack to force NSS build system to use "normal" object directories
-DEFAULT_GMAKE_FLAGS += BUILD='$(MOZ_BUILD_ROOT)/security/$$(subst $(shell cd $(topsrcdir); pwd)/security/,,$$(CURDIR))'
+DEFAULT_GMAKE_FLAGS += BUILD='$(MOZ_BUILD_ROOT)/security/$$(subst $(ABS_topsrcdir)/security/,,$$(CURDIR))'
 DEFAULT_GMAKE_FLAGS += BUILD_TREE='$$(BUILD)' OBJDIR='$$(BUILD)' DEPENDENCIES='$$(BUILD)/.deps' SINGLE_SHLIB_DIR='$$(BUILD)'
 DEFAULT_GMAKE_FLAGS += SOURCE_XP_DIR=$(ABS_DIST)
 ifndef MOZ_DEBUG
@@ -252,6 +264,24 @@ DEFAULT_GMAKE_FLAGS += XCFLAGS="$(CFLAGS)"
 DEFAULT_GMAKE_FLAGS += DARWIN_DYLIB_VERSIONS="-compatibility_version 1 -current_version 1 $(LDFLAGS)"
 endif
 
+DEFAULT_GMAKE_FLAGS += NSS_NO_PKCS11_BYPASS=1
+
+# Put NSS headers directly under $(DIST)/include
+DEFAULT_GMAKE_FLAGS += PUBLIC_EXPORT_DIR='$(ABS_DIST)/include/$$(MODULE)'
+DEFAULT_GMAKE_FLAGS += SOURCE_XPHEADERS_DIR='$$(SOURCE_XP_DIR)/include/$$(MODULE)'
+DEFAULT_GMAKE_FLAGS += MODULE_INCLUDES='$$(addprefix -I$$(SOURCE_XP_DIR)/include/,$$(REQUIRES))'
+
+# Work around NSS's MAKE_OBJDIR being racy. See bug #836220
+DEFAULT_GMAKE_FLAGS += MAKE_OBJDIR='$$(INSTALL) -D $$(OBJDIR)'
+
+# Work around NSS adding IMPORT_LIBRARY to TARGETS with no rule for
+# it, creating race conditions. See bug #836220
+DEFAULT_GMAKE_FLAGS += TARGETS='$$(LIBRARY) $$(SHARED_LIBRARY) $$(PROGRAM)'
+
+ifdef MOZ_B2G_CERTDATA
+include $(srcdir)/b2g-certdata.mk
+endif
+
 ifdef MOZ_NSS_PATCH
 # If we're applying a patch, we'll copy the NSS source to the objdir
 # and build it from there.
@@ -274,11 +304,14 @@ NSS_SRCDIR = $(topsrcdir)
 endif
 
 NSS_DIRS =
+ifndef MOZ_FOLD_LIBS
+NSS_DIRS += nss/lib
+else
 ifndef NSS_DISABLE_DBM
-NSS_DIRS += dbm
+NSS_DIRS += nss/lib/dbm
+endif
 endif
 NSS_DIRS += \
-  nss/lib \
   nss/cmd/lib \
   nss/cmd/shlibsign \
   $(NULL)
@@ -291,53 +324,178 @@ NSS_DIRS += \
   $(NULL)
 endif
 
-ifndef MOZ_NATIVE_NSS
-define build_rules
-libs::
-	$$(NSSMAKE) -C $$(NSS_SRCDIR)/security/$(1) $$(DEFAULT_GMAKE_FLAGS)
-
-clean clobber clobber_all realclean distclean depend::
-	$$(NSSMAKE) -C $$(NSS_SRCDIR)/security/$(1) $$(DEFAULT_GMAKE_FLAGS) clean
-endef
-$(foreach dir,$(NSS_DIRS),$(eval $(call build_rules,$(dir))))
-
-NSS_LIBS = \
-  $(LOADABLE_ROOT_MODULE) \
-  $(SOFTOKEN3_LIB) \
-  $(NSSDBM3_LIB) \
-  $(NSS3_LIB) \
-  $(NSSUTIL3_LIB) \
-  $(SSL3_LIB) \
-  $(SMIME3_LIB) \
-  $(FREEBL_LIB) \
-  $(FREEBL_32INT_LIB) \
-  $(FREEBL_32FPU_LIB) \
-  $(FREEBL_32INT64_LIB) \
-  $(FREEBL_64INT_LIB) \
-  $(FREEBL_64FPU_LIB) \
-  $(NULL)
-
-define install_rules
-libs::
-ifeq ($(OS_ARCH)_$(1), SunOS_$(SOFTOKEN3_LIB))
-# has to use copy mode on Solaris, see #665509
-	$$(NSINSTALL) -t -m 755 $$(DIST)/lib/$(1) $$(DIST)/bin
-else
-	$$(INSTALL) -m 755 $$(DIST)/lib/$(1) $$(DIST)/bin
+ifneq (,$(filter %--build-id,$(LDFLAGS)))
+DEFAULT_GMAKE_ENV = LDFLAGS=-Wl,--build-id
 endif
 
-install::
-	$$(SYSINSTALL) -m 755 $$(DIST)/lib/$(1) $$(DESTDIR)$$(mozappdir)
-endef
-$(foreach lib,$(NSS_LIBS),$(eval $(call install_rules,$(lib))))
+ifdef MOZ_FOLD_LIBS
+# TODO: The following can be replaced by something simpler when bug 844880
+# is fixed.
+# All static libraries required for nss, smime, ssl and nssutil.
+NSS_STATIC_LIBS := $(shell $(MAKE) --no-print-directory -f $(srcdir)/nss.mk DEPTH="$(DEPTH)" topsrcdir="$(topsrcdir)" srcdir="$(srcdir)" echo-variable-libs)
+# Corresponding build directories
+NSS_STATIC_DIRS := $(foreach lib,$(NSS_STATIC_LIBS),$(patsubst %/,%,$(dir $(lib))))
+NSS_DIRS += $(NSS_STATIC_DIRS)
 
-libs::
-	$(INSTALL) -m 755 $(SDK_LIBS) $(DIST)/sdk/lib
-# NSS installs headers to dist/public and we want them in dist/include
-	$(NSINSTALL) -D $(DIST)/include/nss
-	(cd $(DIST)/public/nss && tar $(TAR_CREATE_FLAGS) - .) | \
-	  (cd $(DIST)/include && tar -xf -)
+# TODO: The following can be replaced by something simpler when bug 844884
+# is fixed.
+# Remaining nss/lib directories
+NSS_DIRS += nss/lib/freebl nss/lib/softoken nss/lib/jar nss/lib/crmf nss/lib/ckfw nss/lib/libpkix
+ifeq (WINNT,$(OS_TARGET))
+NSS_DIRS += nss/lib/zlib
+endif
+endif # MOZ_FOLD_LIBS
 
-endif # MOZ_NATIVE_NSS
+# Filter-out $(LIBRARY_NAME) because it's already handled in config/rules.mk.
+NSS_DIST_DLL_FILES := $(addprefix $(DIST)/lib/$(DLL_PREFIX),$(addsuffix $(DLL_SUFFIX),$(filter-out $(LIBRARY_NAME),$(NSS_DLLS)) $(NSS_EXTRA_DLLS)))
+NSS_DIST_DLL_DEST := $(DIST)/bin
+INSTALL_TARGETS += NSS_DIST_DLL
+
+ifeq ($(OS_ARCH)_$(1), SunOS_softokn3)
+# has to use copy mode on Solaris, see #665509
+$(DIST)/bin/$(DLL_PREFIX)softokn3$(DLL_SUFFIX): INSTALL := $(INSTALL) -t
+endif
+
+NSS_SDK_LIB_FILES := \
+  $(addprefix $(DIST)/lib/$(LIB_PREFIX),$(addsuffix .$(LIB_SUFFIX),$(SDK_LIBS))) \
+  $(addprefix $(DIST)/bin/$(DLL_PREFIX),$(addsuffix $(DLL_SUFFIX),$(NSS_DLLS))) \
+  $(NULL)
+NSS_SDK_LIB_DEST := $(DIST)/sdk/lib
+INSTALL_TARGETS += NSS_SDK_LIB
+
+ifdef MOZ_FOLD_LIBS
+ifeq (WINNT,$(OS_TARGET))
+SUFFIX = _s.$(LIB_SUFFIX)
+else
+SUFFIX = .$(LIB_SUFFIX)
+endif
+
+# Fold NSPR libs
+EXTRA_DSO_LDOPTS += $(DEPTH)/nsprpub/pr/src/$(LIB_PREFIX)nspr4$(SUFFIX)
+EXTRA_DSO_LDOPTS += $(DEPTH)/nsprpub/lib/ds/$(LIB_PREFIX)plds4$(SUFFIX)
+EXTRA_DSO_LDOPTS += $(DEPTH)/nsprpub/lib/libc/src/$(LIB_PREFIX)plc4$(SUFFIX)
+
+# Fold SQLite
+EXTRA_DSO_LDOPTS += $(DEPTH)/db/sqlite3/src/$(LIB_PREFIX)mozsqlite3.$(LIB_SUFFIX)
+
+# Add all static libraries for nss, smime, ssl and nssutil
+SHARED_LIBRARY_LIBS = $(addprefix ../,$(NSS_STATIC_LIBS))
+
+ifeq (WINNT,$(OS_TARGET))
+# Create a .def file based on the various .def files for nss, smime, ssl and
+# nssutil.
+NSS_STATIC_LIBS_DEFS := $(wildcard $(addprefix $(srcdir)/../,$(NSS_STATIC_LIBS:.$(LIB_SUFFIX)=.def)))
+DEFFILE = nss3.def
+
+nss3.def: $(NSS_STATIC_LIBS_DEFS) $(DEPTH)/db/sqlite3/src/sqlite-processed.def
+	echo LIBRARY nss3$(DLL_SUFFIX) > $@.tmp
+	echo EXPORTS >> $@.tmp
+	grep -v -h -e ^LIBRARY -e ^EXPORTS -e ^\; $^ >> $@.tmp
+	mv $@.tmp $@
+endif
+
+# Force the linker to include everything from the static libraries.
+EXPAND_LIBS_EXEC += --extract
+else
+$(NSS_DIST_DLL_FILES) $(NSS_SDK_LIB_FILES): libs-nss/lib
+endif # MOZ_FOLD_LIBS
 
 include $(topsrcdir)/config/rules.mk
+
+ifdef MOZ_FOLD_LIBS
+$(SHARED_LIBRARY): $(SHARED_LIBRARY_LIBS)
+
+EXTRA_DSO_LDOPTS += $(REALTIME_LIBS)
+
+ifdef IMPORT_LIB_SUFFIX
+IMPORT_PREFIX = $(LIB_PREFIX)
+IMPORT_SUFFIX = .$(IMPORT_LIB_SUFFIX)
+else
+IMPORT_PREFIX = $(DLL_PREFIX)
+IMPORT_SUFFIX = $(DLL_SUFFIX)
+endif
+
+NSPR_IMPORT_LIBS = $(addprefix $(DIST)/lib/$(IMPORT_PREFIX),$(addsuffix $(IMPORT_SUFFIX),nspr4 plc4 plds4))
+SQLITE_IMPORT_LIB = $(DIST)/lib/$(IMPORT_PREFIX)mozsqlite3$(IMPORT_SUFFIX)
+
+# TODO: The following can be replaced by something simpler when bug 844884
+# is fixed.
+# Associate target files with the rules that build them.
+$(DIST)/lib/$(LIB_PREFIX)crmf.$(LIB_SUFFIX): libs-nss/lib/crmf
+$(DIST)/lib/$(DLL_PREFIX)freebl3$(DLL_SUFFIX): libs-nss/lib/freebl
+$(DIST)/lib/$(DLL_PREFIX)nssckbi$(DLL_SUFFIX): libs-nss/lib/ckfw
+$(DIST)/lib/$(DLL_PREFIX)softokn3$(DLL_SUFFIX): libs-nss/lib/softoken
+$(DIST)/lib/$(DLL_PREFIX)nssdbm3$(DLL_SUFFIX): libs-nss/lib/softoken
+$(foreach lib,$(NSS_STATIC_LIBS),$(eval ../$(lib): libs-$(patsubst %/,%,$(dir $(lib)))))
+
+# Create fake import libraries for the folded libraries, so that linking
+# against them works both for the NSS build system (see dependencies below)
+# and for the rest of the mozilla build system.
+$(NSPR_IMPORT_LIBS) \
+$(SQLITE_IMPORT_LIB) \
+$(DIST)/lib/$(IMPORT_PREFIX)nssutil3$(IMPORT_SUFFIX) \
+$(DIST)/lib/$(IMPORT_PREFIX)ssl3$(IMPORT_SUFFIX) \
+$(DIST)/lib/$(IMPORT_PREFIX)smime3$(IMPORT_SUFFIX): $(DIST)/lib/$(IMPORT_PREFIX)nss3$(IMPORT_SUFFIX)
+ifeq (WINNT,$(OS_TARGET))
+	cp $< $@
+else
+	ln -sf $< $@
+endif
+
+# Interdependencies between nss sub-directories, and dependencies on NSPR/SQLite
+libs-nss/lib/ckfw: libs-nss/lib/nss/../base $(NSPR_IMPORT_LIBS)
+libs-nss/lib/softoken: $(NSPR_IMPORT_LIBS) $(SQLITE_IMPORT_LIB)
+libs-nss/lib/softoken: libs-nss/lib/freebl
+ifndef NSS_DISABLE_DBM
+libs-nss/lib/softoken: libs-nss/lib/dbm
+endif
+libs-nss/lib/softoken: $(DIST)/lib/$(IMPORT_PREFIX)nssutil3$(IMPORT_SUFFIX)
+libs-nss/lib/freebl: $(DIST)/lib/$(IMPORT_PREFIX)nssutil3$(IMPORT_SUFFIX) $(NSPR_IMPORT_LIBS)
+
+# For each directory where we build static libraries, force the NSS build system
+# to only build static libraries.
+$(addprefix libs-,$(NSS_STATIC_DIRS)): DEFAULT_GMAKE_FLAGS += SHARED_LIBRARY= IMPORT_LIBRARY=
+endif # MOZ_FOLD_LIBS
+
+DEFAULT_GMAKE_FLAGS += $(EXTRA_GMAKE_FLAGS)
+
+$(addprefix libs-,$(NSS_DIRS)): libs-%:
+# Work around NSS's export rule being racy when recursing for private_export
+# See bug #836220.
+$(addprefix export-,$(NSS_DIRS)): EXTRA_GMAKE_FLAGS = PRIVATE_EXPORTS=
+$(addprefix export-,$(NSS_DIRS)): export-%: private_export-%
+$(addprefix private_export-,$(NSS_DIRS)): EXTRA_GMAKE_FLAGS =
+$(addprefix private_export-,$(NSS_DIRS)): private_export-%:
+
+# Work around bug #836228 in pymake
+ifdef .PYMAKE
+$(foreach p,libs export private_export,$(addprefix $(p)-,$(NSS_DIRS))): *=$(subst $(NULL) $(NULL),-,$(wordlist 2,$(words $(subst -, ,$@)),$(subst -, ,$@)))
+endif
+
+$(foreach p,libs export private_export,$(addprefix $(p)-,$(NSS_DIRS))):
+	$(DEFAULT_GMAKE_ENV) $(MAKE) -C $(NSS_SRCDIR)/security/$* $(@:-$*=) $(DEFAULT_GMAKE_FLAGS)
+
+export:: $(addprefix export-,$(NSS_DIRS))
+
+$(addprefix clean-,$(NSS_DIRS)): clean-%:
+	$(MAKE) -C $(NSS_SRCDIR)/security/$* $(DEFAULT_GMAKE_FLAGS) clean
+
+clean clobber clobber_all realclean distclean depend:: $(addprefix clean-,$(NSS_DIRS))
+
+NSS_CMD_TARGETS := $(addprefix libs-,$(filter-out nss/cmd/lib,$(filter nss/cmd/%,$(NSS_DIRS))))
+libs:: $(NSS_CMD_TARGETS)
+
+ifdef MOZ_FOLD_LIBS
+$(NSS_CMD_TARGETS): $(addprefix $(DIST)/lib/$(IMPORT_PREFIX),$(addsuffix $(IMPORT_SUFFIX),$(NSS_LIBS)))
+libs-nss/cmd/modutil: libs-nss/lib/jar
+ifeq (WINNT,$(OS_TARGET))
+libs-nss/cmd/modutil: libs-nss/lib/zlib
+endif
+$(NSS_CMD_TARGETS): libs-nss/cmd/lib
+else
+$(NSS_CMD_TARGETS): libs-nss/lib libs-nss/cmd/lib
+endif # MOZ_FOLD_LIBS
+
+# Work around NSS build system race condition creating certdata.c in
+# security/nss/lib/ckfw/builtins. See bug #836220.
+libs-nss/lib$(if $(MOZ_FOLD_LIBS),/ckfw): $(call mkdir_deps,../nss/lib/ckfw/builtins)

@@ -12,6 +12,7 @@
 #include "nsContentUtils.h"
 
 #include "nsMathMLmoFrame.h"
+#include <algorithm>
 
 //
 // <mo> -- operator, fence, or separator - implementation
@@ -79,39 +80,36 @@ nsMathMLmoFrame::UseMathMLChar()
     NS_MATHML_OPERATOR_IS_INVISIBLE(mFlags);
 }
 
-NS_IMETHODIMP
+void
 nsMathMLmoFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                   const nsRect&           aDirtyRect,
                                   const nsDisplayListSet& aLists)
 {
-  nsresult rv = NS_OK;
   bool useMathMLChar = UseMathMLChar();
 
   if (!useMathMLChar) {
     // let the base class do everything
-    rv = nsMathMLTokenFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsMathMLTokenFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
   } else {
-    rv = DisplayBorderBackgroundOutline(aBuilder, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBorderBackgroundOutline(aBuilder, aLists);
     
     // make our char selected if our inner child text frame is selected
     bool isSelected = false;
     nsRect selectedRect;
     nsIFrame* firstChild = mFrames.FirstChild();
     if (IsFrameInSelection(firstChild)) {
-      selectedRect = firstChild->GetRect();
+      mMathMLChar.GetRect(selectedRect);
+      // add a one pixel border (it renders better for operators like minus)
+      selectedRect.Inflate(nsPresContext::CSSPixelsToAppUnits(1));
       isSelected = true;
     }
-    rv = mMathMLChar.Display(aBuilder, this, aLists, 0, isSelected ? &selectedRect : nullptr);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mMathMLChar.Display(aBuilder, this, aLists, 0, isSelected ? &selectedRect : nullptr);
   
 #if defined(DEBUG) && defined(SHOW_BOUNDING_BOX)
     // for visual debug
-    rv = DisplayBoundingMetrics(aBuilder, this, mReference, mBoundingMetrics, aLists);
+    DisplayBoundingMetrics(aBuilder, this, mReference, mBoundingMetrics, aLists);
 #endif
   }
-  return rv;
 }
 
 // get the text that we enclose and setup our nsMathMLChar
@@ -169,12 +167,6 @@ nsMathMLmoFrame::ProcessTextData()
   mFlags |= allFlags & NS_MATHML_OPERATOR_ACCENT;
   mFlags |= allFlags & NS_MATHML_OPERATOR_MOVABLELIMITS;
 
-  bool isMutable =
-    NS_MATHML_OPERATOR_IS_STRETCHY(allFlags) ||
-    NS_MATHML_OPERATOR_IS_LARGEOP(allFlags);
-  if (isMutable)
-    mFlags |= NS_MATHML_OPERATOR_MUTABLE;
-
   // see if this is an operator that should be centered to cater for 
   // fonts that are not math-aware
   if (1 == length) {
@@ -189,12 +181,19 @@ nsMathMLmoFrame::ProcessTextData()
 
   // cache the operator
   mMathMLChar.SetData(presContext, data);
-  ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mMathMLChar, isMutable);
 
   // cache the native direction -- beware of bug 133429...
   // mEmbellishData.direction must always retain our native direction, whereas
   // mMathMLChar.GetStretchDirection() may change later, when Stretch() is called
   mEmbellishData.direction = mMathMLChar.GetStretchDirection();
+
+  bool isMutable =
+    NS_MATHML_OPERATOR_IS_LARGEOP(allFlags) ||
+    (mEmbellishData.direction != NS_STRETCH_DIRECTION_UNSUPPORTED);
+  if (isMutable)
+    mFlags |= NS_MATHML_OPERATOR_MUTABLE;
+
+  ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mMathMLChar, isMutable);
 }
 
 // get our 'form' and lookup in the Operator Dictionary to fetch 
@@ -343,13 +342,13 @@ nsMathMLmoFrame::ProcessOperatorData()
     // Use the default value suggested by the MathML REC.
     // http://www.w3.org/TR/MathML/chapter3.html#presm.mo.attrs
     // thickmathspace = 5/18em
-    float lspace = 5.0/18.0;
-    float rspace = 5.0/18.0;
+    float lspace = 5.0f/18.0f;
+    float rspace = 5.0f/18.0f;
     if (NS_MATHML_OPERATOR_IS_INVISIBLE(mFlags)) {
       // mMathMLChar has been reset in ProcessTextData so we can not find it
       // in the operator dictionary. The operator dictionary always uses
       // lspace = rspace = 0 for invisible operators.
-      lspace = rspace = 0.0;
+      lspace = rspace = 0;
     } else {
       // lookup the operator dictionary
       nsAutoString data;
@@ -370,7 +369,7 @@ nsMathMLmoFrame::ProcessOperatorData()
       // tuning if we don't want too much extra space when we are a script.
       // (with its fonts, TeX sets lspace=0 & rspace=0 as soon as scriptlevel>0.
       // Our fonts can be anything, so...)
-      if (GetStyleFont()->mScriptLevel > 0) {
+      if (StyleFont()->mScriptLevel > 0) {
         if (NS_MATHML_OPERATOR_EMBELLISH_IS_ISOLATED(mFlags)) {
           // could be an isolated accent or script, e.g., x^{+}, just zero out
           mEmbellishData.leadingSpace = 0;
@@ -394,17 +393,18 @@ nsMathMLmoFrame::ProcessOperatorData()
   // values: length
   // default: set by dictionary (thickmathspace) 
   //
-  // XXXfredw Should we allow negative values? (bug 411227) They will be made
-  // positive by the rounding below.
-  // XXXfredw Should we allow relative values? They will give a multiple of the
-  // current leading space, which is not necessarily the default one.
+  // XXXfredw Support for negative and relative values is not implemented
+  // (bug 805926).
+  // Relative values will give a multiple of the current leading space,
+  // which is not necessarily the default one.
   //
   nscoord leadingSpace = mEmbellishData.leadingSpace;
   GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::lspace_,
                value);
   if (!value.IsEmpty()) {
     nsCSSValue cssValue;
-    if (nsMathMLElement::ParseNumericValue(value, cssValue, 0)) {
+    if (nsMathMLElement::ParseNumericValue(value, cssValue, 0,
+                                           mContent->OwnerDoc())) {
       if ((eCSSUnit_Number == cssValue.GetUnit()) && !cssValue.GetFloatValue())
         leadingSpace = 0;
       else if (cssValue.IsLengthUnit())
@@ -420,17 +420,18 @@ nsMathMLmoFrame::ProcessOperatorData()
   // values: length
   // default: set by dictionary (thickmathspace) 
   //
-  // XXXfredw Should we allow negative values? (bug 411227) They will be made
-  // positive by the rounding below.
-  // XXXfredw Should we allow relative values? They will give a multiple of the
-  // current trailing space, which is not necessarily the default one.
+  // XXXfredw Support for negative and relative values is not implemented
+  // (bug 805926).
+  // Relative values will give a multiple of the current leading space,
+  // which is not necessarily the default one.
   //
   nscoord trailingSpace = mEmbellishData.trailingSpace;
   GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::rspace_,
                value);
   if (!value.IsEmpty()) {
     nsCSSValue cssValue;
-    if (nsMathMLElement::ParseNumericValue(value, cssValue, 0)) {
+    if (nsMathMLElement::ParseNumericValue(value, cssValue, 0,
+                                           mContent->OwnerDoc())) {
       if ((eCSSUnit_Number == cssValue.GetUnit()) && !cssValue.GetFloatValue())
         trailingSpace = 0;
       else if (cssValue.IsLengthUnit())
@@ -508,14 +509,15 @@ nsMathMLmoFrame::ProcessOperatorData()
   // give a multiple of the defaut value but a multiple of the operator at
   // normal size.
   //
-  mMinSize = 0.0;
+  mMinSize = 0;
   GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::minsize_,
                value);
   if (!value.IsEmpty()) {
     nsCSSValue cssValue;
     if (nsMathMLElement::ParseNumericValue(value, cssValue,
                                            nsMathMLElement::
-                                           PARSE_ALLOW_UNITLESS)) {
+                                           PARSE_ALLOW_UNITLESS,
+                                           mContent->OwnerDoc())) {
       nsCSSUnit unit = cssValue.GetUnit();
       if (eCSSUnit_Number == unit)
         mMinSize = cssValue.GetFloatValue();
@@ -547,7 +549,8 @@ nsMathMLmoFrame::ProcessOperatorData()
     nsCSSValue cssValue;
     if (nsMathMLElement::ParseNumericValue(value, cssValue,
                                            nsMathMLElement::
-                                           PARSE_ALLOW_UNITLESS)) {
+                                           PARSE_ALLOW_UNITLESS,
+                                           mContent->OwnerDoc())) {
       nsCSSUnit unit = cssValue.GetUnit();
       if (eCSSUnit_Number == unit)
         mMaxSize = cssValue.GetFloatValue();
@@ -658,13 +661,13 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
 
       if (isVertical && NS_MATHML_OPERATOR_IS_SYMMETRIC(mFlags)) {
         // we need to center about the axis
-        nscoord delta = NS_MAX(container.ascent - axisHeight,
+        nscoord delta = std::max(container.ascent - axisHeight,
                                container.descent + axisHeight);
         container.ascent = delta + axisHeight;
         container.descent = delta - axisHeight;
 
         // get ready in case we encounter user-desired min-max size
-        delta = NS_MAX(initialSize.ascent - axisHeight,
+        delta = std::max(initialSize.ascent - axisHeight,
                        initialSize.descent + axisHeight);
         initialSize.ascent = delta + axisHeight;
         initialSize.descent = delta - axisHeight;
@@ -680,21 +683,21 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
           // try to maintain the aspect ratio of the char
           float aspect = mMaxSize / float(initialSize.ascent + initialSize.descent);
           container.ascent =
-            NS_MIN(container.ascent, nscoord(initialSize.ascent * aspect));
+            std::min(container.ascent, nscoord(initialSize.ascent * aspect));
           container.descent =
-            NS_MIN(container.descent, nscoord(initialSize.descent * aspect));
+            std::min(container.descent, nscoord(initialSize.descent * aspect));
           // below we use a type cast instead of a conversion to avoid a VC++ bug
           // see http://support.microsoft.com/support/kb/articles/Q115/7/05.ASP
           container.width =
-            NS_MIN(container.width, (nscoord)mMaxSize);
+            std::min(container.width, (nscoord)mMaxSize);
         }
         else { // multiplicative value
           container.ascent =
-            NS_MIN(container.ascent, nscoord(initialSize.ascent * mMaxSize));
+            std::min(container.ascent, nscoord(initialSize.ascent * mMaxSize));
           container.descent =
-            NS_MIN(container.descent, nscoord(initialSize.descent * mMaxSize));
+            std::min(container.descent, nscoord(initialSize.descent * mMaxSize));
           container.width =
-            NS_MIN(container.width, nscoord(initialSize.width * mMaxSize));
+            std::min(container.width, nscoord(initialSize.width * mMaxSize));
         }
 
         if (isVertical && !NS_MATHML_OPERATOR_IS_SYMMETRIC(mFlags)) {
@@ -721,19 +724,19 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
           // try to maintain the aspect ratio of the char
           float aspect = mMinSize / float(initialSize.ascent + initialSize.descent);
           container.ascent =
-            NS_MAX(container.ascent, nscoord(initialSize.ascent * aspect));
+            std::max(container.ascent, nscoord(initialSize.ascent * aspect));
           container.descent =
-            NS_MAX(container.descent, nscoord(initialSize.descent * aspect));
+            std::max(container.descent, nscoord(initialSize.descent * aspect));
           container.width =
-            NS_MAX(container.width, (nscoord)mMinSize);
+            std::max(container.width, (nscoord)mMinSize);
         }
         else { // multiplicative value
           container.ascent =
-            NS_MAX(container.ascent, nscoord(initialSize.ascent * mMinSize));
+            std::max(container.ascent, nscoord(initialSize.ascent * mMinSize));
           container.descent =
-            NS_MAX(container.descent, nscoord(initialSize.descent * mMinSize));
+            std::max(container.descent, nscoord(initialSize.descent * mMinSize));
           container.width =
-            NS_MAX(container.width, nscoord(initialSize.width * mMinSize));
+            std::max(container.width, nscoord(initialSize.width * mMinSize));
         }
 
         if (isVertical && !NS_MATHML_OPERATOR_IS_SYMMETRIC(mFlags)) {
@@ -749,8 +752,7 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
     nsresult res = mMathMLChar.Stretch(PresContext(), aRenderingContext,
                                        aStretchDirection, container, charSize,
                                        stretchHint,
-                                       NS_MATHML_IS_RTL(mPresentationData.
-                                                        flags));
+                                       StyleVisibility()->mDirection);
     if (NS_FAILED(res)) {
       // gracefully handle cases where stretching the char failed (i.e., GetBoundingMetrics failed)
       // clear our 'form' to behave as if the operator wasn't in the dictionary
@@ -839,9 +841,9 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
   else if (useMathMLChar) {
     nscoord ascent = fm->MaxAscent();
     nscoord descent = fm->MaxDescent();
-    aDesiredStretchSize.ascent = NS_MAX(mBoundingMetrics.ascent + leading, ascent);
+    aDesiredStretchSize.ascent = std::max(mBoundingMetrics.ascent + leading, ascent);
     aDesiredStretchSize.height = aDesiredStretchSize.ascent +
-                                 NS_MAX(mBoundingMetrics.descent + leading, descent);
+                                 std::max(mBoundingMetrics.descent + leading, descent);
   }
   aDesiredStretchSize.width = mBoundingMetrics.width;
   aDesiredStretchSize.mBoundingMetrics = mBoundingMetrics;
@@ -874,7 +876,7 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
     aDesiredStretchSize.width = mBoundingMetrics.width;
     aDesiredStretchSize.mBoundingMetrics.width = mBoundingMetrics.width;
 
-    nscoord dx = (NS_MATHML_IS_RTL(mPresentationData.flags) ?
+    nscoord dx = (StyleVisibility()->mDirection ?
                   trailingSpace : leadingSpace);
     if (dx) {
       // adjust the offsets

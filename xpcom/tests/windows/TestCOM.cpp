@@ -30,7 +30,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsITestCom, NS_ITEST_COM_IID)
  * nsTestCom
  */
 
-class nsTestCom: public nsITestCom {
+class nsTestCom MOZ_FINAL : public nsITestCom {
   NS_DECL_ISUPPORTS
 
 public:
@@ -69,7 +69,7 @@ nsrefcnt nsTestCom::Release()
   return res;
 }
 
-class nsTestComFactory: public nsIFactory {
+class nsTestComFactory MOZ_FINAL : public nsIFactory {
   NS_DECL_ISUPPORTS
 public:
   nsTestComFactory() {
@@ -83,7 +83,7 @@ public:
     printf("nsTestComFactory: ");
     printf("%s", (aLock ? "Locking server" : "Unlocking server"));
     printf("\n");
-    return S_OK;
+    return NS_OK;
   }
 };
 
@@ -127,11 +127,8 @@ int main(int argc, char *argv[])
   IUnknown *iUnknown;  
   nsITestCom *iTestCom;
 
-  nsresult res;
   iFactory->LockServer(TRUE);
-  res = iFactory->CreateInstance(NULL,
-				 IID_IUnknown, 
-				 (void **) &iUnknown);
+  iFactory->CreateInstance(NULL, IID_IUnknown, (void **) &iUnknown);
   iFactory->LockServer(FALSE);
 
   GUID testGUID = NS_ITEST_COM_IID;

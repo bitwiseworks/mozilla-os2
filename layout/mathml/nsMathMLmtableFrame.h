@@ -6,6 +6,7 @@
 #ifndef nsMathMLmtableFrame_h___
 #define nsMathMLmtableFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
@@ -25,17 +26,17 @@ public:
   // Overloaded nsIMathMLFrame methods
 
   NS_IMETHOD
-  InheritAutomaticData(nsIFrame* aParent);
+  InheritAutomaticData(nsIFrame* aParent) MOZ_OVERRIDE;
 
   NS_IMETHOD
   UpdatePresentationData(uint32_t aFlagsValues,
-                         uint32_t aWhichFlags);
+                         uint32_t aWhichFlags) MOZ_OVERRIDE;
 
   NS_IMETHOD
   UpdatePresentationDataFromChildAt(int32_t         aFirstIndex,
                                     int32_t         aLastIndex,
                                     uint32_t        aFlagsValues,
-                                    uint32_t        aWhichFlags);
+                                    uint32_t        aWhichFlags) MOZ_OVERRIDE;
 
   // overloaded nsTableOuterFrame methods
 
@@ -43,14 +44,14 @@ public:
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
-         nsReflowStatus&          aStatus);
+         nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   NS_IMETHOD
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
-                   int32_t  aModType);
+                   int32_t  aModType) MOZ_OVERRIDE;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsTableOuterFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
@@ -80,11 +81,11 @@ public:
 
   NS_IMETHOD
   SetInitialChildList(ChildListID  aListID,
-                      nsFrameList& aChildList);
+                      nsFrameList& aChildList) MOZ_OVERRIDE;
 
   NS_IMETHOD
   AppendFrames(ChildListID  aListID,
-               nsFrameList& aFrameList)
+               nsFrameList& aFrameList) MOZ_OVERRIDE
   {
     nsresult rv = nsTableFrame::AppendFrames(aListID, aFrameList);
     RestyleTable();
@@ -94,7 +95,7 @@ public:
   NS_IMETHOD
   InsertFrames(ChildListID aListID,
                nsIFrame* aPrevFrame,
-               nsFrameList& aFrameList)
+               nsFrameList& aFrameList) MOZ_OVERRIDE
   {
     nsresult rv = nsTableFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
     RestyleTable();
@@ -103,14 +104,14 @@ public:
 
   NS_IMETHOD
   RemoveFrame(ChildListID aListID,
-              nsIFrame* aOldFrame)
+              nsIFrame* aOldFrame) MOZ_OVERRIDE
   {
     nsresult rv = nsTableFrame::RemoveFrame(aListID, aOldFrame);
     RestyleTable();
     return rv;
   }
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsTableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
@@ -139,11 +140,11 @@ public:
   NS_IMETHOD
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
-                   int32_t  aModType);
+                   int32_t  aModType) MOZ_OVERRIDE;
 
   NS_IMETHOD
   AppendFrames(ChildListID  aListID,
-               nsFrameList& aFrameList)
+               nsFrameList& aFrameList) MOZ_OVERRIDE
   {
     nsresult rv = nsTableRowFrame::AppendFrames(aListID, aFrameList);
     RestyleTable();
@@ -153,7 +154,7 @@ public:
   NS_IMETHOD
   InsertFrames(ChildListID aListID,
                nsIFrame* aPrevFrame,
-               nsFrameList& aFrameList)
+               nsFrameList& aFrameList) MOZ_OVERRIDE
   {
     nsresult rv = nsTableRowFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
     RestyleTable();
@@ -162,14 +163,14 @@ public:
 
   NS_IMETHOD
   RemoveFrame(ChildListID aListID,
-              nsIFrame* aOldFrame)
+              nsIFrame* aOldFrame) MOZ_OVERRIDE
   {
     nsresult rv = nsTableRowFrame::RemoveFrame(aListID, aOldFrame);
     RestyleTable();
     return rv;
   }
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsTableRowFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
@@ -203,11 +204,11 @@ public:
   NS_IMETHOD
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
-                   int32_t  aModType);
+                   int32_t  aModType) MOZ_OVERRIDE;
 
-  virtual int32_t GetRowSpan();
-  virtual int32_t GetColSpan();
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual int32_t GetRowSpan() MOZ_OVERRIDE;
+  virtual int32_t GetColSpan() MOZ_OVERRIDE;
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsTableCellFrame::IsFrameOfType(aFlags & ~(nsIFrame::eMathML));
   }
@@ -233,7 +234,7 @@ public:
   UpdatePresentationDataFromChildAt(int32_t         aFirstIndex,
                                     int32_t         aLastIndex,
                                     uint32_t        aFlagsValues,
-                                    uint32_t        aFlagsToUpdate)
+                                    uint32_t        aFlagsToUpdate) MOZ_OVERRIDE
   {
     nsMathMLContainerFrame::PropagatePresentationDataFromChildAt(this,
       aFirstIndex, aLastIndex, aFlagsValues, aFlagsToUpdate);
@@ -244,9 +245,9 @@ public:
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
-         nsReflowStatus&          aStatus);
+         nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsBlockFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eMathML | nsIFrame::eExcludesIgnorableWhitespace));
@@ -255,8 +256,6 @@ public:
 protected:
   nsMathMLmtdInnerFrame(nsStyleContext* aContext) : nsBlockFrame(aContext) {}
   virtual ~nsMathMLmtdInnerFrame();
-
-  virtual int GetSkipSides() const { return 0; }
 };  // class nsMathMLmtdInnerFrame
 
 #endif /* nsMathMLmtableFrame_h___ */

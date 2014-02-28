@@ -36,6 +36,7 @@
 #endif
 #endif
 
+#include "xpcom-private.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsCRT.h"
 #include "nsCOMPtr.h"
@@ -142,7 +143,7 @@ NS_IMPL_ISUPPORTS2(nsDirEnumeratorUnix, nsISimpleEnumerator, nsIDirectoryEnumera
 NS_IMETHODIMP
 nsDirEnumeratorUnix::Init(nsLocalFile *parent, bool resolveSymlinks /*ignored*/)
 {
-    nsCAutoString dirPath;
+    nsAutoCString dirPath;
     if (NS_FAILED(parent->GetNativePath(dirPath)) ||
         dirPath.IsEmpty()) {
         return NS_ERROR_FILE_INVALID_PATH;
@@ -295,7 +296,7 @@ nsLocalFile::InitWithNativePath(const nsACString &filePath)
 {
     if (filePath.Equals("~") || Substring(filePath, 0, 2).EqualsLiteral("~/")) {
         nsCOMPtr<nsIFile> homeDir;
-        nsCAutoString homePath;
+        nsAutoCString homePath;
         if (NS_FAILED(NS_GetSpecialDirectory(NS_OS_HOME_DIR,
                                              getter_AddRefs(homeDir))) ||
             NS_FAILED(homeDir->GetNativePath(homePath))) {
@@ -400,7 +401,8 @@ nsLocalFile::OpenNSPRFileDesc(int32_t flags, int32_t mode, PRFileDesc **_retval)
 
 #if defined(LINUX) && !defined(ANDROID)
     if (flags & OS_READAHEAD) {
-        readahead(PR_FileDesc2NativeHandle(*_retval), 0, 0);
+        posix_fadvise(PR_FileDesc2NativeHandle(*_retval), 0, 0,
+                      POSIX_FADV_SEQUENTIAL);
     }
 #endif
     return NS_OK;
@@ -627,7 +629,7 @@ nsLocalFile::GetNativeTargetPathName(nsIFile *newParent,
     else
         LocateNativeLeafName(nameBegin, nameEnd);
 
-    nsCAutoString dirName;
+    nsAutoCString dirName;
     if (NS_FAILED(rv = newParent->GetNativePath(dirName)))
         return rv;
 
@@ -669,7 +671,7 @@ nsLocalFile::CopyDirectoryTo(nsIFile *newParent)
         if (NS_FAILED(rv = newParent->Create(DIRECTORY_TYPE, oldPerms)))
             return rv;
     } else {    // dir exists lets try to use leaf
-        nsCAutoString leafName;
+        nsAutoCString leafName;
         if (NS_FAILED(rv = GetNativeLeafName(leafName)))
             return rv;
         if (NS_FAILED(rv = newParent->AppendNative(leafName)))
@@ -703,7 +705,7 @@ nsLocalFile::CopyDirectoryTo(nsIFile *newParent)
                 if (NS_FAILED(rv = entry->CopyToNative(destClone, EmptyCString()))) {
 #ifdef DEBUG
                     nsresult rv2;
-                    nsCAutoString pathName;
+                    nsAutoCString pathName;
                     if (NS_FAILED(rv2 = entry->GetNativePath(pathName)))
                         return rv2;
                     printf("Operation not supported: %s\n", pathName.get());
@@ -717,7 +719,7 @@ nsLocalFile::CopyDirectoryTo(nsIFile *newParent)
             if (NS_FAILED(rv = entry->CopyToNative(newParent, EmptyCString()))) {
 #ifdef DEBUG
                 nsresult rv2;
-                nsCAutoString pathName;
+                nsAutoCString pathName;
                 if (NS_FAILED(rv2 = entry->GetNativePath(pathName)))
                     return rv2;
                 printf("Operation not supported: %s\n", pathName.get());
@@ -753,7 +755,7 @@ nsLocalFile::CopyToNative(nsIFile *newParent, const nsACString &newName)
     if (NS_FAILED(rv = IsDirectory(&isDirectory)))
         return rv;
 
-    nsCAutoString newPathName;
+    nsAutoCString newPathName;
     if (isDirectory) {
         if (!newName.IsEmpty()) {
             if (NS_FAILED(rv = workParent->AppendNative(newName)))
@@ -883,7 +885,7 @@ nsLocalFile::MoveToNative(nsIFile *newParent, const nsACString &newName)
     CHECK_mPath();
 
     // check to make sure that we have a new parent
-    nsCAutoString newPathName;
+    nsAutoCString newPathName;
     rv = GetNativeTargetPathName(newParent, newName, newPathName);
     if (NS_FAILED(rv))
         return rv;
@@ -1214,7 +1216,7 @@ nsLocalFile::GetDiskSpaceAvailable(int64_t *aDiskSpaceAvailable)
 
     /* 
      * Members of the STATFS struct that you should know about:
-     * f_bsize = block size on disk.
+     * F_BSIZE = block size on disk.
      * f_bavail = number of free blocks available to a non-superuser.
      * f_bfree = number of total free blocks in file system.
      */
@@ -1226,22 +1228,13 @@ nsLocalFile::GetDiskSpaceAvailable(int64_t *aDiskSpaceAvailable)
 #endif
         return NS_ERROR_FAILURE;
     }
-#ifdef DEBUG_DISK_SPACE
-    printf("DiskSpaceAvailable: %d bytes\n",
-         fs_buf.f_bsize * (fs_buf.f_bavail - 1));
-#endif
 
-    /* 
-     * The number of bytes free == The number of free blocks available to
-     * a non-superuser, minus one as a fudge factor, multiplied by the size
-     * of the aforementioned blocks.
-     */
-#if defined(SOLARIS) || defined(XP_MACOSX)
-    /* On Solaris and Mac, unit is f_frsize. */
-    *aDiskSpaceAvailable = (int64_t)fs_buf.f_frsize * (fs_buf.f_bavail - 1);
-#else
-    *aDiskSpaceAvailable = (int64_t)fs_buf.f_bsize * (fs_buf.f_bavail - 1);
-#endif /* SOLARIS */
+    *aDiskSpaceAvailable = (int64_t) fs_buf.F_BSIZE * fs_buf.f_bavail;
+
+#ifdef DEBUG_DISK_SPACE
+    printf("DiskSpaceAvailable: %lu bytes\n",
+         *aDiskSpaceAvailable);
+#endif
 
 #if defined(USE_LINUX_QUOTACTL)
 
@@ -1264,7 +1257,7 @@ nsLocalFile::GetDiskSpaceAvailable(int64_t *aDiskSpaceAvailable)
     {
         int64_t QuotaSpaceAvailable = 0;
         if (dq.dqb_bhardlimit > dq.dqb_curspace)
-            QuotaSpaceAvailable = int64_t(fs_buf.f_bsize * (dq.dqb_bhardlimit - dq.dqb_curspace));
+            QuotaSpaceAvailable = int64_t(fs_buf.F_BSIZE * (dq.dqb_bhardlimit - dq.dqb_curspace));
         if(QuotaSpaceAvailable < *aDiskSpaceAvailable) {
             *aDiskSpaceAvailable = QuotaSpaceAvailable;
         }
@@ -1527,7 +1520,7 @@ nsLocalFile::Equals(nsIFile *inFile, bool *_retval)
     NS_ENSURE_ARG_POINTER(_retval);
     *_retval = false;
 
-    nsCAutoString inPath;
+    nsAutoCString inPath;
     nsresult rv = inFile->GetNativePath(inPath);
     if (NS_FAILED(rv))
         return rv;
@@ -1545,7 +1538,7 @@ nsLocalFile::Contains(nsIFile *inFile, bool recur, bool *_retval)
     NS_ENSURE_ARG(inFile);
     NS_ENSURE_ARG_POINTER(_retval);
 
-    nsCAutoString inPath;
+    nsAutoCString inPath;
     nsresult rv;
 
     if (NS_FAILED(rv = inFile->GetNativePath(inPath)))
@@ -1782,7 +1775,7 @@ nsLocalFile::Reveal()
             return gnomevfs->ShowURIForInput(mPath);
     } else {
         nsCOMPtr<nsIFile> parentDir;
-        nsCAutoString dirPath;
+        nsAutoCString dirPath;
         if (NS_FAILED(GetParent(getter_AddRefs(parentDir))))
             return NS_ERROR_FAILURE;
         if (NS_FAILED(parentDir->GetNativePath(dirPath)))
@@ -1853,7 +1846,7 @@ nsLocalFile::Launch()
 #elif defined(MOZ_WIDGET_ANDROID)
     // Try to get a mimetype, if this fails just use the file uri alone
     nsresult rv;
-    nsCAutoString type;
+    nsAutoCString type;
     nsCOMPtr<nsIMIMEService> mimeService(do_GetService("@mozilla.org/mime;1", &rv));
     if (NS_SUCCEEDED(rv))
         rv = mimeService->GetTypeFromFile(this, type);
@@ -1902,7 +1895,7 @@ NS_NewNativeLocalFile(const nsACString &path, bool followSymlinks, nsIFile **res
 
 #define SET_UCS(func, ucsArg) \
     { \
-        nsCAutoString buf; \
+        nsAutoCString buf; \
         nsresult rv = NS_CopyUnicodeToNative(ucsArg, buf); \
         if (NS_FAILED(rv)) \
             return rv; \
@@ -1911,7 +1904,7 @@ NS_NewNativeLocalFile(const nsACString &path, bool followSymlinks, nsIFile **res
 
 #define GET_UCS(func, ucsArg) \
     { \
-        nsCAutoString buf; \
+        nsAutoCString buf; \
         nsresult rv = (func)(buf); \
         if (NS_FAILED(rv)) return rv; \
         return NS_CopyNativeToUnicode(buf, ucsArg); \
@@ -1919,7 +1912,7 @@ NS_NewNativeLocalFile(const nsACString &path, bool followSymlinks, nsIFile **res
 
 #define SET_UCS_2ARGS_2(func, opaqueArg, ucsArg) \
     { \
-        nsCAutoString buf; \
+        nsAutoCString buf; \
         nsresult rv = NS_CopyUnicodeToNative(ucsArg, buf); \
         if (NS_FAILED(rv)) \
             return rv; \
@@ -2002,7 +1995,7 @@ nsLocalFile::GetHashCode(uint32_t *aResult)
 nsresult 
 NS_NewLocalFile(const nsAString &path, bool followLinks, nsIFile* *result)
 {
-    nsCAutoString buf;
+    nsAutoCString buf;
     nsresult rv = NS_CopyUnicodeToNative(path, buf);
     if (NS_FAILED(rv))
         return rv;
@@ -2416,7 +2409,7 @@ nsLocalFile::GetBundleContentsLastModifiedTime(int64_t *aLastModTime)
     return GetLastModifiedTime(aLastModTime);
   }
 
-  nsCAutoString infoPlistPath(mPath);
+  nsAutoCString infoPlistPath(mPath);
   infoPlistPath.AppendLiteral("/Contents/Info.plist");
   PRFileInfo64 info;
   if (PR_GetFileInfo64(infoPlistPath.get(), &info) != PR_SUCCESS) {
@@ -2436,7 +2429,7 @@ NS_IMETHODIMP nsLocalFile::InitWithFile(nsIFile *aFile)
 {
   NS_ENSURE_ARG(aFile);
 
-  nsCAutoString nativePath;
+  nsAutoCString nativePath;
   nsresult rv = aFile->GetNativePath(nativePath);
   if (NS_FAILED(rv))
     return rv;

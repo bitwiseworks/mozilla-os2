@@ -14,20 +14,20 @@ function test() {
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
 
     testRecurse();
   });
 }
 
 function testRecurse() {
-  gDebuggee.gRecurseLimit = (gDebugger.DebuggerController.StackFrames.pageSize * 2) + 1;
+  gDebuggee.gRecurseLimit = (gDebugger.gCallStackPageSize * 2) + 1;
 
   gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
     Services.tm.currentThread.dispatch({ run: function() {
 
-      let frames = gDebugger.DebuggerView.StackFrames._frames;
-      let pageSize = gDebugger.DebuggerController.StackFrames.pageSize;
+      let frames = gDebugger.DebuggerView.StackFrames.widget._list;
+      let pageSize = gDebugger.gCallStackPageSize;
       let recurseLimit = gDebuggee.gRecurseLimit;
       let childNodes = frames.childNodes;
 
@@ -39,7 +39,6 @@ function testRecurse() {
 
 
       gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
-
         is(frames.querySelectorAll(".dbg-stackframe").length, pageSize * 2,
           "Should now have twice the max limit of frames.");
 
@@ -48,14 +47,15 @@ function testRecurse() {
             "Should have reached the recurse limit.");
 
           gDebugger.DebuggerController.activeThread.resume(function() {
+            window.clearInterval(scrollingInterval);
             closeDebuggerAndFinish();
           });
         });
-
-        frames.scrollTop = frames.scrollHeight;
       });
 
-      frames.scrollTop = frames.scrollHeight;
+      let scrollingInterval = window.setInterval(function() {
+        frames.scrollByIndex(-1);
+      }, 100);
     }}, 0);
   });
 

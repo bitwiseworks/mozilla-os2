@@ -1,17 +1,19 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef RegExp_h___
-#define RegExp_h___
+#ifndef builtin_RegExp_h
+#define builtin_RegExp_h
 
 #include "jsprvtd.h"
 
+#include "vm/MatchPairs.h"
+#include "vm/RegExpObject.h"
+
 JSObject *
-js_InitRegExpClass(JSContext *cx, JSObject *obj);
+js_InitRegExpClass(JSContext *cx, js::HandleObject obj);
 
 /*
  * The following builtin natives are extern'd for pointer comparison in
@@ -20,27 +22,40 @@ js_InitRegExpClass(JSContext *cx, JSObject *obj);
 
 namespace js {
 
+RegExpRunStatus
+ExecuteRegExp(JSContext *cx, HandleObject regexp, HandleString string,
+              MatchConduit &matches);
+
 /*
- * |res| may be null if the |RegExpStatics| are not to be updated.
- * |input| may be null if there is no |JSString| corresponding to
+ * Legacy behavior of ExecuteRegExp(), which is baked into the JSAPI.
+ *
+ * |res| may be NULL if the RegExpStatics are not to be updated.
+ * |input| may be NULL if there is no JSString corresponding to
  * |chars| and |length|.
  */
 bool
-ExecuteRegExp(JSContext *cx, RegExpStatics *res, RegExpObject &reobj,
-              JSLinearString *input, const jschar *chars, size_t length,
-              size_t *lastIndex, RegExpExecType type, Value *rval);
+ExecuteRegExpLegacy(JSContext *cx, RegExpStatics *res, RegExpObject &reobj,
+                    Handle<JSLinearString*> input, const jschar *chars, size_t length,
+                    size_t *lastIndex, bool test, MutableHandleValue rval);
+
+/* Translation from MatchPairs to a JS array in regexp_exec()'s output format. */
+bool
+CreateRegExpMatchResult(JSContext *cx, HandleString string, MatchPairs &matches,
+                        MutableHandleValue rval);
 
 bool
-ExecuteRegExp(JSContext *cx, RegExpStatics *res, RegExpShared &shared,
-              JSLinearString *input, const jschar *chars, size_t length,
-              size_t *lastIndex, RegExpExecType type, Value *rval);
+CreateRegExpMatchResult(JSContext *cx, HandleString input, const jschar *chars, size_t length,
+                        MatchPairs &matches, MutableHandleValue rval);
 
 extern JSBool
 regexp_exec(JSContext *cx, unsigned argc, Value *vp);
+
+bool
+regexp_test_raw(JSContext *cx, HandleObject regexp, HandleString input, JSBool *result);
 
 extern JSBool
 regexp_test(JSContext *cx, unsigned argc, Value *vp);
 
 } /* namespace js */
 
-#endif
+#endif /* builtin_RegExp_h */

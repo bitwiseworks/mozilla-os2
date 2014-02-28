@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<resources>
+
+    <style name="AboutHome.Thumbnail">
+      <item name="android:layout_width">fill_parent</item>
+      <item name="android:layout_height">fill_parent</item>
+      <item name="android:paddingTop">12dip</item>
+      <item name="android:paddingBottom">12dip</item>
+      <item name="android:paddingLeft">12dip</item>
+      <item name="android:paddingRight">12dip</item>
+    </style>
+
+    <style name="AboutHome.Thumbnail.Grid">
+      <item name="android:layout_width">fill_parent</item>
+      <item name="android:layout_height">wrap_content</item>
+      <!-- Use padding instead of grid spacing to split up items so that
+           tap highlight will extend outside the thumbnail -->
+      <item name="android:verticalSpacing">0dip</item>
+      <item name="android:horizontalSpacing">0dip</item>
+      <item name="android:isScrollContainer">false</item>
+      <item name="android:gravity">center</item>
+      <item name="android:listSelector">@drawable/action_bar_button</item>
+      <item name="android:paddingTop">0dip</item>
+      <item name="android:paddingBottom">0dip</item>
+      <!-- Increase the padding on left and right on large screen sizes -->
+      <item name="android:paddingLeft">60dip</item>
+      <item name="android:paddingRight">60dip</item>
+    </style>
+
+    <style name="AddressBar.ImageButton.Forward">
+        <item name="android:contentDescription">@string/forward</item>
+        <item name="android:layout_width">45dip</item>
+        <item name="android:layout_height">38dip</item>
+        <item name="android:paddingLeft">10dp</item>
+        <item name="android:paddingTop">7dp</item>
+        <item name="android:paddingBottom">7dp</item>
+        <item name="android:layout_gravity">center_vertical</item>
+        <item name="android:layout_centerVertical">true</item>
+        <item name="android:src">@drawable/ic_menu_forward</item>
+        <item name="android:background">@drawable/address_bar_nav_button</item>
+        <!-- Start with the button hidden -->
+        <item name="android:alpha">0</item>
+        <item name="android:layout_marginLeft">@dimen/forward_default_offset</item>
+    </style>
+
+   <style name="AddressBar.Button.Container">
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <!-- Start with forward hidden -->
+        <item name="android:orientation">horizontal</item>
+    </style>
+
+    <style name="TabsList" parent="TabsListBase">
+         <item name="android:orientation">horizontal</item>
+    </style>
+
+    <style name="TabsItem">
+         <item name="android:nextFocusDown">@+id/close</item>
+    </style>
+
+    <style name="TabsItemClose">
+         <item name="android:nextFocusUp">@+id/info</item>
+    </style>
+
+    <style name="Toast">
+        <item name="android:layout_width">300dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_centerHorizontal">true</item>
+
+        <!-- Copied from root Toast style. Margin-left/right were removed since they
+             large tablets are never going to be 300dp wide. -->
+        <item name="android:layout_alignParentBottom">true</item>
+        <item name="android:layout_marginBottom">64dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:background">@drawable/toast</item>
+        <item name="android:clickable">true</item>
+        <item name="android:showDividers">middle</item>
+        <item name="android:dividerPadding">16dp</item>
+
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingBottom">0dp</item>
+        <item name="android:paddingLeft">0dp</item>
+        <item name="android:paddingRight">0dp</item>
+    </style>
+
+</resources>

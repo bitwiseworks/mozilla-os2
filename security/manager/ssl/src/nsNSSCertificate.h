@@ -14,13 +14,15 @@
 #include "nsIASN1Object.h"
 #include "nsISMimeCert.h"
 #include "nsIIdentityInfo.h"
+#include "nsCOMPtr.h"
 #include "nsNSSShutDown.h"
 #include "nsISimpleEnumerator.h"
 #include "nsISerializable.h"
 #include "nsIClassInfo.h"
+#include "ScopedNSSTypes.h"
+#include "certt.h"
 
-#include "nsNSSCertHeader.h"
-
+class nsAutoString;
 class nsINSSComponent;
 class nsIASN1Sequence;
 
@@ -42,12 +44,12 @@ public:
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
 
-  nsNSSCertificate(CERTCertificate *cert);
+  nsNSSCertificate(CERTCertificate *cert,SECOidTag *evOidPolicy = nullptr);
   nsNSSCertificate();
   /* from a request? */
   virtual ~nsNSSCertificate();
   nsresult FormatUIStrings(const nsAutoString &nickname, nsAutoString &nickWithSerial, nsAutoString &details);
-  static nsNSSCertificate* Create(CERTCertificate *cert = nullptr);
+  static nsNSSCertificate* Create(CERTCertificate *cert = nullptr, SECOidTag *evOidPolicy = nullptr);
   static nsNSSCertificate* ConstructFromDER(char *certDER, int derLen);
 
   // It is the responsibility of the caller of this method to free the returned
@@ -55,7 +57,7 @@ public:
   static char* defaultServerNickname(CERTCertificate* cert);
 
 private:
-  CERTCertificate *mCert;
+  mozilla::ScopedCERTCertificate mCert;
   bool             mPermDelete;
   uint32_t         mCertType;
   nsCOMPtr<nsIASN1Object> mASN1Structure;
@@ -82,11 +84,15 @@ public:
   NS_DECL_NSIX509CERTLIST
 
   nsNSSCertList(CERTCertList *certList = nullptr, bool adopt = false);
-  virtual ~nsNSSCertList();
 
   static CERTCertList *DupCertList(CERTCertList *aCertList);
 private:
-  CERTCertList *mCertList;
+   virtual ~nsNSSCertList() { }
+
+   mozilla::ScopedCERTCertList mCertList;
+
+   nsNSSCertList(const nsNSSCertList &) MOZ_DELETE;
+   void operator=(const nsNSSCertList &) MOZ_DELETE;
 };
 
 class nsNSSCertListEnumerator: public nsISimpleEnumerator
@@ -96,9 +102,13 @@ public:
    NS_DECL_NSISIMPLEENUMERATOR
 
    nsNSSCertListEnumerator(CERTCertList *certList);
-   virtual ~nsNSSCertListEnumerator();
 private:
-   CERTCertList *mCertList;
+   virtual ~nsNSSCertListEnumerator() { }
+
+   mozilla::ScopedCERTCertList mCertList;
+
+   nsNSSCertListEnumerator(const nsNSSCertListEnumerator &) MOZ_DELETE;
+   void operator=(const nsNSSCertListEnumerator &) MOZ_DELETE;
 };
 
 

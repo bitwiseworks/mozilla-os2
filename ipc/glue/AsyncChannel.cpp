@@ -210,6 +210,25 @@ AsyncChannel::ThreadLink::ThreadLink(AsyncChannel *aChan,
 
 AsyncChannel::ThreadLink::~ThreadLink()
 {
+    MonitorAutoLock lock(*mChan->mMonitor);
+    // Bug 848949: We need to prevent the other side
+    // from sending us any more messages to avoid Use-After-Free.
+    // The setup here is as shown:
+    //
+    //          (Us)         (Them)
+    //       AsyncChannel  AsyncChannel
+    //         |  ^     \ /     ^ |
+    //         |  |      X      | |
+    //         v  |     / \     | v
+    //        ThreadLink   ThreadLink
+    //
+    // We want to null out the diagonal link from their ThreadLink
+    // to our AsyncChannel.  Note that we must hold the monitor so
+    // that we do this atomically with respect to them trying to send
+    // us a message.
+    if (mTargetChan) {
+        static_cast<ThreadLink*>(mTargetChan->mLink)->mTargetChan = 0;
+    }
     mTargetChan = 0;
 }
 
@@ -229,7 +248,8 @@ AsyncChannel::ThreadLink::SendMessage(Message *msg)
     mChan->AssertWorkerThread();
     mChan->mMonitor->AssertCurrentThreadOwns();
 
-    mTargetChan->OnMessageReceivedFromLink(*msg);
+    if (mTargetChan)
+        mTargetChan->OnMessageReceivedFromLink(*msg);
     delete msg;
 }
 
@@ -246,16 +266,18 @@ AsyncChannel::ThreadLink::SendClose()
     // The I/O thread would then invoke OnChannelErrorFromLink().
     // As usual, we skip that process and just invoke the
     // OnChannelErrorFromLink() method directly.
-    mTargetChan->OnChannelErrorFromLink();
+    if (mTargetChan)
+        mTargetChan->OnChannelErrorFromLink();
 }
 
 AsyncChannel::AsyncChannel(AsyncListener* aListener)
-  : mListener(aListener),
+  : mListener(aListener->asWeakPtr()),
     mChannelState(ChannelClosed),
     mWorkerLoop(),
     mChild(false),
     mChannelErrorTask(NULL),
-    mLink(NULL)
+    mLink(NULL),
+    mWorkerLoopID(-1)
 {
     MOZ_COUNT_CTOR(AsyncChannel);
 }
@@ -275,6 +297,7 @@ AsyncChannel::Open(Transport* aTransport,
     NS_PRECONDITION(!mLink, "Open() called > once");
     mMonitor = new RefCountedMonitor();
     mWorkerLoop = MessageLoop::current();
+    mWorkerLoopID = mWorkerLoop->id();
     mLink = link = new ProcessLink(this);
     link->Open(aTransport, aIOLoop, aSide); // n.b.: sets mChild
     return true;
@@ -332,6 +355,7 @@ void
 AsyncChannel::CommonThreadOpenInit(AsyncChannel *aTargetChan, Side aSide)
 {
     mWorkerLoop = MessageLoop::current();
+    mWorkerLoopID = mWorkerLoop->id();
     mLink = new ThreadLink(this, aTargetChan);
     mChild = (aSide == Child); 
 }
@@ -362,12 +386,7 @@ AsyncChannel::Close()
     AssertWorkerThread();
 
     {
-        // n.b.: We increase the ref count of monitor temporarily
-        //       for the duration of this block.  Otherwise, the
-        //       function NotifyMaybeChannelError() will call
-        //       ::Clear() which can free the monitor.
-        nsRefPtr<RefCountedMonitor> monitor(mMonitor);
-        MonitorAutoLock lock(*monitor);
+        MonitorAutoLock lock(*mMonitor);
 
         if (ChannelError == mChannelState ||
             ChannelTimeout == mChannelState) {
@@ -377,7 +396,7 @@ AsyncChannel::Close()
             // also be deleted and the listener will never be notified
             // of the channel error.
             if (mListener) {
-                MonitorAutoUnlock unlock(*monitor);
+                MonitorAutoUnlock unlock(*mMonitor);
                 NotifyMaybeChannelError();
             }
             return;
@@ -474,7 +493,7 @@ AsyncChannel::OnDispatchMessage(const Message& msg)
 }
 
 bool
-AsyncChannel::OnSpecialMessage(uint16 id, const Message& msg)
+AsyncChannel::OnSpecialMessage(uint16_t id, const Message& msg)
 {
     return false;
 }
@@ -554,12 +573,20 @@ AsyncChannel::NotifyMaybeChannelError()
 void
 AsyncChannel::Clear()
 {
-    mListener = 0;
+    // Don't clear mWorkerLoopID; we use it in AssertLinkThread() and
+    // AssertWorkerThread().
+    //
+    // Also don't clear mListener.  If we clear it, then sending a message
+    // through this channel after it's Clear()'ed can cause this process to
+    // crash.
+    //
+    // In practice, mListener owns the channel, so the channel gets deleted
+    // before mListener.  But just to be safe, mListener is a weak pointer.
+
     mWorkerLoop = 0;
 
     delete mLink;
     mLink = 0;
-    mMonitor = 0;
 
     if (mChannelErrorTask) {
         mChannelErrorTask->Cancel();
@@ -570,10 +597,8 @@ AsyncChannel::Clear()
 static void
 PrintErrorMessage(bool isChild, const char* channelName, const char* msg)
 {
-#ifdef DEBUG
-    fprintf(stderr, "\n###!!! [%s][%s] Error: %s\n\n",
-            isChild ? "Child" : "Parent", channelName, msg);
-#endif
+    printf_stderr("\n###!!! [%s][%s] Error: %s\n\n",
+                  isChild ? "Child" : "Parent", channelName, msg);
 }
 
 bool
@@ -582,7 +607,7 @@ AsyncChannel::MaybeHandleError(Result code, const char* channelName)
     if (MsgProcessed == code)
         return true;
 
-    const char* errorMsg;
+    const char* errorMsg = nullptr;
     switch (code) {
     case MsgNotKnown:
         errorMsg = "Unknown message: not processed";
@@ -618,7 +643,7 @@ AsyncChannel::MaybeHandleError(Result code, const char* channelName)
 void
 AsyncChannel::ReportConnectionError(const char* channelName) const
 {
-    const char* errorMsg;
+    const char* errorMsg = nullptr;
     switch (mChannelState) {
     case ChannelClosed:
         errorMsg = "Closed channel: cannot send/recv";
@@ -646,7 +671,7 @@ AsyncChannel::ReportConnectionError(const char* channelName) const
 }
 
 void
-AsyncChannel::DispatchOnChannelConnected(int32 peer_pid)
+AsyncChannel::DispatchOnChannelConnected(int32_t peer_pid)
 {
     AssertWorkerThread();
     if (mListener)
@@ -722,7 +747,7 @@ AsyncChannel::ProcessLink::OnTakeConnectedChannel()
 }
 
 void
-AsyncChannel::ProcessLink::OnChannelConnected(int32 peer_pid)
+AsyncChannel::ProcessLink::OnChannelConnected(int32_t peer_pid)
 {
     AssertIOThread();
 

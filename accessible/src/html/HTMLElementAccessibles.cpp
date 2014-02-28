@@ -41,11 +41,11 @@ HTMLBRAccessible::NativeState()
   return states::READONLY;
 }
 
-nsresult
-HTMLBRAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLBRAccessible::NativeName(nsString& aName)
 {
   aName = static_cast<PRUnichar>('\n');    // Newline char
-  return NS_OK;
+  return eNameOK;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -54,10 +54,11 @@ HTMLBRAccessible::GetNameInternal(nsAString& aName)
 
 NS_IMPL_ISUPPORTS_INHERITED0(HTMLLabelAccessible, HyperTextAccessible)
 
-nsresult
-HTMLLabelAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLLabelAccessible::NativeName(nsString& aName)
 {
-  return nsTextEquivUtils::GetNameFromSubtree(this, aName);
+  nsTextEquivUtils::GetNameFromSubtree(this, aName);
+  return aName.IsEmpty() ? eNameOK : eNameFromSubtree;
 }
 
 role
@@ -88,15 +89,14 @@ HTMLOutputAccessible::NativeRole()
   return roles::SECTION;
 }
 
-nsresult
-HTMLOutputAccessible::GetAttributesInternal(nsIPersistentProperties* aAttributes)
+already_AddRefed<nsIPersistentProperties>
+HTMLOutputAccessible::NativeAttributes()
 {
-  nsresult rv = AccessibleWrap::GetAttributesInternal(aAttributes);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::live,
+  nsCOMPtr<nsIPersistentProperties> attributes =
+    AccessibleWrap::NativeAttributes();
+  nsAccUtils::SetAccAttr(attributes, nsGkAtoms::live,
                          NS_LITERAL_STRING("polite"));
 
-  return NS_OK;
+  return attributes.forget();
 }
 

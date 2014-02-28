@@ -8,13 +8,14 @@
 
 #include "txExprResult.h"
 #include "nsIDOMXPathResult.h"
-#include "nsIDocument.h"
 #include "nsStubMutationObserver.h"
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "nsWeakPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
+
+class nsIDocument;
 
 // {662f2c9a-c7cd-4cab-9349-e733df5a838c}
 #define NS_IXPATHRESULT_IID \
@@ -62,9 +63,9 @@ public:
 
     // nsIXPathResult interface
     nsresult SetExprResult(txAExprResult *aExprResult, uint16_t aResultType,
-                           nsINode* aContextNode);
-    nsresult GetExprResult(txAExprResult **aExprResult);
-    nsresult Clone(nsIXPathResult **aResult);
+                           nsINode* aContextNode) MOZ_OVERRIDE;
+    nsresult GetExprResult(txAExprResult **aExprResult) MOZ_OVERRIDE;
+    nsresult Clone(nsIXPathResult **aResult) MOZ_OVERRIDE;
     void RemoveObserver();
 private:
     static bool isSnapshot(uint16_t aResultType)

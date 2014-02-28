@@ -9,24 +9,10 @@ topsrcdir       = @top_srcdir@
 srcdir          = @srcdir@
 VPATH           = @srcdir@
 
-MODULE          = embed_base
-XPIDL_MODULE	= embed_base
-
 include $(DEPTH)/config/autoconf.mk
 
 SDK_HEADERS         = \
                 nsEmbedCID.h \
-                $(NULL)
-
-SDK_XPIDLSRCS   = \
-                nsIWindowCreator.idl \
-                $(NULL)
-
-
-XPIDLSRCS	    = \
-                nsIWindowCreator2.idl \
-                nsIWindowProvider.idl \
-                nsIDialogCreator.idl \
                 $(NULL)
 
 include $(topsrcdir)/config/rules.mk

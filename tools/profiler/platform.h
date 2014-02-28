@@ -1,6 +1,33 @@
 // Copyright (c) 2006-2011 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+//  * Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in
+//    the documentation and/or other materials provided with the
+//    distribution.
+//  * Neither the name of Google, Inc. nor the names of its contributors
+//    may be used to endorse or promote products derived from this
+//    software without specific prior written permission.
+// 
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+// FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+// COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+// INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+// OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+// AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+// OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
+
+#ifndef TOOLS_PLATFORM_H_
+#define TOOLS_PLATFORM_H_
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -8,28 +35,52 @@
 #define __android_log_print(a, ...)
 #endif
 
+#ifdef XP_UNIX
+#include <pthread.h>
+#endif
+
 #include "mozilla/StandardInteger.h"
 #include "mozilla/Util.h"
 #include "mozilla/unused.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/Mutex.h"
+#include "PlatformMacros.h"
 #include "v8-support.h"
 #include <vector>
-#define ASSERT(a) MOZ_ASSERT(a)
-#ifdef ANDROID
-#if defined(__arm__) || defined(__thumb__)
-#define ENABLE_SPS_LEAF_DATA
-#define ENABLE_ARM_LR_SAVING
+
+#ifdef XP_WIN
+#include <windows.h>
 #endif
-#define LOG(text) __android_log_write(ANDROID_LOG_ERROR, "profiler", text)
-#define LOGF(format, ...) __android_log_print(ANDROID_LOG_ERROR, "profiler", format, __VA_ARGS__)
+
+#define ASSERT(a) MOZ_ASSERT(a)
+
+#ifdef ANDROID
+# if defined(__arm__) || defined(__thumb__)
+#  define ENABLE_SPS_LEAF_DATA
+#  define ENABLE_ARM_LR_SAVING
+# endif
+# define LOG(text) \
+    __android_log_write(ANDROID_LOG_ERROR, "Profiler", text)
+# define LOGF(format, ...) \
+    __android_log_print(ANDROID_LOG_ERROR, "Profiler", format, __VA_ARGS__)
+
 #else
-#define LOG(text) printf("Profiler: %s\n", text)
-#define LOGF(format, ...) printf("Profiler: " format "\n", __VA_ARGS__)
+  extern bool moz_profiler_verbose();
+# define LOG(text) \
+    do { if (moz_profiler_verbose()) fprintf(stderr, "Profiler: %s\n", text); \
+    } while (0)
+# define LOGF(format, ...) \
+    do { if (moz_profiler_verbose()) fprintf(stderr, "Profiler: " format \
+                                             "\n", __VA_ARGS__);        \
+    } while (0)
+
 #endif
 
 #if defined(XP_MACOSX) || defined(XP_WIN)
 #define ENABLE_SPS_LEAF_DATA
 #endif
+
+extern mozilla::TimeStamp sStartTime;
 
 typedef uint8_t* Address;
 
@@ -143,13 +194,16 @@ class Thread {
   // prctl().
   static const int kMaxThreadNameLength = 16;
 
-  class PlatformData;
-  PlatformData* data() { return data_; }
+#ifdef XP_WIN
+  HANDLE thread_;
+  unsigned thread_id_;
+#endif
+#if defined(XP_MACOSX)
+  pthread_t thread_;
+#endif
 
  private:
   void set_name(const char *name);
-
-  PlatformData* data_;
 
   char name_[kMaxThreadNameLength];
   int stack_size_;
@@ -157,6 +211,32 @@ class Thread {
   DISALLOW_COPY_AND_ASSIGN(Thread);
 };
 
+// ----------------------------------------------------------------------------
+// HAVE_NATIVE_UNWIND
+//
+// Pseudo backtraces are available on all platforms.  Native
+// backtraces are available only on selected platforms.  Breakpad is
+// the only supported native unwinder.  HAVE_NATIVE_UNWIND is set at
+// build time to indicate whether native unwinding is possible on this
+// platform.  The actual unwind mode currently in use is stored in
+// sUnwindMode.
+
+#undef HAVE_NATIVE_UNWIND
+#if defined(MOZ_PROFILING) \
+    && (defined(SPS_PLAT_amd64_linux) || defined(SPS_PLAT_arm_android) \
+        || defined(SPS_PLAT_x86_linux) \
+        || defined(SPS_OS_windows) \
+        || defined(SPS_OS_darwin))
+# define HAVE_NATIVE_UNWIND
+#endif
+
+/* Some values extracted at startup from environment variables, that
+   control the behaviour of the breakpad unwinder. */
+void read_profiler_env_vars();
+typedef  enum { UnwINVALID, UnwNATIVE, UnwPSEUDO, UnwCOMBINED }  UnwMode;
+extern UnwMode sUnwindMode;       /* what mode? */
+extern int     sUnwindInterval;   /* in milliseconds */
+extern int     sUnwindStackScan;  /* max # of dubious frames allowed */
 
 
 // ----------------------------------------------------------------------------
@@ -165,6 +245,9 @@ class Thread {
 // A sampler periodically samples the state of the VM and optionally
 // (if used for profiling) the program counter and stack pointer for
 // the thread that created it.
+
+class PseudoStack;
+class ThreadProfile;
 
 // TickSample captures the information collected for each sample.
 class TickSample {
@@ -187,23 +270,24 @@ class TickSample {
   Address lr;  // ARM link register
 #endif
   Address function;  // The last called JS function.
-  void*   context;   // The context from the signal handler, if available
+  void*   context;   // The context from the signal handler, if available. On
+                     // Win32 this may contain the windows thread context.
+  ThreadProfile* threadProfile;
   static const int kMaxFramesCount = 64;
-  Address stack[kMaxFramesCount];  // Call stack.
   int frames_count;  // Number of captured frames.
   mozilla::TimeStamp timestamp;
 };
 
+class ThreadInfo;
+class PlatformData;
+class TableTicker;
 class Sampler {
  public:
   // Initialize sampler.
-  explicit Sampler(int interval, bool profiling);
+  explicit Sampler(int interval, bool profiling, int entrySize);
   virtual ~Sampler();
 
   int interval() const { return interval_; }
-
-  // Performs stack sampling.
-  virtual void SampleStack(TickSample* sample) = 0;
 
   // This method is called for each sampling period with the current
   // program counter.
@@ -228,9 +312,14 @@ class Sampler {
   bool IsPaused() const { return paused_; }
   void SetPaused(bool value) { NoBarrier_Store(&paused_, value); }
 
-  class PlatformData;
+  virtual bool ProfileThreads() const = 0;
 
-  PlatformData* platform_data() { return data_; }
+  int EntrySize() { return entrySize_; }
+
+  // We can't new/delete the type safely without defining it
+  // (-Wdelete-incomplete). Use these Alloc/Free functions instead.
+  static PlatformData* AllocPlatformData(int aThreadId);
+  static void FreePlatformData(PlatformData*);
 
   // If we move the backtracing code into the platform files we won't
   // need to have these hacks
@@ -241,6 +330,28 @@ class Sampler {
 #ifdef XP_MACOSX
   static pthread_t GetProfiledThread(PlatformData*);
 #endif
+
+  static std::vector<ThreadInfo*> GetRegisteredThreads() {
+    return *sRegisteredThreads;
+  }
+
+  static bool RegisterCurrentThread(const char* aName,
+                                    PseudoStack* aPseudoStack,
+                                    bool aIsMainThread, void* stackTop);
+  static void UnregisterCurrentThread();
+
+  static void Startup();
+  // Should only be called on shutdown
+  static void Shutdown();
+
+  static TableTicker* GetActiveSampler() { return sActiveSampler; }
+  static void SetActiveSampler(TableTicker* sampler) { sActiveSampler = sampler; }
+
+  static mozilla::Mutex* sRegisteredThreadsMutex;
+ protected:
+  static std::vector<ThreadInfo*>* sRegisteredThreads;
+  static TableTicker* sActiveSampler;
+
  private:
   void SetActive(bool value) { NoBarrier_Store(&active_, value); }
 
@@ -248,6 +359,47 @@ class Sampler {
   const bool profiling_;
   Atomic32 paused_;
   Atomic32 active_;
-  PlatformData* data_;  // Platform specific data.
+  const int entrySize_;
+
+  // Refactor me!
+#if defined(SPS_OS_linux) || defined(SPS_OS_android)
+  bool signal_handler_installed_;
+  struct sigaction old_sigprof_signal_handler_;
+  struct sigaction old_sigsave_signal_handler_;
+  bool signal_sender_launched_;
+  pthread_t signal_sender_thread_;
+#endif
 };
 
+class ThreadInfo {
+ public:
+  ThreadInfo(const char* aName, int aThreadId, bool aIsMainThread, PseudoStack* aPseudoStack)
+    : mName(strdup(aName))
+    , mThreadId(aThreadId)
+    , mIsMainThread(aIsMainThread)
+    , mPseudoStack(aPseudoStack)
+    , mPlatformData(Sampler::AllocPlatformData(aThreadId))
+    , mProfile(NULL) {}
+
+  virtual ~ThreadInfo();
+
+  const char* Name() const { return mName; }
+  int ThreadId() const { return mThreadId; }
+
+  bool IsMainThread() const { return mIsMainThread; }
+  PseudoStack* Stack() const { return mPseudoStack; }
+  
+  void SetProfile(ThreadProfile* aProfile) { mProfile = aProfile; }
+  ThreadProfile* Profile() const { return mProfile; }
+
+  PlatformData* GetPlatformData() const { return mPlatformData; }
+ private:
+  char* mName;
+  int mThreadId;
+  const bool mIsMainThread;
+  PseudoStack* mPseudoStack;
+  PlatformData* mPlatformData;
+  ThreadProfile* mProfile;
+};
+
+#endif /* ndef TOOLS_PLATFORM_H_ */

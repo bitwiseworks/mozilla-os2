@@ -10,6 +10,8 @@
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsError.h"
+#include "nsDisplayList.h"
+#include "FrameLayerBuilder.h"
 
 namespace mozilla {
 namespace css {
@@ -41,10 +43,27 @@ ImageLoader::SetAnimationModeEnumerator(nsISupports* aKey, FrameSet* aValue,
   return PL_DHASH_NEXT;
 }
 
+static PLDHashOperator
+ClearImageHashSet(nsPtrHashKey<ImageLoader::Image>* aKey, void* aClosure)
+{
+  nsIDocument* doc = static_cast<nsIDocument*>(aClosure);
+  ImageLoader::Image* image = aKey->GetKey();
+
+  imgIRequest* request = image->mRequests.GetWeak(doc);
+  if (request) {
+    request->CancelAndForgetObserver(NS_BINDING_ABORTED);
+  }
+
+  image->mRequests.Remove(doc);
+
+  return PL_DHASH_REMOVE;
+}
+
 void
 ImageLoader::DropDocumentReference()
 {
-  ClearAll();
+  ClearFrames();
+  mImages.EnumerateEntries(&ClearImageHashSet, mDocument);
   mDocument = nullptr;
 }
 
@@ -56,8 +75,8 @@ ImageLoader::AssociateRequestToFrame(imgIRequest* aRequest,
              mFrameToRequestMap.IsInitialized() &&
              mImages.IsInitialized());
 
-  nsCOMPtr<imgIDecoderObserver> observer;
-  aRequest->GetDecoderObserver(getter_AddRefs(observer));
+  nsCOMPtr<imgINotificationObserver> observer;
+  aRequest->GetNotificationObserver(getter_AddRefs(observer));
   if (!observer) {
     // The request has already been canceled, so ignore it.  This is ok because
     // we're not going to get any more notifications from a canceled request.
@@ -98,11 +117,12 @@ ImageLoader::AssociateRequestToFrame(imgIRequest* aRequest,
   }
 
   // Add these to the sets, but only if they're not already there.
-  uint32_t i;
-  if (!frameSet->GreatestIndexLtEq(aFrame, i)) {
+  uint32_t i = frameSet->IndexOfFirstElementGt(aFrame);
+  if (i == 0 || aFrame != frameSet->ElementAt(i-1)) {
     frameSet->InsertElementAt(i, aFrame);
   }
-  if (!requestSet->GreatestIndexLtEq(aRequest, i)) {
+  i = requestSet->IndexOfFirstElementGt(aRequest);
+  if (i == 0 || aRequest != requestSet->ElementAt(i-1)) {
     requestSet->InsertElementAt(i, aRequest);
   }
 }
@@ -119,13 +139,13 @@ ImageLoader::MaybeRegisterCSSImage(ImageLoader::Image* aImage)
     return;
   }
 
-  imgIRequest* canonicalRequest = aImage->mRequests.GetWeak(nullptr);
+  imgRequestProxy* canonicalRequest = aImage->mRequests.GetWeak(nullptr);
   if (!canonicalRequest) {
     // The image was blocked or something.
     return;
   }
 
-  nsCOMPtr<imgIRequest> request;
+  nsRefPtr<imgRequestProxy> request;
 
   // Ignore errors here.  If cloning fails for some reason we'll put a null
   // entry in the hash and we won't keep trying to clone.
@@ -157,8 +177,8 @@ ImageLoader::DisassociateRequestFromFrame(imgIRequest* aRequest,
 
 #ifdef DEBUG
   {
-    nsCOMPtr<imgIDecoderObserver> observer;
-    aRequest->GetDecoderObserver(getter_AddRefs(observer));
+    nsCOMPtr<imgINotificationObserver> observer;
+    aRequest->GetNotificationObserver(getter_AddRefs(observer));
     MOZ_ASSERT(!observer || observer == this);
   }
 #endif
@@ -218,28 +238,11 @@ ImageLoader::SetAnimationMode(uint16_t aMode)
   mRequestToFrameMap.EnumerateRead(SetAnimationModeEnumerator, &aMode);
 }
 
-static PLDHashOperator
-ClearImageHashSet(nsPtrHashKey<ImageLoader::Image>* aKey, void* aClosure)
-{
-  nsIDocument* doc = static_cast<nsIDocument*>(aClosure);
-  ImageLoader::Image* image = aKey->GetKey();
-
-  imgIRequest* request = image->mRequests.GetWeak(doc);
-  if (request) {
-    request->CancelAndForgetObserver(NS_BINDING_ABORTED);
-  }
-
-  image->mRequests.Remove(doc);
-
-  return PL_DHASH_REMOVE;
-}
-
 void
-ImageLoader::ClearAll()
+ImageLoader::ClearFrames()
 {
   mRequestToFrameMap.Clear();
   mFrameToRequestMap.Clear();
-  mImages.EnumerateEntries(&ClearImageHashSet, mDocument);
 }
 
 void
@@ -259,7 +262,7 @@ ImageLoader::LoadImage(nsIURI* aURI, nsIPrincipal* aOriginPrincipal,
     return;
   }
 
-  nsCOMPtr<imgIRequest> request;
+  nsRefPtr<imgRequestProxy> request;
   nsContentUtils::LoadImage(aURI, mDocument, aOriginPrincipal, aReferrer,
                             nullptr, nsIRequest::LOAD_NORMAL,
                             getter_AddRefs(request));
@@ -268,7 +271,7 @@ ImageLoader::LoadImage(nsIURI* aURI, nsIPrincipal* aOriginPrincipal,
     return;
   }
 
-  nsCOMPtr<imgIRequest> clonedRequest;
+  nsRefPtr<imgRequestProxy> clonedRequest;
   mInClone = true;
   nsresult rv = request->Clone(this, getter_AddRefs(clonedRequest));
   mInClone = false;
@@ -314,6 +317,20 @@ ImageLoader::GetPresContext()
   return shell->GetPresContext();
 }
 
+void InvalidateImagesCallback(nsIFrame* aFrame, 
+                              FrameLayerBuilder::DisplayItemData* aItem)
+{
+  nsDisplayItem::Type type = nsDisplayItem::GetDisplayItemTypeFromKey(aItem->GetDisplayItemKey());
+  uint8_t flags = nsDisplayItem::GetDisplayItemFlagsForType(type);
+
+  if (flags & nsDisplayItem::TYPE_RENDERS_NO_IMAGES) {
+    return;
+  }
+
+  aItem->Invalidate();
+  aFrame->SchedulePaint();
+}
+
 void
 ImageLoader::DoRedraw(FrameSet* aFrameSet)
 {
@@ -324,25 +341,15 @@ ImageLoader::DoRedraw(FrameSet* aFrameSet)
   for (FrameSet::size_type i = 0; i < length; i++) {
     nsIFrame* frame = aFrameSet->ElementAt(i);
 
-    // NOTE: It is not sufficient to invalidate only the size of the image:
-    //       the image may be tiled! 
-    //       The best option is to call into the frame, however lacking this
-    //       we have to at least invalidate the frame's bounds, hence
-    //       as long as we have a frame we'll use its size.
-    //
-
-    // Invalidate the entire frame
-    // XXX We really only need to invalidate the client area of the frame...    
-
-    nsRect bounds(nsPoint(0, 0), frame->GetSize());
-
-    if (frame->GetType() == nsGkAtoms::canvasFrame) {
-      // The canvas's background covers the whole viewport.
-      bounds = frame->GetVisualOverflowRect();
-    }
-
-    if (frame->GetStyleVisibility()->IsVisible()) {
-      frame->Invalidate(bounds);
+    if (frame->StyleVisibility()->IsVisible()) {
+      if (frame->IsFrameOfType(nsIFrame::eTablePart)) {
+        // Tables don't necessarily build border/background display items
+        // for the individual table part frames, so IterateRetainedDataFor
+        // might not find the right display item.
+        frame->InvalidateFrame();
+      } else {
+        FrameLayerBuilder::IterateRetainedDataFor(frame, InvalidateImagesCallback);
+      }
     }
   }
 }
@@ -351,12 +358,35 @@ NS_IMPL_ADDREF(ImageLoader)
 NS_IMPL_RELEASE(ImageLoader)
 
 NS_INTERFACE_MAP_BEGIN(ImageLoader)
-  NS_INTERFACE_MAP_ENTRY(imgIDecoderObserver)
-  NS_INTERFACE_MAP_ENTRY(imgIContainerObserver)
+  NS_INTERFACE_MAP_ENTRY(imgINotificationObserver)
   NS_INTERFACE_MAP_ENTRY(imgIOnloadBlocker)
 NS_INTERFACE_MAP_END
 
 NS_IMETHODIMP
+ImageLoader::Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData)
+{
+  if (aType == imgINotificationObserver::SIZE_AVAILABLE) {
+    nsCOMPtr<imgIContainer> image;
+    aRequest->GetImage(getter_AddRefs(image));
+    return OnStartContainer(aRequest, image);
+  }
+
+  if (aType == imgINotificationObserver::IS_ANIMATED) {
+    return OnImageIsAnimated(aRequest);
+  }
+
+  if (aType == imgINotificationObserver::LOAD_COMPLETE) {
+    return OnStopFrame(aRequest);
+  }
+
+  if (aType == imgINotificationObserver::FRAME_UPDATE) {
+    return FrameChanged(aRequest);
+  }
+
+  return NS_OK;
+}
+
+nsresult
 ImageLoader::OnStartContainer(imgIRequest* aRequest, imgIContainer* aImage)
 { 
   nsPresContext* presContext = GetPresContext();
@@ -369,7 +399,7 @@ ImageLoader::OnStartContainer(imgIRequest* aRequest, imgIContainer* aImage)
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 ImageLoader::OnImageIsAnimated(imgIRequest* aRequest)
 {
   if (!mDocument) {
@@ -393,8 +423,8 @@ ImageLoader::OnImageIsAnimated(imgIRequest* aRequest)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-ImageLoader::OnStopFrame(imgIRequest *aRequest, uint32_t aFrame)
+nsresult
+ImageLoader::OnStopFrame(imgIRequest *aRequest)
 {
   if (!mDocument || mInClone) {
     return NS_OK;
@@ -412,10 +442,8 @@ ImageLoader::OnStopFrame(imgIRequest *aRequest, uint32_t aFrame)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-ImageLoader::FrameChanged(imgIRequest *aRequest,
-                          imgIContainer *aContainer,
-                          const nsIntRect *aDirtyRect)
+nsresult
+ImageLoader::FrameChanged(imgIRequest *aRequest)
 {
   if (!mDocument || mInClone) {
     return NS_OK;

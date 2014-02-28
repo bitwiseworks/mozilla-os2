@@ -24,7 +24,7 @@ interface nsIMIMEInfo;
  *       nsIDownloadManager::DOWNLOAD_DIRTY 
  *       nsIDownloadManager::DOWNLOAD_BLOCKED_POLICY 
  */
-[scriptable, uuid(c891111e-92a6-47b8-bc46-874ebb61ac9d)]
+[scriptable, uuid(b02be33b-d47c-4bd3-afd9-402a942426b0)]
 interface nsIDownload : nsITransfer {
     
     /**
@@ -88,9 +88,21 @@ interface nsIDownload : nsITransfer {
     readonly attribute nsIMIMEInfo MIMEInfo;
 
     /**
-     * The id of the download that is stored in the database.
+     * The id of the download that is stored in the database - not globally unique.
+     * For example, a private download and a public one might have identical ids.
+     * Can only be safely used for direct database manipulation in the database that
+     * contains this download. Use the guid property instead for safe, database-agnostic
+     * searching and manipulation.
+     *
+     * @deprecated
      */
     readonly attribute unsigned long id;
+
+    /**
+     * The guid of the download that is stored in the database.
+     * Has the form of twelve alphanumeric characters.
+     */
+    readonly attribute ACString guid;
 
     /**
      * The state of the download.
@@ -110,10 +122,54 @@ interface nsIDownload : nsITransfer {
      * server supports it.
      */
     readonly attribute boolean resumable;
+
+    /**
+     * Indicates if the download was initiated from a context marked as private,
+     * controlling whether it should be stored in a permanent manner or not.
+     */
+    readonly attribute boolean isPrivate;
+
+    /**
+     * Cancel this download if it's currently in progress.
+     */
+    void cancel();
+
+    /**
+     * Pause this download if it is in progress.
+     *
+     * @throws NS_ERROR_UNEXPECTED if it cannot be paused.
+     */
+    void pause();
+
+    /**
+     * Resume this download if it is paused.
+     *
+     * @throws NS_ERROR_UNEXPECTED if it cannot be resumed or is not paused.
+     */
+    void resume();
+
+    /**
+     * Instruct the download manager to remove this download. Whereas
+     * cancel simply cancels the transfer, but retains information about it,
+     * remove removes all knowledge of it.
+     *
+     * @see nsIDownloadManager.removeDownload for more detail
+     * @throws NS_ERROR_FAILURE if the download is active.
+     */
+    void remove();
+
+    /**
+     * Instruct the download manager to retry this failed download
+     * @throws NS_ERROR_NOT_AVAILABLE if the download is not known.
+     * @throws NS_ERROR_FAILURE if the download is not in the following states:
+     *         nsIDownloadManager::DOWNLOAD_CANCELED
+     *         nsIDownloadManager::DOWNLOAD_FAILED
+     */
+    void retry();
 };
 
 %{C++
-// {E3FA9D0A-1DD1-11B2-BDEF-8C720B597445}
+// {b02be33b-d47c-4bd3-afd9-402a942426b0}
 #define NS_DOWNLOAD_CID \
-    { 0xe3fa9d0a, 0x1dd1, 0x11b2, { 0xbd, 0xef, 0x8c, 0x72, 0x0b, 0x59, 0x74, 0x45 } }
+  { 0xb02be33b, 0xd47c, 0x4bd3, { 0xaf, 0xd9, 0x40, 0x2a, 0x94, 0x24, 0x26, 0xb0 } }
 %}

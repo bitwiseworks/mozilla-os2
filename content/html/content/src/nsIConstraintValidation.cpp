@@ -7,8 +7,8 @@
 
 #include "nsAString.h"
 #include "nsGenericHTMLElement.h"
-#include "nsHTMLFormElement.h"
-#include "nsDOMValidityState.h"
+#include "mozilla/dom/HTMLFormElement.h"
+#include "mozilla/dom/ValidityState.h"
 #include "nsIFormControl.h"
 #include "nsContentUtils.h"
 
@@ -16,7 +16,6 @@ const uint16_t nsIConstraintValidation::sContentSpecifiedMaxLengthMessage = 256;
 
 nsIConstraintValidation::nsIConstraintValidation()
   : mValidityBitField(0)
-  , mValidity(nullptr)
   // By default, all elements are subjects to constraint validation.
   , mBarredFromConstraintValidation(false)
 {
@@ -24,19 +23,24 @@ nsIConstraintValidation::nsIConstraintValidation()
 
 nsIConstraintValidation::~nsIConstraintValidation()
 {
-  if (mValidity) {
-    mValidity->Disconnect();
+}
+
+mozilla::dom::ValidityState*
+nsIConstraintValidation::Validity()
+{
+  if (!mValidity) {
+    mValidity = new mozilla::dom::ValidityState(this);
   }
+
+  return mValidity;
 }
 
 nsresult
 nsIConstraintValidation::GetValidity(nsIDOMValidityState** aValidity)
 {
-  if (!mValidity) {
-    mValidity = new nsDOMValidityState(this);
-  }
+  NS_ENSURE_ARG_POINTER(aValidity);
 
-  NS_ADDREF(*aValidity = mValidity);
+  NS_ADDREF(*aValidity = Validity());
 
   return NS_OK;
 }
@@ -89,22 +93,30 @@ nsIConstraintValidation::GetValidationMessage(nsAString& aValidationMessage)
   return NS_OK;
 }
 
-nsresult
-nsIConstraintValidation::CheckValidity(bool* aValidity)
+bool
+nsIConstraintValidation::CheckValidity()
 {
   if (!IsCandidateForConstraintValidation() || IsValid()) {
-    *aValidity = true;
-    return NS_OK;
+    return true;
   }
-
-  *aValidity = false;
 
   nsCOMPtr<nsIContent> content = do_QueryInterface(this);
   NS_ASSERTION(content, "This class should be inherited by HTML elements only!");
 
-  return nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(), content,
-                                              NS_LITERAL_STRING("invalid"),
-                                              false, true);
+  nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(), content,
+                                       NS_LITERAL_STRING("invalid"),
+                                       false, true);
+  return false;
+}
+
+nsresult
+nsIConstraintValidation::CheckValidity(bool* aValidity)
+{
+  NS_ENSURE_ARG_POINTER(aValidity);
+
+  *aValidity = CheckValidity();
+
+  return NS_OK;
 }
 
 void
@@ -124,8 +136,8 @@ nsIConstraintValidation::SetValidityState(ValidityStateType aState,
     nsCOMPtr<nsIFormControl> formCtrl = do_QueryInterface(this);
     NS_ASSERTION(formCtrl, "This interface should be used by form elements!");
 
-    nsHTMLFormElement* form =
-      static_cast<nsHTMLFormElement*>(formCtrl->GetFormElement());
+    mozilla::dom::HTMLFormElement* form =
+      static_cast<mozilla::dom::HTMLFormElement*>(formCtrl->GetFormElement());
     if (form) {
       form->UpdateValidity(IsValid());
     }
@@ -152,8 +164,8 @@ nsIConstraintValidation::SetBarredFromConstraintValidation(bool aBarred)
     nsCOMPtr<nsIFormControl> formCtrl = do_QueryInterface(this);
     NS_ASSERTION(formCtrl, "This interface should be used by form elements!");
 
-    nsHTMLFormElement* form =
-      static_cast<nsHTMLFormElement*>(formCtrl->GetFormElement());
+    mozilla::dom::HTMLFormElement* form =
+      static_cast<mozilla::dom::HTMLFormElement*>(formCtrl->GetFormElement());
     if (form) {
       // If the element is going to be barred from constraint validation,
       // we can inform the form that we are now valid.

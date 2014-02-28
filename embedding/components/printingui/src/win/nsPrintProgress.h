@@ -8,8 +8,8 @@
 
 #include "nsIPrintProgress.h"
 
+#include "nsCOMArray.h"
 #include "nsCOMPtr.h"
-#include "nsISupportsArray.h"
 #include "nsIDOMWindow.h"
 #include "nsIPrintStatusFeedback.h"
 #include "nsString.h"
@@ -34,9 +34,9 @@ private:
   bool                              m_processCanceled;
   nsString                          m_pendingStatus;
   int32_t                           m_pendingStateFlags;
-  int32_t                           m_pendingStateValue;
+  nsresult                          m_pendingStateValue;
   nsCOMPtr<nsIDOMWindow>            m_dialog;
-  nsCOMPtr<nsISupportsArray>        m_listenerList;
+  nsCOMArray<nsIWebProgressListener>        m_listenerList;
   nsCOMPtr<nsIObserver>             m_observer;
 };
 

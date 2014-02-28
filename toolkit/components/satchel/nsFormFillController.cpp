@@ -17,7 +17,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsIWebNavigation.h"
 #include "nsIContentViewer.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMKeyEvent.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
@@ -35,12 +34,16 @@
 #include "nsIDOMNSEditableElement.h"
 #include "mozilla/dom/Element.h"
 #include "nsContentUtils.h"
+#include "nsDOMEvent.h"
 
-NS_IMPL_ISUPPORTS5(nsFormFillController,
+using namespace mozilla::dom;
+
+NS_IMPL_ISUPPORTS6(nsFormFillController,
                    nsIFormFillController,
                    nsIAutoCompleteInput,
                    nsIAutoCompleteSearch,
                    nsIDOMEventListener,
+                   nsIFormAutoCompleteObserver,
                    nsIMutationObserver)
 
 nsFormFillController::nsFormFillController() :
@@ -57,8 +60,6 @@ nsFormFillController::nsFormFillController() :
   mSuppressOnInput(false)
 {
   mController = do_GetService("@mozilla.org/autocomplete/controller;1");
-  mDocShells = do_CreateInstance("@mozilla.org/supports-array;1");
-  mPopups = do_CreateInstance("@mozilla.org/supports-array;1");
   mPwmgrInputs.Init();
 }
 
@@ -86,12 +87,9 @@ nsFormFillController::~nsFormFillController()
   mPwmgrInputs.Enumerate(RemoveForDocumentEnumerator, &ed);
 
   // Remove ourselves as a focus listener from all cached docShells
-  uint32_t count;
-  mDocShells->Count(&count);
+  uint32_t count = mDocShells.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    nsCOMPtr<nsIDocShell> docShell;
-    mDocShells->GetElementAt(i, getter_AddRefs(docShell));
-    nsCOMPtr<nsIDOMWindow> domWindow = GetWindowForDocShell(docShell);
+    nsCOMPtr<nsIDOMWindow> domWindow = GetWindowForDocShell(mDocShells[i]);
     RemoveWindowListeners(domWindow);
   }
 }
@@ -204,8 +202,8 @@ nsFormFillController::AttachToBrowser(nsIDocShell *aDocShell, nsIAutoCompletePop
 {
   NS_ENSURE_TRUE(aDocShell && aPopup, NS_ERROR_ILLEGAL_VALUE);
 
-  mDocShells->AppendElement(aDocShell);
-  mPopups->AppendElement(aPopup);
+  mDocShells.AppendElement(aDocShell);
+  mPopups.AppendElement(aPopup);
 
   // Listen for focus events on the domWindow of the docShell
   nsCOMPtr<nsIDOMWindow> domWindow = GetWindowForDocShell(aDocShell);
@@ -221,13 +219,12 @@ nsFormFillController::DetachFromBrowser(nsIDocShell *aDocShell)
   NS_ENSURE_TRUE(index >= 0, NS_ERROR_FAILURE);
 
   // Stop listening for focus events on the domWindow of the docShell
-  nsCOMPtr<nsIDocShell> docShell;
-  mDocShells->GetElementAt(index, getter_AddRefs(docShell));
-  nsCOMPtr<nsIDOMWindow> domWindow = GetWindowForDocShell(docShell);
+  nsCOMPtr<nsIDOMWindow> domWindow =
+    GetWindowForDocShell(mDocShells.SafeElementAt(index));
   RemoveWindowListeners(domWindow);
 
-  mDocShells->RemoveElementAt(index);
-  mPopups->RemoveElementAt(index);
+  mDocShells.RemoveElementAt(index);
+  mPopups.RemoveElementAt(index);
 
   return NS_OK;
 }
@@ -294,8 +291,7 @@ nsFormFillController::SetPopupOpen(bool aPopupOpen)
       NS_ENSURE_STATE(content);
       nsCOMPtr<nsIDocShell> docShell = GetDocShellForInput(mFocusedInput);
       NS_ENSURE_STATE(docShell);
-      nsCOMPtr<nsIPresShell> presShell;
-      docShell->GetPresShell(getter_AddRefs(presShell));
+      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
       NS_ENSURE_STATE(presShell);
       presShell->ScrollContentIntoView(content,
                                        nsIPresShell::ScrollAxis(
@@ -550,7 +546,7 @@ nsFormFillController::OnTextEntered(bool* aPrevent)
   // code.
   event->SetTrusted(true);
 
-  nsCOMPtr<nsIDOMEventTarget> targ = do_QueryInterface(mFocusedInput);
+  nsCOMPtr<EventTarget> targ = do_QueryInterface(mFocusedInput);
 
   bool defaultActionEnabled;
   targ->DispatchEvent(event, &defaultActionEnabled);
@@ -568,6 +564,24 @@ NS_IMETHODIMP
 nsFormFillController::GetConsumeRollupEvent(bool *aConsumeRollupEvent)
 {
   *aConsumeRollupEvent = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFormFillController::GetInPrivateContext(bool *aInPrivateContext)
+{
+  if (!mFocusedInput) {
+    *aInPrivateContext = false;
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIDOMDocument> inputDoc;
+  mFocusedInput->GetOwnerDocument(getter_AddRefs(inputDoc));
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(inputDoc);
+  nsCOMPtr<nsISupports> container = doc->GetContainer();
+  nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(container);
+  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
+  *aInPrivateContext = loadContext && loadContext->UsePrivateBrowsing();
   return NS_OK;
 }
 
@@ -589,11 +603,15 @@ nsFormFillController::StartSearch(const nsAString &aSearchString, const nsAStrin
     // XXX aPreviousResult shouldn't ever be a historyResult type, since we're not letting
     // satchel manage the field?
     rv = mLoginManager->AutoCompleteSearch(aSearchString,
-                                         aPreviousResult,
-                                         mFocusedInput,
-                                         getter_AddRefs(result));
+                                           aPreviousResult,
+                                           mFocusedInput,
+                                           getter_AddRefs(result));
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (aListener) {
+      aListener->OnSearchResult(this, result);
+    }
   } else {
-    nsCOMPtr<nsIAutoCompleteResult> formHistoryResult;
+    mLastListener = aListener;
 
     // It appears that mFocusedInput is always null when we are focusing a XUL
     // element. Scary :)
@@ -602,48 +620,65 @@ nsFormFillController::StartSearch(const nsAString &aSearchString, const nsAStrin
         do_GetService("@mozilla.org/satchel/form-autocomplete;1", &rv);
       NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = formAutoComplete->AutoCompleteSearch(aSearchParam,
+      formAutoComplete->AutoCompleteSearchAsync(aSearchParam,
                                                 aSearchString,
                                                 mFocusedInput,
                                                 aPreviousResult,
-                                                getter_AddRefs(formHistoryResult));
+                                                this);
+      mLastFormAutoComplete = formAutoComplete;
+    } else {
+      mLastSearchString = aSearchString;
 
-      NS_ENSURE_SUCCESS(rv, rv);
+      // Even if autocomplete is disabled, handle the inputlist anyway as that was
+      // specifically requested by the page. This is so a field can have the default
+      // autocomplete disabled and replaced with a custom inputlist autocomplete.
+      return PerformInputListAutoComplete(aPreviousResult);
     }
+  }
 
-    mLastSearchResult = formHistoryResult;
-    mLastListener = aListener;
-    mLastSearchString = aSearchString;
+  return NS_OK;
+}
 
-    nsCOMPtr <nsIInputListAutoComplete> inputListAutoComplete =
-      do_GetService("@mozilla.org/satchel/inputlist-autocomplete;1", &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
+nsresult
+nsFormFillController::PerformInputListAutoComplete(nsIAutoCompleteResult* aPreviousResult)
+{
+  // If an <input> is focused, check if it has a list="<datalist>" which can
+  // provide the list of suggestions.
 
-    rv = inputListAutoComplete->AutoCompleteSearch(formHistoryResult,
-                                                   aSearchString,
-                                                   mFocusedInput,
-                                                   getter_AddRefs(result));
+  nsresult rv;
+  nsCOMPtr<nsIAutoCompleteResult> result;
 
-    if (mFocusedInput) {
-      nsCOMPtr<nsIDOMHTMLElement> list;
-      mFocusedInput->GetList(getter_AddRefs(list));
+  nsCOMPtr <nsIInputListAutoComplete> inputListAutoComplete =
+    do_GetService("@mozilla.org/satchel/inputlist-autocomplete;1", &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = inputListAutoComplete->AutoCompleteSearch(aPreviousResult,
+                                                 mLastSearchString,
+                                                 mFocusedInput,
+                                                 getter_AddRefs(result));
+  NS_ENSURE_SUCCESS(rv, rv);
 
-      nsCOMPtr<nsINode> node = do_QueryInterface(list);
-      if (mListNode != node) {
-        if (mListNode) {
-          mListNode->RemoveMutationObserver(this);
-          mListNode = nullptr;
-        }
-        if (node) {
-          node->AddMutationObserverUnlessExists(this);
-          mListNode = node;
-        }
+  if (mFocusedInput) {
+    nsCOMPtr<nsIDOMHTMLElement> list;
+    mFocusedInput->GetList(getter_AddRefs(list));
+
+    // Add a mutation observer to check for changes to the items in the <datalist>
+    // and update the suggestions accordingly.
+    nsCOMPtr<nsINode> node = do_QueryInterface(list);
+    if (mListNode != node) {
+      if (mListNode) {
+        mListNode->RemoveMutationObserver(this);
+        mListNode = nullptr;
+      }
+      if (node) {
+        node->AddMutationObserverUnlessExists(this);
+        mListNode = node;
       }
     }
   }
-  NS_ENSURE_SUCCESS(rv, rv);
 
-  aListener->OnSearchResult(this, result);
+  if (mLastListener) {
+    mLastListener->OnSearchResult(this, result);
+  }
 
   return NS_OK;
 }
@@ -696,7 +731,29 @@ void nsFormFillController::RevalidateDataList()
 NS_IMETHODIMP
 nsFormFillController::StopSearch()
 {
+  // Make sure to stop and clear this, otherwise the controller will prevent
+  // mLastFormAutoComplete from being deleted.
+  if (mLastFormAutoComplete) {
+    mLastFormAutoComplete->StopAutoCompleteSearch();
+    mLastFormAutoComplete = nullptr;
+  }
   return NS_OK;
+}
+
+////////////////////////////////////////////////////////////////////////
+//// nsIFormAutoCompleteObserver
+
+NS_IMETHODIMP
+nsFormFillController::OnSearchCompletion(nsIAutoCompleteResult *aResult)
+{
+  nsCOMPtr<nsIAutoCompleteResult> resultParam = do_QueryInterface(aResult);
+
+  nsAutoString searchString;
+  resultParam->GetSearchString(searchString);
+  mLastSearchResult = aResult;
+  mLastSearchString = searchString;
+
+  return PerformInputListAutoComplete(resultParam);
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -744,21 +801,17 @@ nsFormFillController::HandleEvent(nsIDOMEvent* aEvent)
     return NS_OK;
   }
   if (type.EqualsLiteral("pagehide")) {
-    nsCOMPtr<nsIDOMEventTarget> target;
-    aEvent->GetTarget(getter_AddRefs(target));
 
-    nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(target);
-    if (!domDoc)
+    nsCOMPtr<nsIDocument> doc = do_QueryInterface(
+      aEvent->InternalDOMEvent()->GetTarget());
+    if (!doc)
       return NS_OK;
 
     if (mFocusedInput) {
-      nsCOMPtr<nsIDOMDocument> inputDoc;
-      mFocusedInput->GetOwnerDocument(getter_AddRefs(inputDoc));
-      if (domDoc == inputDoc)
+      if (doc == mFocusedInputNode->OwnerDoc())
         StopControllingInput();
     }
 
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
     PwmgrInputsEnumData ed(this, doc);
     mPwmgrInputs.Enumerate(RemoveForDocumentEnumerator, &ed);
   }
@@ -786,11 +839,9 @@ nsFormFillController::RemoveForDocumentEnumerator(const nsINode* aKey,
 nsresult
 nsFormFillController::Focus(nsIDOMEvent* aEvent)
 {
-  nsCOMPtr<nsIDOMEventTarget> target;
-  aEvent->GetTarget(getter_AddRefs(target));
-
-  nsCOMPtr<nsIDOMHTMLInputElement> input = do_QueryInterface(target);
-  nsCOMPtr<nsINode> inputNode = do_QueryInterface(input); 
+  nsCOMPtr<nsIDOMHTMLInputElement> input = do_QueryInterface(
+    aEvent->InternalDOMEvent()->GetTarget());
+  nsCOMPtr<nsINode> inputNode = do_QueryInterface(input);
   if (!inputNode)
     return NS_OK;
 
@@ -898,9 +949,8 @@ nsFormFillController::MouseDown(nsIDOMEvent* aEvent)
   if (!mouseEvent)
     return NS_ERROR_FAILURE;
 
-  nsCOMPtr<nsIDOMEventTarget> target;
-  aEvent->GetTarget(getter_AddRefs(target));
-  nsCOMPtr<nsIDOMHTMLInputElement> targetInput = do_QueryInterface(target);
+  nsCOMPtr<nsIDOMHTMLInputElement> targetInput = do_QueryInterface(
+    aEvent->InternalDOMEvent()->GetTarget());
   if (!targetInput)
     return NS_OK;
 
@@ -945,7 +995,7 @@ nsFormFillController::AddWindowListeners(nsIDOMWindow *aWindow)
     return;
 
   nsCOMPtr<nsPIDOMWindow> privateDOMWindow(do_QueryInterface(aWindow));
-  nsIDOMEventTarget* target = nullptr;
+  EventTarget* target = nullptr;
   if (privateDOMWindow)
     target = privateDOMWindow->GetChromeEventHandler();
 
@@ -988,7 +1038,7 @@ nsFormFillController::RemoveWindowListeners(nsIDOMWindow *aWindow)
   mPwmgrInputs.Enumerate(RemoveForDocumentEnumerator, &ed);
 
   nsCOMPtr<nsPIDOMWindow> privateDOMWindow(do_QueryInterface(aWindow));
-  nsIDOMEventTarget* target = nullptr;
+  EventTarget* target = nullptr;
   if (privateDOMWindow)
     target = privateDOMWindow->GetChromeEventHandler();
 
@@ -1008,25 +1058,19 @@ nsFormFillController::RemoveWindowListeners(nsIDOMWindow *aWindow)
 }
 
 void
-nsFormFillController::AddKeyListener(nsIDOMHTMLInputElement *aInput)
+nsFormFillController::AddKeyListener(nsINode* aInput)
 {
-  if (!aInput)
-    return;
-
-  nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(aInput);
-
-  target->AddEventListener(NS_LITERAL_STRING("keypress"), this,
+  aInput->AddEventListener(NS_LITERAL_STRING("keypress"), this,
                            true, false);
 }
 
 void
 nsFormFillController::RemoveKeyListener()
 {
-  if (!mFocusedInput)
+  if (!mFocusedInputNode)
     return;
 
-  nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(mFocusedInput);
-  target->RemoveEventListener(NS_LITERAL_STRING("keypress"), this, true);
+  mFocusedInputNode->RemoveEventListener(NS_LITERAL_STRING("keypress"), this, true);
 }
 
 void
@@ -1042,15 +1086,15 @@ nsFormFillController::StartControllingInput(nsIDOMHTMLInputElement *aInput)
     return;
 
   // Cache the popup for the focused docShell
-  mPopups->GetElementAt(index, getter_AddRefs(mFocusedPopup));
+  mFocusedPopup = mPopups.SafeElementAt(index);
 
   nsCOMPtr<nsINode> node = do_QueryInterface(aInput);
   if (!node) {
     return;
   }
 
-  AddKeyListener(aInput);
-  
+  AddKeyListener(node);
+
   node->AddMutationObserverUnlessExists(this);
   mFocusedInputNode = node;
   mFocusedInput = aInput;
@@ -1127,12 +1171,9 @@ nsFormFillController::GetIndexOfDocShell(nsIDocShell *aDocShell)
     return -1;
 
   // Loop through our cached docShells looking for the given docShell
-  uint32_t count;
-  mDocShells->Count(&count);
+  uint32_t count = mDocShells.Length();
   for (uint32_t i = 0; i < count; ++i) {
-    nsCOMPtr<nsIDocShell> docShell;
-    mDocShells->GetElementAt(i, getter_AddRefs(docShell));
-    if (docShell == aDocShell)
+    if (mDocShells[i] == aDocShell)
       return i;
   }
 
@@ -1170,4 +1211,3 @@ static const mozilla::Module kSatchelModule = {
 };
 
 NSMODULE_DEFN(satchel) = &kSatchelModule;
-

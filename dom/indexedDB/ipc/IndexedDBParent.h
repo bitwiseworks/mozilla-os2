@@ -5,6 +5,9 @@
 #ifndef mozilla_dom_indexeddb_ipc_indexeddbparent_h__
 #define mozilla_dom_indexeddb_ipc_indexeddbparent_h__
 
+#include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
+
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
 #include "mozilla/dom/indexedDB/PIndexedDBParent.h"
@@ -15,8 +18,6 @@
 #include "mozilla/dom/indexedDB/PIndexedDBObjectStoreParent.h"
 #include "mozilla/dom/indexedDB/PIndexedDBRequestParent.h"
 #include "mozilla/dom/indexedDB/PIndexedDBTransactionParent.h"
-
-#include "mozilla/Attributes.h"
 
 #include "nsIDOMEventListener.h"
 
@@ -40,6 +41,15 @@ class IDBIndex;
 class IDBObjectStore;
 class IDBOpenDBRequest;
 class IDBTransaction;
+
+class IndexedDBCursorParent;
+class IndexedDBDatabaseParent;
+class IndexedDBDeleteDatabaseRequestParent;
+class IndexedDBIndexParent;
+class IndexedDBObjectStoreParent;
+class IndexedDBTransactionParent;
+class IndexedDBVersionChangeTransactionParent;
+class IndexedDBVersionChangeObjectStoreParent;
 
 /*******************************************************************************
  * AutoSetCurrentTransaction
@@ -87,7 +97,7 @@ public:
   }
 
   NS_IMETHOD
-  HandleEvent(nsIDOMEvent* aEvent)
+  HandleEvent(nsIDOMEvent* aEvent) MOZ_OVERRIDE
   {
     return mActor ? mActor->HandleEvent(aEvent) : NS_OK;
   }
@@ -130,16 +140,25 @@ public:
  * IndexedDBParent
  ******************************************************************************/
 
-class IndexedDBParent : public PIndexedDBParent
+class IndexedDBParent : private PIndexedDBParent
 {
   friend class mozilla::dom::ContentParent;
   friend class mozilla::dom::TabParent;
+  friend class IndexedDBDatabaseParent;
+  friend class IndexedDBDeleteDatabaseRequestParent;
 
   nsRefPtr<IDBFactory> mFactory;
   nsCString mASCIIOrigin;
 
+  ContentParent* mManagerContent;
+  TabParent* mManagerTab;
+
+  bool mDisconnected;
+
 public:
-  IndexedDBParent();
+  IndexedDBParent(ContentParent* aContentParent);
+  IndexedDBParent(TabParent* aTabParent);
+
   virtual ~IndexedDBParent();
 
   const nsCString&
@@ -148,7 +167,38 @@ public:
     return mASCIIOrigin;
   }
 
+  void
+  Disconnect();
+
+  bool
+  IsDisconnected() const
+  {
+    return mDisconnected;
+  }
+
+  ContentParent*
+  GetManagerContent() const
+  {
+    return mManagerContent;
+  }
+
+  TabParent*
+  GetManagerTab() const
+  {
+    return mManagerTab;
+  }
+
+  bool
+  CheckReadPermission(const nsAString& aDatabaseName);
+
+  bool
+  CheckWritePermission(const nsAString& aDatabaseName);
+
 protected:
+  bool
+  CheckPermissionInternal(const nsAString& aDatabaseName,
+                          const nsDependentCString& aPermission);
+
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
@@ -182,8 +232,12 @@ protected:
  * IndexedDBDatabaseParent
  ******************************************************************************/
 
-class IndexedDBDatabaseParent : public PIndexedDBDatabaseParent
+class IndexedDBDatabaseParent : private PIndexedDBDatabaseParent
 {
+  friend class IndexedDBParent;
+  friend class IndexedDBTransactionParent;
+  friend class IndexedDBVersionChangeTransactionParent;
+
   AutoWeakEventListener<IndexedDBDatabaseParent> mEventListener;
 
   nsRefPtr<IDBOpenDBRequest> mOpenRequest;
@@ -198,6 +252,21 @@ public:
 
   nsresult
   HandleEvent(nsIDOMEvent* aEvent);
+
+  void
+  Disconnect();
+
+  bool
+  IsDisconnected() const
+  {
+    return static_cast<IndexedDBParent*>(Manager())->IsDisconnected();
+  }
+
+  bool
+  CheckWritePermission(const nsAString& aDatabaseName);
+
+  void
+  Invalidate();
 
 protected:
   nsresult
@@ -229,8 +298,12 @@ protected:
  * IndexedDBTransactionParent
  ******************************************************************************/
 
-class IndexedDBTransactionParent : public PIndexedDBTransactionParent
+class IndexedDBTransactionParent : protected PIndexedDBTransactionParent
 {
+  friend class IndexedDBCursorParent;
+  friend class IndexedDBDatabaseParent;
+  friend class IndexedDBObjectStoreParent;
+
 protected:
   AutoWeakEventListener<IndexedDBTransactionParent> mEventListener;
 
@@ -241,6 +314,12 @@ protected:
 public:
   IndexedDBTransactionParent();
   virtual ~IndexedDBTransactionParent();
+
+  bool
+  IsDisconnected() const
+  {
+    return static_cast<IndexedDBDatabaseParent*>(Manager())->IsDisconnected();
+  }
 
   nsresult
   SetTransaction(IDBTransaction* aTransaction);
@@ -289,9 +368,17 @@ protected:
 class IndexedDBVersionChangeTransactionParent :
   public IndexedDBTransactionParent
 {
+  friend class IndexedDBVersionChangeObjectStoreParent;
+
 public:
   IndexedDBVersionChangeTransactionParent();
   virtual ~IndexedDBVersionChangeTransactionParent();
+
+  bool
+  IsDisconnected() const
+  {
+    return static_cast<IndexedDBDatabaseParent*>(Manager())->IsDisconnected();
+  }
 
 protected:
   virtual bool
@@ -309,11 +396,57 @@ protected:
 };
 
 /*******************************************************************************
+ * IndexedDBCursorParent
+ ******************************************************************************/
+
+class IndexedDBCursorParent : private PIndexedDBCursorParent
+{
+  friend class IndexedDBIndexParent;
+  friend class IndexedDBObjectStoreParent;
+
+  nsRefPtr<IDBCursor> mCursor;
+
+public:
+  IDBCursor*
+  GetCursor() const
+  {
+    return mCursor;
+  }
+
+  bool
+  IsDisconnected() const;
+
+protected:
+  IndexedDBCursorParent(IDBCursor* aCursor);
+  virtual ~IndexedDBCursorParent();
+
+  virtual void
+  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvPIndexedDBRequestConstructor(PIndexedDBRequestParent* aActor,
+                                   const CursorRequestParams& aParams)
+                                   MOZ_OVERRIDE;
+
+  virtual PIndexedDBRequestParent*
+  AllocPIndexedDBRequest(const CursorRequestParams& aParams) MOZ_OVERRIDE;
+
+  virtual bool
+  DeallocPIndexedDBRequest(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
+};
+
+/*******************************************************************************
  * IndexedDBObjectStoreParent
  ******************************************************************************/
 
-class IndexedDBObjectStoreParent : public PIndexedDBObjectStoreParent
+class IndexedDBObjectStoreParent : protected PIndexedDBObjectStoreParent
 {
+  friend class IndexedDBIndexParent;
+  friend class IndexedDBTransactionParent;
+  friend class IndexedDBVersionChangeTransactionParent;
+
+  typedef mozilla::dom::indexedDB::ipc::OpenCursorResponse OpenCursorResponse;
+
 protected:
   nsRefPtr<IDBObjectStore> mObjectStore;
 
@@ -328,6 +461,38 @@ public:
   GetObjectStore() const
   {
     return mObjectStore;
+  }
+
+  bool
+  IsDisconnected() const
+  {
+    IndexedDBTransactionParent* manager =
+      static_cast<IndexedDBTransactionParent*>(Manager());
+    return manager->IsDisconnected();
+  }
+
+  // Ordinarily callers could just do this manually using
+  // PIndexedDBObjectStoreParent::SendPIndexedDBCursorConstructor but we're
+  // inheriting the abstract protocol class privately to prevent outside code
+  // from sending messages without checking the disconnected state. Therefore
+  // we need a helper method.
+  bool
+  OpenCursor(IDBCursor* aCursor,
+             const ObjectStoreCursorConstructorParams& aParams,
+             OpenCursorResponse& aResponse) NS_WARN_UNUSED_RESULT
+  {
+    if (IsDisconnected()) {
+      return true;
+    }
+
+    IndexedDBCursorParent* cursorActor = new IndexedDBCursorParent(aCursor);
+
+    if (!SendPIndexedDBCursorConstructor(cursorActor, aParams)) {
+      return false;
+    }
+
+    aResponse = cursorActor;
+    return true;
   }
 
 protected:
@@ -374,11 +539,21 @@ protected:
 class IndexedDBVersionChangeObjectStoreParent :
   public IndexedDBObjectStoreParent
 {
+  friend class IndexedDBVersionChangeTransactionParent;
+
 public:
   IndexedDBVersionChangeObjectStoreParent();
   virtual ~IndexedDBVersionChangeObjectStoreParent();
 
 protected:
+  bool
+  IsDisconnected() const
+  {
+    IndexedDBVersionChangeTransactionParent* manager =
+      static_cast<IndexedDBVersionChangeTransactionParent*>(Manager());
+    return manager->IsDisconnected();
+  }
+
   virtual bool
   RecvDeleteIndex(const nsString& aName) MOZ_OVERRIDE;
 
@@ -392,8 +567,13 @@ protected:
  * IndexedDBIndexParent
  ******************************************************************************/
 
-class IndexedDBIndexParent : public PIndexedDBIndexParent
+class IndexedDBIndexParent : private PIndexedDBIndexParent
 {
+  friend class IndexedDBObjectStoreParent;
+  friend class IndexedDBVersionChangeObjectStoreParent;
+
+  typedef mozilla::dom::indexedDB::ipc::OpenCursorResponse OpenCursorResponse;
+
   nsRefPtr<IDBIndex> mIndex;
 
 public:
@@ -407,6 +587,37 @@ public:
   GetIndex() const
   {
     return mIndex;
+  }
+
+  // Ordinarily callers could just do this manually using
+  // PIndexedDBIndexParent::SendPIndexedDBCursorConstructor but we're
+  // inheriting the abstract protocol class privately to prevent outside code
+  // from sending messages without checking the disconnected state. Therefore
+  // we need a helper method.
+  bool
+  OpenCursor(IDBCursor* aCursor, const IndexCursorConstructorParams& aParams,
+             OpenCursorResponse& aResponse) NS_WARN_UNUSED_RESULT
+  {
+    if (IsDisconnected()) {
+      return true;
+    }
+
+    IndexedDBCursorParent* cursorActor = new IndexedDBCursorParent(aCursor);
+
+    if (!SendPIndexedDBCursorConstructor(cursorActor, aParams)) {
+      return false;
+    }
+
+    aResponse = cursorActor;
+    return true;
+  }
+
+  bool
+  IsDisconnected() const
+  {
+    IndexedDBObjectStoreParent* manager =
+      static_cast<IndexedDBObjectStoreParent*>(Manager());
+    return manager->IsDisconnected();
   }
 
 protected:
@@ -433,47 +644,28 @@ protected:
 };
 
 /*******************************************************************************
- * IndexedDBCursorParent
- ******************************************************************************/
-
-class IndexedDBCursorParent : public PIndexedDBCursorParent
-{
-  nsRefPtr<IDBCursor> mCursor;
-
-public:
-  IndexedDBCursorParent(IDBCursor* aCursor);
-  virtual ~IndexedDBCursorParent();
-
-  IDBCursor*
-  GetCursor() const
-  {
-    return mCursor;
-  }
-
-protected:
-  virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
-  virtual bool
-  RecvPIndexedDBRequestConstructor(PIndexedDBRequestParent* aActor,
-                                   const CursorRequestParams& aParams)
-                                   MOZ_OVERRIDE;
-
-  virtual PIndexedDBRequestParent*
-  AllocPIndexedDBRequest(const CursorRequestParams& aParams) MOZ_OVERRIDE;
-
-  virtual bool
-  DeallocPIndexedDBRequest(PIndexedDBRequestParent* aActor) MOZ_OVERRIDE;
-};
-
-/*******************************************************************************
  * IndexedDBRequestParentBase
  ******************************************************************************/
 
 class IndexedDBRequestParentBase : public PIndexedDBRequestParent
 {
+public:
+  bool
+  SendResponse(const ResponseValue& aResponse) NS_WARN_UNUSED_RESULT
+  {
+    if (IsDisconnected()) {
+      return true;
+    }
+
+    return Send__delete__(this, aResponse);
+  }
+
 protected:
+  // Don't let anyone call this directly, instead go through SendResponse.
+  using PIndexedDBRequestParent::Send__delete__;
+
   typedef ipc::ResponseValue ResponseValue;
+  typedef PIndexedDBRequestParent::PBlobParent PBlobParent;
 
   nsRefPtr<IDBRequest> mRequest;
 
@@ -482,6 +674,9 @@ protected:
 
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
+  virtual bool
+  IsDisconnected() = 0;
 };
 
 /*******************************************************************************
@@ -490,6 +685,8 @@ protected:
 
 class IndexedDBObjectStoreRequestParent : public IndexedDBRequestParentBase
 {
+  friend class IndexedDBObjectStoreParent;
+
   nsRefPtr<IDBObjectStore> mObjectStore;
 
   typedef ipc::ObjectStoreRequestParams ParamsUnionType;
@@ -538,6 +735,10 @@ protected:
   void
   ConvertBlobActors(const InfallibleTArray<PBlobParent*>& aActors,
                     nsTArray<nsCOMPtr<nsIDOMBlob> >& aBlobs);
+
+private:
+  virtual bool
+  IsDisconnected() MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -546,6 +747,8 @@ protected:
 
 class IndexedDBIndexRequestParent : public IndexedDBRequestParentBase
 {
+  friend class IndexedDBIndexParent;
+
   nsRefPtr<IDBIndex> mIndex;
 
   typedef ipc::IndexRequestParams ParamsUnionType;
@@ -584,6 +787,10 @@ public:
 
   bool
   OpenKeyCursor(const OpenKeyCursorParams& aParams);
+
+private:
+  virtual bool
+  IsDisconnected() MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -592,6 +799,8 @@ public:
 
 class IndexedDBCursorRequestParent : public IndexedDBRequestParentBase
 {
+  friend class IndexedDBCursorParent;
+
   nsRefPtr<IDBCursor> mCursor;
 
   typedef ipc::CursorRequestParams ParamsUnionType;
@@ -606,6 +815,10 @@ public:
 
   bool
   Continue(const ContinueParams& aParams);
+
+private:
+  virtual bool
+  IsDisconnected() MOZ_OVERRIDE;
 };
 
 /*******************************************************************************
@@ -613,24 +826,32 @@ public:
  ******************************************************************************/
 
 class IndexedDBDeleteDatabaseRequestParent :
-  public PIndexedDBDeleteDatabaseRequestParent
+  private PIndexedDBDeleteDatabaseRequestParent
 {
+  friend class IndexedDBParent;
+
   AutoWeakEventListener<IndexedDBDeleteDatabaseRequestParent> mEventListener;
 
   nsRefPtr<IDBFactory> mFactory;
   nsRefPtr<IDBOpenDBRequest> mOpenRequest;
 
 public:
+  nsresult
+  HandleEvent(nsIDOMEvent* aEvent);
+
+protected:
   IndexedDBDeleteDatabaseRequestParent(IDBFactory* aFactory);
   virtual ~IndexedDBDeleteDatabaseRequestParent();
 
   nsresult
   SetOpenRequest(IDBOpenDBRequest* aOpenRequest);
 
-  nsresult
-  HandleEvent(nsIDOMEvent* aEvent);
+  bool
+  IsDisconnected() const
+  {
+    return static_cast<IndexedDBParent*>(Manager())->IsDisconnected();
+  }
 };
-
 
 END_INDEXEDDB_NAMESPACE
 

@@ -9,24 +9,13 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-TOOL_DIRS += app
-
-MODULE = ipdlunittest
-
-EXPORTS_NAMESPACES = mozilla/_ipdltest
-EXPORTS_mozilla/_ipdltest =  \
-  IPDLUnitTests.h  \
-  IPDLUnitTestProcessChild.h  \
-  IPDLUnitTestTypes.h \
-  $(NULL)
-
 LIBRARY_NAME = $(MODULE)_s
 LIBXUL_LIBRARY = 1
 FORCE_STATIC_LIB = 1
 EXPORT_LIBRARY = 1
 
 IPDLTESTS = \
-  TestBlockChild \
+  TestActorPunning \
   TestBridgeMain \
   TestCrashCleanup \
   TestDataStructures \
@@ -55,6 +44,7 @@ IPDLTESTS = \
   TestSyncHang \
   TestSyncWakeup \
   TestBadActor \
+  TestUrgency \
   $(NULL)
 
 ifeq ($(OS_ARCH),Linux)
@@ -70,13 +60,6 @@ IPDLTESTHDRS = $(addprefix $(srcdir)/,$(addsuffix .h,$(IPDLTESTS)))
 
 TESTER_TEMPLATE := $(srcdir)/IPDLUnitTests.template.cpp
 GENTESTER := $(srcdir)/genIPDLUnitTests.py
-
-CPPSRCS =  \
-  IPDLUnitTests.cpp  \
-  IPDLUnitTestSubprocess.cpp  \
-  IPDLUnitTestProcessChild.cpp  \
-  $(IPDLTESTSRCS)  \
-  $(NULL)
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

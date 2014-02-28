@@ -31,7 +31,6 @@
 #include "nsZipArchive.h"
 #include "mozilla/Omnijar.h"
 #include "prenv.h"
-#include "mozilla/FunctionTimer.h"
 #include "mozilla/Telemetry.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
@@ -67,7 +66,7 @@ NS_MEMORY_REPORTER_IMPLEMENT(StartupCacheMapping,
     "Memory used to hold the mapping of the startup cache from file.  This "
     "memory is likely to be swapped out shortly after start-up.")
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(StartupCacheDataMallocSizeOf, "startup-cache/data")
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(StartupCacheDataMallocSizeOf)
 
 static int64_t
 GetStartupCacheDataSize()
@@ -89,8 +88,13 @@ static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 StartupCache*
 StartupCache::GetSingleton() 
 {
-  if (!gStartupCache)
+  if (!gStartupCache) {
+    if (XRE_GetProcessType() != GeckoProcessType_Default) {
+      return nullptr;
+    }
+
     StartupCache::InitSingleton();
+  }
 
   return StartupCache::gStartupCache;
 }
@@ -117,6 +121,7 @@ StartupCache::InitSingleton()
 
 StartupCache* StartupCache::gStartupCache;
 bool StartupCache::gShutdownInitiated;
+bool StartupCache::gIgnoreDiskCache;
 enum StartupCache::TelemetrifyAge StartupCache::gPostFlushAgeAction = StartupCache::IGNORE_AGE;
 
 StartupCache::StartupCache() 
@@ -133,7 +138,15 @@ StartupCache::~StartupCache()
   // but an early shutdown means either mTimer didn't run 
   // or the write thread is still running.
   WaitOnWriteThread();
-  WriteToDisk();
+
+  // If we shutdown quickly timer wont have fired. Instead of writing
+  // it on the main thread and block the shutdown we simply wont update
+  // the startup cache. Always do this if the file doesn't exist since
+  // we use it part of the packge step.
+  if (!mArchive) {
+    WriteToDisk();
+  }
+
   gStartupCache = nullptr;
   (void)::NS_UnregisterMemoryReporter(mMappingMemoryReporter);
   (void)::NS_UnregisterMemoryReporter(mDataMemoryReporter);
@@ -144,10 +157,6 @@ StartupCache::~StartupCache()
 nsresult
 StartupCache::Init() 
 {
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
-    NS_WARNING("Startup cache is only available in the chrome process");
-    return NS_ERROR_NOT_AVAILABLE;
-  }
   // workaround for bug 653936
   nsCOMPtr<nsIProtocolHandler> jarInitializer(do_GetService(NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "jar"));
   
@@ -169,6 +178,20 @@ StartupCache::Init()
     if (NS_FAILED(rv)) {
       // return silently, this will fail in mochitests's xpcshell process.
       return rv;
+    }
+
+    nsCOMPtr<nsIFile> profDir;
+    NS_GetSpecialDirectory("ProfDS", getter_AddRefs(profDir));
+    if (profDir) {
+      bool same;
+      if (NS_SUCCEEDED(profDir->Equals(file, &same)) && !same) {
+        // We no longer store the startup cache in the main profile
+        // directory, so we should cleanup the old one.
+        if (NS_SUCCEEDED(
+              profDir->AppendNative(NS_LITERAL_CSTRING("startupCache")))) {
+          profDir->Remove(true);
+        }
+      }
     }
 
     rv = file->AppendNative(NS_LITERAL_CSTRING("startupCache"));
@@ -202,12 +225,12 @@ StartupCache::Init()
   rv = mObserverService->AddObserver(mListener, "startupcache-invalidate",
                                      false);
   NS_ENSURE_SUCCESS(rv, rv);
-  
+
   rv = LoadArchive(RECORD_AGE);
   
   // Sometimes we don't have a cache yet, that's ok.
   // If it's corrupted, just remove it and start over.
-  if (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND) {
+  if (gIgnoreDiskCache || (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND)) {
     NS_WARNING("Failed to load startupcache file correctly, removing!");
     InvalidateCache();
   }
@@ -226,6 +249,9 @@ StartupCache::Init()
 nsresult
 StartupCache::LoadArchive(enum TelemetrifyAge flag)
 {
+  if (gIgnoreDiskCache)
+    return NS_ERROR_FAILURE;
+
   bool exists;
   mArchive = NULL;
   nsresult rv = mFile->Exists(&exists);
@@ -415,7 +441,7 @@ StartupCache::WriteToDisk()
   nsresult rv;
   mStartupWriteInitiated = true;
 
-  if (mTable.Count() == 0)
+  if (!mTable.IsInitialized() || mTable.Count() == 0)
     return;
 
   nsCOMPtr<nsIZipWriter> zipW = do_CreateInstance("@mozilla.org/zipwriter;1");
@@ -457,6 +483,9 @@ StartupCache::WriteToDisk()
   mArchive = NULL;
   zipW->Close();
 
+  // We succesfully wrote the archive to disk; mark the disk file as trusted
+  gIgnoreDiskCache = false;
+
   // Our reader's view of the archive is outdated now, reload it.
   LoadArchive(gPostFlushAgeAction);
   
@@ -469,8 +498,23 @@ StartupCache::InvalidateCache()
   WaitOnWriteThread();
   mTable.Clear();
   mArchive = NULL;
-  mFile->Remove(false);
+  nsresult rv = mFile->Remove(false);
+  if (NS_FAILED(rv) && rv != NS_ERROR_FILE_TARGET_DOES_NOT_EXIST &&
+      rv != NS_ERROR_FILE_NOT_FOUND) {
+    gIgnoreDiskCache = true;
+    mozilla::Telemetry::Accumulate(Telemetry::STARTUP_CACHE_INVALID, true);
+    return;
+  }
+  gIgnoreDiskCache = false;
   LoadArchive(gPostFlushAgeAction);
+}
+
+void
+StartupCache::IgnoreDiskCache()
+{
+  gIgnoreDiskCache = true;
+  if (gStartupCache)
+    gStartupCache->InvalidateCache();
 }
 
 /*
@@ -485,7 +529,6 @@ StartupCache::WaitOnWriteThread()
   if (!mWriteThread || mWriteThread == PR_GetCurrentThread())
     return;
 
-  NS_TIME_FUNCTION_MIN(30);
   PR_JoinThread(mWriteThread);
   mWriteThread = NULL;
 }
@@ -710,6 +753,13 @@ StartupCacheWrapper::InvalidateCache()
     return NS_ERROR_NOT_INITIALIZED;
   }
   sc->InvalidateCache();
+  return NS_OK;
+}
+
+nsresult
+StartupCacheWrapper::IgnoreDiskCache()
+{
+  StartupCache::IgnoreDiskCache();
   return NS_OK;
 }
 

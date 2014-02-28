@@ -22,12 +22,12 @@ function waitForImportAndSmartBookmarks(aCallback) {
     Services.obs.removeObserver(waitImport, "bookmarks-restore-success");
     // Delay to test eventual smart bookmarks creation.
     do_execute_soon(function () {
-      waitForAsyncUpdates(aCallback);
+      promiseAsyncUpdates().then(aCallback);
     });
   }, "bookmarks-restore-success", false);
 }
 
-let gTests = [
+[
 
   // This test must be the first one.
   function test_checkPreferences() {
@@ -39,7 +39,7 @@ let gTests = [
     // Wait for Places init notification.
     Services.obs.addObserver(function(aSubject, aTopic, aData) {
       Services.obs.removeObserver(arguments.callee,
-                                  PlacesUtils.TOPIC_INIT_COMPLETE);
+                                  "places-browser-init-complete");
       do_execute_soon(function () {
         // Ensure preferences status.
         do_check_false(Services.prefs.getBoolPref(PREF_AUTO_EXPORT_HTML));
@@ -58,7 +58,7 @@ let gTests = [
 
         run_next_test();
       });
-    }, PlacesUtils.TOPIC_INIT_COMPLETE, false);
+    }, "places-browser-init-complete", false);
   },
 
   function test_import()
@@ -263,7 +263,7 @@ let gTests = [
                                               TOPICDATA_FORCE_PLACES_INIT);
   }
 
-];
+].forEach(add_test);
 
 do_register_cleanup(function () {
   remove_all_bookmarks();

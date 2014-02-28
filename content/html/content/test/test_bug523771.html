@@ -19,6 +19,13 @@ method="POST" enctype="multipart/form-data">
 </form>
 <pre id="test">
 <script class="testbody" type="text/javascript">
+
+if (navigator.platform.startsWith("Win")) {
+  SimpleTest.expectAssertions(0, 1);
+} else {
+  SimpleTest.expectAssertions(1);
+}
+
 var filesToKill = [];
 singleFileInput = document.getElementById('singleFile');
 multiFileInput = document.getElementById('multiFile');
@@ -36,7 +43,7 @@ function setFileInputs () {
   SpecialPowers.wrap(singleFileInput).mozSetFileNameArray([f.path], 1);
 
   var input2FileNames = [];
-  for each (file in input2Files) {
+  for (file of input2Files) {
     f = createFileWithData(file.name, file.body);
     input2FileNames.push(f.path);
   }
@@ -44,13 +51,12 @@ function setFileInputs () {
 }
 
 function createFileWithData(fileName, fileData) {
-  var dirSvc = SpecialPowers.wrap(Components).classes["@mozilla.org/file/directory_service;1"]
-                            .getService(Components.interfaces.nsIProperties);
-  var testFile = dirSvc.get("ProfD", Components.interfaces.nsIFile);
+  var dirSvc = SpecialPowers.Cc["@mozilla.org/file/directory_service;1"]
+                            .getService(SpecialPowers.Ci.nsIProperties);
+  var testFile = dirSvc.get("ProfD", SpecialPowers.Ci.nsIFile);
   testFile.append(fileName);
-  var outStream = SpecialPowers.wrap(Components).
-                    classes["@mozilla.org/network/file-output-stream;1"].
-                    createInstance(Components.interfaces.nsIFileOutputStream);
+  var outStream = SpecialPowers.Cc["@mozilla.org/network/file-output-stream;1"].
+                    createInstance(SpecialPowers.Ci.nsIFileOutputStream);
   outStream.init(testFile, 0x02 | 0x08 | 0x20, // write, create, truncate
                  0666, 0);
   outStream.write(fileData, fileData.length);

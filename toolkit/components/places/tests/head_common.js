@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const CURRENT_SCHEMA_VERSION = 21;
+const CURRENT_SCHEMA_VERSION = 23;
 
 const NS_APP_USER_PROFILE_50_DIR = "ProfD";
 const NS_APP_PROFILE_DIR_STARTUP = "ProfDS";
@@ -23,22 +23,24 @@ const TITLE_LENGTH_MAX = 4096;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "Services", function() {
-  Cu.import("resource://gre/modules/Services.jsm");
-  return Services;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
+                                  "resource://gre/modules/FileUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "BookmarkJSONUtils",
+                                  "resource://gre/modules/BookmarkJSONUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesBackups",
+                                  "resource://gre/modules/PlacesBackups.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "NetUtil", function() {
-  Cu.import("resource://gre/modules/NetUtil.jsm");
-  return NetUtil;
-});
-
-XPCOMUtils.defineLazyGetter(this, "FileUtils", function() {
-  Cu.import("resource://gre/modules/FileUtils.jsm");
-  return FileUtils;
-});
-
+// This imports various other objects in addition to PlacesUtils.
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
+
 XPCOMUtils.defineLazyGetter(this, "SMALLPNG_DATA_URI", function() {
   return NetUtil.newURI(
          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAA" +
@@ -53,15 +55,11 @@ function LOG(aMsg) {
 
 let gTestDir = do_get_cwd();
 
-// Ensure history is enabled.
-Services.prefs.setBoolPref("places.history.enabled", true);
-
 // Initialize profile.
 let gProfD = do_get_profile();
 
 // Remove any old database.
 clearDB();
-
 
 /**
  * Shortcut to create a nsIURI.
@@ -358,40 +356,40 @@ function check_no_bookmarks() {
   root.containerOpen = false;
 }
 
-
-
 /**
- * Sets title synchronously for a page in moz_places.
+ * Allows waiting for an observer notification once.
  *
- * @param aURI
- *        An nsIURI to set the title for.
- * @param aTitle
- *        The title to set the page to.
- * @throws if the page is not found in the database.
+ * @param aTopic
+ *        Notification topic to observe.
  *
- * @note This is just a test compatibility mock.
+ * @return {Promise}
+ * @resolves The array [aSubject, aData] from the observed notification.
+ * @rejects Never.
  */
-function setPageTitle(aURI, aTitle) {
-  PlacesUtils.history.setPageTitle(aURI, aTitle);
+function promiseTopicObserved(aTopic)
+{
+  let deferred = Promise.defer();
+
+  Services.obs.addObserver(
+    function PTO_observe(aSubject, aTopic, aData) {
+      Services.obs.removeObserver(PTO_observe, aTopic);
+      deferred.resolve([aSubject, aData]);
+    }, aTopic, false);
+
+  return deferred.promise;
 }
 
-
 /**
- * Clears history invoking callback when done.
+ * Clears history asynchronously.
  *
- * @param aCallback
- *        Callback function to be called once clear history has finished.
+ * @return {Promise}
+ * @resolves When history has been cleared.
+ * @rejects Never.
  */
-function waitForClearHistory(aCallback) {
-  let observer = {
-    observe: function(aSubject, aTopic, aData) {
-      Services.obs.removeObserver(this, PlacesUtils.TOPIC_EXPIRATION_FINISHED);
-      aCallback();
-    }
-  };
-  Services.obs.addObserver(observer, PlacesUtils.TOPIC_EXPIRATION_FINISHED, false);
-
-  PlacesUtils.bhistory.removeAllPages();
+function promiseClearHistory() {
+  let promise = promiseTopicObserved(PlacesUtils.TOPIC_EXPIRATION_FINISHED);
+  do_execute_soon(function() PlacesUtils.bhistory.removeAllPages());
+  return promise;
 }
 
 
@@ -476,7 +474,7 @@ function create_JSON_backup(aFilename) {
   let bookmarksBackupDir = gProfD.clone();
   bookmarksBackupDir.append("bookmarkbackups");
   if (!bookmarksBackupDir.exists()) {
-    bookmarksBackupDir.create(Ci.nsIFile.DIRECTORY_TYPE, parseInt("0755"));
+    bookmarksBackupDir.create(Ci.nsIFile.DIRECTORY_TYPE, parseInt("0755", 8));
     do_check_true(bookmarksBackupDir.exists());
   }
   let bookmarksJSONFile = gTestDir.clone();
@@ -516,37 +514,6 @@ function check_JSON_backup() {
   return profileBookmarksJSONFile;
 }
 
-
-/**
- * Waits for a frecency update then calls back.
- *
- * @param aURI
- *        URI or spec of the page we are waiting frecency for.
- * @param aValidator
- *        Validator function for the current frecency. If it returns true we
- *        have the expected frecency, otherwise we wait for next update.
- * @param aCallback
- *        function invoked when frecency update finishes.
- * @param aCbScope
- *        "this" scope for the callback
- * @param aCbArguments
- *        array of arguments to be passed to the callback
- *
- * @note since frecency is something that can be changed by a bunch of stuff
- *       like adding and removing visits, bookmarks we use a polling strategy.
- */
-function waitForFrecency(aURI, aValidator, aCallback, aCbScope, aCbArguments) {
-  Services.obs.addObserver(function (aSubject, aTopic, aData) {
-    let frecency = frecencyForUrl(aURI);
-    if (!aValidator(frecency)) {
-      print("Has to wait for frecency...");
-      return;
-    }
-    Services.obs.removeObserver(arguments.callee, aTopic);
-    aCallback.apply(aCbScope, aCbArguments);
-  }, "places-frecency-updated", false);
-}
-
 /**
  * Returns the frecency of a url.
  *
@@ -561,12 +528,14 @@ function frecencyForUrl(aURI)
     "SELECT frecency FROM moz_places WHERE url = ?1"
   );
   stmt.bindByIndex(0, url);
-  if (!stmt.executeStep())
-    throw new Error("No result for frecency.");
-  let frecency = stmt.getInt32(0);
-  stmt.finalize();
-
-  return frecency;
+  try {
+    if (!stmt.executeStep()) {
+      throw new Error("No result for frecency.");
+    }
+    return stmt.getInt32(0);
+  } finally {
+    stmt.finalize();
+  }
 }
 
 /**
@@ -611,15 +580,11 @@ function is_time_ordered(before, after) {
 }
 
 /**
- * Waits for all pending async statements on the default connection, before
- * proceeding with aCallback.
+ * Waits for all pending async statements on the default connection.
  *
- * @param aCallback
- *        Function to be called when done.
- * @param aScope
- *        Scope for the callback.
- * @param aArguments
- *        Arguments array for the callback.
+ * @return {Promise}
+ * @resolves When all pending async statements finished.
+ * @rejects Never.
  *
  * @note The result is achieved by asynchronously executing a query requiring
  *       a write lock.  Since all statements on the same connection are
@@ -627,10 +592,10 @@ function is_time_ordered(before, after) {
  *       complete.  Note that WAL makes so that writers don't block readers, but
  *       this is a problem only across different connections.
  */
-function waitForAsyncUpdates(aCallback, aScope, aArguments)
+function promiseAsyncUpdates()
 {
-  let scope = aScope || this;
-  let args = aArguments || [];
+  let deferred = Promise.defer();
+
   let db = DBConn();
   let begin = db.createAsyncStatement("BEGIN EXCLUSIVE");
   begin.executeAsync();
@@ -638,14 +603,16 @@ function waitForAsyncUpdates(aCallback, aScope, aArguments)
 
   let commit = db.createAsyncStatement("COMMIT");
   commit.executeAsync({
-    handleResult: function() {},
-    handleError: function() {},
+    handleResult: function () {},
+    handleError: function () {},
     handleCompletion: function(aReason)
     {
-      aCallback.apply(scope, args);
+      deferred.resolve();
     }
   });
   commit.finalize();
+
+  return deferred.promise;
 }
 
 /**
@@ -811,6 +778,25 @@ function do_compare_arrays(a1, a2, sorted)
 }
 
 /**
+ * Generic nsINavBookmarkObserver that doesn't implement anything, but provides
+ * dummy methods to prevent errors about an object not having a certain method.
+ */
+function NavBookmarkObserver() {}
+
+NavBookmarkObserver.prototype = {
+  onBeginUpdateBatch: function () {},
+  onEndUpdateBatch: function () {},
+  onItemAdded: function () {},
+  onItemRemoved: function () {},
+  onItemChanged: function () {},
+  onItemVisited: function () {},
+  onItemMoved: function () {},
+  QueryInterface: XPCOMUtils.generateQI([
+    Ci.nsINavBookmarkObserver,
+  ])
+};
+
+/**
  * Generic nsINavHistoryObserver that doesn't implement anything, but provides
  * dummy methods to prevent errors about an object not having a certain method.
  */
@@ -821,7 +807,6 @@ NavHistoryObserver.prototype = {
   onEndUpdateBatch: function () {},
   onVisit: function () {},
   onTitleChanged: function () {},
-  onBeforeDeleteURI: function () {},
   onDeleteURI: function () {},
   onClearHistory: function () {},
   onPageChanged: function () {},
@@ -853,7 +838,6 @@ NavHistoryResultObserver.prototype = {
   nodeLastModifiedChanged: function () {},
   nodeMoved: function () {},
   nodeRemoved: function () {},
-  nodeReplaced: function () {},
   nodeTagsChanged: function () {},
   nodeTitleChanged: function () {},
   nodeURIChanged: function () {},
@@ -864,7 +848,7 @@ NavHistoryResultObserver.prototype = {
 };
 
 /**
- * Asynchronously adds visits to a page, invoking a callback function when done.
+ * Asynchronously adds visits to a page.
  *
  * @param aPlaceInfo
  *        Can be an nsIURI, in such a case a single LINK visit will be added.
@@ -876,14 +860,14 @@ NavHistoryResultObserver.prototype = {
  *            [optional] visitDate: visit date in microseconds from the epoch
  *            [optional] referrer: nsIURI of the referrer for this visit
  *          }
- * @param [optional] aCallback
- *        Function to be invoked on completion.
- * @param [optional] aStack
- *        The stack frame used to report errors.
+ *
+ * @return {Promise}
+ * @resolves When all visits have been added successfully.
+ * @rejects JavaScript exception.
  */
-function addVisits(aPlaceInfo, aCallback, aStack)
+function promiseAddVisits(aPlaceInfo)
 {
-  let stack = aStack || Components.stack.caller;
+  let deferred = Promise.defer();
   let places = [];
   if (aPlaceInfo instanceof Ci.nsIURI) {
     places.push({ uri: aPlaceInfo });
@@ -911,14 +895,36 @@ function addVisits(aPlaceInfo, aCallback, aStack)
   PlacesUtils.asyncHistory.updatePlaces(
     places,
     {
-      handleError: function AAV_handleError() {
-        do_throw("Unexpected error in adding visit.", stack);
+      handleError: function AAV_handleError(aResultCode, aPlaceInfo) {
+        let ex = new Components.Exception("Unexpected error in adding visits.",
+                                          aResultCode);
+        deferred.reject(ex);
       },
       handleResult: function () {},
       handleCompletion: function UP_handleCompletion() {
-        if (aCallback)
-          aCallback();
+        deferred.resolve();
       }
     }
   );
+
+  return deferred.promise;
 }
+
+/**
+ * Asynchronously check a url is visited.
+ *
+ * @param aURI The URI.
+ * @return {Promise}
+ * @resolves When the check has been added successfully.
+ * @rejects JavaScript exception.
+ */
+function promiseIsURIVisited(aURI) {
+  let deferred = Promise.defer();
+
+  PlacesUtils.asyncHistory.isURIVisited(aURI, function(aURI, aIsVisited) {
+    deferred.resolve(aIsVisited);
+  });
+
+  return deferred.promise;
+}
+

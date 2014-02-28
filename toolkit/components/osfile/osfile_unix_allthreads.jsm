@@ -19,12 +19,9 @@
 
 if (typeof Components != "undefined") {
   // Module is opened as a jsm module
-  var EXPORTED_SYMBOLS = ["OS"];
+  this.EXPORTED_SYMBOLS = ["OS"];
   Components.utils.import("resource://gre/modules/ctypes.jsm");
-  Components.utils.import("resource://gre/modules/osfile/osfile_shared_allthreads.jsm");
-} else {
-  // File is included from a chrome worker
-  importScripts("resource://gre/modules/osfile/osfile_shared_allthreads.jsm");
+  Components.utils.import("resource://gre/modules/osfile/osfile_shared_allthreads.jsm", this);
 }
 
 (function(exports) {
@@ -42,7 +39,7 @@ if (typeof Components != "undefined") {
 
   // Open libc
   let libc;
-  let libc_candidates =  [ "libsystem.B.dylib",
+  let libc_candidates =  [ "libSystem.B.dylib",
                            "libc.so.6",
                            "libc.so" ];
   for (let i = 0; i < libc_candidates.length; ++i) {
@@ -50,13 +47,12 @@ if (typeof Components != "undefined") {
       libc = ctypes.open(libc_candidates[i]);
       break;
     } catch (x) {
-      if (exports.OS.Shared.DEBUG) {
-        LOG("Could not open libc "+libc_candidates[i]);
-      }
+      LOG("Could not open libc ", libc_candidates[i]);
     }
   }
   if (!libc) {
-    throw new Error("Could not open any libc.");
+    // Note: If you change the string here, please adapt tests accordingly
+    throw new Error("Could not open system library: no libc");
   }
   exports.OS.Shared.Unix.libc = libc;
 
@@ -163,6 +159,136 @@ if (typeof Components != "undefined") {
 
   exports.OS.Shared.Unix.Error = OSError;
 
+  /**
+   * Code shared by implementations of File.Info on Unix
+   *
+   * @constructor
+  */
+  let AbstractInfo = function AbstractInfo(isDir, isSymLink, size, lastAccessDate,
+                                           lastModificationDate, unixLastStatusChangeDate,
+                                           unixOwner, unixGroup, unixMode) {
+    this._isDir = isDir;
+    this._isSymlLink = isSymLink;
+    this._size = size;
+    this._lastAccessDate = lastAccessDate;
+    this._lastModificationDate = lastModificationDate;
+    this._unixLastStatusChangeDate = unixLastStatusChangeDate;
+    this._unixOwner = unixOwner;
+    this._unixGroup = unixGroup;
+    this._unixMode = unixMode;
+  };
+
+  AbstractInfo.prototype = {
+    /**
+     * |true| if this file is a directory, |false| otherwise
+     */
+    get isDir() {
+      return this._isDir;
+    },
+    /**
+     * |true| if this file is a symbolink link, |false| otherwise
+     */
+    get isSymLink() {
+      return this._isSymlLink;
+    },
+    /**
+     * The size of the file, in bytes.
+     *
+     * Note that the result may be |NaN| if the size of the file cannot be
+     * represented in JavaScript.
+     *
+     * @type {number}
+     */
+    get size() {
+      return this._size;
+    },
+    /**
+     * The date of last access to this file.
+     *
+     * Note that the definition of last access may depend on the
+     * underlying operating system and file system.
+     *
+     * @type {Date}
+     */
+    get lastAccessDate() {
+      return this._lastAccessDate;
+    },
+    /**
+     * Return the date of last modification of this file.
+     */
+    get lastModificationDate() {
+      return this._lastModificationDate;
+    },
+    /**
+     * Return the date at which the status of this file was last modified
+     * (this is the date of the latest write/renaming/mode change/...
+     * of the file)
+     */
+    get unixLastStatusChangeDate() {
+      return this._unixLastStatusChangeDate;
+    },
+    /*
+     * Return the Unix owner of this file
+     */
+    get unixOwner() {
+      return this._unixOwner;
+    },
+    /*
+     * Return the Unix group of this file
+     */
+    get unixGroup() {
+      return this._unixGroup;
+    },
+    /*
+     * Return the Unix group of this file
+     */
+    get unixMode() {
+      return this._unixMode;
+    }
+  };
+  exports.OS.Shared.Unix.AbstractInfo = AbstractInfo;
+
+  /**
+   * Code shared by implementations of File.DirectoryIterator.Entry on Unix
+   *
+   * @constructor
+  */
+  let AbstractEntry = function AbstractEntry(isDir, isSymLink, name, path) {
+    this._isDir = isDir;
+    this._isSymlLink = isSymLink;
+    this._name = name;
+    this._path = path;
+  };
+
+  AbstractEntry.prototype = {
+    /**
+     * |true| if the entry is a directory, |false| otherwise
+     */
+    get isDir() {
+      return this._isDir;
+    },
+    /**
+     * |true| if the entry is a directory, |false| otherwise
+     */
+    get isSymLink() {
+      return this._isSymlLink;
+    },
+    /**
+     * The name of the entry
+     * @type {string}
+     */
+    get name() {
+      return this._name;
+    },
+    /**
+     * The full path to the entry
+     */
+    get path() {
+      return this._path;
+    }
+  };
+  exports.OS.Shared.Unix.AbstractEntry = AbstractEntry;
+
   // Special constants that need to be defined on all platforms
 
    Object.defineProperty(exports.OS.Shared, "POS_START", { value: exports.OS.Constants.libc.SEEK_SET });
@@ -184,5 +310,13 @@ if (typeof Components != "undefined") {
   // Special constructors that need to be defined on all threads
   OSError.closed = function closed(operation) {
     return new OSError(operation, OS.Constants.libc.EBADF);
+  };
+
+  OSError.exists = function exists(operation) {
+    return new OSError(operation, OS.Constants.libc.EEXIST);
+  };
+
+  OSError.noSuchFile = function noSuchFile(operation) {
+    return new OSError(operation, OS.Constants.libc.ENOENT);
   };
 })(this);

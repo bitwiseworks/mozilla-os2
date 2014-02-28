@@ -2,7 +2,6 @@
 package @ANDROID_PACKAGE_NAME@.tests;
 
 import @ANDROID_PACKAGE_NAME@.*;
-import android.app.Instrumentation;
 
 /**
  * A basic panning correctness test.
@@ -21,7 +20,7 @@ public class testPanCorrectness extends PixelTest {
 
         MotionEventHelper meh = new MotionEventHelper(getInstrumentation(), mDriver.getGeckoLeft(), mDriver.getGeckoTop());
 
-        mActions.expectGeckoEvent("Gecko:Ready").blockForEvent();
+        blockForGeckoReady();
 
         // load page and check we're at 0,0
         loadAndVerifyBoxes(url);
@@ -30,12 +29,22 @@ public class testPanCorrectness extends PixelTest {
         Actions.RepeatedEventExpecter paintExpecter = mActions.expectPaint();
         meh.dragSync(10, 150, 10, 50);
         PaintedSurface painted = waitForPaint(paintExpecter);
-        checkScrollWithBoxes(painted, 0, 100);
+        paintExpecter.unregisterListener();
+        try {
+            checkScrollWithBoxes(painted, 0, 100);
+        } finally {
+            painted.close();
+        }
 
         // drag page leftwards by 100 pixels
         paintExpecter = mActions.expectPaint();
         meh.dragSync(150, 10, 50, 10);
         painted = waitForPaint(paintExpecter);
-        checkScrollWithBoxes(painted, 100, 100);
+        paintExpecter.unregisterListener();
+        try {
+            checkScrollWithBoxes(painted, 100, 100);
+        } finally {
+            painted.close();
+        }
     }
 }

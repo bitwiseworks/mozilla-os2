@@ -20,17 +20,12 @@ VISIBILITY_FLAGS =
 STDCXX_COMPAT =
 
 ifneq (WINNT,$(HOST_OS_ARCH))
-HOST_PROGRAM	= nsinstall$(HOST_BIN_SUFFIX)
-HOST_CSRCS	= nsinstall.c pathsub.c
+HOST_PROGRAM	= nsinstall_real$(HOST_BIN_SUFFIX)
 endif
-
-TARGETS		= $(HOST_PROGRAM) $(SIMPLE_PROGRAMS)
 
 ifndef CROSS_COMPILE
 ifdef USE_ELF_DYNSTR_GC
-TARGETS		+= elf-dynstr-gc
-# Compiling the above will create dependency files.
-NEED_MDDEPDIR	= 1
+export:: elf-dynstr-gc
 endif
 endif
 
@@ -44,16 +39,32 @@ ifdef GNU_CC
 MODULE_OPTIMIZE_FLAGS = -O3
 endif
 
-ifndef COMPILER_DEPEND
-ifndef MOZ_NATIVE_MAKEDEPEND
-DIRS		+= mkdepend
-endif
-endif
-
 include $(topsrcdir)/config/config.mk
 
 # Do not install util programs
 NO_INSTALL=1
+
+ifneq (WINNT,$(HOST_OS_ARCH))
+# Ensure nsinstall is atomically created
+nsinstall$(HOST_BIN_SUFFIX): $(HOST_PROGRAM)
+	cp $^ $@.tmp
+	mv $@.tmp $@
+
+NSINSTALL_FILES := nsinstall$(HOST_BIN_SUFFIX)
+NSINSTALL_DEST := $(DIST)/bin
+NSINSTALL_TARGET := export
+INSTALL_TARGETS += NSINSTALL
+endif
+
+HEADERS_FILES = \
+	$(DEPTH)/mozilla-config.h \
+	$(srcdir)/nsStaticComponents.h \
+	$(NULL)
+HEADERS_DEST := $(DIST)/include
+HEADERS_TARGET := export
+INSTALL_TARGETS += HEADERS
+
+PYTHON_UNIT_TESTS := $(wildcard $(srcdir)/tests/unit-*.py)
 
 include $(topsrcdir)/config/rules.mk
 
@@ -63,17 +74,8 @@ ifeq ($(OS_CONFIG),SunOS4.1)
 NSPR_CFLAGS	+= -I$(srcdir)/../nsprpub/pr/include/md
 endif
 
-HEADERS = \
-	$(DEPTH)/mozilla-config.h \
-	$(srcdir)/nsStaticComponents.h \
-	$(NULL)
-
-export:: $(TARGETS) $(HEADERS)
-	$(INSTALL) $(IFLAGS1) $(HEADERS) $(DIST)/include
+export::
 	-$(RM) $(FINAL_LINK_COMPS) $(FINAL_LINK_LIBS) $(FINAL_LINK_COMP_NAMES)
-ifdef HOST_PROGRAM
-	$(INSTALL) $(HOST_PROGRAM) $(DIST)/bin
-endif
 
 # Generate a new buildid every time we "export" in config... that's only
 # supposed to be once per-build!
@@ -138,45 +140,19 @@ GARBAGE += \
 
 ifndef CROSS_COMPILE
 ifdef USE_ELF_DYNSTR_GC
-elf-dynstr-gc: elf-dynstr-gc.c $(GLOBAL_DEPS)
-	$(CC) $(COMPILE_CFLAGS) $(GLIB_CFLAGS) -o $@ $< $(LDFLAGS) $(GLIB_LIBS) 
+elf-dynstr-gc: elf-dynstr-gc.c $(GLOBAL_DEPS) $(call mkdir_deps,$(MDDEPDIR))
+	$(CC) $(COMPILE_CFLAGS) $(GLIB_CFLAGS) -o $@ $< $(LDFLAGS) $(GLIB_LIBS)
 endif
 endif
 
 FORCE:
 
-ifndef COMPILER_DEPEND
-ifdef MKDEPEND_DIR
-clean clobber realclean clobber_all::
-	cd $(MKDEPEND_DIR); $(MAKE) $@
-endif
-endif
-
-PYUNITS := \
-  unit-Expression.py \
-  unit-Preprocessor.py \
-  unit-nsinstall.py \
-  unit-printprereleasesuffix.py \
-  unit-JarMaker.py \
-  unit-buildlist.py \
-  unit-expandlibs.py \
-  unit-writemozinfo.py \
-  unit-mozunit.py \
-  $(NULL)
-
 check-preqs = \
-  check-python-modules \
   check-jar-mn \
   check-makefiles \
   $(NULL)
 
 check:: $(check-preqs)
-
-check-python-modules::
-	@$(EXIT_ON_ERROR) \
-	for test in $(PYUNITS); do \
-	  $(PYTHON) $(srcdir)/tests/$$test ; \
-	done
 
 check-jar-mn::
 	$(MAKE) -C tests/src-simple check-jar

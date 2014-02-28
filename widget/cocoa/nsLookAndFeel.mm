@@ -5,13 +5,26 @@
 
 #include "nsLookAndFeel.h"
 #include "nsCocoaFeatures.h"
-#include "nsObjCExceptions.h"
 #include "nsIServiceManager.h"
 #include "nsNativeThemeColors.h"
 #include "nsStyleConsts.h"
+#include "nsCocoaFeatures.h"
 #include "gfxFont.h"
 
 #import <Cocoa/Cocoa.h>
+
+// This must be included last:
+#include "nsObjCExceptions.h"
+
+enum {
+  mozNSScrollerStyleLegacy       = 0,
+  mozNSScrollerStyleOverlay      = 1
+};
+typedef NSInteger mozNSScrollerStyle;
+
+@interface NSScroller(AvailableSinceLion)
++ (mozNSScrollerStyle)preferredScrollerStyle;
+@end
 
 nsLookAndFeel::nsLookAndFeel() : nsXPLookAndFeel()
 {
@@ -32,6 +45,8 @@ static nscolor GetColorFromNSColor(NSColor* aColor)
 nsresult
 nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
 {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+
   nsresult res = NS_OK;
   
   switch (aID) {
@@ -228,8 +243,7 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
       aColor = NS_RGB(0xA3,0xA3,0xA3);
       break;          
     case eColorID__moz_mac_menutextdisable:
-      aColor = nsCocoaFeatures::OnSnowLeopardOrLater() ?
-                 NS_RGB(0x88,0x88,0x88) : NS_RGB(0x98,0x98,0x98);
+      aColor = NS_RGB(0x88,0x88,0x88);
       break;      
     case eColorID__moz_mac_menutextselect:
       aColor = GetColorFromNSColor([NSColor selectedMenuItemTextColor]);
@@ -272,6 +286,8 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
     }
   
   return res;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
 nsresult
@@ -336,6 +352,12 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_ScrollSliderStyle:
       aResult = eScrollThumbStyle_Proportional;
       break;
+    case eIntID_UseOverlayScrollbars:
+      aResult = SystemWantsOverlayScrollbars() ? 1 : 0;
+      break;
+    case eIntID_AllowOverlayScrollbarsOverlap:
+      aResult = AllowOverlayScrollbarsOverlap() ? 1 : 0;
+      break;
     case eIntID_TreeOpenDelay:
       aResult = 1000;
       break;
@@ -365,6 +387,9 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
       break;
     case eIntID_MacLionTheme:
       aResult = nsCocoaFeatures::OnLionOrLater();
+      break;
+    case eIntID_AlertNotificationOrigin:
+      aResult = NS_ALERT_TOP;
       break;
     case eIntID_TabFocusModel:
     {
@@ -406,6 +431,13 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_ScrollbarButtonAutoRepeatBehavior:
       aResult = 0;
       break;
+    case eIntID_SwipeAnimationEnabled:
+      aResult = 0;
+      if ([NSEvent respondsToSelector:@selector(
+            isSwipeTrackingFromScrollEventsEnabled)]) {
+        aResult = [NSEvent isSwipeTrackingFromScrollEventsEnabled] ? 1 : 0;
+      }
+      break;
     default:
       aResult = 0;
       res = NS_ERROR_FAILURE;
@@ -438,6 +470,22 @@ nsLookAndFeel::GetFloatImpl(FloatID aID, float &aResult)
   return res;
 }
 
+bool nsLookAndFeel::UseOverlayScrollbars()
+{
+  return GetInt(eIntID_UseOverlayScrollbars) != 0;
+}
+
+bool nsLookAndFeel::SystemWantsOverlayScrollbars()
+{
+  return ([NSScroller respondsToSelector:@selector(preferredScrollerStyle)] &&
+          [NSScroller preferredScrollerStyle] == mozNSScrollerStyleOverlay);
+}
+
+bool nsLookAndFeel::AllowOverlayScrollbarsOverlap()
+{
+  return (UseOverlayScrollbars() && nsCocoaFeatures::OnMountainLionOrLater());
+}
+
 // copied from gfxQuartzFontCache.mm, maybe should go in a Cocoa utils
 // file somewhere
 static void GetStringForNSString(const NSString *aSrc, nsAString& aDest)
@@ -448,14 +496,17 @@ static void GetStringForNSString(const NSString *aSrc, nsAString& aDest)
 
 bool
 nsLookAndFeel::GetFontImpl(FontID aID, nsString &aFontName,
-                           gfxFontStyle &aFontStyle)
+                           gfxFontStyle &aFontStyle,
+                           float aDevPixPerCSSPixel)
 {
+    NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
+
     // hack for now
     if (aID == eFont_Window || aID == eFont_Document) {
         aFontStyle.style      = NS_FONT_STYLE_NORMAL;
         aFontStyle.weight     = NS_FONT_WEIGHT_NORMAL;
         aFontStyle.stretch    = NS_FONT_STRETCH_NORMAL;
-        aFontStyle.size       = 14;
+        aFontStyle.size       = 14 * aDevPixPerCSSPixel;
         aFontStyle.systemFont = true;
 
         aFontName.AssignLiteral("sans-serif");
@@ -552,9 +603,12 @@ nsLookAndFeel::GetFontImpl(FontID aID, nsString &aFontName,
         (traits & NSFontExpandedTrait) ?
             NS_FONT_STRETCH_EXPANDED : (traits & NSFontCondensedTrait) ?
                 NS_FONT_STRETCH_CONDENSED : NS_FONT_STRETCH_NORMAL;
-    aFontStyle.size = [font pointSize];
+    // convert size from css pixels to device pixels
+    aFontStyle.size = [font pointSize] * aDevPixPerCSSPixel;
     aFontStyle.systemFont = true;
 
     GetStringForNSString([font familyName], aFontName);
     return true;
+
+    NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(false);
 }

@@ -34,17 +34,19 @@ case "$target" in
     fi
     ;;
 *-darwin*)
-    # we prefer gcc-4.2 over gcc on older darwin, so
-    # use that specific version if it's available.
-    # On newer versions of darwin, gcc is llvm-gcc while gcc-4.2 is the plain
-    # one, so we also try that first. If that fails, we fall back to clang
-    # as llvm-gcc is an unsupported dead end.
-    MOZ_PATH_PROGS(CC, $CC gcc-4.2 clang gcc)
-    MOZ_PATH_PROGS(CXX, $CXX g++-4.2 clang++ g++)
-    IS_LLVM_GCC=$($CC -v 2>&1 | grep llvm-gcc)
-    if test -n "$IS_LLVM_GCC"
+    # GCC on darwin is based on gcc 4.2 and we don't support it anymore.
+    if test -z "$CC"; then
+        MOZ_PATH_PROGS(CC, clang)
+    fi
+    if test -z "$CXX"; then
+        MOZ_PATH_PROGS(CXX, clang++)
+    fi
+    IS_GCC=$($CC -v 2>&1 | grep gcc)
+    if test -n "$IS_GCC"
     then
-      echo llvm-gcc is known to be broken, please use gcc-4.2 or clang.
+      echo gcc is known to be broken on OS X, please use clang.
+      echo see http://developer.mozilla.org/en-US/docs/Developer_Guide/Build_Instructions/Mac_OS_X_Prerequisites
+      echo for more information.
       exit 1
     fi
     ;;
@@ -90,6 +92,15 @@ if test "$CLANG_CXX"; then
     ## Worse, it's not supported by gcc, so it will cause tryserver bustage
     ## without any easy way for non-Clang users to check for it.
     _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Wno-unknown-warning-option -Wno-return-type-c-linkage -Wno-mismatched-tags"
+fi
+
+if test -z "$GNU_CC"; then
+    case "$target" in
+    *-mingw*)
+        ## Warning 4099 (equivalent of mismatched-tags) is disabled (bug 780474)
+        ## for the same reasons as above.
+        _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -wd4099"
+    esac
 fi
 
 if test "$GNU_CC"; then

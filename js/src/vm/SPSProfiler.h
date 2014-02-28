@@ -1,17 +1,20 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef SPSProfiler_h__
-#define SPSProfiler_h__
+#ifndef vm_SPSProfiler_h
+#define vm_SPSProfiler_h
 
 #include <stddef.h>
 
+#include "mozilla/DebugOnly.h"
+#include "mozilla/GuardObjects.h"
 #include "mozilla/HashFunctions.h"
+
 #include "js/Utility.h"
+#include "jsscript.h"
 
 /*
  * SPS Profiler integration with the JS Engine
@@ -100,21 +103,11 @@
  * from a signal handler when the JIT code is executing.
  */
 
-struct JSFunction;
-struct JSScript;
+class JSFunction;
 
 namespace js {
 
 class ProfileEntry;
-
-#ifdef JS_METHODJIT
-namespace mjit {
-    struct JITChunk;
-    struct JITScript;
-    struct JSActiveFrame;
-    struct PCLengthEntry;
-}
-#endif
 
 typedef HashMap<JSScript*, const char*, DefaultHasher<JSScript*>, SystemAllocPolicy>
         ProfileStringMap;
@@ -131,7 +124,7 @@ class SPSProfiler
     uint32_t             *size_;
     uint32_t             max_;
     bool                 slowAssertions;
-    bool                 enabled_;
+    uint32_t             enabled_;
 
     const char *allocProfileString(JSContext *cx, JSScript *script,
                                    JSFunction *function);
@@ -142,7 +135,19 @@ class SPSProfiler
     SPSProfiler(JSRuntime *rt);
     ~SPSProfiler();
 
-    uint32_t *size() { return size_; }
+    uint32_t **addressOfSizePointer() {
+        return &size_;
+    }
+
+    uint32_t *addressOfMaxSize() {
+        return &max_;
+    }
+
+    ProfileEntry **addressOfStack() {
+        return &stack_;
+    }
+
+    uint32_t *sizePointer() { return size_; }
     uint32_t maxSize() { return max_; }
     ProfileEntry *stack() { return stack_; }
 
@@ -167,81 +172,16 @@ class SPSProfiler
     void updatePC(JSScript *script, jsbytecode *pc) {
         if (enabled() && *size_ - 1 < max_) {
             JS_ASSERT(*size_ > 0);
+            JS_ASSERT(stack_[*size_ - 1].script() == script);
             stack_[*size_ - 1].setPC(pc);
         }
     }
 
-#ifdef JS_METHODJIT
-    struct ICInfo
-    {
-        size_t base;
-        size_t size;
-        jsbytecode *pc;
+    /* Enter a C++ function. */
+    void enterNative(const char *string, void *sp);
+    void exitNative() { pop(); }
 
-        ICInfo(void *base, size_t size, jsbytecode *pc)
-          : base(size_t(base)), size(size), pc(pc)
-        {}
-    };
-
-    struct JMChunkInfo
-    {
-        size_t mainStart;               // bounds for the inline code
-        size_t mainEnd;
-        size_t stubStart;               // bounds of the ool code
-        size_t stubEnd;
-        mjit::PCLengthEntry *pcLengths; // pcLengths for this chunk
-        mjit::JITChunk *chunk;          // stored to test when removing
-
-        JMChunkInfo(mjit::JSActiveFrame *frame,
-                    mjit::PCLengthEntry *pcLengths,
-                    mjit::JITChunk *chunk);
-
-        jsbytecode *convert(JSScript *script, size_t ip);
-    };
-
-    struct JMScriptInfo
-    {
-        Vector<ICInfo, 0, SystemAllocPolicy> ics;
-        Vector<JMChunkInfo, 1, SystemAllocPolicy> chunks;
-    };
-
-    typedef HashMap<JSScript*, JMScriptInfo*, DefaultHasher<JSScript*>,
-                    SystemAllocPolicy> JITInfoMap;
-
-    /*
-     * This is the mapping which facilitates translation from an ip to a
-     * jsbytecode*. The mapping is from a JSScript* to a set of chunks and ics
-     * which are associated with the script. This way lookup/translation doesn't
-     * have to do something like iterate the entire map.
-     *
-     * Each IC is easy to test because they all have only one pc associated with
-     * them, and the range is easy to check. The main chunks of code are a bit
-     * harder because there are both the inline and out of line streams which
-     * need to be tested. Each of these streams is described by the pcLengths
-     * array stored within each chunk. This array describes the width of each
-     * opcode of the corresponding JSScript, and has the same number of entries
-     * as script->length.
-     */
-    JITInfoMap jminfo;
-
-    bool registerMJITCode(mjit::JITChunk *chunk,
-                          mjit::JSActiveFrame *outerFrame,
-                          mjit::JSActiveFrame **inlineFrames);
-    void discardMJITCode(mjit::JITScript *jscr,
-                         mjit::JITChunk *chunk, void* address);
-    bool registerICCode(mjit::JITChunk *chunk, JSScript *script, jsbytecode* pc,
-                        void *start, size_t size);
-    jsbytecode *ipToPC(JSScript *script, size_t ip);
-
-  private:
-    JMChunkInfo *registerScript(mjit::JSActiveFrame *frame,
-                                mjit::PCLengthEntry *lenths,
-                                mjit::JITChunk *chunk);
-    void unregisterScript(JSScript *script, mjit::JITChunk *chunk);
-  public:
-#else
     jsbytecode *ipToPC(JSScript *script, size_t ip) { return NULL; }
-#endif
 
     void setProfilingStack(ProfileEntry *stack, uint32_t *size, uint32_t max);
     const char *profileString(JSContext *cx, JSScript *script, JSFunction *maybeFun);
@@ -250,6 +190,10 @@ class SPSProfiler
     /* meant to be used for testing, not recommended to call in normal code */
     size_t stringsCount() { return strings.count(); }
     void stringsReset() { strings.clear(); }
+
+    uint32_t *addressOfEnabled() {
+        return &enabled_;
+    }
 };
 
 /*
@@ -259,13 +203,191 @@ class SPSProfiler
  */
 class SPSEntryMarker
 {
-    SPSProfiler *profiler;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
   public:
-    SPSEntryMarker(JSRuntime *rt JS_GUARD_OBJECT_NOTIFIER_PARAM);
+    SPSEntryMarker(JSRuntime *rt
+                   MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
     ~SPSEntryMarker();
+
+  private:
+    SPSProfiler *profiler;
+    mozilla::DebugOnly<uint32_t> size_before;
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+/*
+ * SPS is the profiling backend used by the JS engine to enable time profiling.
+ * More information can be found in vm/SPSProfiler.{h,cpp}. This class manages
+ * the instrumentation portion of the profiling for JIT code.
+ *
+ * The instrumentation tracks entry into functions, leaving those functions via
+ * a function call, reentering the functions from a function call, and exiting
+ * the functions from returning. This class also handles inline frames and
+ * manages the instrumentation which needs to be attached to them as well.
+ *
+ * The basic methods which emit instrumentation are at the end of this class,
+ * and the management functions are all described in the middle.
+ */
+template<class Assembler, class Register>
+class SPSInstrumentation
+{
+    /* Because of inline frames, this is a nested structure in a vector */
+    struct FrameState {
+        JSScript *script; // script for this frame, NULL if not pushed yet
+        bool skipNext;    // should the next call to reenter be skipped?
+        int  left;        // number of leave() calls made without a matching reenter()
+    };
+
+    SPSProfiler *profiler_; // Instrumentation location management
+
+    Vector<FrameState, 1, SystemAllocPolicy> frames;
+    FrameState *frame;
+
+  public:
+    /*
+     * Creates instrumentation which writes information out the the specified
+     * profiler's stack and constituent fields.
+     */
+    SPSInstrumentation(SPSProfiler *profiler)
+      : profiler_(profiler), frame(NULL)
+    {
+        enterInlineFrame();
+    }
+
+    /* Small proxies around SPSProfiler */
+    bool enabled() { return profiler_ && profiler_->enabled(); }
+    SPSProfiler *profiler() { JS_ASSERT(enabled()); return profiler_; }
+    bool slowAssertions() { return enabled() && profiler_->slowAssertionsEnabled(); }
+
+    /* Signals an inline function returned, reverting to the previous state */
+    void leaveInlineFrame() {
+        if (!enabled())
+            return;
+        JS_ASSERT(frame->left == 0);
+        JS_ASSERT(frame->script != NULL);
+        frames.shrinkBy(1);
+        JS_ASSERT(frames.length() > 0);
+        frame = &frames[frames.length() - 1];
+    }
+
+    /* Saves the current state and assumes a fresh one for the inline function */
+    bool enterInlineFrame() {
+        if (!enabled())
+            return true;
+        JS_ASSERT_IF(frame != NULL, frame->script != NULL);
+        JS_ASSERT_IF(frame != NULL, frame->left == 1);
+        if (!frames.growBy(1))
+            return false;
+        frame = &frames[frames.length() - 1];
+        frame->script = NULL;
+        frame->skipNext = false;
+        frame->left = 0;
+        return true;
+    }
+
+    /* Number of inline frames currently active (doesn't include original one) */
+    unsigned inliningDepth() {
+        return frames.length() - 1;
+    }
+
+    /*
+     * When debugging or with slow assertions, sometimes a C++ method will be
+     * invoked to perform the pop operation from the SPS stack. When we leave
+     * JIT code, we need to record the current PC, but upon reentering JIT code,
+     * no update back to NULL should happen. This method exists to flag this
+     * behavior. The next leave() will emit instrumentation, but the following
+     * reenter() will be a no-op.
+     */
+    void skipNextReenter() {
+        /* If we've left the frame, the reenter will be skipped anyway */
+        if (!enabled() || frame->left != 0)
+            return;
+        JS_ASSERT(frame->script);
+        JS_ASSERT(!frame->skipNext);
+        frame->skipNext = true;
+    }
+
+    /*
+     * In some cases, a frame needs to be flagged as having been pushed, but no
+     * instrumentation should be emitted. This updates internal state to flag
+     * that further instrumentation should actually be emitted.
+     */
+    void setPushed(JSScript *script) {
+        if (!enabled())
+            return;
+        JS_ASSERT(frame->left == 0);
+        frame->script = script;
+    }
+
+    /*
+     * Flags entry into a JS function for the first time. Before this is called,
+     * no instrumentation is emitted, but after this instrumentation is emitted.
+     */
+    bool push(JSContext *cx, JSScript *script, Assembler &masm, Register scratch) {
+        if (!enabled())
+            return true;
+        const char *string = profiler_->profileString(cx, script,
+                                                      script->function());
+        if (string == NULL)
+            return false;
+        masm.spsPushFrame(profiler_, string, script, scratch);
+        setPushed(script);
+        return true;
+    }
+
+    /*
+     * Signifies that C++ performed the push() for this function. C++ always
+     * sets the current PC to something non-null, however, so as soon as JIT
+     * code is reentered this updates the current pc to NULL.
+     */
+    void pushManual(JSScript *script, Assembler &masm, Register scratch) {
+        if (!enabled())
+            return;
+        masm.spsUpdatePCIdx(profiler_, ProfileEntry::NullPCIndex, scratch);
+        setPushed(script);
+    }
+
+    /*
+     * Signals that the current function is leaving for a function call. This
+     * can happen both on JS function calls and also calls to C++. This
+     * internally manages how many leave() calls have been seen, and only the
+     * first leave() emits instrumentation. Similarly, only the last
+     * corresponding reenter() actually emits instrumentation.
+     */
+    void leave(jsbytecode *pc, Assembler &masm, Register scratch) {
+        if (enabled() && frame->script && frame->left++ == 0) {
+            JS_ASSERT(frame->script->code <= pc &&
+                      pc < frame->script->code + frame->script->length);
+            masm.spsUpdatePCIdx(profiler_, pc - frame->script->code, scratch);
+        }
+    }
+
+    /*
+     * Flags that the leaving of the current function has returned. This tracks
+     * state with leave() to only emit instrumentation at proper times.
+     */
+    void reenter(Assembler &masm, Register scratch) {
+        if (!enabled() || !frame->script || frame->left-- != 1)
+            return;
+        if (frame->skipNext)
+            frame->skipNext = false;
+        else
+            masm.spsUpdatePCIdx(profiler_, ProfileEntry::NullPCIndex, scratch);
+    }
+
+    /*
+     * Signifies exiting a JS frame, popping the SPS entry. Because there can be
+     * multiple return sites of a function, this does not cease instrumentation
+     * emission.
+     */
+    void pop(Assembler &masm, Register scratch) {
+        if (enabled()) {
+            JS_ASSERT(frame->left == 0);
+            JS_ASSERT(frame->script);
+            masm.spsPopFrame(profiler_, scratch);
+        }
+    }
 };
 
 } /* namespace js */
 
-#endif /* SPSProfiler_h__ */
+#endif /* vm_SPSProfiler_h */

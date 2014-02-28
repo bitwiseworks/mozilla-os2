@@ -13,6 +13,12 @@
  * limitations under the License.
  */
 
+if (!this.ctypes) {
+  // We're likely being loaded as a JSM.
+  this.EXPORTED_SYMBOLS = [ "libcutils", "libnetutils", "netHelpers" ];
+  Components.utils.import("resource://gre/modules/ctypes.jsm");
+}
+
 const SYSTEM_PROPERTY_KEY_MAX = 32;
 const SYSTEM_PROPERTY_VALUE_MAX = 92;
 
@@ -24,7 +30,7 @@ let DEBUG;
 /**
  * Expose some system-level functions.
  */
-let libcutils = (function() {
+this.libcutils = (function() {
   let lib;
   try {
     lib = ctypes.open("libcutils.so");
@@ -99,7 +105,7 @@ let libcutils = (function() {
 /**
  * Network-related functions from libnetutils.
  */
-let libnetutils = (function () {
+this.libnetutils = (function () {
   let library;
   try {
     library = ctypes.open("libnetutils.so");
@@ -145,10 +151,6 @@ let libnetutils = (function () {
                                               ctypes.default_abi,
                                               ctypes.int,
                                               ctypes.char.ptr),
-    ifc_reset_connections: library.declare("ifc_reset_connections",
-                                           ctypes.default_abi,
-                                           ctypes.int,
-                                           ctypes.char.ptr),
     ifc_configure: library.declare("ifc_configure", ctypes.default_abi,
                                    ctypes.int,
                                    ctypes.char.ptr,
@@ -157,6 +159,18 @@ let libnetutils = (function () {
                                    ctypes.int,
                                    ctypes.int,
                                    ctypes.int),
+    ifc_add_route: library.declare("ifc_add_route", ctypes.default_abi,
+                                   ctypes.int, // return value
+                                   ctypes.char.ptr, // ifname
+                                   ctypes.char.ptr, // dst
+                                   ctypes.int, // prefix_length
+                                   ctypes.char.ptr), // gw
+    ifc_remove_route: library.declare("ifc_remove_route", ctypes.default_abi,
+                                      ctypes.int, // return value
+                                      ctypes.char.ptr, // ifname
+                                      ctypes.char.ptr, // dst
+                                      ctypes.int, // prefix_length
+                                      ctypes.char.ptr), // gw
     dhcp_stop: library.declare("dhcp_stop", ctypes.default_abi,
                                ctypes.int,
                                ctypes.char.ptr),
@@ -165,7 +179,15 @@ let libnetutils = (function () {
                                         ctypes.char.ptr),
     dhcp_get_errmsg: library.declare("dhcp_get_errmsg", ctypes.default_abi,
                                      ctypes.char.ptr),
+
+    // Constants for ifc_reset_connections.
+    // NOTE: Ignored in versions before ICS.
+    RESET_IPV4_ADDRESSES: 0x01,
+    RESET_IPV6_ADDRESSES: 0x02,
   };
+
+  iface.RESET_ALL_ADDRESSES = iface.RESET_IPV4_ADDRESSES |
+                              iface.RESET_IPV6_ADDRESSES
 
   // dhcp_do_request's interface changed in SDK version 15. We try to hide
   // this here by implementing the same JS API for both versions.
@@ -180,28 +202,60 @@ let libnetutils = (function () {
     let dns2buf = ctypes.char.array(4096)();
     let serverbuf = ctypes.char.array(4096)();
     let lease = ctypes.int();
-    let c_dhcp_do_request =
-      library.declare("dhcp_do_request", ctypes.default_abi,
-                      ctypes.int,      // return value
-                      ctypes.char.ptr, // ifname
-                      ctypes.char.ptr, // ipaddr
-                      ctypes.char.ptr, // gateway
-                      ctypes.int.ptr,  // prefixlen
-                      ctypes.char.ptr, // dns1
-                      ctypes.char.ptr, // dns2
-                      ctypes.char.ptr, // server
-                      ctypes.int.ptr); // lease
+    let vendorbuf = ctypes.char.array(4096)();
+    let c_dhcp_do_request;
+
+    // also changed for 16
+    if (sdkVersion >= 16) {
+      c_dhcp_do_request =
+        library.declare("dhcp_do_request", ctypes.default_abi,
+                        ctypes.int,       // return value
+                        ctypes.char.ptr,  // ifname
+                        ctypes.char.ptr,  // ipaddr
+                        ctypes.char.ptr,  // gateway
+                        ctypes.int.ptr,   // prefixlen
+                        ctypes.char.ptr,  // dns1
+                        ctypes.char.ptr,  // dns2
+                        ctypes.char.ptr,  // server
+                        ctypes.int.ptr,   // lease
+                        ctypes.char.ptr); // vendorinfo
+    } else {
+      c_dhcp_do_request =
+        library.declare("dhcp_do_request", ctypes.default_abi,
+                        ctypes.int,      // return value
+                        ctypes.char.ptr, // ifname
+                        ctypes.char.ptr, // ipaddr
+                        ctypes.char.ptr, // gateway
+                        ctypes.int.ptr,  // prefixlen
+                        ctypes.char.ptr, // dns1
+                        ctypes.char.ptr, // dns2
+                        ctypes.char.ptr, // server
+                        ctypes.int.ptr); // lease
+    }
 
 
     iface.dhcp_do_request = function dhcp_do_request(ifname) {
-      let ret = c_dhcp_do_request(ifname,
-                                  ipaddrbuf,
-                                  gatewaybuf,
-                                  prefixLen.address(),
-                                  dns1buf,
-                                  dns2buf,
-                                  serverbuf,
-                                  lease.address());
+      let ret;
+      if (sdkVersion >= 16) {
+        ret = c_dhcp_do_request(ifname,
+                                ipaddrbuf,
+                                gatewaybuf,
+                                prefixLen.address(),
+                                dns1buf,
+                                dns2buf,
+                                serverbuf,
+                                lease.address(),
+                                vendorbuf);
+      } else {
+        ret = c_dhcp_do_request(ifname,
+                                ipaddrbuf,
+                                gatewaybuf,
+                                prefixLen.address(),
+                                dns1buf,
+                                dns2buf,
+                                serverbuf,
+                                lease.address());
+      }
 
       if (ret && DEBUG) {
         let error = iface.dhcp_get_errmsg();
@@ -215,7 +269,8 @@ let libnetutils = (function () {
         dns1_str: dns1buf.readString(),
         dns2_str: dns2buf.readString(),
         server_str: serverbuf.readString(),
-        lease: lease.value | 0
+        lease: lease.value | 0,
+        vendor_str: vendorbuf.readString()
       };
       obj.ipaddr = netHelpers.stringToIP(obj.ipaddr_str);
       obj.mask_str = netHelpers.ipToString(obj.mask);
@@ -228,6 +283,17 @@ let libnetutils = (function () {
     };
     // dhcp_do_request_renew() went away in newer libnetutils.
     iface.dhcp_do_request_renew = iface.dhcp_do_request;
+
+    // Same deal with ifc_reset_connections.
+    let c_ifc_reset_connections =
+      library.declare("ifc_reset_connections",
+                      ctypes.default_abi,
+                      ctypes.int,
+                      ctypes.char.ptr,
+                      ctypes.int);
+    iface.ifc_reset_connections = function(ifname, reset_mask) {
+      return c_ifc_reset_connections(ifname, reset_mask) | 0;
+    }
   } else {
     let ints = ctypes.int.array(8)();
     let c_dhcp_do_request =
@@ -279,6 +345,14 @@ let libnetutils = (function () {
     };
     iface.dhcp_do_request = wrapCFunc(c_dhcp_do_request);
     iface.dhcp_do_request_renew = wrapCFunc(c_dhcp_do_request_renew);
+    let c_ifc_reset_connections =
+      library.declare("ifc_reset_connections",
+                      ctypes.default_abi,
+                      ctypes.int,
+                      ctypes.char.ptr);
+    iface.ifc_reset_connections = function(ifname, reset_mask) {
+      return c_ifc_reset_connections(ifname) | 0;
+    }
   }
 
   return iface;
@@ -287,7 +361,7 @@ let libnetutils = (function () {
 /**
  * Helpers for conversions.
  */
-let netHelpers = {
+this.netHelpers = {
 
   /**
    * Swap byte orders for 32-bit value
@@ -363,5 +437,18 @@ let netHelpers = {
       mask |= (0x80000000 >> i);
     }
     return this.ntohl(mask);
+  },
+
+  /**
+   * Get Mask length from given mask address
+   */
+  getMaskLength: function getMaskLength(mask) {
+    let len = 0;
+    let netmask = this.ntohl(mask);
+    while (netmask & 0x80000000) {
+        len++;
+        netmask = netmask << 1;
+    }
+    return len;
   }
 };

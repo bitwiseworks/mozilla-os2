@@ -75,9 +75,9 @@ nsTSubstring_CharT::MutatePrep( size_type capacity, char_type** oldData, uint32_
         size_type temp = curCapacity;
         while (temp < capacity)
           temp <<= 1;
-        NS_ASSERTION(NS_MIN(temp, kMaxCapacity) >= capacity,
+        NS_ASSERTION(XPCOM_MIN(temp, kMaxCapacity) >= capacity,
                      "should have hit the early return at the top");
-        capacity = NS_MIN(temp, kMaxCapacity);
+        capacity = XPCOM_MIN(temp, kMaxCapacity);
       }
 
     //
@@ -127,7 +127,7 @@ nsTSubstring_CharT::MutatePrep( size_type capacity, char_type** oldData, uint32_
         // make use of our F_OWNED or F_FIXED buffers because they are not
         // large enough.
 
-        nsStringBuffer* newHdr = nsStringBuffer::Alloc(storageSize);
+        nsStringBuffer* newHdr = nsStringBuffer::Alloc(storageSize).get();
         if (!newHdr)
           return false; // we are still in a consistent state
 
@@ -451,7 +451,7 @@ nsTSubstring_CharT::Adopt( char_type* data, size_type length )
 void
 nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, char_type c )
   {
-    cutStart = NS_MIN(cutStart, Length());
+    cutStart = XPCOM_MIN(cutStart, Length());
 
     if (ReplacePrep(cutStart, cutLength, 1))
       mData[cutStart] = c;
@@ -479,7 +479,7 @@ nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, const cha
           }
       }
 
-    cutStart = NS_MIN(cutStart, Length());
+    cutStart = XPCOM_MIN(cutStart, Length());
 
     if (ReplacePrep(cutStart, cutLength, length) && length > 0)
       char_traits::copy(mData + cutStart, data, length);
@@ -502,7 +502,7 @@ nsTSubstring_CharT::ReplaceASCII( index_type cutStart, size_type cutLength, cons
       }
 #endif
 
-    cutStart = NS_MIN(cutStart, Length());
+    cutStart = XPCOM_MIN(cutStart, Length());
 
     if (ReplacePrep(cutStart, cutLength, length) && length > 0)
       char_traits::copyASCII(mData + cutStart, data, length);
@@ -520,7 +520,7 @@ nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, const sub
 
     size_type length = tuple.Length();
 
-    cutStart = NS_MIN(cutStart, Length());
+    cutStart = XPCOM_MIN(cutStart, Length());
 
     if (ReplacePrep(cutStart, cutLength, length) && length > 0)
       tuple.WriteTo(mData + cutStart, length);
@@ -554,7 +554,7 @@ nsTSubstring_CharT::SetCapacity( size_type capacity, const fallible_t& )
       return false; // out-of-memory
 
     // compute new string length
-    size_type newLen = NS_MIN(mLength, capacity);
+    size_type newLen = XPCOM_MIN(mLength, capacity);
 
     if (oldData)
       {
@@ -791,23 +791,18 @@ void nsTSubstring_CharT::AppendPrintf( const char* format, va_list ap )
  * XXX(darin): if this is the right thing, then why wasn't it fixed in NSPR?!?
  */
 static void 
-Modified_cnvtf(char *buf, int bufsz, int prcsn, double fval)
+Modified_cnvtf(char (& buf)[40], int prcsn, double fval)
 {
   int decpt, sign, numdigits;
-  char *num, *nump;
+  char num[40];
+  char *nump;
   char *bufp = buf;
   char *endnum;
 
-  /* If anything fails, we store an empty string in 'buf' */
-  num = (char*)malloc(bufsz);
-  if (num == NULL) {
-    buf[0] = '\0';
-    return;
-  }
-  if (PR_dtoa(fval, 2, prcsn, &decpt, &sign, &endnum, num, bufsz)
+  if (PR_dtoa(fval, 2, prcsn, &decpt, &sign, &endnum, num, sizeof(num))
       == PR_FAILURE) {
     buf[0] = '\0';
-    goto done;
+    return;
   }
   numdigits = endnum - num;
   nump = num;
@@ -824,7 +819,7 @@ Modified_cnvtf(char *buf, int bufsz, int prcsn, double fval)
 
   if (decpt == 9999) {
     while ((*bufp++ = *nump++) != 0) {} /* nothing to execute */
-    goto done;
+    return;
   }
 
   if (decpt > (prcsn+1) || decpt < -(prcsn-1) || decpt < -5) {
@@ -837,7 +832,7 @@ Modified_cnvtf(char *buf, int bufsz, int prcsn, double fval)
       *bufp++ = *nump++;
     }
     *bufp++ = 'e';
-    PR_snprintf(bufp, bufsz - (bufp - buf), "%+d", decpt-1);
+    PR_snprintf(bufp, sizeof(num) - (bufp - buf), "%+d", decpt-1);
   }
   else if (decpt >= 0) {
     if (decpt == 0) {
@@ -873,8 +868,6 @@ Modified_cnvtf(char *buf, int bufsz, int prcsn, double fval)
     }
     *bufp++ = '\0';
   }
-done:
-  free(num);
 }
 #endif /* CharT_is_PRUnichar */
 
@@ -884,7 +877,7 @@ nsTSubstring_CharT::DoAppendFloat( double aFloat, int digits )
   char buf[40];
   // Use Modified_cnvtf, which is locale-insensitive, instead of the
   // locale-sensitive PR_snprintf or sprintf(3)
-  Modified_cnvtf(buf, sizeof(buf), digits, aFloat);
+  Modified_cnvtf(buf, digits, aFloat);
   AppendASCII(buf);
 }
 
@@ -895,7 +888,7 @@ nsTSubstring_CharT::SizeOfExcludingThisMustBeUnshared(
   if (mFlags & F_SHARED) {
     return nsStringBuffer::FromData(mData)->
              SizeOfIncludingThisMustBeUnshared(mallocSizeOf);
-  } 
+  }
   if (mFlags & F_OWNED) {
     return mallocSizeOf(mData);
   }
@@ -928,6 +921,22 @@ nsTSubstring_CharT::SizeOfExcludingThisIfUnshared(
 }
 
 size_t
+nsTSubstring_CharT::SizeOfExcludingThisEvenIfShared(
+    nsMallocSizeOfFun mallocSizeOf) const
+{
+  // This is identical to SizeOfExcludingThisMustBeUnshared except for the
+  // F_SHARED case.
+  if (mFlags & F_SHARED) {
+    return nsStringBuffer::FromData(mData)->
+             SizeOfIncludingThisEvenIfShared(mallocSizeOf);
+  }
+  if (mFlags & F_OWNED) {
+    return mallocSizeOf(mData);
+  }
+  return 0;
+}
+
+size_t
 nsTSubstring_CharT::SizeOfIncludingThisMustBeUnshared(
     nsMallocSizeOfFun mallocSizeOf) const
 {
@@ -939,5 +948,12 @@ nsTSubstring_CharT::SizeOfIncludingThisIfUnshared(
     nsMallocSizeOfFun mallocSizeOf) const
 {
   return mallocSizeOf(this) + SizeOfExcludingThisIfUnshared(mallocSizeOf);
+}
+
+size_t
+nsTSubstring_CharT::SizeOfIncludingThisEvenIfShared(
+    nsMallocSizeOfFun mallocSizeOf) const
+{
+  return mallocSizeOf(this) + SizeOfExcludingThisEvenIfShared(mallocSizeOf);
 }
 

@@ -1,16 +1,15 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef StringBuffer_h___
-#define StringBuffer_h___
+#ifndef vm_StringBuffer_h
+#define vm_StringBuffer_h
 
-#include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
 
 #include "jscntxt.h"
-#include "jspubtd.h"
 
 #include "js/Vector.h"
 
@@ -46,6 +45,7 @@ class StringBuffer
     inline bool resize(size_t len) { return cb.resize(len); }
     inline bool append(const jschar c) { return cb.append(c); }
     inline bool append(const jschar *chars, size_t len) { return cb.append(chars, len); }
+    inline bool append(const JS::CharPtr chars, size_t len) { return cb.append(chars.get(), len); }
     inline bool append(const jschar *begin, const jschar *end) { return cb.append(begin, end); }
     inline bool append(JSString *str);
     inline bool append(JSLinearString *str);
@@ -63,6 +63,9 @@ class StringBuffer
     }
     void infallibleAppend(const jschar *chars, size_t len) {
         cb.infallibleAppend(chars, len);
+    }
+    void infallibleAppend(const JS::CharPtr chars, size_t len) {
+        cb.infallibleAppend(chars.get(), len);
     }
     void infallibleAppend(const jschar *begin, const jschar *end) {
         cb.infallibleAppend(begin, end);
@@ -82,7 +85,7 @@ class StringBuffer
      * Creates a string from the characters in this buffer, then (regardless
      * whether string creation succeeded or failed) empties the buffer.
      */
-    JSFixedString *finishString();
+    JSFlatString *finishString();
 
     /* Identical to finishString() except that an atom is created. */
     JSAtom *finishAtom();
@@ -117,9 +120,9 @@ StringBuffer::appendInflated(const char *cstr, size_t cstrlen)
     size_t lengthBefore = length();
     if (!cb.growByUninitialized(cstrlen))
         return false;
-    DebugOnly<size_t> oldcstrlen = cstrlen;
-    DebugOnly<bool> ok = InflateStringToBuffer(context(), cstr, cstrlen,
-                                               begin() + lengthBefore, &cstrlen);
+    mozilla::DebugOnly<size_t> oldcstrlen = cstrlen;
+    mozilla::DebugOnly<bool> ok = InflateStringToBuffer(context(), cstr, cstrlen,
+                                                        begin() + lengthBefore, &cstrlen);
     JS_ASSERT(ok && oldcstrlen == cstrlen);
     return true;
 }
@@ -146,4 +149,4 @@ BooleanToStringBuffer(JSContext *cx, bool b, StringBuffer &sb)
 
 }  /* namespace js */
 
-#endif /* StringBuffer_h___ */
+#endif /* vm_StringBuffer_h */

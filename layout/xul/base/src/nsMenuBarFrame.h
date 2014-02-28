@@ -10,7 +10,7 @@
 #ifndef nsMenuBarFrame_h__
 #define nsMenuBarFrame_h__
 
-#include "prtypes.h"
+#include "mozilla/Attributes.h"
 #include "nsIAtom.h"
 #include "nsCOMPtr.h"
 #include "nsBoxFrame.h"
@@ -32,37 +32,40 @@ public:
   nsMenuBarFrame(nsIPresShell* aShell, nsStyleContext* aContext);
 
   // nsMenuParent interface
-  virtual nsMenuFrame* GetCurrentMenuItem();
-  NS_IMETHOD SetCurrentMenuItem(nsMenuFrame* aMenuItem);
-  virtual void CurrentMenuIsBeingDestroyed();
-  NS_IMETHOD ChangeMenuItem(nsMenuFrame* aMenuItem, bool aSelectFirstItem);
+  virtual nsMenuFrame* GetCurrentMenuItem() MOZ_OVERRIDE;
+  NS_IMETHOD SetCurrentMenuItem(nsMenuFrame* aMenuItem) MOZ_OVERRIDE;
+  virtual void CurrentMenuIsBeingDestroyed() MOZ_OVERRIDE;
+  NS_IMETHOD ChangeMenuItem(nsMenuFrame* aMenuItem, bool aSelectFirstItem) MOZ_OVERRIDE;
 
-  NS_IMETHOD SetActive(bool aActiveFlag); 
+  NS_IMETHOD SetActive(bool aActiveFlag) MOZ_OVERRIDE; 
 
-  virtual bool IsMenuBar() { return true; }
-  virtual bool IsContextMenu() { return false; }
-  virtual bool IsActive() { return mIsActive; }
-  virtual bool IsMenu() { return false; }
-  virtual bool IsOpen() { return true; } // menubars are considered always open
+  virtual bool IsMenuBar() MOZ_OVERRIDE { return true; }
+  virtual bool IsContextMenu() MOZ_OVERRIDE { return false; }
+  virtual bool IsActive() MOZ_OVERRIDE { return mIsActive; }
+  virtual bool IsMenu() MOZ_OVERRIDE { return false; }
+  virtual bool IsOpen() MOZ_OVERRIDE { return true; } // menubars are considered always open
 
   bool IsMenuOpen() { return mCurrentMenu && mCurrentMenu->IsOpen(); }
 
   void InstallKeyboardNavigator();
   void RemoveKeyboardNavigator();
 
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot);
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
-  virtual void LockMenuUntilClosed(bool aLock) {}
-  virtual bool IsMenuLocked() { return false; }
+  virtual void LockMenuUntilClosed(bool aLock) MOZ_OVERRIDE {}
+  virtual bool IsMenuLocked() MOZ_OVERRIDE { return false; }
 
 // Non-interface helpers
 
-  void
-  SetStayActive(bool aStayActive) { mStayActive = aStayActive; }
+  // The 'stay active' flag is set when navigating from one top-level menu
+  // to another, to prevent the menubar from deactivating and submenus from
+  // firing extra DOMMenuItemActive events.
+  bool GetStayActive() { return mStayActive; }
+  void SetStayActive(bool aStayActive) { mStayActive = aStayActive; }
 
   // Called when a menu on the menu bar is clicked on. Returns a menu if one
   // needs to be closed.
@@ -73,7 +76,7 @@ public:
 
   // indicate that a menu on the menubar was closed. Returns true if the caller
   // may deselect the menuitem.
-  virtual bool MenuClosed();
+  virtual bool MenuClosed() MOZ_OVERRIDE;
 
   // Called when Enter is pressed while the menubar is focused. If the current
   // menu is open, let the child handle the key.
@@ -82,7 +85,7 @@ public:
   // Used to handle ALT+key combos
   nsMenuFrame* FindMenuWithShortcut(nsIDOMKeyEvent* aKeyEvent);
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     // Override bogus IsFrameOfType in nsBoxFrame.
     if (aFlags & (nsIFrame::eReplacedContainsBlock | nsIFrame::eReplaced))
@@ -91,7 +94,7 @@ public:
   }
 
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
       return MakeFrameName(NS_LITERAL_STRING("MenuBar"), aResult);
   }
@@ -113,7 +116,7 @@ protected:
   // be null if no menu is active.
   nsMenuFrame* mCurrentMenu;
 
-  nsIDOMEventTarget* mTarget;
+  mozilla::dom::EventTarget* mTarget;
 
 }; // class nsMenuBarFrame
 

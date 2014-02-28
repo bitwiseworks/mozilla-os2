@@ -9,7 +9,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-LIBRARY_NAME = google_breakpad_libxul_s
 FORCE_STATIC_LIB = 1
 
 STL_FLAGS =
@@ -26,14 +25,6 @@ VPATH += \
   $(topsrcdir)/toolkit/crashreporter/google-breakpad/src/client/windows/handler \
   $(topsrcdir)/toolkit/crashreporter/google-breakpad/src/client/windows/sender \
   $(topsrcdir)/toolkit/crashreporter/google-breakpad/src/client/windows/crash_generation \
-  $(NULL)
-
-CPPSRCS = \
-  $(objs_common) \
-  $(objs_handler) \
-  $(objs_sender) \
-  $(objs_crash_generation) \
-  http_upload.cc \ # required for the libxul version but not standalone
   $(NULL)
 
 DEFINES += -DUNICODE -DUNICODE_ -DBREAKPAD_NO_TERMINATE_THREAD -DNOMINMAX

@@ -11,22 +11,21 @@
 #include "prenv.h"
 
 #include "nsString.h"
-#include "GLContext.h"
+#include "nsTArray.h"
+#include "GLContextTypes.h"
 #include "gfx3DMatrix.h"
+#include "mozilla/layers/LayersTypes.h"
+#include "gfxColor.h"
+#include "mozilla/gfx/Matrix.h"
+#include "mozilla/RefPtr.h"
 
 namespace mozilla {
+namespace gl {
+class GLContext;
+}
 namespace layers {
 
 class Layer;
-
-// The kinds of mask layer a shader can support
-// We rely on the items in this enum being sequential
-enum MaskType {
-  MaskNone = 0,   // no mask layer
-  Mask2d,         // mask layer for layers with 2D transforms
-  Mask3d,         // mask layer for layers with 3D transforms
-  NumMaskTypes
-};
 
 /**
  * This struct represents the shaders that make up a program and the uniform
@@ -140,45 +139,16 @@ class ShaderProgramOGL
 public:
   typedef mozilla::gl::GLContext GLContext;
 
-  ShaderProgramOGL(GLContext* aGL, const ProgramProfileOGL& aProfile) :
-    mIsProjectionMatrixStale(false), mGL(aGL), mProgram(0),
-    mProfile(aProfile), mProgramState(STATE_NEW) { }
+  ShaderProgramOGL(GLContext* aGL, const ProgramProfileOGL& aProfile);
 
-  ~ShaderProgramOGL() {
-    if (mProgram <= 0) {
-      return;
-    }
-
-    nsRefPtr<GLContext> ctx = mGL->GetSharedContext();
-    if (!ctx) {
-      ctx = mGL;
-    }
-    ctx->MakeCurrent();
-    ctx->fDeleteProgram(mProgram);
-  }
+  ~ShaderProgramOGL();
 
   bool HasInitialized() {
     NS_ASSERTION(mProgramState != STATE_OK || mProgram > 0, "Inconsistent program state");
     return mProgramState == STATE_OK;
   }
 
-  void Activate() {
-    if (mProgramState == STATE_NEW) {
-      if (!Initialize()) {
-        NS_WARNING("Shader could not be initialised");
-        return;
-      }
-    }
-    NS_ASSERTION(HasInitialized(), "Attempting to activate a program that's not in use!");
-    mGL->fUseProgram(mProgram);
-#if CHECK_CURRENT_PROGRAM
-    mGL->SetUserData(&sCurrentProgramKey, this);
-#endif
-    // check and set the projection matrix
-    if (mIsProjectionMatrixStale) {
-      SetProjectionMatrix(mProjectionMatrix);
-    }
-  }
+  void Activate();
 
   bool Initialize();
 
@@ -224,12 +194,29 @@ public:
     SetMatrixUniform(mProfile.LookupUniformLocation("uLayerTransform"), aMatrix);
   }
 
+  void SetLayerTransform(const gfx::Matrix4x4& aMatrix) {
+    SetMatrixUniform(mProfile.LookupUniformLocation("uLayerTransform"), aMatrix);
+  }
+
+  void SetMaskLayerTransform(const gfx::Matrix4x4& aMatrix) {
+    SetMatrixUniform(mProfile.LookupUniformLocation("uMaskQuadTransform"), aMatrix);
+  }
+
   void SetLayerQuadRect(const nsIntRect& aRect) {
     gfx3DMatrix m;
     m._11 = float(aRect.width);
     m._22 = float(aRect.height);
     m._41 = float(aRect.x);
     m._42 = float(aRect.y);
+    SetMatrixUniform(mProfile.LookupUniformLocation("uLayerQuadTransform"), m);
+  }
+
+  void SetLayerQuadRect(const gfx::Rect& aRect) {
+    gfx3DMatrix m;
+    m._11 = aRect.width;
+    m._22 = aRect.height;
+    m._41 = aRect.x;
+    m._42 = aRect.y;
     SetMatrixUniform(mProfile.LookupUniformLocation("uLayerQuadTransform"), m);
   }
 
@@ -249,6 +236,11 @@ public:
 
   // sets this program's texture transform, if it uses one
   void SetTextureTransform(const gfx3DMatrix& aMatrix) {
+    if (mProfile.mHasTextureTransform)
+      SetMatrixUniform(mProfile.LookupUniformLocation("uTextureTransform"), aMatrix);
+  }
+
+  void SetTextureTransform(const gfx::Matrix4x4& aMatrix) {
     if (mProfile.mHasTextureTransform)
       SetMatrixUniform(mProfile.LookupUniformLocation("uTextureTransform"), aMatrix);
   }
@@ -296,7 +288,15 @@ public:
     SetUniform(mProfile.LookupUniformLocation("uWhiteTexture"), aUnit);
   }
 
+  void SetMaskTextureUnit(GLint aUnit) {
+    SetUniform(mProfile.LookupUniformLocation("uMaskTexture"), aUnit);
+  }
+
   void SetRenderColor(const gfxRGBA& aColor) {
+    SetUniform(mProfile.LookupUniformLocation("uRenderColor"), aColor);
+  }
+
+  void SetRenderColor(const gfx::Color& aColor) {
     SetUniform(mProfile.LookupUniformLocation("uRenderColor"), aColor);
   }
 
@@ -314,8 +314,8 @@ protected:
   // true if the projection matrix needs setting
   bool mIsProjectionMatrixStale;
 
-  nsRefPtr<GLContext> mGL;
-  // the OpenGL id of the program 
+  RefPtr<GLContext> mGL;
+  // the OpenGL id of the program
   GLuint mProgram;
   ProgramProfileOGL mProfile;
   enum {
@@ -329,53 +329,16 @@ protected:
   static int sCurrentProgramKey;
 #endif
 
-  void SetUniform(GLint aLocation, float aFloatValue) {
-    ASSERT_THIS_PROGRAM;
-    NS_ASSERTION(aLocation >= 0, "Invalid location");
+  void SetUniform(GLint aLocation, float aFloatValue);
+  void SetUniform(GLint aLocation, const gfxRGBA& aColor);
+  void SetUniform(GLint aLocation, int aLength, float *aFloatValues);
+  void SetUniform(GLint aLocation, GLint aIntValue);
+  void SetMatrixUniform(GLint aLocation, const gfx3DMatrix& aMatrix);
+  void SetMatrixUniform(GLint aLocation, const float *aFloatValues);
 
-    mGL->fUniform1f(aLocation, aFloatValue);
-  }
-
-  void SetUniform(GLint aLocation, const gfxRGBA& aColor) {
-    ASSERT_THIS_PROGRAM;
-    NS_ASSERTION(aLocation >= 0, "Invalid location");
-
-    mGL->fUniform4f(aLocation, float(aColor.r), float(aColor.g), float(aColor.b), float(aColor.a));
-  }
-
-  void SetUniform(GLint aLocation, int aLength, float *aFloatValues) {
-    ASSERT_THIS_PROGRAM;
-    NS_ASSERTION(aLocation >= 0, "Invalid location");
-
-    if (aLength == 1) {
-      mGL->fUniform1fv(aLocation, 1, aFloatValues);
-    } else if (aLength == 2) {
-      mGL->fUniform2fv(aLocation, 1, aFloatValues);
-    } else if (aLength == 3) {
-      mGL->fUniform3fv(aLocation, 1, aFloatValues);
-    } else if (aLength == 4) {
-      mGL->fUniform4fv(aLocation, 1, aFloatValues);
-    } else {
-      NS_NOTREACHED("Bogus aLength param");
-    }
-  }
-
-  void SetUniform(GLint aLocation, GLint aIntValue) {
-    ASSERT_THIS_PROGRAM;
-    NS_ASSERTION(aLocation >= 0, "Invalid location");
-
-    mGL->fUniform1i(aLocation, aIntValue);
-  }
-
-  void SetMatrixUniform(GLint aLocation, const gfx3DMatrix& aMatrix) {
+  void SetUniform(GLint aLocation, const gfx::Color& aColor);
+  void SetMatrixUniform(GLint aLocation, const gfx::Matrix4x4& aMatrix) {
     SetMatrixUniform(aLocation, &aMatrix._11);
-  }
-
-  void SetMatrixUniform(GLint aLocation, const float *aFloatValues) {
-    ASSERT_THIS_PROGRAM;
-    NS_ASSERTION(aLocation >= 0, "Invalid location");
-
-    mGL->fUniformMatrix4fv(aLocation, 1, false, aFloatValues);
   }
 };
 

@@ -24,11 +24,11 @@ MOCHITEST_FILES = \
 		test_browserElement_NoPref.html \
 		test_browserElement_NoWhitelist.html \
 		browserElement_LoadEvents.js \
+		file_browserElement_LoadEvents.html \
 		test_browserElement_inproc_LoadEvents.html \
 		browserElement_DataURI.js \
 		test_browserElement_inproc_DataURI.html \
 		browserElement_ErrorSecurity.js \
-		test_browserElement_inproc_ErrorSecurity.html \
 		browserElement_Titlechange.js \
 		test_browserElement_inproc_Titlechange.html \
 		browserElement_TopBarrier.js \
@@ -43,6 +43,8 @@ MOCHITEST_FILES = \
 		test_browserElement_inproc_Iconchange.html \
 		browserElement_GetScreenshot.js \
 		test_browserElement_inproc_GetScreenshot.html \
+		browserElement_BadScreenshot.js \
+		test_browserElement_inproc_BadScreenshot.html \
 		browserElement_SetVisible.js \
 		test_browserElement_inproc_SetVisible.html \
 		browserElement_SetVisibleFrames.js \
@@ -63,6 +65,16 @@ MOCHITEST_FILES = \
 		browserElement_XFrameOptionsSameOrigin.js \
 		test_browserElement_inproc_XFrameOptionsSameOrigin.html \
 		file_browserElement_XFrameOptionsSameOrigin.html \
+		browserElement_XFrameOptionsAllowFrom.js \
+		test_browserElement_inproc_XFrameOptionsAllowFrom.html \
+		file_browserElement_XFrameOptionsAllowFrom.html \
+		file_browserElement_XFrameOptionsAllowFrom.sjs \
+		browserElement_FirstPaint.js \
+		test_browserElement_inproc_FirstPaint.html \
+		browserElement_NextPaint.js \
+		test_browserElement_inproc_NextPaint.html \
+		test_browserElement_oop_NextPaint.html \
+		file_browserElement_NextPaint.html \
 		browserElement_Alert.js \
 		test_browserElement_inproc_Alert.html \
 		browserElement_AlertInFrame.js \
@@ -82,11 +94,17 @@ MOCHITEST_FILES = \
 		test_browserElement_inproc_PromptCheck.html \
 		browserElement_PromptConfirm.js \
 		test_browserElement_inproc_PromptConfirm.html \
+		browserElement_CookiesNotThirdParty.js \
+		file_browserElement_CookiesNotThirdParty.html \
+		test_browserElement_inproc_CookiesNotThirdParty.html \
 		browserElement_Close.js \
 		test_browserElement_inproc_Close.html \
 		browserElement_CloseFromOpener.js \
 		test_browserElement_inproc_CloseFromOpener.html \
 		file_browserElement_CloseFromOpener.html \
+		browserElement_CloseApp.js \
+		test_browserElement_inproc_CloseApp.html \
+		file_browserElement_CloseApp.html \
 		browserElement_OpenWindow.js \
 		test_browserElement_inproc_OpenWindow.html \
 		file_browserElement_Open1.html \
@@ -109,34 +127,64 @@ MOCHITEST_FILES = \
 		file_browserElement_SecurityChange.html \
 		browserElement_BackForward.js \
 		test_browserElement_inproc_BackForward.html \
-	        file_bug741717.sjs \
+		file_bug741717.sjs \
 		browserElement_Reload.js \
-	        file_bug709759.sjs \
+		file_bug709759.sjs \
 		browserElement_Stop.js \
-                test_browserElement_inproc_Stop.html \
-                browserElement_ContextmenuEvents.js \
-                test_browserElement_inproc_ContextmenuEvents.html \
+		test_browserElement_inproc_Stop.html \
+		browserElement_ContextmenuEvents.js \
+		test_browserElement_inproc_ContextmenuEvents.html \
 		browserElement_SendEvent.js \
 		test_browserElement_inproc_SendEvent.html \
 		browserElement_ScrollEvent.js \
 		test_browserElement_inproc_ScrollEvent.html \
+		browserElement_Auth.js \
+		test_browserElement_inproc_Auth.html \
+		file_http_401_response.sjs \
+		browserElement_RemoveBrowserElement.js \
+		test_browserElement_inproc_RemoveBrowserElement.html \
+		browserElement_DOMRequestError.js \
+		test_browserElement_inproc_DOMRequestError.html \
+		file_browserElement_AppFramePermission.html \
+		browserElement_AppFramePermission.js \
+		test_browserElement_inproc_AppFramePermission.html \
+		file_wyciwyg.html \
+		browserElement_ExposableURI.js \
+		test_browserElement_inproc_ExposableURI.html \
+		browserElement_FrameWrongURI.js \
+		test_browserElement_inproc_FrameWrongURI.html \
+		file_browserElement_FrameWrongURI.html \
+		file_post_request.html \
+		test_browserElement_inproc_ReloadPostRequest.html \
+		browserElement_ReloadPostRequest.js \
+		browserElement_PurgeHistory.js \
+		test_browserElement_inproc_PurgeHistory.html \
+		browserElement_DocumentFirstPaint.js \
+		test_browserElement_inproc_DocumentFirstPaint.html \
+		browserElement_VisibilityChange.js \
+		test_browserElement_inproc_VisibilityChange.html \
 		$(NULL)
 
 # Disabled due to https://bugzilla.mozilla.org/show_bug.cgi?id=774100
 #		test_browserElement_inproc_Reload.html \
 
-# OOP tests don't work on Windows (bug 763081) or native-fennec (bug
-# 774939).
+# Disabled due to focus issues (no bug that I'm aware of)
+# 		test_browserElement_oop_KeyEvents.html \
+
+# Disable due to certificate issue (no bug that I'm aware of)
+#		test_browserElement_inproc_ErrorSecurity.html \
+
+# OOP tests don't work on native-fennec (bug 774939).
 #
 # Both the "inproc" and "oop" versions of OpenMixedProcess open remote frames,
 # so we don't run that test on platforms which don't support OOP tests.
 
-ifneq ($(OS_ARCH),WINNT) #{
-ifndef MOZ_JAVA_COMPOSITOR #{
+ifndef MOZ_ANDROID_OMTC #{
 MOCHITEST_FILES += \
 		browserElement_OpenMixedProcess.js \
 		file_browserElement_OpenMixedProcess.html \
 		test_browserElement_inproc_OpenMixedProcess.html \
+		test_browserElement_inproc_ErrorSecurity.html \
 		test_browserElement_oop_OpenMixedProcess.html \
 		test_browserElement_oop_LoadEvents.html \
 		test_browserElement_oop_DataURI.html \
@@ -147,13 +195,16 @@ MOCHITEST_FILES += \
 		test_browserElement_oop_TopBarrier.html \
 		test_browserElement_oop_Iconchange.html \
 		test_browserElement_oop_GetScreenshot.html \
-		test_browserElement_oop_SetVisible.html \
-		test_browserElement_oop_SetVisibleFrames.html \
-		test_browserElement_oop_SetVisibleFrames2.html \
-		test_browserElement_oop_KeyEvents.html \
+		test_browserElement_oop_BadScreenshot.html \
 		test_browserElement_oop_XFrameOptions.html \
 		test_browserElement_oop_XFrameOptionsDeny.html \
 		test_browserElement_oop_XFrameOptionsSameOrigin.html \
+		test_browserElement_oop_XFrameOptionsAllowFrom.html \
+		test_browserElement_oop_SendEvent.html \
+		test_browserElement_oop_SetVisible.html \
+		test_browserElement_oop_SetVisibleFrames.html \
+		test_browserElement_oop_SetVisibleFrames2.html \
+		test_browserElement_oop_FirstPaint.html \
 		test_browserElement_oop_Alert.html \
 		test_browserElement_oop_AlertInFrame.html \
 		test_browserElement_oop_TargetTop.html \
@@ -161,8 +212,10 @@ MOCHITEST_FILES += \
 		test_browserElement_oop_TargetBlank.html \
 		test_browserElement_oop_PromptCheck.html \
 		test_browserElement_oop_PromptConfirm.html \
+		test_browserElement_oop_CookiesNotThirdParty.html \
 		test_browserElement_oop_Close.html \
 		test_browserElement_oop_CloseFromOpener.html \
+		test_browserElement_oop_CloseApp.html \
 		test_browserElement_oop_OpenWindow.html \
 		test_browserElement_oop_OpenWindowInFrame.html \
 		test_browserElement_oop_OpenWindowRejected.html \
@@ -172,12 +225,20 @@ MOCHITEST_FILES += \
 		test_browserElement_oop_BackForward.html \
 		test_browserElement_oop_Reload.html \
 		test_browserElement_oop_Stop.html \
-                test_browserElement_oop_ContextmenuEvents.html \
-		test_browserElement_oop_SendEvent.html \
+		test_browserElement_oop_ContextmenuEvents.html \
 		test_browserElement_oop_ScrollEvent.html \
-		$(NULL)
-endif #}
-endif #}
+		test_browserElement_oop_Auth.html \
+		test_browserElement_oop_RemoveBrowserElement.html \
+		test_browserElement_oop_DOMRequestError.html \
+		test_browserElement_oop_AppFramePermission.html \
+		test_browserElement_oop_ExposableURI.html \
+		test_browserElement_oop_FrameWrongURI.html \
+		test_browserElement_oop_ReloadPostRequest.html \
+		test_browserElement_oop_PurgeHistory.html \
+		test_browserElement_oop_DocumentFirstPaint.html \
+		test_browserElement_oop_VisibilityChange.html \
+	$(NULL)
 
+endif #}
 
 include $(topsrcdir)/config/rules.mk

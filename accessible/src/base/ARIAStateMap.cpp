@@ -4,9 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ARIAStateMap.h"
-
-#include "nsARIAMap.h"
+#include "ARIAMap.h"
 #include "States.h"
 
 #include "mozilla/dom/Element.h"
@@ -266,6 +264,16 @@ aria::MapToState(EStateRule aRule, dom::Element* aElement, uint64_t* aState)
     {
       static const TokenTypeData data(
         nsGkAtoms::aria_readonly, eBoolType | eDefinedIfAbsent,
+        0, states::READONLY, states::EDITABLE);
+
+      MapTokenType(aElement, aState, data);
+      return true;
+    }
+
+    case eARIAReadonlyOrEditableIfDefined:
+    {
+      static const TokenTypeData data(
+        nsGkAtoms::aria_readonly, eBoolType,
         0, states::READONLY, states::EDITABLE);
 
       MapTokenType(aElement, aState, data);

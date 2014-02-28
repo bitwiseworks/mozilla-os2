@@ -4,97 +4,171 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "base/basictypes.h"
+
+#include "BluetoothReplyRunnable.h"
 #include "BluetoothUtils.h"
-#include "nsContentUtils.h"
-#include "BluetoothDevice.h"
 #include "jsapi.h"
-#include "nsTArray.h"
-#include "nsString.h"
 #include "mozilla/Scoped.h"
+#include "mozilla/dom/bluetooth/BluetoothTypes.h"
+#include "nsContentUtils.h"
+#include "nsCxPusher.h"
+#include "nsIScriptContext.h"
+#include "nsISystemMessagesInternal.h"
+#include "nsString.h"
+#include "nsTArray.h"
 
-nsresult
-mozilla::dom::bluetooth::StringArrayToJSArray(JSContext* aCx, JSObject* aGlobal,
-                                              const nsTArray<nsString>& aSourceArray,
-                                              JSObject** aResultArray)
+BEGIN_BLUETOOTH_NAMESPACE
+
+bool
+SetJsObject(JSContext* aContext,
+            const BluetoothValue& aValue,
+            JSObject* aObj)
 {
-  NS_ASSERTION(aCx, "Null context!");
-  NS_ASSERTION(aGlobal, "Null global!");
+  MOZ_ASSERT(aContext && aObj);
 
-  JSAutoRequest ar(aCx);
-  JSAutoCompartment ac(aCx, aGlobal);
+  if (aValue.type() != BluetoothValue::TArrayOfBluetoothNamedValue) {
+    NS_WARNING("SetJsObject: Invalid parameter type");
+    return false;
+  }
 
-  JSObject* arrayObj;
+  const nsTArray<BluetoothNamedValue>& arr =
+    aValue.get_ArrayOfBluetoothNamedValue();
 
-  if (aSourceArray.IsEmpty()) {
-    arrayObj = JS_NewArrayObject(aCx, 0, nullptr);
-  } else {
-    uint32_t valLength = aSourceArray.Length();
-    mozilla::ScopedDeleteArray<jsval> valArray(new jsval[valLength]);
-    JS::AutoArrayRooter tvr(aCx, 0, valArray);
-    for (uint32_t index = 0; index < valLength; index++) {
-      JSString* s = JS_NewUCStringCopyN(aCx, aSourceArray[index].BeginReading(),
-                                        aSourceArray[index].Length());
-      if(!s) {
-        NS_WARNING("Memory allocation error!");
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
-      valArray[index] = STRING_TO_JSVAL(s);
-      tvr.changeLength(index + 1);
+  for (uint32_t i = 0; i < arr.Length(); i++) {
+    JS::Value val;
+    const BluetoothValue& v = arr[i].value();
+    JSString* jsData;
+
+    switch(v.type()) {
+      case BluetoothValue::TnsString:
+        jsData = JS_NewUCStringCopyN(aContext,
+                                     v.get_nsString().BeginReading(),
+                                     v.get_nsString().Length());
+        NS_ENSURE_TRUE(jsData, false);
+        val = STRING_TO_JSVAL(jsData);
+        break;
+      case BluetoothValue::Tuint32_t:
+        val = INT_TO_JSVAL(v.get_uint32_t());
+        break;
+      case BluetoothValue::Tbool:
+        val = BOOLEAN_TO_JSVAL(v.get_bool());
+        break;
+      default:
+        NS_WARNING("SetJsObject: Parameter is not handled");
+        break;
     }
-    arrayObj = JS_NewArrayObject(aCx, valLength, valArray);
+
+    if (!JS_SetProperty(aContext, aObj,
+                        NS_ConvertUTF16toUTF8(arr[i].name()).get(),
+                        &val)) {
+      NS_WARNING("Failed to set property");
+      return false;
+    }
   }
 
-  if (!arrayObj) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  // XXX This is not what Jonas wants. He wants it to be live.
-  // Followup at bug 717414
-  if (!JS_FreezeObject(aCx, arrayObj)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  *aResultArray = arrayObj;
-  return NS_OK;
+  return true;
 }
 
-nsresult
-mozilla::dom::bluetooth::BluetoothDeviceArrayToJSArray(JSContext* aCx, JSObject* aGlobal,
-                                                       const nsTArray<nsRefPtr<BluetoothDevice> >& aSourceArray,
-                                                       JSObject** aResultArray)
+nsString
+GetObjectPathFromAddress(const nsAString& aAdapterPath,
+                         const nsAString& aDeviceAddress)
 {
-  NS_ASSERTION(aCx, "Null context!");
-  NS_ASSERTION(aGlobal, "Null global!");
-
-  JSAutoRequest ar(aCx);
-  JSAutoCompartment ac(aCx, aGlobal);
-
-  JSObject* arrayObj;
-
-  if (aSourceArray.IsEmpty()) {
-    arrayObj = JS_NewArrayObject(aCx, 0, nullptr);
-  } else {
-    uint32_t valLength = aSourceArray.Length();
-    mozilla::ScopedDeleteArray<jsval> valArray(new jsval[valLength]);
-    JS::AutoArrayRooter tvr(aCx, 0, valArray);
-    for (uint32_t index = 0; index < valLength; index++) {
-      nsISupports* obj = aSourceArray[index]->ToISupports();
-      nsresult rv =
-        nsContentUtils::WrapNative(aCx, aGlobal, obj, &valArray[index]);
-      NS_ENSURE_SUCCESS(rv, rv);
-      tvr.changeLength(index + 1);
-    }
-    arrayObj = JS_NewArrayObject(aCx, valLength, valArray);
-  }
-
-  if (!arrayObj) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  if (!JS_FreezeObject(aCx, arrayObj)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  *aResultArray = arrayObj;
-  return NS_OK;
+  // The object path would be like /org/bluez/2906/hci0/dev_00_23_7F_CB_B4_F1,
+  // and the adapter path would be the first part of the object path, according
+  // to the example above, it's /org/bluez/2906/hci0.
+  nsString devicePath(aAdapterPath);
+  devicePath.AppendLiteral("/dev_");
+  devicePath.Append(aDeviceAddress);
+  devicePath.ReplaceChar(':', '_');
+  return devicePath;
 }
+
+nsString
+GetAddressFromObjectPath(const nsAString& aObjectPath)
+{
+  // The object path would be like /org/bluez/2906/hci0/dev_00_23_7F_CB_B4_F1,
+  // and the adapter path would be the first part of the object path, according
+  // to the example above, it's /org/bluez/2906/hci0.
+  nsString address(aObjectPath);
+  int addressHead = address.RFind("/") + 5;
+
+  MOZ_ASSERT(addressHead + BLUETOOTH_ADDRESS_LENGTH == address.Length());
+
+  address.Cut(0, addressHead);
+  address.ReplaceChar('_', ':');
+
+  return address;
+}
+
+bool
+BroadcastSystemMessage(const nsAString& aType,
+                       const InfallibleTArray<BluetoothNamedValue>& aData)
+{
+  mozilla::AutoSafeJSContext cx;
+  NS_ASSERTION(!::JS_IsExceptionPending(cx),
+      "Shouldn't get here when an exception is pending!");
+
+  JSObject* obj = JS_NewObject(cx, NULL, NULL, NULL);
+  if (!obj) {
+    NS_WARNING("Failed to new JSObject for system message!");
+    return false;
+  }
+
+  if (!SetJsObject(cx, aData, obj)) {
+    NS_WARNING("Failed to set properties of system message!");
+    return false;
+  }
+
+  nsCOMPtr<nsISystemMessagesInternal> systemMessenger =
+    do_GetService("@mozilla.org/system-message-internal;1");
+  NS_ENSURE_TRUE(systemMessenger, false);
+
+  systemMessenger->BroadcastMessage(aType, OBJECT_TO_JSVAL(obj));
+
+  return true;
+}
+
+void
+DispatchBluetoothReply(BluetoothReplyRunnable* aRunnable,
+                       const BluetoothValue& aValue,
+                       const nsAString& aErrorStr)
+{
+  // Reply will be deleted by the runnable after running on main thread
+  BluetoothReply* reply;
+  if (!aErrorStr.IsEmpty()) {
+    nsString err(aErrorStr);
+    reply = new BluetoothReply(BluetoothReplyError(err));
+  } else {
+    MOZ_ASSERT(aValue.type() != BluetoothValue::T__None);
+    reply = new BluetoothReply(BluetoothReplySuccess(aValue));
+  }
+
+  aRunnable->SetReply(reply);
+  if (NS_FAILED(NS_DispatchToMainThread(aRunnable))) {
+    NS_WARNING("Failed to dispatch to main thread!");
+  }
+}
+
+void
+ParseAtCommand(const nsACString& aAtCommand, const int aStart,
+               nsTArray<nsCString>& aRetValues)
+{
+  int length = aAtCommand.Length();
+  int begin = aStart;
+
+  for (int i = aStart; i < length; ++i) {
+    // Use ',' as separator
+    if (aAtCommand[i] == ',') {
+      nsCString tmp(nsDependentCSubstring(aAtCommand, begin, i - begin));
+      aRetValues.AppendElement(tmp);
+
+      begin = i + 1;
+    }
+  }
+
+  nsCString tmp(nsDependentCSubstring(aAtCommand, begin));
+  aRetValues.AppendElement(tmp);
+}
+
+END_BLUETOOTH_NAMESPACE

@@ -3,6 +3,9 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
+// Tests that anonymous functions appear in the stack frame list with either
+// their displayName property or a SpiderMonkey-inferred name.
+
 var gPane = null;
 var gTab = null;
 var gDebuggee = null;
@@ -15,7 +18,7 @@ function test() {
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
 
     testAnonCall();
   });
@@ -25,7 +28,7 @@ function testAnonCall() {
   gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
     Services.tm.currentThread.dispatch({ run: function() {
 
-      let frames = gDebugger.DebuggerView.StackFrames._frames;
+      let frames = gDebugger.DebuggerView.StackFrames.widget._list;
 
       is(gDebugger.DebuggerController.activeThread.state, "paused",
         "Should only be getting stack frames while paused.");
@@ -33,14 +36,36 @@ function testAnonCall() {
       is(frames.querySelectorAll(".dbg-stackframe").length, 3,
         "Should have three frames.");
 
-      is(frames.querySelector("#stackframe-0 .dbg-stackframe-name").getAttribute("value"),
+      is(frames.querySelector("#stackframe-0 .dbg-stackframe-title").getAttribute("value"),
         "anonFunc", "Frame name should be anonFunc");
+
+      testInferredName();
+    }}, 0);
+  });
+
+  gDebuggee.evalCall();
+}
+
+function testInferredName() {
+  gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
+    Services.tm.currentThread.dispatch({ run: function() {
+
+      let frames = gDebugger.DebuggerView.StackFrames.widget._list;
+
+      is(gDebugger.DebuggerController.activeThread.state, "paused",
+        "Should only be getting stack frames while paused.");
+
+      is(frames.querySelectorAll(".dbg-stackframe").length, 3,
+        "Should have three frames.");
+
+      is(frames.querySelector("#stackframe-0 .dbg-stackframe-title").getAttribute("value"),
+        "a/<", "Frame name should be a/<");
 
       resumeAndFinish();
     }}, 0);
   });
 
-  gDebuggee.evalCall();
+  gDebugger.DebuggerController.activeThread.resume();
 }
 
 function resumeAndFinish() {

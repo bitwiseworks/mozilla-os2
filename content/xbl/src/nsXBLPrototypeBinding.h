@@ -12,7 +12,6 @@
 #include "nsXBLProtoImplMethod.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsWeakReference.h"
-#include "nsIContent.h"
 #include "nsHashtable.h"
 #include "nsClassHashtable.h"
 #include "nsXBLDocumentInfo.h"
@@ -20,10 +19,10 @@
 #include "nsXBLProtoImpl.h"
 
 class nsIAtom;
+class nsIContent;
 class nsIDocument;
 class nsIScriptContext;
 class nsSupportsHashtable;
-class nsFixedSizeAllocator;
 class nsXBLProtoImplField;
 class nsXBLBinding;
 class nsCSSStyleSheet;
@@ -102,14 +101,14 @@ public:
 
   // Resolve all the fields for this binding on the object |obj|.
   // False return means a JS exception was set.
-  bool ResolveAllFields(JSContext* cx, JSObject* obj) const
+  bool ResolveAllFields(JSContext* cx, JS::Handle<JSObject*> obj) const
   {
     return !mImplementation || mImplementation->ResolveAllFields(cx, obj);
   }
 
   // Undefine all our fields from object |obj| (which should be a
   // JSObject for a bound element).
-  void UndefineFields(JSContext* cx, JSObject* obj) const {
+  void UndefineFields(JSContext* cx, JS::Handle<JSObject*> obj) const {
     if (mImplementation) {
       mImplementation->UndefineFields(cx, obj);
     }
@@ -120,13 +119,16 @@ public:
   }
 
   nsresult InitClass(const nsCString& aClassName, JSContext * aContext,
-                     JSObject * aGlobal, JSObject * aScriptObject,
-                     JSObject** aClassObject);
+                     JS::Handle<JSObject*> aGlobal,
+                     JS::Handle<JSObject*> aScriptObject,
+                     JS::MutableHandle<JSObject*> aClassObject,
+                     bool* aNew);
 
   nsresult ConstructInterfaceTable(const nsAString& aImpls);
   
   void SetImplementation(nsXBLProtoImpl* aImpl) { mImplementation = aImpl; }
-  nsresult InstallImplementation(nsIContent* aBoundElement);
+  nsXBLProtoImpl* GetImplementation() { return mImplementation; }
+  nsresult InstallImplementation(nsXBLBinding* aBinding);
   bool HasImplementation() const { return mImplementation != nullptr; }
 
   void AttributeChanged(nsIAtom* aAttribute, int32_t aNameSpaceID,
@@ -281,12 +283,7 @@ public:
 
   void Traverse(nsCycleCollectionTraversalCallback &cb) const;
   void UnlinkJSObjects();
-  void Trace(TraceCallback aCallback, void *aClosure) const;
-
-// Static members
-  static uint32_t gRefCnt;
- 
-  static nsFixedSizeAllocator* kAttrPool;
+  void Trace(const TraceCallbacks& aCallbacks, void *aClosure) const;
 
 // Internal member functions.
 // XXXbz GetImmediateChild needs to be public to be called by SetAttrs,

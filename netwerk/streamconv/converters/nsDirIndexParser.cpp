@@ -184,7 +184,7 @@ nsDirIndexParser::ParseFormat(const char* aFormatStr) {
     if (! *aFormatStr)
       break;
 
-    nsCAutoString name;
+    nsAutoCString name;
     int32_t     len = 0;
     while (aFormatStr[len] && !nsCRT::IsAsciiSpace(PRUnichar(aFormatStr[len])))
       ++len;
@@ -224,7 +224,7 @@ nsDirIndexParser::ParseData(nsIDirIndex *aIdx, char* aDataStr) {
 
   nsresult rv = NS_OK;
 
-  nsCAutoString filename;
+  nsAutoCString filename;
 
   for (int32_t i = 0; mFormat[i] != -1; ++i) {
     // If we've exhausted the data before we run out of fields, just
@@ -305,7 +305,7 @@ nsDirIndexParser::ParseData(nsIDirIndex *aIdx, char* aDataStr) {
         if (status == 1)
           aIdx->SetSize(len);
         else
-          aIdx->SetSize(LL_MAXUINT); // LL_MAXUINT means unknown
+          aIdx->SetSize(UINT64_MAX); // UINT64_MAX means unknown
       }
       break;
     case FIELD_LASTMODIFIED:
@@ -345,7 +345,7 @@ nsDirIndexParser::ParseData(nsIDirIndex *aIdx, char* aDataStr) {
 NS_IMETHODIMP
 nsDirIndexParser::OnDataAvailable(nsIRequest *aRequest, nsISupports *aCtxt,
                                   nsIInputStream *aStream,
-                                  uint32_t aSourceOffset,
+                                  uint64_t aSourceOffset,
                                   uint32_t aCount) {
   if (aCount < 1)
     return NS_OK;
@@ -354,7 +354,7 @@ nsDirIndexParser::OnDataAvailable(nsIRequest *aRequest, nsISupports *aCtxt,
   
   // Ensure that our mBuf has capacity to hold the data we're about to
   // read.
-  if (!EnsureStringLength(mBuf, len + aCount))
+  if (!mBuf.SetLength(len + aCount, fallible_t()))
     return NS_ERROR_OUT_OF_MEMORY;
 
   // Now read the data into our buffer.

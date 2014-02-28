@@ -5,26 +5,27 @@
 
 #include "prlog.h"
 
-#include <stdlib.h>
-#include "nsIPrefService.h"
-#include "nsIPrefBranch.h"
-#include "nsServiceManagerUtils.h"
-#include "nsCOMPtr.h"
-#include "nsNSSShutDown.h"
 #include "nsNTLMAuthModule.h"
+#include "nsNSSShutDown.h"
 #include "nsNativeCharsetUtils.h"
-#include "nsReadableUtils.h"
-#include "nsString.h"
 #include "prsystem.h"
-#include "nss.h"
-#include "pk11func.h"
+#include "pk11pub.h"
 #include "md4.h"
+#include "mozilla/Likely.h"
+#include "mozilla/Telemetry.h"
 
 #ifdef PR_LOGGING
-PRLogModuleInfo *gNTLMLog = PR_NewLogModule("NTLM");
+static PRLogModuleInfo *
+GetNTLMLog()
+{
+  static PRLogModuleInfo *sNTLMLog;
+  if (!sNTLMLog)
+    sNTLMLog = PR_NewLogModule("NTLM");
+  return sNTLMLog;
+}
 
-#define LOG(x) PR_LOG(gNTLMLog, PR_LOG_DEBUG, x)
-#define LOG_ENABLED() PR_LOG_TEST(gNTLMLog, PR_LOG_DEBUG)
+#define LOG(x) PR_LOG(GetNTLMLog(), PR_LOG_DEBUG, x)
+#define LOG_ENABLED() PR_LOG_TEST(GetNTLMLog(), PR_LOG_DEBUG)
 #else
 #define LOG(x)
 #endif
@@ -97,15 +98,12 @@ static const char NTLM_TYPE3_MARKER[] = { 0x03, 0x00, 0x00, 0x00 };
 
 //-----------------------------------------------------------------------------
 
-static bool SendLM()
-{
-  nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
-  if (!prefs)
-    return false;
+static bool sendLM = false;
 
-  bool val;
-  nsresult rv = prefs->GetBoolPref("network.ntlm.send-lm-response", &val);
-  return NS_SUCCEEDED(rv) && val;
+/*static*/ void
+nsNTLMAuthModule::SetSendLM(bool newSendLM)
+{
+  sendLM = newSendLM;
 }
 
 //-----------------------------------------------------------------------------
@@ -223,7 +221,7 @@ static void LogToken(const char *name, const void *token, uint32_t tokenLen)
   if (!LOG_ENABLED())
     return;
 
-  char *b64data = PL_Base64Encode((const char *) token, tokenLen, NULL);
+  char *b64data = PL_Base64Encode((const char *) token, tokenLen, nullptr);
   if (b64data)
   {
     PR_LogPrint("%s: %s\n", name, b64data);
@@ -353,7 +351,7 @@ LM_Hash(const nsString &password, unsigned char *hash)
 {
   // convert password to OEM character set.  we'll just use the native
   // filesystem charset.
-  nsCAutoString passbuf;
+  nsAutoCString passbuf;
   NS_CopyUnicodeToNative(password, passbuf);
   ToUpperCase(passbuf);
   uint32_t n = passbuf.Length();
@@ -520,7 +518,7 @@ ParseType2Msg(const void *inBuf, uint32_t inLen, Type2Msg *msg)
   uint32_t offset = ReadUint32(cursor);
   // Check the offset / length combo is in range of the input buffer, including
   // integer overflow checking.
-  if (NS_LIKELY(offset < offset + targetLen && offset + targetLen <= inLen)) {
+  if (MOZ_LIKELY(offset < offset + targetLen && offset + targetLen <= inLen)) {
     msg->targetLen = targetLen;
     msg->target = ((const uint8_t *) inBuf) + offset;
   }
@@ -528,7 +526,7 @@ ParseType2Msg(const void *inBuf, uint32_t inLen, Type2Msg *msg)
   {
     // Do not error out, for (conservative) backward compatibility.
     msg->targetLen = 0;
-    msg->target = NULL;
+    msg->target = nullptr;
   }
 
   // read flags
@@ -577,7 +575,7 @@ GenerateType3Msg(const nsString &domain,
 #endif
   nsAutoString ucsHostBuf; 
   // temporary buffers for oem strings
-  nsCAutoString oemDomainBuf, oemUserBuf, oemHostBuf;
+  nsAutoCString oemDomainBuf, oemUserBuf, oemHostBuf;
   // pointers and lengths for the string buffers; encoding is unicode if
   // the "negotiate unicode" flag was set in the Type-2 message.
   const void *domainPtr, *userPtr, *hostPtr;
@@ -683,7 +681,7 @@ GenerateType3Msg(const nsString &domain,
     NTLM_Hash(password, ntlmHash);
     LM_Response(ntlmHash, msg.challenge, ntlmResp);
 
-    if (SendLM())
+    if (sendLM)
     {
       uint8_t lmHash[LM_HASH_LEN];
       LM_Hash(password, lmHash);
@@ -770,11 +768,23 @@ nsNTLMAuthModule::Init(const char      *serviceName,
                        const PRUnichar *username,
                        const PRUnichar *password)
 {
-  NS_ASSERTION(serviceFlags == nsIAuthModule::REQ_DEFAULT, "unexpected service flags");
+  NS_ASSERTION((serviceFlags & ~nsIAuthModule::REQ_PROXY_AUTH) == nsIAuthModule::REQ_DEFAULT,
+      "unexpected service flags");
 
   mDomain = domain;
   mUsername = username;
   mPassword = password;
+
+  static bool sTelemetrySent = false;
+  if (!sTelemetrySent) {
+      mozilla::Telemetry::Accumulate(
+          mozilla::Telemetry::NTLM_MODULE_USED,
+          serviceFlags | nsIAuthModule::REQ_PROXY_AUTH
+              ? NTLM_MODULE_GENERIC_PROXY
+              : NTLM_MODULE_GENERIC_DIRECT);
+      sTelemetrySent = true;
+  }
+
   return NS_OK;
 }
 

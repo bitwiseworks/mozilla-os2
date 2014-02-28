@@ -16,9 +16,6 @@ class nsIWidget;
 class nsWindow;
 struct nsIntRect;
 
-#define NS_WM_IMEFIRST WM_IME_SETCONTEXT
-#define NS_WM_IMELAST  WM_IME_KEYUP
-
 class nsIMEContext
 {
 public:
@@ -43,6 +40,48 @@ public:
   bool IsValid() const
   {
     return !!mIMC;
+  }
+
+  void SetOpenState(bool aOpen) const
+  {
+    if (!mIMC) {
+      return;
+    }
+    ::ImmSetOpenStatus(mIMC, aOpen);
+  }
+
+  bool GetOpenState() const
+  {
+    if (!mIMC) {
+      return false;
+    }
+    return (::ImmGetOpenStatus(mIMC) != FALSE);
+  }
+
+  bool AssociateDefaultContext()
+  {
+    // We assume that there is only default IMC, no new IMC has been created.
+    if (mIMC) {
+      return false;
+    }
+    if (!::ImmAssociateContextEx(mWnd, NULL, IACE_DEFAULT)) {
+      return false;
+    }
+    mIMC = ::ImmGetContext(mWnd);
+    return (mIMC != NULL);
+  }
+
+  bool Disassociate()
+  {
+    if (!mIMC) {
+      return false;
+    }
+    if (!::ImmAssociateContextEx(mWnd, NULL, 0)) {
+      return false;
+    }
+    ::ImmReleaseContext(mWnd, mIMC);
+    mIMC = NULL;
+    return true;
   }
 
 protected:
@@ -82,20 +121,13 @@ public:
   {
     return IsComposing() && IsComposingWindow(aWindow);
   }
-  static bool IsStatusChanged() { return sIsStatusChanged; }
-
-  static bool IsDoingKakuteiUndo(HWND aWnd);
-
-  static void NotifyEndStatusChange() { sIsStatusChanged = false; }
-
-  static bool CanOptimizeKeyAndIMEMessages(MSG *aNextKeyOrIMEMessage);
 
 #ifdef DEBUG
   /**
    * IsIMEAvailable() returns TRUE when current keyboard layout has IME.
    * Otherwise, FALSE.
    */
-  static bool IsIMEAvailable() { return sIsIME; }
+  static bool IsIMEAvailable() { return !!::ImmIsIME(::GetKeyboardLayout(0)); }
 #endif
 
   // If aForce is TRUE, these methods doesn't check whether we have composition
@@ -282,8 +314,8 @@ protected:
   nsWindow* mComposingWindow;
   nsString  mCompositionString;
   nsString  mLastDispatchedCompositionString;
-  nsTArray<uint32_t> mClauseArray;
-  nsTArray<uint8_t> mAttributeArray;
+  InfallibleTArray<uint32_t> mClauseArray;
+  InfallibleTArray<uint8_t> mAttributeArray;
 
   int32_t mCursorPosition;
   uint32_t mCompositionStart;
@@ -291,10 +323,6 @@ protected:
   bool mIsComposing;
   bool mIsComposingOnPlugin;
   bool mNativeCaretIsCreated;
-
-  static bool sIsStatusChanged;
-  static bool sIsIME;
-  static bool sIsIMEOpening;
 
   static UINT sCodePage;
   static DWORD sIMEProperty;

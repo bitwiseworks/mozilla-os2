@@ -48,8 +48,10 @@ class txToDocHandlerFactory : public txAOutputHandlerFactory
 public:
     txToDocHandlerFactory(txExecutionState* aEs,
                           nsIDOMDocument* aSourceDocument,
-                          nsITransformObserver* aObserver)
-        : mEs(aEs), mSourceDocument(aSourceDocument), mObserver(aObserver)
+                          nsITransformObserver* aObserver,
+                          bool aDocumentIsData)
+        : mEs(aEs), mSourceDocument(aSourceDocument), mObserver(aObserver),
+          mDocumentIsData(aDocumentIsData)
     {
     }
 
@@ -59,6 +61,7 @@ private:
     txExecutionState* mEs;
     nsCOMPtr<nsIDOMDocument> mSourceDocument;
     nsCOMPtr<nsITransformObserver> mObserver;
+    bool mDocumentIsData;
 };
 
 class txToFragmentHandlerFactory : public txAOutputHandlerFactory
@@ -95,7 +98,8 @@ txToDocHandlerFactory::createHandlerWith(txOutputFormat* aFormat,
 
             nsresult rv = handler->createResultDocument(EmptyString(),
                                                         kNameSpaceID_None,
-                                                        mSourceDocument);
+                                                        mSourceDocument,
+                                                        mDocumentIsData);
             if (NS_SUCCEEDED(rv)) {
                 *aHandler = handler.forget();
             }
@@ -108,7 +112,8 @@ txToDocHandlerFactory::createHandlerWith(txOutputFormat* aFormat,
             nsAutoPtr<txMozillaTextOutput> handler(
                 new txMozillaTextOutput(mObserver));
 
-            nsresult rv = handler->createResultDocument(mSourceDocument);
+            nsresult rv = handler->createResultDocument(mSourceDocument,
+                                                        mDocumentIsData);
             if (NS_SUCCEEDED(rv)) {
                 *aHandler = handler.forget();
             }
@@ -143,7 +148,8 @@ txToDocHandlerFactory::createHandlerWith(txOutputFormat* aFormat,
                 new txMozillaXMLOutput(aFormat, mObserver));
 
             nsresult rv = handler->createResultDocument(aName, aNsID,
-                                                        mSourceDocument);
+                                                        mSourceDocument,
+                                                        mDocumentIsData);
             if (NS_SUCCEEDED(rv)) {
                 *aHandler = handler.forget();
             }
@@ -156,7 +162,8 @@ txToDocHandlerFactory::createHandlerWith(txOutputFormat* aFormat,
             nsAutoPtr<txMozillaTextOutput> handler(
                 new txMozillaTextOutput(mObserver));
 
-            nsresult rv = handler->createResultDocument(mSourceDocument);
+            nsresult rv = handler->createResultDocument(mSourceDocument,
+                                                        mDocumentIsData);
             if (NS_SUCCEEDED(rv)) {
                 *aHandler = handler.forget();
             }
@@ -284,17 +291,16 @@ private:
  * txMozillaXSLTProcessor
  */
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(txMozillaXSLTProcessor)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(txMozillaXSLTProcessor)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mEmbeddedStylesheetRoot)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mSource)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mPrincipal)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mEmbeddedStylesheetRoot)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mSource)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mPrincipal)
     tmp->mVariables.clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(txMozillaXSLTProcessor)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mEmbeddedStylesheetRoot)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mSource)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mPrincipal)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEmbeddedStylesheetRoot)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSource)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrincipal)
     txOwningExpandedNameMap<txIGlobalParameter>::iterator iter(tmp->mVariables);
     while (iter.next()) {
         cb.NoteXPCOMChild(static_cast<txVariable*>(iter.value())->getValue());
@@ -522,7 +528,7 @@ public:
 
   NS_IMETHOD Run()
   {
-    mProcessor->TransformToDoc(nullptr);
+    mProcessor->TransformToDoc(nullptr, false);
     return NS_OK;
   }
 };
@@ -612,11 +618,12 @@ txMozillaXSLTProcessor::TransformToDocument(nsIDOMNode *aSource,
 
     mSource = aSource;
 
-    return TransformToDoc(aResult);
+    return TransformToDoc(aResult, true);
 }
 
 nsresult
-txMozillaXSLTProcessor::TransformToDoc(nsIDOMDocument **aResult)
+txMozillaXSLTProcessor::TransformToDoc(nsIDOMDocument **aResult,
+                                       bool aCreateDataDocument)
 {
     nsAutoPtr<txXPathNode> sourceNode(txXPathNativeNode::createXPathNode(mSource));
     if (!sourceNode) {
@@ -633,7 +640,9 @@ txMozillaXSLTProcessor::TransformToDoc(nsIDOMDocument **aResult)
 
     // XXX Need to add error observers
 
-    txToDocHandlerFactory handlerFactory(&es, sourceDOMDocument, mObserver);
+    // If aResult is non-null, we're a data document
+    txToDocHandlerFactory handlerFactory(&es, sourceDOMDocument, mObserver,
+                                         aCreateDataDocument);
     es.mOutputHandlerFactory = &handlerFactory;
 
     nsresult rv = es.init(*sourceNode, &mVariables);
@@ -1006,7 +1015,7 @@ txMozillaXSLTProcessor::LoadStyleSheet(nsIURI* aUri, nsILoadGroup* aLoadGroup)
     if (NS_FAILED(rv) && mObserver) {
         // This is most likely a network or security error, just
         // use the uri as context.
-        nsCAutoString spec;
+        nsAutoCString spec;
         aUri->GetSpec(spec);
         CopyUTF8toUTF16(spec, mSourceText);
         nsresult status = NS_ERROR_GET_MODULE(rv) == NS_ERROR_MODULE_XSLT ? rv :
@@ -1238,7 +1247,7 @@ txMozillaXSLTProcessor::ContentRemoved(nsIDocument* aDocument,
 
 NS_IMETHODIMP
 txMozillaXSLTProcessor::Initialize(nsISupports* aOwner, JSContext* cx,
-                                   JSObject* obj, uint32_t argc, jsval* argv)
+                                   JSObject* obj, const JS::CallArgs& args)
 {
     nsCOMPtr<nsIPrincipal> prin;
     nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
@@ -1429,11 +1438,10 @@ txVariable::Convert(nsIVariant *aValue, txAExprResult** aResult)
                 JSContext* cx = nsContentUtils::GetCurrentJSContext();
                 NS_ENSURE_TRUE(cx, NS_ERROR_NOT_AVAILABLE);
 
-                JSObject *jsobj;
-                rv = holder->GetJSObject(&jsobj);
-                NS_ENSURE_SUCCESS(rv, rv);
+                JS::RootedObject jsobj(cx, holder->GetJSObject());
+                NS_ENSURE_STATE(jsobj);
 
-                JSString *str = JS_ValueToString(cx, OBJECT_TO_JSVAL(jsobj));
+                JS::RootedString str(cx, JS_ValueToString(cx, OBJECT_TO_JSVAL(jsobj)));
                 NS_ENSURE_TRUE(str, NS_ERROR_FAILURE);
 
                 nsDependentJSString value;

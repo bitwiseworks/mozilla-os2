@@ -76,6 +76,11 @@ RefTestCmdLineHandler.prototype =
     var prefs = Components.classes["@mozilla.org/preferences-service;1"].
                 getService(Components.interfaces.nsIPrefService);
     var branch = prefs.getDefaultBranch("");
+    // For mochitests, we're more interested in testing the behavior of in-
+    // content XBL bindings, so we set this pref to true. In reftests, we're
+    // more interested in testing the behavior of XBL as it works in chrome,
+    // so we want this pref to be false.
+    branch.setBoolPref("dom.use_xbl_scopes_for_remote_xul", false);
     branch.setBoolPref("gfx.color_management.force_srgb", true);
     branch.setBoolPref("browser.dom.window.dump.enabled", true);
     branch.setIntPref("ui.caretBlinkTime", -1);
@@ -91,6 +96,15 @@ RefTestCmdLineHandler.prototype =
     // Disable addon updates and prefetching so we don't leak them
     branch.setBoolPref("extensions.update.enabled", false);
     branch.setBoolPref("extensions.getAddons.cache.enabled", false);
+    // Disable blocklist updates so we don't have them reported as leaks
+    branch.setBoolPref("extensions.blocklist.enabled", false);
+    // Make url-classifier updates so rare that they won't affect tests
+    branch.setIntPref("urlclassifier.updateinterval", 172800);
+    // Disable high-quality downscaling, since it makes reftests more difficult.
+    branch.setBoolPref("image.high_quality_downscaling.enabled", false);
+    // Checking whether two files are the same is slow on Windows.
+    // Setting this pref makes tests run much faster there.
+    branch.setBoolPref("security.fileuri.strict_origin_policy", false);
 
     var wwatch = Components.classes["@mozilla.org/embedcomp/window-watcher;1"]
                            .getService(nsIWindowWatcher);
@@ -102,4 +116,4 @@ RefTestCmdLineHandler.prototype =
   helpInfo : "  -reftest <file>    Run layout acceptance tests on given manifest.\n"
 };
 
-var NSGetFactory = XPCOMUtils.generateNSGetFactory([RefTestCmdLineHandler]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([RefTestCmdLineHandler]);

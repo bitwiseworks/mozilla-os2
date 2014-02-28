@@ -22,7 +22,7 @@ class MessageReplyDeserializer;
 
 class SyncMessage : public Message {
  public:
-  SyncMessage(int32 routing_id, uint16 type, PriorityValue priority,
+  SyncMessage(int32_t routing_id, uint16_t type, PriorityValue priority,
               MessageReplyDeserializer* deserializer);
 
   // Call this to get a deserializer for the output parameters.
@@ -78,13 +78,14 @@ class SyncMessage : public Message {
   MessageReplyDeserializer* deserializer_;
   base::WaitableEvent* pump_messages_event_;
 
-  static uint32 next_id_;  // for generation of unique ids
+  static uint32_t next_id_;  // for generation of unique ids
 };
 
 // Used to deserialize parameters from a reply to a synchronous message
 class MessageReplyDeserializer {
  public:
   bool SerializeOutputParameters(const Message& msg);
+  virtual ~MessageReplyDeserializer() {}
  private:
   // Derived classes need to implement this, using the given iterator (which
   // is skipped past the header for synchronous messages).

@@ -9,18 +9,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = dom
 LIBRARY_NAME   = jsdomgeolocation_s
 LIBXUL_LIBRARY = 1
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
-
-
-CPPSRCS		= \
-		nsGeolocation.cpp \
-		nsGeoPosition.cpp \
-		$(NULL)
+FAIL_ON_WARNINGS := 1
 
 LOCAL_INCLUDES = \
 		-I$(topsrcdir)/dom/base \
@@ -28,8 +22,6 @@ LOCAL_INCLUDES = \
 		-I$(topsrcdir)/content/base/src \
 		-I$(topsrcdir)/content/events/src \
 		$(NULL)
-
-EXPORTS        = nsGeoPosition.h
 
 ifdef MOZ_MAEMO_LIBLOCATION
 LOCAL_INCLUDES  += $(MOZ_PLATFORM_MAEMO_CFLAGS) \
@@ -49,8 +41,6 @@ endif
 ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
 LOCAL_INCLUDES  += -I$(topsrcdir)/dom/system/gonk
 endif
-
-EXPORTS         += nsGeoPositionIPCSerialiser.h
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

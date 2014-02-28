@@ -13,9 +13,10 @@ import org.json.simple.parser.ParseException;
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.sync.AlreadySyncingException;
 import org.mozilla.gecko.sync.CredentialException;
-import org.mozilla.gecko.sync.GlobalConstants;
+import org.mozilla.gecko.background.common.GlobalConstants;
+import org.mozilla.gecko.background.common.log.Logger;
+import org.mozilla.gecko.sync.SyncConstants;
 import org.mozilla.gecko.sync.GlobalSession;
-import org.mozilla.gecko.sync.Logger;
 import org.mozilla.gecko.sync.NonObjectJSONException;
 import org.mozilla.gecko.sync.SyncConfiguration;
 import org.mozilla.gecko.sync.SyncConfigurationException;
@@ -189,9 +190,9 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
   public Object syncMonitor = new Object();
   private SyncResult syncResult;
 
-  public Account localAccount;
+  protected Account localAccount;
   protected boolean thisSyncIsForced = false;
-  public SharedPreferences accountSharedPreferences;
+  protected SharedPreferences accountSharedPreferences;
 
   /**
    * Return the number of milliseconds until we're allowed to sync again,
@@ -238,11 +239,11 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
    * @param backoff time to wait in milliseconds.
    */
   @Override
-  public void requestBackoff(long backoff) {
+  public void requestBackoff(final long backoff) {
     if (backoff > 0) {
       // Fuzz the backoff time (up to 25% more) to prevent client lock-stepping; agrees with desktop.
-      backoff = backoff + Math.round((double) backoff * 0.25d * Math.random());
-      this.extendEarliestNextSync(System.currentTimeMillis() + backoff);
+      final long fuzzedBackoff = backoff + Math.round((double) backoff * 0.25d * Math.random());
+      this.extendEarliestNextSync(System.currentTimeMillis() + fuzzedBackoff);
     }
   }
 
@@ -258,6 +259,23 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
    *          stage names to sync, or <code>null</code> to sync all known stages.
    */
   public static void requestImmediateSync(final Account account, final String[] stageNames) {
+    requestImmediateSync(account, stageNames, null);
+  }
+
+  /**
+   * Asynchronously request an immediate sync, optionally syncing only the given
+   * named stages.
+   * <p>
+   * Returns immediately.
+   *
+   * @param account
+   *          the Android <code>Account</code> instance to sync.
+   * @param stageNames
+   *          stage names to sync, or <code>null</code> to sync all known stages.
+   * @param moreExtras
+   *          bundle of extras to give to the sync, or <code>null</code>
+   */
+  public static void requestImmediateSync(final Account account, final String[] stageNames, Bundle moreExtras) {
     if (account == null) {
       Logger.warn(LOG_TAG, "Not requesting immediate sync because Android Account is null.");
       return;
@@ -266,6 +284,11 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
     final Bundle extras = new Bundle();
     Utils.putStageNamesToSync(extras, stageNames, null);
     extras.putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true);
+
+    if (moreExtras != null) {
+      extras.putAll(moreExtras);
+    }
+
     ContentResolver.requestSync(account, BrowserContract.AUTHORITY, extras);
   }
 
@@ -275,6 +298,9 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
                             final String authority,
                             final ContentProviderClient provider,
                             final SyncResult syncResult) {
+    syncStartTimestamp = System.currentTimeMillis();
+
+    Logger.setThreadLogTag(SyncConstants.GLOBAL_LOG_TAG);
     Logger.resetLogging();
     Utils.reseedSharedRandom(); // Make sure we don't work with the same random seed for too long.
 
@@ -305,8 +331,14 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
         Logger.trace(LOG_TAG, "AccountManagerCallback invoked.");
         // TODO: N.B.: Future must not be used on the main thread.
         try {
-          Logger.info(LOG_TAG, "Syncing account named " + account.name +
-              " for authority " + authority + ".");
+          if (Logger.LOG_PERSONAL_INFORMATION) {
+            Logger.pii(LOG_TAG, "Syncing account named " + account.name +
+                " for authority " + authority + ".");
+          } else {
+            // Replace "foo@bar.com" with "XXX@XXX.XXX".
+            Logger.info(LOG_TAG, "Syncing account named like " + Utils.obfuscateEmail(account.name) +
+                " for authority " + authority + ".");
+          }
 
           // We dump this information right away to help with debugging.
           Logger.debug(LOG_TAG, "Username: " + username);
@@ -373,8 +405,14 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
         if (setNextSync.get()) {
           long interval = getSyncInterval();
           long next = System.currentTimeMillis() + interval;
-          Logger.info(LOG_TAG, "Setting minimum next sync time to " + next + " (" + interval + "ms from now).");
-          extendEarliestNextSync(next);
+
+          if (thisSyncIsForced) {
+            Logger.info(LOG_TAG, "Setting minimum next sync time to " + next + " (" + interval + "ms from now).");
+            setEarliestNextSync(next);
+          } else {
+            Logger.info(LOG_TAG, "Extending minimum next sync time to " + next + " (" + interval + "ms from now).");
+            extendEarliestNextSync(next);
+          }
         }
         Logger.info(LOG_TAG, "Sync took " + Utils.formatDuration(syncStartTimestamp, System.currentTimeMillis()) + ".");
       } catch (InterruptedException e) {
@@ -428,7 +466,6 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
                                         IOException, ParseException,
                                         NonObjectJSONException, CryptoException {
     Logger.trace(LOG_TAG, "Performing sync.");
-    syncStartTimestamp = System.currentTimeMillis();
 
     /**
      * Bug 769745: pickle Sync account parameters to JSON file. Un-pickle in
@@ -521,7 +558,7 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GlobalSe
   public synchronized String getClientName() {
     String clientName = accountSharedPreferences.getString(SyncConfiguration.PREF_CLIENT_NAME, null);
     if (clientName == null) {
-      clientName = GlobalConstants.PRODUCT_NAME + " on " + android.os.Build.MODEL;
+      clientName = GlobalConstants.MOZ_APP_DISPLAYNAME + " on " + android.os.Build.MODEL;
       accountSharedPreferences.edit().putString(SyncConfiguration.PREF_CLIENT_NAME, clientName).commit();
     }
     return clientName;

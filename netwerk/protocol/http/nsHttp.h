@@ -7,61 +7,13 @@
 #ifndef nsHttp_h__
 #define nsHttp_h__
 
-#if defined(MOZ_LOGGING)
-#define FORCE_PR_LOG
-#endif
-
-// e10s mess: IPDL-generatd headers include chromium which both #includes
-// prlog.h, and #defines LOG in conflict with this file.
-// Solution: (as described in bug 545995)
-// 1) ensure that this file is #included before any IPDL-generated files and
-//    anything else that #includes prlog.h, so that we can make sure prlog.h
-//    sees FORCE_PR_LOG if needed.
-// 2) #include IPDL boilerplate, and then undef LOG so our LOG wins.
-// 3) nsNetModule.cpp does its own crazy stuff with #including prlog.h
-//    multiple times; allow it to define ALLOW_LATE_NSHTTP_H_INCLUDE to bypass
-//    check. 
-#if defined(PR_LOG) && !defined(ALLOW_LATE_NSHTTP_H_INCLUDE)
-#error "If nsHttp.h #included it must come before any IPDL-generated files or other files that #include prlog.h"
-#endif
-#include "mozilla/net/NeckoChild.h"
-#undef LOG
-
 #include "plstr.h"
-#include "prlog.h"
 #include "prtime.h"
 #include "nsISupportsUtils.h"
 #include "nsPromiseFlatString.h"
 #include "nsURLHelper.h"
 #include "netCore.h"
-
-#if defined(PR_LOGGING)
-//
-// Log module for HTTP Protocol logging...
-//
-// To enable logging (see prlog.h for full details):
-//
-//    set NSPR_LOG_MODULES=nsHttp:5
-//    set NSPR_LOG_FILE=http.log
-//
-// this enables PR_LOG_ALWAYS level information and places all output in
-// the file http.log
-//
-extern PRLogModuleInfo *gHttpLog;
-#endif
-
-// http logging
-#define LOG1(args) PR_LOG(gHttpLog, 1, args)
-#define LOG2(args) PR_LOG(gHttpLog, 2, args)
-#define LOG3(args) PR_LOG(gHttpLog, 3, args)
-#define LOG4(args) PR_LOG(gHttpLog, 4, args)
-#define LOG(args) LOG4(args)
-
-#define LOG1_ENABLED() PR_LOG_TEST(gHttpLog, 1)
-#define LOG2_ENABLED() PR_LOG_TEST(gHttpLog, 2)
-#define LOG3_ENABLED() PR_LOG_TEST(gHttpLog, 3)
-#define LOG4_ENABLED() PR_LOG_TEST(gHttpLog, 4)
-#define LOG_ENABLED() LOG4_ENABLED()
+#include "mozilla/Mutex.h"
 
 // http version codes
 #define NS_HTTP_VERSION_UNKNOWN  0
@@ -93,12 +45,18 @@ typedef uint8_t nsHttpVersion;
 // a transaction with this caps flag keeps timing information
 #define NS_HTTP_TIMING_ENABLED       (1<<5)
 
-// (1<<6) is unused
+// a transaction with this flag blocks the initiation of other transactons
+// in the same load group until it is complete
+#define NS_HTTP_LOAD_AS_BLOCKING     (1<<6)
 
 // Disallow the use of the SPDY protocol. This is meant for the contexts
 // such as HTTP upgrade which are nonsensical for SPDY, it is not the
 // SPDY configuration variable.
 #define NS_HTTP_DISALLOW_SPDY        (1<<7)
+
+// a transaction with this flag loads without respect to whether the load
+// group is currently blocking on some resources
+#define NS_HTTP_LOAD_UNBLOCKED       (1<<8)
 
 //-----------------------------------------------------------------------------
 // some default values
@@ -160,7 +118,7 @@ struct nsHttp
                                  const char *separators);
 
     // This function parses a string containing a decimal-valued, non-negative
-    // 64-bit integer.  If the value would exceed LL_MAXINT, then false is
+    // 64-bit integer.  If the value would exceed INT64_MAX, then false is
     // returned.  Otherwise, this function returns true and stores the
     // parsed value in |result|.  The next unparsed character in |input| is
     // optionally returned via |next| if |next| is non-null.
@@ -177,8 +135,19 @@ struct nsHttp
         return ParseInt64(input, &next, result) && *next == '\0';
     }
 
+    // Return whether the HTTP status code represents a permanent redirect
+    static bool IsPermanentRedirect(uint32_t httpStatus);
+
+    // Return whether upon a redirect code of httpStatus for method, the
+    // request method should be rewritten to GET.
+    static bool ShouldRewriteRedirectToGET(uint32_t httpStatus, nsHttpAtom method);
+
+    // Return whether the specified method is safe as per RFC 2616,
+    // Section 9.1.1.
+    static bool IsSafeMethod(nsHttpAtom method);
+
     // Declare all atoms
-    // 
+    //
     // The atom names and values are stored in nsHttpAtomList.h and are brought
     // to you by the magic of C preprocessing.  Add new atoms to nsHttpAtomList
     // and all support logic will be auto-generated.
@@ -200,8 +169,8 @@ PRTimeToSeconds(PRTime t_usec)
 
 #define NowInSeconds() PRTimeToSeconds(PR_Now())
 
-// round q-value to one decimal place; return most significant digit as uint.
-#define QVAL_TO_UINT(q) ((unsigned int) ((q + 0.05) * 10.0))
+// Round q-value to 2 decimal places; return 2 most significant digits as uint.
+#define QVAL_TO_UINT(q) ((unsigned int) ((q + 0.005) * 100.0))
 
 #define HTTP_LWS " \t"
 #define HTTP_HEADER_VALUE_SEPS HTTP_LWS ","

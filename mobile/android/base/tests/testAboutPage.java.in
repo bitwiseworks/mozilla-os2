@@ -2,9 +2,11 @@
 package @ANDROID_PACKAGE_NAME@.tests;
 
 import @ANDROID_PACKAGE_NAME@.*;
-import android.app.Activity;
-import android.util.Log;
 
+/* Tests related to the about: page:
+ *  - check that about: loads from the awesome bar
+ *  - check that about: loads from Settings/About...
+ */
 public class testAboutPage extends PixelTest {
     @Override
     protected int getTestType() {
@@ -12,9 +14,9 @@ public class testAboutPage extends PixelTest {
     }
 
     public void testAboutPage() {
-        mActions.expectGeckoEvent("Gecko:Ready").blockForEvent();
+        blockForGeckoReady();
 
-        // Load the about: page
+        // Load the about: page and verify its title
         String url = "about:";
         loadAndPaint(url);
 
@@ -26,28 +28,18 @@ public class testAboutPage extends PixelTest {
         url = getAbsoluteUrl("/robocop/robocop_blank_01.html");
         loadUrl(url);
 
-        // Use the menu to open the Settings
-        mActions.sendSpecialKey(Actions.SpecialKey.MENU);
-
-        // Look for the 'More' menu if this device/OS uses it
-        if (mSolo.waitForText("^More$")) {
-            mSolo.clickOnText("^More$");
-        }
-
-        mSolo.waitForText("^Settings$");
-        mSolo.clickOnText("^Settings$");
-
         // Set up listeners to catch the page load we're about to do
         Actions.EventExpecter tabEventExpecter = mActions.expectGeckoEvent("Tab:Added");
         Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
 
-        // Tap on the "About Xxxx" setting
-        mSolo.waitForText("About (Fennec|Nightly|Aurora|Firefox|Firefox Beta)");
-        mSolo.clickOnText("About (Fennec|Nightly|Aurora|Firefox|Firefox Beta)");
+        selectSettingsItem("General", "About (Fennec|Nightly|Aurora|Firefox|Firefox Beta)");
 
         // Wait for the new tab and page to load
         tabEventExpecter.blockForEvent();
         contentEventExpecter.blockForEvent();
+
+        tabEventExpecter.unregisterListener();
+        contentEventExpecter.unregisterListener();
 
         // Grab the title to make sure the about: page was loaded
         awesomebar = mDriver.findElement(getActivity(), "awesome_bar_title");

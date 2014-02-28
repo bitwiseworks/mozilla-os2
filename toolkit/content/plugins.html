@@ -7,7 +7,12 @@
 <html>
 <head>
 <script type="application/javascript">
-  var strBundleService = Components.classes["@mozilla.org/intl/stringbundle;1"].getService(Components.interfaces.nsIStringBundleService);
+  "use strict";
+
+  Components.utils.import("resource://gre/modules/AddonManager.jsm");
+
+  var Ci = Components.interfaces;
+  var strBundleService = Components.classes["@mozilla.org/intl/stringbundle;1"].getService(Ci.nsIStringBundleService);
   var pluginsbundle = strBundleService.createBundle("chrome://global/locale/plugins.properties");
   var regionbundle = strBundleService.createBundle("chrome://global-region/locale/region.properties");
 
@@ -19,6 +24,7 @@
 <body>
 <div id="outside">
 <script type="application/javascript">
+  "use strict";
 
   function setDirection() {
     var frame = document.getElementById("directionDetector");
@@ -52,72 +58,163 @@
    */
   navigator.plugins.refresh(false);
 
+  AddonManager.getAddonsByTypes(["plugin"], function (aPlugins) {
+    var fragment = document.createDocumentFragment();
 
-  var numPlugins = navigator.plugins.length;
+    // "Installed plugins"
+    var id, label;
+    if (aPlugins.length > 0) {
+      id = "plugs";
+      label = "installedplugins_label";
+    } else {
+      id = "noplugs";
+      label = "nopluginsareinstalled_label";
+    }
+    var enabledplugins = document.createElement("h1");
+    enabledplugins.setAttribute("id", id);
+    enabledplugins.appendChild(document.createTextNode(pluginsbundle.GetStringFromName(label)));
+    fragment.appendChild(enabledplugins);
 
-  if (numPlugins > 0)
-    document.writeln("<h1 id=\"plugs\">" + pluginsbundle.GetStringFromName("enabledplugins_label") + "<\/h1>");
-  else
-    document.writeln("<h1 id=\"noplugs\">" + pluginsbundle.GetStringFromName("nopluginsareenabled_label") + "<\/h1>");
+    // "Find updates for installed plugins at " ...
+    var findpluginupdates = document.createElement("div");
+    findpluginupdates.setAttribute("id", "findpluginupdates");
+    findpluginupdates.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("findpluginupdates_label") + " "));
+    fragment.appendChild(findpluginupdates);
 
-  document.writeln("<div id=\"findmore\">" + pluginsbundle.GetStringFromName("findmore_label") + " ");
-  document.writeln("<a href=\"" + regionbundle.GetStringFromName("more_plugins_url") + "\">" + regionbundle.GetStringFromName("more_plugins_label") + "<\/a>.");
-  document.writeln("<\/div>");
+    // ... "mozilla.com/plugincheck"
+    var pluginupdates = document.createElement("a");
+    pluginupdates.setAttribute("href", regionbundle.GetStringFromName("pluginupdates_url"));
+    pluginupdates.appendChild(document.createTextNode(regionbundle.GetStringFromName("pluginupdates_label")));
+    findpluginupdates.appendChild(pluginupdates);
 
-  document.writeln("<div id=\"findpluginupdates\">" + pluginsbundle.GetStringFromName("findpluginupdates_label") + " ");
-  document.writeln("<a href=\"" + regionbundle.GetStringFromName("pluginupdates_url") + "\">" + regionbundle.GetStringFromName("pluginupdates_label") + "<\/a>.");
-  document.writeln("<\/div>");
+    fragment.appendChild(document.createElement("hr"));
 
-  document.writeln("<div id=\"installhelp\">" + pluginsbundle.GetStringFromName("installhelp_label") + " ");
-  document.writeln("<a href=\"" + regionbundle.GetStringFromName("plugindoc_url") + "\">" + regionbundle.GetStringFromName("plugindoc_label") + "<\/a>.");
-  document.writeln("<\/div><hr>");
+    var stateNames = {};
+    ["STATE_SOFTBLOCKED",
+     "STATE_BLOCKED",
+     "STATE_OUTDATED",
+     "STATE_VULNERABLE_UPDATE_AVAILABLE",
+     "STATE_VULNERABLE_NO_UPDATE"].forEach(function(label) {
+      stateNames[Ci.nsIBlocklistService[label]] = label;
+    });
 
-  for (var i = 0; i < numPlugins; i++)
-  {
-    var plugin = navigator.plugins[i];
+    for (var i = 0; i < aPlugins.length; i++) {
+      var plugin = aPlugins[i];
+      if (plugin) {
+        // "Shockwave Flash"
+        var plugname = document.createElement("h2");
+        plugname.setAttribute("class", "plugname");
+        plugname.appendChild(document.createTextNode(plugin.name));
+        fragment.appendChild(plugname);
 
-    if (plugin)
-    {
-      document.write("<h2 class=\"plugname\">");
-      document.write(plugin.name);
-      document.writeln("<\/h2>");
+        var dl = document.createElement("dl");
+        fragment.appendChild(dl);
 
-      document.writeln("<dl><dd><span class=\"label\">" + pluginsbundle.GetStringFromName("file_label") + "<\/span> ");
-      document.write(plugin.filename);
-      document.writeln("<\/dd><dd><span class=\"label\">" + pluginsbundle.GetStringFromName("version_label") + "<\/span> ");
-      document.write(plugin.version);
-      document.writeln("<\/dd><dd>");
-      document.write(plugin.description);
-      document.writeln("<\/dd><\/dl>");
+        // "File: Flash Player.plugin"
+        var fileDd = document.createElement("dd");
+        var file = document.createElement("span");
+        file.setAttribute("class", "label");
+        file.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("file_label") + " "));
+        fileDd.appendChild(file);
+        fileDd.appendChild(document.createTextNode(plugin.pluginLibraries));
+        dl.appendChild(fileDd);
 
-      document.writeln("<table border=\"1\" class=\"contenttable\">");
-      document.writeln("<thead>");
-      document.writeln("<tr><th class=\"type\">" + pluginsbundle.GetStringFromName("mimetype_label") + "<\/th>");
-      document.writeln("<th class=\"desc\">" + pluginsbundle.GetStringFromName("description_label") + "<\/th>");
-      document.writeln("<th class=\"suff\">" + pluginsbundle.GetStringFromName("suffixes_label") + "<\/th>");
-      document.writeln("<\/tr><\/thead>");
-      document.writeln("<tbody>");
+        // "Path: /usr/lib/mozilla/plugins/libtotem-cone-plugin.so"
+        var pathDd = document.createElement("dd");
+        var path = document.createElement("span");
+        path.setAttribute("class", "label");
+        path.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("path_label") + " "));
+        pathDd.appendChild(path);
+        pathDd.appendChild(document.createTextNode(plugin.pluginFullpath));
+        dl.appendChild(pathDd);
 
-      var numTypes = plugin.length;
-      var mimetype;
-      for (var j = 0; j < numTypes; j++)
-      {
-        mimetype = plugin[j];
+        // "Version: "
+        var versionDd = document.createElement("dd");
+        var version = document.createElement("span");
+        version.setAttribute("class", "label");
+        version.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("version_label") + " "));
+        versionDd.appendChild(version);
+        versionDd.appendChild(document.createTextNode(plugin.version));
+        dl.appendChild(versionDd);
 
-        if (mimetype)
-        {
-          document.writeln("<tr>");
-          document.writeln("<td>" + mimetype.type + "<\/td>");
-          document.writeln("<td>" + mimetype.description + "<\/td>");
-          document.writeln("<td>" + mimetype.suffixes + "<\/td>");
-          document.writeln("<\/tr>");
+        // "State: "
+        var stateDd = document.createElement("dd");
+        var state = document.createElement("span");
+        state.setAttribute("label", "state");
+        state.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("state_label") + " "));
+        stateDd.appendChild(state);
+        status = plugin.isActive ? pluginsbundle.GetStringFromName("state_enabled") : pluginsbundle.GetStringFromName("state_disabled");
+        if (plugin.blocklistState in stateNames) {
+          status += " (" + stateNames[plugin.blocklistState] + ")";
+        }
+        stateDd.appendChild(document.createTextNode(status));
+        dl.appendChild(stateDd);
+
+        // Plugin Description
+        var descDd = document.createElement("dd");
+        descDd.appendChild(document.createTextNode(plugin.description));
+        dl.appendChild(descDd);
+
+        // MIME Type table
+        var mimetypeTable = document.createElement("table");
+        mimetypeTable.setAttribute("border", "1");
+        mimetypeTable.setAttribute("class", "contenttable");
+        fragment.appendChild(mimetypeTable);
+
+        var thead = document.createElement("thead");
+        mimetypeTable.appendChild(thead);
+        var tr = document.createElement("tr");
+        thead.appendChild(tr);
+
+        // "MIME Type" column header
+        var typeTh = document.createElement("th");
+        typeTh.setAttribute("class", "type");
+        typeTh.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("mimetype_label")));
+        tr.appendChild(typeTh);
+
+        // "Description" column header
+        var descTh = document.createElement("th");
+        descTh.setAttribute("class", "desc");
+        descTh.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("description_label")));
+        tr.appendChild(descTh);
+
+        // "Suffixes" column header
+        var suffixesTh = document.createElement("th");
+        suffixesTh.setAttribute("class", "suff");
+        suffixesTh.appendChild(document.createTextNode(pluginsbundle.GetStringFromName("suffixes_label")));
+        tr.appendChild(suffixesTh);
+
+        var tbody = document.createElement("tbody");
+        mimetypeTable.appendChild(tbody);
+
+        var mimeTypes = plugin.pluginMimeTypes;
+        for (var j = 0; j < mimeTypes.length; j++) {
+          var mimetype = mimeTypes[j];
+          if (mimetype) {
+            var mimetypeRow = document.createElement("tr");
+            tbody.appendChild(mimetypeRow);
+
+            // "application/x-shockwave-flash"
+            var typename = document.createElement("td");
+            typename.appendChild(document.createTextNode(mimetype.type));
+            mimetypeRow.appendChild(typename);
+
+            // "Shockwave Flash"
+            var description = document.createElement("td");
+            description.appendChild(document.createTextNode(mimetype.description));
+            mimetypeRow.appendChild(description);
+
+            // "swf"
+            var suffixes = document.createElement("td");
+            suffixes.appendChild(document.createTextNode(mimetype.suffixes));
+            mimetypeRow.appendChild(suffixes);
+          }
         }
       }
-
-      document.write("<\/tbody>");
-      document.write("<\/table>");
     }
-  }
+
+    document.getElementById("outside").appendChild(fragment);
+  });
 </script>
 </div>
 </body>

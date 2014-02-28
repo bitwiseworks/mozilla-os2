@@ -5,12 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "places_test_harness.h"
-#include "nsIBrowserHistory.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "mozilla/Attributes.h"
 
 #include "mock_Link.h"
+using namespace mozilla;
 using namespace mozilla::dom;
 
 /**
@@ -37,7 +37,7 @@ new_test_uri()
 {
   // Create a unique spec.
   static int32_t specNumber = 0;
-  nsCAutoString spec = NS_LITERAL_CSTRING("http://mozilla.org/");
+  nsAutoCString spec = NS_LITERAL_CSTRING("http://mozilla.org/");
   spec.AppendInt(specNumber++);
 
   // Create the URI for the spec.
@@ -108,6 +108,26 @@ test_set_places_enabled()
 
   rv = prefBranch->SetBoolPref("places.history.enabled", true);
   do_check_success(rv);
+
+  // Run the next test.
+  run_next_test();
+}
+
+
+void
+test_wait_checkpoint()
+{
+  // This "fake" test is here to wait for the initial WAL checkpoint we force
+  // after creating the database schema, since that may happen at any time,
+  // and cause concurrent readers to access an older checkpoint.
+  nsCOMPtr<mozIStorageConnection> db = do_get_db();
+  nsCOMPtr<mozIStorageAsyncStatement> stmt;
+  db->CreateAsyncStatement(NS_LITERAL_CSTRING("SELECT 1"),
+                           getter_AddRefs(stmt));
+  nsRefPtr<AsyncStatementSpinner> spinner = new AsyncStatementSpinner();
+  nsCOMPtr<mozIStoragePendingStatement> pending;
+  (void)stmt->ExecuteAsync(spinner, getter_AddRefs(pending));
+  spinner->SpinUntilCompleted();
 
   // Run the next test.
   run_next_test();
@@ -491,12 +511,11 @@ void
 test_visituri_transition_typed()
 {
   nsCOMPtr<nsINavHistoryService> navHistory = do_get_NavHistory();
-  nsCOMPtr<nsIBrowserHistory> browserHistory = do_QueryInterface(navHistory);
   nsCOMPtr<IHistory> history = do_get_IHistory();
   nsCOMPtr<nsIURI> lastURI = new_test_uri();
   nsCOMPtr<nsIURI> visitedURI = new_test_uri();
 
-  browserHistory->MarkPageAsTyped(visitedURI);
+  navHistory->MarkPageAsTyped(visitedURI);
   history->VisitURI(visitedURI, lastURI, mozilla::IHistory::TOP_LEVEL);
   nsRefPtr<VisitURIObserver> finisher = new VisitURIObserver();
   finisher->WaitForNotification();
@@ -514,8 +533,6 @@ test_visituri_transition_typed()
 void
 test_visituri_transition_embed()
 {
-  nsCOMPtr<nsINavHistoryService> navHistory = do_get_NavHistory();
-  nsCOMPtr<nsIBrowserHistory> browserHistory = do_QueryInterface(navHistory);
   nsCOMPtr<IHistory> history = do_get_IHistory();
   nsCOMPtr<nsIURI> lastURI = new_test_uri();
   nsCOMPtr<nsIURI> visitedURI = new_test_uri();
@@ -590,6 +607,7 @@ test_two_null_links_same_uri()
  */
 Test gTests[] = {
   TEST(test_set_places_enabled), // Must come first!
+  TEST(test_wait_checkpoint), // Must come second!
   TEST(test_unvisited_does_not_notify_part1), // Order Important!
   TEST(test_visited_notifies),
   TEST(test_unvisited_does_not_notify_part2), // Order Important!

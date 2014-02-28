@@ -9,11 +9,14 @@
 #include "gfxASurface.h"
 #include "gfxImageSurface.h"
 
+/* include windows.h for the HWND and HDC definitions that we need. */
 #include <windows.h>
+/* undefine LoadImage because our code uses that name */
+#undef LoadImage
 
 class gfxContext;
 
-class THEBES_API gfxWindowsSurface : public gfxASurface {
+class gfxWindowsSurface : public gfxASurface {
 public:
     enum {
         FLAG_TAKE_DC = (1 << 0),

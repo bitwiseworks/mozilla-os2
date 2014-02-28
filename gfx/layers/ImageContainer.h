@@ -9,22 +9,15 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "gfxASurface.h" // for gfxImageFormat
-#include "LayersTypes.h" // for LayersBackend
+#include "mozilla/layers/LayersTypes.h" // for LayersBackend
 #include "mozilla/TimeStamp.h"
 #include "ImageTypes.h"
+#include "nsTArray.h"
 
 #ifdef XP_WIN
 struct ID3D10Texture2D;
 struct ID3D10Device;
 struct ID3D10ShaderResourceView;
-#endif
-
-#ifdef XP_MACOSX
-#include "mozilla/gfx/MacIOSurface.h"
-#endif
-
-#ifdef MOZ_WIDGET_GONK
-# include <ui/GraphicBuffer.h>
 #endif
 
 typedef void* HANDLE;
@@ -35,10 +28,11 @@ class CrossProcessMutex;
 namespace ipc {
 class Shmem;
 }
-    
+
 namespace layers {
 
-class ImageContainerChild;
+class ImageClient;
+class SharedPlanarYCbCrImage;
 
 struct ImageBackendData
 {
@@ -62,7 +56,7 @@ protected:
  * When resampling an Image, only pixels within the buffer should be
  * sampled. For example, cairo images should be sampled in EXTEND_PAD mode.
  */
-class THEBES_API Image {
+class Image {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Image)
 
 public:
@@ -82,11 +76,15 @@ public:
 
   int32_t GetSerial() { return mSerial; }
 
+  void MarkSent() { mSent = true; }
+  bool IsSentToCompositor() { return mSent; }
+
 protected:
   Image(void* aImplData, ImageFormat aFormat) :
     mImplData(aImplData),
     mSerial(PR_ATOMIC_INCREMENT(&sSerialCounter)),
-    mFormat(aFormat)
+    mFormat(aFormat),
+    mSent(false)
   {}
 
   nsAutoPtr<ImageBackendData> mBackendData[mozilla::layers::LAYERS_LAST];
@@ -95,6 +93,7 @@ protected:
   int32_t mSerial;
   ImageFormat mFormat;
   static int32_t sSerialCounter;
+  bool mSent;
 };
 
 /**
@@ -154,7 +153,7 @@ public:
 
 /**
  * A class that manages Image creation for a LayerManager. The only reason
- * we need a separate class here is that LayerMananers aren't threadsafe
+ * we need a separate class here is that LayerManagers aren't threadsafe
  * (because layers can only be used on the main thread) and we want to
  * be able to create images from any thread, to facilitate video playback
  * without involving the main thread, for example.
@@ -168,7 +167,7 @@ public:
  * wrapper.
  */
 
-class THEBES_API ImageFactory
+class ImageFactory
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ImageFactory)
 protected:
@@ -261,7 +260,7 @@ struct RemoteImageData {
  * updates the shared state to point to the new image and the old image
  * is immediately released (not true in Normal or Asynchronous modes).
  */
-class THEBES_API ImageContainer {
+class ImageContainer {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ImageContainer)
 public:
 
@@ -295,7 +294,7 @@ public:
    * Implementations must call CurrentImageChanged() while holding
    * mReentrantMonitor.
    *
-   * If this ImageContainer has an ImageContainerChild for async video: 
+   * If this ImageContainer has an ImageClient for async video:
    * Schelude a task to send the image to the compositor using the 
    * PImageBridge protcol without using the main thread.
    */
@@ -304,7 +303,7 @@ public:
   /**
    * Set an Image as the current image to display. The Image must have
    * been created by this ImageContainer.
-   * Must be called on the main thread, within a layers transaction. 
+   * Must be called on the main thread, within a layers transaction.
    * 
    * This method takes mReentrantMonitor
    * when accessing thread-shared state.
@@ -329,9 +328,9 @@ public:
    * If this ImageContainer uses ImageBridge, returns the ID associated to
    * this container, for use in the ImageBridge protocol.
    * Returns 0 if this ImageContainer does not use ImageBridge. Note that
-   * 0 is always an invalid ID for asynchronous image containers. 
+   * 0 is always an invalid ID for asynchronous image containers.
    *
-   * Can be called from ay thread.
+   * Can be called from any thread.
    */
   uint64_t GetAsyncContainerID() const;
 
@@ -435,6 +434,15 @@ public:
   uint32_t GetPaintCount() {
     ReentrantMonitorAutoEnter mon(mReentrantMonitor);
     return mPaintCount;
+  }
+
+  /**
+   * Resets the paint count to zero.
+   * Can be called from any thread.
+   */
+  void ResetPaintCount() {
+    ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+    mPaintCount = 0;
   }
 
   /**
@@ -542,14 +550,14 @@ protected:
 
   CompositionNotifySink *mCompositionNotifySink;
 
-  // This member points to an ImageContainerChild if this ImageContainer was 
+  // This member points to an ImageClient if this ImageContainer was
   // sucessfully created with ENABLE_ASYNC, or points to null otherwise.
-  // 'unsuccessful' in this case only means that the ImageContainerChild could not
+  // 'unsuccessful' in this case only means that the ImageClient could not
   // be created, most likely because off-main-thread compositing is not enabled.
-  // In this case the ImageContainer is perfectly usable, but it will forward 
-  // frames to the compositor through transactions in the main thread rather than 
+  // In this case the ImageContainer is perfectly usable, but it will forward
+  // frames to the compositor through transactions in the main thread rather than
   // asynchronusly using the ImageBridge IPDL protocol.
-  nsRefPtr<ImageContainerChild> mImageContainerChild;
+  ImageClient* mImageClient;
 };
 
 class AutoLockImage
@@ -626,7 +634,7 @@ private:
  * |            |<->|
  *                mYSkip
  */
-class THEBES_API PlanarYCbCrImage : public Image {
+class PlanarYCbCrImage : public Image {
 public:
   struct Data {
     // Luminance buffer
@@ -674,6 +682,20 @@ public:
   virtual void SetData(const Data& aData);
 
   /**
+   * This doesn't make a copy of the data buffers. Can be used when mBuffer is
+   * pre allocated with AllocateAndGetNewBuffer(size) and then SetDataNoCopy is
+   * called to only update the picture size, planes etc. fields in mData.
+   * The GStreamer media backend uses this to decode into PlanarYCbCrImage(s)
+   * directly.
+   */
+  virtual void SetDataNoCopy(const Data &aData);
+
+  /**
+   * This allocates and returns a new buffer
+   */
+  virtual uint8_t* AllocateAndGetNewBuffer(uint32_t aSize);
+
+  /**
    * Ask this Image to not convert YUV to RGB during SetData, and make
    * the original data available through GetData. This is optional,
    * and not all PlanarYCbCrImages will support it.
@@ -696,6 +718,8 @@ public:
 
   PlanarYCbCrImage(BufferRecycleBin *aRecycleBin);
 
+  virtual SharedPlanarYCbCrImage *AsSharedPlanarYCbCrImage() { return nullptr; }
+
 protected:
   /**
    * Make a copy of the YCbCr data into local storage.
@@ -714,7 +738,7 @@ protected:
   already_AddRefed<gfxASurface> GetAsSurface();
 
   void SetOffscreenFormat(gfxASurface::gfxImageFormat aFormat) { mOffscreenFormat = aFormat; }
-  gfxASurface::gfxImageFormat GetOffscreenFormat() { return mOffscreenFormat; }
+  gfxASurface::gfxImageFormat GetOffscreenFormat();
 
   nsAutoArrayPtr<uint8_t> mBuffer;
   uint32_t mBufferSize;
@@ -730,7 +754,7 @@ protected:
  * device output color space. This class is very simple as all backends
  * have to know about how to deal with drawing a cairo image.
  */
-class THEBES_API CairoImage : public Image {
+class CairoImage : public Image {
 public:
   struct Data {
     gfxASurface* mSurface;
@@ -764,76 +788,6 @@ public:
   gfxIntSize mSize;
 };
 
-#ifdef XP_MACOSX
-class THEBES_API MacIOSurfaceImage : public Image {
-public:
-  struct Data {
-    MacIOSurface* mIOSurface;
-  };
-
-  MacIOSurfaceImage()
-    : Image(NULL, MAC_IO_SURFACE)
-    , mSize(0, 0)
-    , mPluginInstanceOwner(NULL)
-    , mUpdateCallback(NULL)
-    , mDestroyCallback(NULL)
-    {}
-
-  virtual ~MacIOSurfaceImage()
-  {
-    if (mDestroyCallback) {
-      mDestroyCallback(mPluginInstanceOwner);
-    }
-  }
-
- /**
-  * This can only be called on the main thread. It may add a reference
-  * to the surface (which will eventually be released on the main thread).
-  * The surface must not be modified after this call!!!
-  */
-  virtual void SetData(const Data& aData);
-
-  /**
-   * Temporary hacks to force plugin drawing during an empty transaction.
-   * This should not be used for anything else, and will be removed
-   * when async plugin rendering is complete.
-   */
-  typedef void (*UpdateSurfaceCallback)(ImageContainer* aContainer, void* aInstanceOwner);
-  virtual void SetUpdateCallback(UpdateSurfaceCallback aCallback, void* aInstanceOwner)
-  {
-    mUpdateCallback = aCallback;
-    mPluginInstanceOwner = aInstanceOwner;
-  }
-
-  typedef void (*DestroyCallback)(void* aInstanceOwner);
-  virtual void SetDestroyCallback(DestroyCallback aCallback)
-  {
-    mDestroyCallback = aCallback;
-  }
-
-  virtual gfxIntSize GetSize()
-  {
-    return mSize;
-  }
-
-  MacIOSurface* GetIOSurface()
-  {
-    return mIOSurface;
-  }
-
-  void Update(ImageContainer* aContainer);
-
-  virtual already_AddRefed<gfxASurface> GetAsSurface();
-
-private:
-  gfxIntSize mSize;
-  RefPtr<MacIOSurface> mIOSurface;
-  void* mPluginInstanceOwner;
-  UpdateSurfaceCallback mUpdateCallback;
-  DestroyCallback mDestroyCallback;
-};
-#endif
-
 class RemoteBitmapImage : public Image {
 public:
   RemoteBitmapImage() : Image(NULL, REMOTE_IMAGE_BITMAP) {}
@@ -847,7 +801,6 @@ public:
   gfxIntSize mSize;
   RemoteImageData::Format mFormat;
 };
-
 
 } //namespace
 } //namespace

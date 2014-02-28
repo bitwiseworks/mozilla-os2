@@ -31,6 +31,10 @@ let gBrowserThumbnails = {
   _tabEvents: ["TabClose", "TabSelect"],
 
   init: function Thumbnails_init() {
+    // Bug 863512 - Make page thumbnails work in electrolysis
+    if (gMultiProcessBrowser)
+      return;
+
     try {
       if (Services.prefs.getBoolPref("browser.pagethumbnails.capturing_disabled"))
         return;
@@ -51,6 +55,10 @@ let gBrowserThumbnails = {
   },
 
   uninit: function Thumbnails_uninit() {
+    // Bug 863512 - Make page thumbnails work in electrolysis
+    if (gMultiProcessBrowser)
+      return;
+
     PageThumbs.removeExpirationFilter(this);
     gBrowser.removeTabsProgressListener(this);
     Services.prefs.removeObserver(this.PREF_DISK_CACHE_SSL, this);
@@ -122,7 +130,7 @@ let gBrowserThumbnails = {
       return false;
 
     // Don't capture in per-window private browsing mode.
-    if (gPrivateBrowsingUI.privateWindow)
+    if (PrivateBrowsingUtils.isWindowPrivate(window))
       return false;
 
     let doc = aBrowser.contentDocument;
@@ -159,8 +167,14 @@ let gBrowserThumbnails = {
 
     if (httpChannel) {
       // Continue only if we have a 2xx status code.
-      if (Math.floor(httpChannel.responseStatus / 100) != 2)
+      try {
+        if (Math.floor(httpChannel.responseStatus / 100) != 2)
+          return false;
+      } catch (e) {
+        // Can't get response information from the httpChannel
+        // because mResponseHead is not available.
         return false;
+      }
 
       // Cache-Control: no-store.
       if (httpChannel.isNoStoreResponse())

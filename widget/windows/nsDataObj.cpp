@@ -29,12 +29,15 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsITimer.h"
 #include "nsThreadUtils.h"
+#include "mozilla/Preferences.h"
 
 #include "WinUtils.h"
 #include "mozilla/LazyIdleThread.h"
+#include <algorithm>
 
 
 using namespace mozilla;
+using namespace mozilla::widget;
 
 #define DEFAULT_THREAD_TIMEOUT_MS 30000
 
@@ -90,11 +93,12 @@ STDMETHODIMP nsDataObj::CStream::QueryInterface(REFIID refiid, void** ppvResult)
 }
 
 // nsIStreamListener implementation
-NS_IMETHODIMP nsDataObj::CStream::OnDataAvailable(nsIRequest *aRequest,
-                                                  nsISupports *aContext,
-                                                  nsIInputStream *aInputStream,
-                                                  uint32_t aOffset, // offset within the stream
-                                                  uint32_t aCount) // bytes available on this call
+NS_IMETHODIMP
+nsDataObj::CStream::OnDataAvailable(nsIRequest *aRequest,
+                                    nsISupports *aContext,
+                                    nsIInputStream *aInputStream,
+                                    uint64_t aOffset, // offset within the stream
+                                    uint32_t aCount) // bytes available on this call
 {
     // Extend the write buffer for the incoming data.
     uint8_t* buffer = mChannelData.AppendElements(aCount);
@@ -192,7 +196,7 @@ STDMETHODIMP nsDataObj::CStream::Read(void* pvBuffer,
   // Bytes left for Windows to read out of our buffer
   ULONG bytesLeft = mChannelData.Length() - mStreamRead;
   // Let Windows know what we will hand back, usually this is the entire buffer
-  *nBytesRead = NS_MIN(bytesLeft, nBytesToRead);
+  *nBytesRead = std::min(bytesLeft, nBytesToRead);
   // Copy the buffer data over
   memcpy(pvBuffer, ((char*)mChannelData.Elements() + mStreamRead), *nBytesRead);
   // Update our bytes read tracking
@@ -248,7 +252,7 @@ STDMETHODIMP nsDataObj::CStream::Stat(STATSTG* statstg, DWORD dwFlags)
       return E_FAIL;
     }
 
-    nsCAutoString strFileName;
+    nsAutoCString strFileName;
     nsCOMPtr<nsIURL> sourceURL = do_QueryInterface(sourceURI);
     sourceURL->GetFileName(strFileName);
 
@@ -308,10 +312,12 @@ HRESULT nsDataObj::CreateStream(IStream **outStream)
   nsresult rv = NS_ERROR_FAILURE;
   nsAutoString wideFileName;
   nsCOMPtr<nsIURI> sourceURI;
+  HRESULT res;
 
-  rv = GetDownloadDetails(getter_AddRefs(sourceURI),
-                          wideFileName);
-  NS_ENSURE_SUCCESS(rv, rv);
+  res = GetDownloadDetails(getter_AddRefs(sourceURI),
+                           wideFileName);
+  if(FAILED(res))
+    return res;
 
   nsDataObj::CStream *pStream = new nsDataObj::CStream();
   NS_ENSURE_TRUE(pStream, E_OUTOFMEMORY);
@@ -938,7 +944,7 @@ CreateFilenameFromTextA(nsString & aText, const char * aExtension,
   // way ensures that even in MBCS environments there will be a valid MBCS filename of
   // the correct length.
   int maxUsableFilenameLen = aFilenameLen - strlen(aExtension) - 1; // space for ext + null byte
-  int currLen, textLen = (int) NS_MIN(aText.Length(), aFilenameLen);
+  int currLen, textLen = (int) std::min(aText.Length(), aFilenameLen);
   char defaultChar = '_';
   do {
     currLen = WideCharToMultiByte(CP_ACP, 
@@ -1093,34 +1099,48 @@ nsDataObj :: GetFileDescriptorInternetShortcutW ( FORMATETC& aFE, STGMEDIUM& aST
 HRESULT
 nsDataObj :: GetFileContentsInternetShortcut ( FORMATETC& aFE, STGMEDIUM& aSTG )
 {
+  static const char * kShellIconPref = "browser.shell.shortcutFavicons";
   nsAutoString url;
   if ( NS_FAILED(ExtractShortcutURL(url)) )
     return E_OUTOFMEMORY;
 
   // will need to change if we ever support iDNS
-  nsCAutoString asciiUrl;
+  nsAutoCString asciiUrl;
   LossyCopyUTF16toASCII(url, asciiUrl);
 
   nsCOMPtr<nsIFile> icoFile;
   nsCOMPtr<nsIURI> aUri;
   NS_NewURI(getter_AddRefs(aUri), url);
 
-  nsAutoString aUriHash;
-
-  mozilla::widget::FaviconHelper::ObtainCachedIconFile(aUri, aUriHash, mIOThread, true);
-
-  nsresult rv = mozilla::widget::FaviconHelper::GetOutputIconPath(aUri, icoFile, true);
-  NS_ENSURE_SUCCESS(rv, rv);
+  const char *shortcutFormatStr;
+  int totalLen;
   nsCString path;
-  rv = icoFile->GetNativePath(path);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (!Preferences::GetBool(kShellIconPref, true) ||
+      WinUtils::GetWindowsVersion() < WinUtils::VISTA_VERSION) {
+    shortcutFormatStr = "[InternetShortcut]\r\nURL=%s\r\n";
+    const int formatLen = strlen(shortcutFormatStr) - 2;  // don't include %s
+    totalLen = formatLen + asciiUrl.Length();  // don't include null character
+  } else {
+    nsCOMPtr<nsIFile> icoFile;
+    nsCOMPtr<nsIURI> aUri;
+    NS_NewURI(getter_AddRefs(aUri), url);
 
-  static char* shortcutFormatStr = "[InternetShortcut]\r\nURL=%s\r\n" 
-                                   "IDList=\r\nHotKey=0\r\nIconFile=%s\r\n" 
-                                   "IconIndex=0\r\n";
-  static const int formatLen = strlen(shortcutFormatStr) - 2*2; // don't include %s (2 times) in the len
-  const int totalLen = formatLen + asciiUrl.Length() 
-                       + path.Length(); // we don't want a null character on the end
+    nsAutoString aUriHash;
+
+    mozilla::widget::FaviconHelper::ObtainCachedIconFile(aUri, aUriHash, mIOThread, true);
+
+    nsresult rv = mozilla::widget::FaviconHelper::GetOutputIconPath(aUri, icoFile, true);
+    NS_ENSURE_SUCCESS(rv, E_FAIL);
+    rv = icoFile->GetNativePath(path);
+    NS_ENSURE_SUCCESS(rv, E_FAIL);
+
+    shortcutFormatStr = "[InternetShortcut]\r\nURL=%s\r\n"
+                        "IDList=\r\nHotKey=0\r\nIconFile=%s\r\n"
+                        "IconIndex=0\r\n";
+    const int formatLen = strlen(shortcutFormatStr) - 2 * 2; // no %s twice
+    totalLen = formatLen + asciiUrl.Length() +
+               path.Length(); // we don't want a null character on the end
+  }
 
   // create a global memory area and build up the file contents w/in it
   HGLOBAL hGlobalMemory = ::GlobalAlloc(GMEM_SHARE, totalLen);
@@ -1137,8 +1157,13 @@ nsDataObj :: GetFileContentsInternetShortcut ( FORMATETC& aFE, STGMEDIUM& aSTG )
   // terminate strings which reach the maximum size of the buffer. Since we know that the 
   // formatted length here is totalLen, this call to _snprintf will format the string into 
   // the buffer without appending the null character.
-  _snprintf( contents, totalLen, shortcutFormatStr, asciiUrl.get(), path.get() );
-    
+
+  if (!Preferences::GetBool(kShellIconPref, true)) {
+    _snprintf(contents, totalLen, shortcutFormatStr, asciiUrl.get());
+  } else {
+    _snprintf(contents, totalLen, shortcutFormatStr, asciiUrl.get(), path.get());
+  }
+
   ::GlobalUnlock(hGlobalMemory);
   aSTG.hGlobal = hGlobalMemory;
   aSTG.tymed = TYMED_HGLOBAL;
@@ -1165,7 +1190,7 @@ bool nsDataObj :: IsFlavourPresent(const char *inFlavour)
     flavorList->GetElementAt (i, getter_AddRefs(genericFlavor));
     nsCOMPtr<nsISupportsCString> currentFlavor (do_QueryInterface(genericFlavor));
     if (currentFlavor) {
-      nsCAutoString flavorStr;
+      nsAutoCString flavorStr;
       currentFlavor->GetData(flavorStr);
       if (flavorStr.Equals(inFlavour)) {
         retval = true;         // found it!
@@ -1537,10 +1562,11 @@ HRESULT nsDataObj::DropTempFile(FORMATETC& aFE, STGMEDIUM& aSTG)
     nsCString filename;
     nsAutoString wideFileName;
     nsCOMPtr<nsIURI> sourceURI;
-    rv = GetDownloadDetails(getter_AddRefs(sourceURI),
+    HRESULT res;
+    res = GetDownloadDetails(getter_AddRefs(sourceURI),
       wideFileName);
-    if (NS_FAILED(rv))
-      return E_FAIL;
+    if (FAILED(res))
+      return res;
     NS_UTF16ToCString(wideFileName, NS_CSTRING_ENCODING_NATIVE_FILESYSTEM, filename);
 
     dropFile->AppendNative(filename);
@@ -1567,8 +1593,8 @@ HRESULT nsDataObj::DropTempFile(FORMATETC& aFE, STGMEDIUM& aSTG)
     ULONG readCount = 0;
     uint32_t writeCount = 0;
     while (1) {
-      rv = pStream->Read(buffer, sizeof(buffer), &readCount);
-      if (NS_FAILED(rv))
+      HRESULT hres = pStream->Read(buffer, sizeof(buffer), &readCount);
+      if (FAILED(hres))
         return E_FAIL;
       if (readCount == 0)
         break;
@@ -1959,24 +1985,24 @@ nsDataObj::ExtractUniformResourceLocatorW(FORMATETC& aFE, STGMEDIUM& aSTG )
 
 
 // Gets the filename from the kFilePromiseURLMime flavour
-nsresult nsDataObj::GetDownloadDetails(nsIURI **aSourceURI,
-                                       nsAString &aFilename)
+HRESULT nsDataObj::GetDownloadDetails(nsIURI **aSourceURI,
+                                      nsAString &aFilename)
 {
   *aSourceURI = nullptr;
 
-  NS_ENSURE_TRUE(mTransferable, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(mTransferable, E_FAIL);
 
   // get the URI from the kFilePromiseURLMime flavor
   nsCOMPtr<nsISupports> urlPrimitive;
   uint32_t dataSize = 0;
   mTransferable->GetTransferData(kFilePromiseURLMime, getter_AddRefs(urlPrimitive), &dataSize);
   nsCOMPtr<nsISupportsString> srcUrlPrimitive = do_QueryInterface(urlPrimitive);
-  NS_ENSURE_TRUE(srcUrlPrimitive, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(srcUrlPrimitive, E_FAIL);
   
   nsAutoString srcUri;
   srcUrlPrimitive->GetData(srcUri);
   if (srcUri.IsEmpty())
-    return NS_ERROR_FAILURE;
+    return E_FAIL;
   nsCOMPtr<nsIURI> sourceURI;
   NS_NewURI(getter_AddRefs(sourceURI), srcUri);
 
@@ -1989,22 +2015,22 @@ nsresult nsDataObj::GetDownloadDetails(nsIURI **aSourceURI,
   } else {
     nsCOMPtr<nsIURL> sourceURL = do_QueryInterface(sourceURI);
     if (!sourceURL)
-      return NS_ERROR_FAILURE;
+      return E_FAIL;
     
-    nsCAutoString urlFileName;
+    nsAutoCString urlFileName;
     sourceURL->GetFileName(urlFileName);
     NS_UnescapeURL(urlFileName);
     CopyUTF8toUTF16(urlFileName, srcFileName);
   }
   if (srcFileName.IsEmpty())
-    return NS_ERROR_FAILURE;
+    return E_FAIL;
 
   // make the name safe for the filesystem
   MangleTextToValidFilename(srcFileName);
 
   sourceURI.swap(*aSourceURI);
   aFilename = srcFileName;
-  return NS_OK;
+  return S_OK;
 }
 
 HRESULT nsDataObj::GetFileDescriptor_IStreamA(FORMATETC& aFE, STGMEDIUM& aSTG)
@@ -2019,17 +2045,16 @@ HRESULT nsDataObj::GetFileDescriptor_IStreamA(FORMATETC& aFE, STGMEDIUM& aSTG)
   }
 
   nsAutoString wideFileName;
-  nsresult rv;
+  HRESULT res;
   nsCOMPtr<nsIURI> sourceURI;
-  rv = GetDownloadDetails(getter_AddRefs(sourceURI),
-                          wideFileName);
-  if (NS_FAILED(rv))
+  res = GetDownloadDetails(getter_AddRefs(sourceURI), wideFileName);
+  if (FAILED(res))
   {
     ::GlobalFree(fileGroupDescHandle);
-    return E_FAIL;
+    return res;
   }
 
-  nsCAutoString nativeFileName;
+  nsAutoCString nativeFileName;
   NS_UTF16ToCString(wideFileName, NS_CSTRING_ENCODING_NATIVE_FILESYSTEM, nativeFileName);
   
   strncpy(fileGroupDescA->fgd[0].cFileName, nativeFileName.get(), NS_MAX_FILEDESCRIPTOR - 1);
@@ -2058,14 +2083,14 @@ HRESULT nsDataObj::GetFileDescriptor_IStreamW(FORMATETC& aFE, STGMEDIUM& aSTG)
   }
 
   nsAutoString wideFileName;
-  nsresult rv;
+  HRESULT res;
   nsCOMPtr<nsIURI> sourceURI;
-  rv = GetDownloadDetails(getter_AddRefs(sourceURI),
-                          wideFileName);
-  if (NS_FAILED(rv))
+  res = GetDownloadDetails(getter_AddRefs(sourceURI),
+                           wideFileName);
+  if (FAILED(res))
   {
     ::GlobalFree(fileGroupDescHandle);
-    return E_FAIL;
+    return res;
   }
 
   wcsncpy(fileGroupDescW->fgd[0].cFileName, wideFileName.get(), NS_MAX_FILEDESCRIPTOR - 1);

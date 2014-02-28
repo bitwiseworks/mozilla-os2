@@ -3,14 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/PLayers.h"
+#include "mozilla/layers/PLayerTransaction.h"
 
-/* This must occur *after* layers/PLayers.h to avoid typedefs conflicts. */
+// This must occur *after* layers/PLayerTransaction.h to avoid
+// typedefs conflicts.
 #include "mozilla/Util.h"
 
 #include "ipc/AutoOpenSurface.h"
-#include "mozilla/layers/ShadowLayers.h"
-#include "ShadowBufferD3D9.h"
 
 #include "ThebesLayerD3D9.h"
 #include "gfxPlatform.h"
@@ -49,7 +48,9 @@ ThebesLayerD3D9::~ThebesLayerD3D9()
 void
 ThebesLayerD3D9::InvalidateRegion(const nsIntRegion &aRegion)
 {
-  mValidRegion.Sub(mValidRegion, aRegion);
+  mInvalidRegion.Or(mInvalidRegion, aRegion);
+  mInvalidRegion.SimplifyOutward(10);
+  mValidRegion.Sub(mValidRegion, mInvalidRegion);
 }
 
 void
@@ -190,9 +191,7 @@ ThebesLayerD3D9::RenderThebesLayer(ReadbackProcessor* aReadback)
   nsIntRegion neededRegion = mVisibleRegion;
   if (!neededRegion.GetBounds().IsEqualInterior(newTextureRect) ||
       neededRegion.GetNumRects() > 1) {
-    gfxMatrix transform2d;
-    if (!GetEffectiveTransform().Is2D(&transform2d) ||
-        transform2d.HasNonIntegerTranslation()) {
+    if (MayResample()) {
       neededRegion = newTextureRect;
       if (mode == SURFACE_OPAQUE) {
         // We're going to paint outside the visible region, but layout hasn't
@@ -598,88 +597,6 @@ ThebesLayerD3D9::CreateNewTextures(const gfxIntSize &aSize,
       return;
     }
   }
-}
-
-ShadowThebesLayerD3D9::ShadowThebesLayerD3D9(LayerManagerD3D9 *aManager)
-  : ShadowThebesLayer(aManager, nullptr)
-  , LayerD3D9(aManager)
-{
-  mImplData = static_cast<LayerD3D9*>(this);
-}
-
-ShadowThebesLayerD3D9::~ShadowThebesLayerD3D9()
-{}
-
-void
-ShadowThebesLayerD3D9::Swap(const ThebesBuffer& aNewFront,
-                           const nsIntRegion& aUpdatedRegion,
-                           OptionalThebesBuffer* aNewBack,
-                           nsIntRegion* aNewBackValidRegion,
-                           OptionalThebesBuffer* aReadOnlyFront,
-                           nsIntRegion* aFrontUpdatedRegion)
-{
-  if (!mBuffer) {
-    mBuffer = new ShadowBufferD3D9(this);
-  }
-
-  if (mBuffer) {
-    AutoOpenSurface surf(OPEN_READ_ONLY, aNewFront.buffer());
-    mBuffer->Upload(surf.Get(), GetVisibleRegion().GetBounds());
-  }
-
-  *aNewBack = aNewFront;
-  *aNewBackValidRegion = mValidRegion;
-  *aReadOnlyFront = null_t();
-  aFrontUpdatedRegion->SetEmpty();
-}
-
-void
-ShadowThebesLayerD3D9::DestroyFrontBuffer()
-{
-  mBuffer = nullptr;
-}
-
-void
-ShadowThebesLayerD3D9::Disconnect()
-{
-  mBuffer = nullptr;
-}
-
-Layer*
-ShadowThebesLayerD3D9::GetLayer()
-{
-  return this;
-}
-
-bool
-ShadowThebesLayerD3D9::IsEmpty()
-{
-  return !mBuffer;
-}
-
-void
-ShadowThebesLayerD3D9::RenderThebesLayer()
-{
-  if (!mBuffer || mD3DManager->CompositingDisabled()) {
-    return;
-  }
-  NS_ABORT_IF_FALSE(mBuffer, "should have a buffer here");
-
-  mBuffer->RenderTo(mD3DManager, GetEffectiveVisibleRegion());
-}
-
-void
-ShadowThebesLayerD3D9::CleanResources()
-{
-  mBuffer = nullptr;
-  mValidRegion.SetEmpty();
-}
-
-void
-ShadowThebesLayerD3D9::LayerManagerDestroyed()
-{
-  mD3DManager->deviceManager()->mLayersWithResources.RemoveElement(this);
-  mD3DManager = nullptr;
 }
 
 } /* namespace layers */

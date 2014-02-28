@@ -8,13 +8,12 @@
 #include "nsCOMPtr.h"
 #include "nsCSSRendering.h"
 #include "nsRenderingContext.h"
-#ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
-#endif
 #include "nsIServiceManager.h"
 #include "nsITheme.h"
 #include "nsDisplayList.h"
 #include "nsCSSAnonBoxes.h"
+
+using namespace mozilla;
 
 nsIFrame*
 NS_NewGfxRadioControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -34,16 +33,10 @@ nsGfxRadioControlFrame::~nsGfxRadioControlFrame()
 }
 
 #ifdef ACCESSIBILITY
-already_AddRefed<Accessible>
-nsGfxRadioControlFrame::CreateAccessible()
+a11y::AccType
+nsGfxRadioControlFrame::AccessibleType()
 {
-  nsAccessibilityService* accService = nsIPresShell::AccService();
-  if (accService) {
-    return accService->CreateHTMLRadioButtonAccessible(mContent,
-                                                       PresContext()->PresShell());
-  }
-
-  return nullptr;
+  return a11y::eHTMLRadioButtonType;
 }
 #endif
 
@@ -62,31 +55,29 @@ PaintCheckedRadioButton(nsIFrame* aFrame,
   rect.Deflate(nsPresContext::CSSPixelsToAppUnits(2),
                nsPresContext::CSSPixelsToAppUnits(2));
 
-  aCtx->SetColor(aFrame->GetStyleColor()->mColor);
+  aCtx->SetColor(aFrame->StyleColor()->mColor);
   aCtx->FillEllipse(rect);
 }
 
-NS_IMETHODIMP
+void
 nsGfxRadioControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                          const nsRect&           aDirtyRect,
                                          const nsDisplayListSet& aLists)
 {
-  nsresult rv = nsFormControlFrame::BuildDisplayList(aBuilder, aDirtyRect,
-                                                     aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
-  
+  nsFormControlFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
+
   if (!IsVisibleForPainting(aBuilder))
-    return NS_OK;
+    return;
   
   if (IsThemed())
-    return NS_OK; // The theme will paint the check, if any.
+    return; // The theme will paint the check, if any.
 
   bool checked = true;
   GetCurrentCheckState(&checked); // Get check state from the content model
   if (!checked)
-    return NS_OK;
+    return;
     
-  return aLists.Content()->AppendNewToTop(new (aBuilder)
+  aLists.Content()->AppendNewToTop(new (aBuilder)
     nsDisplayGeneric(aBuilder, this, PaintCheckedRadioButton,
                      "CheckedRadioButton",
                      nsDisplayItem::TYPE_CHECKED_RADIOBUTTON));

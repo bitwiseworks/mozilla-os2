@@ -5,17 +5,13 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.gfx.BitmapUtils;
+import org.mozilla.gecko.util.ThreadUtils;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.util.Base64;
 import android.util.Log;
-
-import java.io.FileOutputStream;
-
-import org.mozilla.gecko.gfx.BitmapUtils;
-import org.mozilla.gecko.util.GeckoBackgroundThread;
 
 public class WebAppAllocator {
     private final String LOGTAG = "GeckoWebAppAllocator";
@@ -25,7 +21,7 @@ public class WebAppAllocator {
     protected static GeckoApp sContext = null;
     protected static WebAppAllocator sInstance = null;
     public static WebAppAllocator getInstance() {
-        return getInstance(GeckoApp.mAppContext);
+        return getInstance(GeckoAppShell.getContext());
     }
 
     public static synchronized WebAppAllocator getInstance(Context cx) {
@@ -63,9 +59,8 @@ public class WebAppAllocator {
     }
 
     public synchronized int findAndAllocateIndex(String app, String name, String aIconData) {
-        byte[] raw = Base64.decode(aIconData.substring(22), Base64.DEFAULT);
-        Bitmap bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.length);
-        return findAndAllocateIndex(app, name, bitmap);
+        Bitmap icon = (aIconData != null) ? BitmapUtils.getBitmapFromDataURI(aIconData) : null;
+        return findAndAllocateIndex(app, name, icon);
     }
 
     public synchronized int findAndAllocateIndex(final String app, final String name, final Bitmap aIcon) {
@@ -76,28 +71,38 @@ public class WebAppAllocator {
         for (int i = 0; i < MAX_WEB_APPS; ++i) {
             if (!mPrefs.contains(appKey(i))) {
                 // found unused index i
-                final int foundIndex = i;
-                GeckoBackgroundThread.getHandler().post(new Runnable() {
-                    public void run() {
-                        int color = 0;
-                        try {
-                            color = BitmapUtils.getDominantColor(aIcon);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-
-                        mPrefs.edit()
-                            .putString(appKey(foundIndex), app)
-                            .putInt(iconKey(foundIndex), color)
-                            .commit();
-                    }
-                });
+                updateAppAllocation(app, i, aIcon);
                 return i;
             }
         }
 
         // no more apps!
         return -1;
+    }
+
+    public synchronized void updateAppAllocation(final String app,
+                                                 final int index,
+                                                 final Bitmap aIcon) {
+        if (aIcon != null) {
+            ThreadUtils.getBackgroundHandler().post(new Runnable() {
+                @Override
+                public void run() {
+                    int color = 0;
+                    try {
+                        color = BitmapUtils.getDominantColor(aIcon);
+                    } catch (Exception e) {
+                        Log.e(LOGTAG, "Exception during getDominantColor", e);
+                    }
+                    mPrefs.edit()
+                          .putString(appKey(index), app)
+                          .putInt(iconKey(index), color).commit();
+                }
+            });
+        } else {
+            mPrefs.edit()
+                  .putString(appKey(index), app)
+                  .putInt(iconKey(index), 0).commit();
+        }
     }
 
     public synchronized int getIndexForApp(String app) {
@@ -123,10 +128,15 @@ public class WebAppAllocator {
         return index;
     }
 
-    public synchronized void releaseIndex(int index) {
-        mPrefs.edit()
-            .remove(appKey(index))
-            .remove(iconKey(index))
-            .apply();
+    public synchronized void releaseIndex(final int index) {
+        ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
+            public void run() {
+                mPrefs.edit()
+                    .remove(appKey(index))
+                    .remove(iconKey(index))
+                    .commit();
+            }
+        });
     }
 }

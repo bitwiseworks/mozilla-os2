@@ -9,9 +9,9 @@
 #define _nsStyleContext_h_
 
 #include "nsRuleNode.h"
-#include "nsIAtom.h"
 #include "nsCSSPseudoElements.h"
 
+class nsIAtom;
 class nsPresContext;
 
 /**
@@ -39,16 +39,39 @@ class nsPresContext;
 class nsStyleContext
 {
 public:
+  /**
+   * Create a new style context.
+   * @param aParent  The parent of a style context is used for CSS
+   *                 inheritance.  When the element or pseudo-element
+   *                 this style context represents the style data of
+   *                 inherits a CSS property, the value comes from the
+   *                 parent style context.  This means style context
+   *                 parentage must match the definitions of inheritance
+   *                 in the CSS specification.
+   * @param aPseudoTag  The pseudo-element or anonymous box for which
+   *                    this style context represents style.  Null if
+   *                    this style context is for a normal DOM element.
+   * @param aPseudoType  Must match aPseudoTag.
+   * @param aRuleNode  A rule node representing the ordered sequence of
+   *                   rules that any element, pseudo-element, or
+   *                   anonymous box that this style context is for
+   *                   matches.  See |nsRuleNode| and |nsIStyleRule|.
+   * @param aSkipFlexItemStyleFixup
+   *                 If set, this flag indicates that we should skip
+   *                 the chunk of ApplyStyleFixups() that modifies flex
+   *                 items' display values.
+   */
   nsStyleContext(nsStyleContext* aParent, nsIAtom* aPseudoTag,
                  nsCSSPseudoElements::Type aPseudoType,
-                 nsRuleNode* aRuleNode, nsPresContext* aPresContext);
+                 nsRuleNode* aRuleNode,
+                 bool aSkipFlexItemStyleFixup);
   ~nsStyleContext();
 
   void* operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW;
   void Destroy();
 
   nsrefcnt AddRef() {
-    if (mRefCnt == PR_UINT32_MAX) {
+    if (mRefCnt == UINT32_MAX) {
       NS_WARNING("refcount overflow, leaking object");
       return mRefCnt;
     }
@@ -58,7 +81,7 @@ public:
   }
 
   nsrefcnt Release() {
-    if (mRefCnt == PR_UINT32_MAX) {
+    if (mRefCnt == UINT32_MAX) {
       NS_WARNING("refcount overflow, leaking object");
       return mRefCnt;
     }
@@ -71,7 +94,7 @@ public:
     return mRefCnt;
   }
 
-  nsPresContext* PresContext() const { return mRuleNode->GetPresContext(); }
+  nsPresContext* PresContext() const { return mRuleNode->PresContext(); }
 
   nsStyleContext* GetParent() const { return mParent; }
 
@@ -84,9 +107,9 @@ public:
   // Find, if it already exists *and is easily findable* (i.e., near the
   // start of the child list), a style context whose:
   //  * GetPseudo() matches aPseudoTag
-  //  * GetRuleNode() matches aRules
+  //  * RuleNode() matches aRules
   //  * !GetStyleIfVisited() == !aRulesIfVisited, and, if they're
-  //    non-null, GetStyleIfVisited()->GetRuleNode() == aRulesIfVisited
+  //    non-null, GetStyleIfVisited()->RuleNode() == aRulesIfVisited
   //  * RelevantLinkVisited() == aRelevantLinkVisited
   already_AddRefed<nsStyleContext>
   FindChildWithRules(const nsIAtom* aPseudoTag, nsRuleNode* aRules,
@@ -172,7 +195,7 @@ public:
   void SetStyle(nsStyleStructID aSID, void* aStruct);
 
   // Setters for inherit structs only, since rulenode only sets those eagerly.
-  #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_, ctor_args_)          \
+  #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_)                      \
     void SetStyle##name_ (nsStyle##name_ * aStruct) {                       \
       void *& slot =                                                        \
         mCachedInheritedData.mStyleStructs[eStyleStruct_##name_];           \
@@ -182,12 +205,12 @@ public:
                    "Going to leak styledata");                              \
       slot = aStruct;                                                       \
     }
-#define STYLE_STRUCT_RESET(name_, checkdata_cb_, ctor_args_) /* nothing */
+#define STYLE_STRUCT_RESET(name_, checkdata_cb_) /* nothing */
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT_RESET
   #undef STYLE_STRUCT_INHERITED
 
-  nsRuleNode* GetRuleNode() { return mRuleNode; }
+  nsRuleNode* RuleNode() { return mRuleNode; }
   void AddStyleBit(const uint32_t& aBit) { mBits |= aBit; }
 
   /*
@@ -209,21 +232,21 @@ public:
    * null-checked.
    *
    * The typesafe functions below are preferred to the use of this
-   * function, bothe because they're easier to read and  because they're
+   * function, both because they're easier to read and because they're
    * faster.
    */
-  const void* NS_FASTCALL GetStyleData(nsStyleStructID aSID);
+  const void* NS_FASTCALL StyleData(nsStyleStructID aSID);
 
   /**
    * Define typesafe getter functions for each style struct by
    * preprocessing the list of style structs.  These functions are the
    * preferred way to get style data.  The macro creates functions like:
-   *   const nsStyleBorder* GetStyleBorder();
-   *   const nsStyleColor* GetStyleColor();
+   *   const nsStyleBorder* StyleBorder();
+   *   const nsStyleColor* StyleColor();
    */
-  #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)  \
-    const nsStyle##name_ * GetStyle##name_() {            \
-      return DoGetStyle##name_(true);                  \
+  #define STYLE_STRUCT(name_, checkdata_cb_)              \
+    const nsStyle##name_ * Style##name_() {               \
+      return DoGetStyle##name_(true);                     \
     }
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
@@ -235,16 +258,33 @@ public:
    *
    * Perhaps this shouldn't be a public nsStyleContext API.
    */
-  #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)  \
+  #define STYLE_STRUCT(name_, checkdata_cb_)              \
     const nsStyle##name_ * PeekStyle##name_() {           \
-      return DoGetStyle##name_(false);                 \
+      return DoGetStyle##name_(false);                    \
     }
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
 
   void* GetUniqueStyleData(const nsStyleStructID& aSID);
 
-  nsChangeHint CalcStyleDifference(nsStyleContext* aOther);
+  /**
+   * Compute the style changes needed during restyling when this style
+   * context is being replaced by aOther.  (This is nonsymmetric since
+   * we optimize by skipping comparison for styles that have never been
+   * requested.)
+   *
+   * This method returns a change hint (see nsChangeHint.h).  All change
+   * hints apply to the frame and its later continuations or special
+   * siblings.  Most (all of those except the "NotHandledForDescendants"
+   * hints) also apply to all descendants.  The caller must pass in any
+   * non-inherited hints that resulted from the parent style context's
+   * style change.  The caller *may* pass more hints than needed, but
+   * must not pass less than needed; therefore if the caller doesn't
+   * know, the caller should pass
+   * nsChangeHint_Hints_NotHandledForDescendants.
+   */
+  nsChangeHint CalcStyleDifference(nsStyleContext* aOther,
+                                   nsChangeHint aParentHintsNotHandledForDescendants);
 
   /**
    * Get a color that depends on link-visitedness using this and
@@ -295,7 +335,7 @@ public:
    */
   void StartBackgroundImageLoads() {
     // Just get our background struct; that should do the trick
-    GetStyleBackground();
+    StyleBackground();
   }
 
 #ifdef DEBUG
@@ -306,7 +346,7 @@ protected:
   void AddChild(nsStyleContext* aChild);
   void RemoveChild(nsStyleContext* aChild);
 
-  void ApplyStyleFixups(nsPresContext* aPresContext);
+  void ApplyStyleFixups(bool aSkipFlexItemStyleFixup);
 
   void FreeAllocations(nsPresContext* aPresContext);
 
@@ -315,8 +355,8 @@ protected:
   inline const void* GetCachedStyleData(nsStyleStructID aSID);
 
   // Helper functions for GetStyle* and PeekStyle*
-  #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_, ctor_args_)      \
-    const nsStyle##name_ * DoGetStyle##name_(bool aComputeData) {     \
+  #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_)                  \
+    const nsStyle##name_ * DoGetStyle##name_(bool aComputeData) {       \
       const nsStyle##name_ * cachedData =                               \
         static_cast<nsStyle##name_*>(                                   \
           mCachedInheritedData.mStyleStructs[eStyleStruct_##name_]);    \
@@ -325,12 +365,12 @@ protected:
       /* Have the rulenode deal */                                      \
       return mRuleNode->GetStyle##name_(this, aComputeData);            \
     }
-  #define STYLE_STRUCT_RESET(name_, checkdata_cb_, ctor_args_)          \
-    const nsStyle##name_ * DoGetStyle##name_(bool aComputeData) {     \
+  #define STYLE_STRUCT_RESET(name_, checkdata_cb_)                      \
+    const nsStyle##name_ * DoGetStyle##name_(bool aComputeData) {       \
       const nsStyle##name_ * cachedData = mCachedResetData              \
         ? static_cast<nsStyle##name_*>(                                 \
             mCachedResetData->mStyleStructs[eStyleStruct_##name_])      \
-        : nullptr;                                                       \
+        : nullptr;                                                      \
       if (cachedData) /* Have it cached already, yay */                 \
         return cachedData;                                              \
       /* Have the rulenode deal */                                      \
@@ -400,5 +440,5 @@ NS_NewStyleContext(nsStyleContext* aParentContext,
                    nsIAtom* aPseudoTag,
                    nsCSSPseudoElements::Type aPseudoType,
                    nsRuleNode* aRuleNode,
-                   nsPresContext* aPresContext);
+                   bool aSkipFlexItemStyleFixup);
 #endif

@@ -3,13 +3,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsMimeTypes.h"
+
 #include "Image.h"
 
 namespace mozilla {
 namespace image {
 
 // Constructor
-Image::Image(imgStatusTracker* aStatusTracker) :
+ImageResource::ImageResource(imgStatusTracker* aStatusTracker, nsIURI* aURI) :
+  mURI(aURI),
   mInnerWindowId(0),
   mAnimationConsumers(0),
   mAnimationMode(kNormalAnimMode),
@@ -26,11 +29,11 @@ Image::Image(imgStatusTracker* aStatusTracker) :
 }
 
 uint32_t
-Image::SizeOfData()
+ImageResource::SizeOfData()
 {
   if (mError)
     return 0;
-  
+
   // This is not used by memory reporters, but for sizing the cache, which is
   // why it uses |moz_malloc_size_of| rather than an
   // |NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN|.
@@ -48,77 +51,77 @@ Image::GetDecoderType(const char *aMimeType)
   eDecoderType rv = eDecoderType_unknown;
 
   // PNG
-  if (!strcmp(aMimeType, "image/png"))
+  if (!strcmp(aMimeType, IMAGE_PNG))
     rv = eDecoderType_png;
-  else if (!strcmp(aMimeType, "image/x-png"))
+  else if (!strcmp(aMimeType, IMAGE_X_PNG))
     rv = eDecoderType_png;
 
   // GIF
-  else if (!strcmp(aMimeType, "image/gif"))
+  else if (!strcmp(aMimeType, IMAGE_GIF))
     rv = eDecoderType_gif;
 
 
   // JPEG
-  else if (!strcmp(aMimeType, "image/jpeg"))
+  else if (!strcmp(aMimeType, IMAGE_JPEG))
     rv = eDecoderType_jpeg;
-  else if (!strcmp(aMimeType, "image/pjpeg"))
+  else if (!strcmp(aMimeType, IMAGE_PJPEG))
     rv = eDecoderType_jpeg;
-  else if (!strcmp(aMimeType, "image/jpg"))
+  else if (!strcmp(aMimeType, IMAGE_JPG))
     rv = eDecoderType_jpeg;
 
   // BMP
-  else if (!strcmp(aMimeType, "image/bmp"))
+  else if (!strcmp(aMimeType, IMAGE_BMP))
     rv = eDecoderType_bmp;
-  else if (!strcmp(aMimeType, "image/x-ms-bmp"))
+  else if (!strcmp(aMimeType, IMAGE_BMP_MS))
     rv = eDecoderType_bmp;
 
 
   // ICO
-  else if (!strcmp(aMimeType, "image/x-icon"))
+  else if (!strcmp(aMimeType, IMAGE_ICO))
     rv = eDecoderType_ico;
-  else if (!strcmp(aMimeType, "image/vnd.microsoft.icon"))
+  else if (!strcmp(aMimeType, IMAGE_ICO_MS))
     rv = eDecoderType_ico;
 
   // Icon
-  else if (!strcmp(aMimeType, "image/icon"))
+  else if (!strcmp(aMimeType, IMAGE_ICON_MS))
     rv = eDecoderType_icon;
+
+#ifdef MOZ_WBMP
+  // WBMP
+  else if (!strcmp(aMimeType, IMAGE_WBMP))
+    rv = eDecoderType_wbmp;
+#endif
 
   return rv;
 }
 
 void
-Image::IncrementAnimationConsumers()
+ImageResource::IncrementAnimationConsumers()
 {
   mAnimationConsumers++;
-  EvaluateAnimation();
 }
 
 void
-Image::DecrementAnimationConsumers()
+ImageResource::DecrementAnimationConsumers()
 {
   NS_ABORT_IF_FALSE(mAnimationConsumers >= 1, "Invalid no. of animation consumers!");
   mAnimationConsumers--;
-  EvaluateAnimation();
 }
 
-//******************************************************************************
-/* attribute unsigned short animationMode; */
-NS_IMETHODIMP
-Image::GetAnimationMode(uint16_t* aAnimationMode)
+nsresult
+ImageResource::GetAnimationModeInternal(uint16_t* aAnimationMode)
 {
   if (mError)
     return NS_ERROR_FAILURE;
 
   NS_ENSURE_ARG_POINTER(aAnimationMode);
-  
+
   *aAnimationMode = mAnimationMode;
   return NS_OK;
 }
 
-//******************************************************************************
-/* attribute unsigned short animationMode; */
-NS_IMETHODIMP
-Image::SetAnimationMode(uint16_t aAnimationMode)
+nsresult
+ImageResource::SetAnimationModeInternal(uint16_t aAnimationMode)
 {
   if (mError)
     return NS_ERROR_FAILURE;
@@ -127,16 +130,14 @@ Image::SetAnimationMode(uint16_t aAnimationMode)
                aAnimationMode == kDontAnimMode ||
                aAnimationMode == kLoopOnceAnimMode,
                "Wrong Animation Mode is being set!");
-  
-  mAnimationMode = aAnimationMode;
 
-  EvaluateAnimation();
+  mAnimationMode = aAnimationMode;
 
   return NS_OK;
 }
 
 void
-Image::EvaluateAnimation()
+ImageResource::EvaluateAnimation()
 {
   if (!mAnimating && ShouldAnimate()) {
     nsresult rv = StartAnimation();

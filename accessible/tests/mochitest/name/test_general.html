@@ -91,6 +91,9 @@
       // Gets the name from html:input value, ignore @title attribute on input
       testName("from_input_ignoretitle", "Custom country");
 
+      // Insert spaces around the control's value to not jamm sibling text nodes
+      testName("insert_spaces_around_control", "start value end");
+
       // Gets the name from @title, ignore whitespace content
       testName("from_label_ignore_ws_subtree", "about");
 
@@ -124,6 +127,9 @@
       // ARIA role button is presented allowing the name calculation from
       // children.
       testName("btn_children", "14");
+
+      // html:button, no name from content
+      testName("btn_nonamefromcontent", null);
 
       // ARIA role option is presented allowing the name calculation from
       // visible children (bug 443081).
@@ -159,10 +165,14 @@
       testName("textareawithchild", "Story Bar is ended.");
 
       //////////////////////////////////////////////////////////////////////////
-      // button name (specific cases not covered by test_name_markup.html)
+      // controls having a value used as a part of computed name
 
-      testName("submit", "Submit Query");
-      testName("image_submit", "Submit Query");
+      testName("ctrlvalue_progressbar:input", "foo 5 baz");
+      testName("ctrlvalue_scrollbar:input", "foo 5 baz");
+      testName("ctrlvalue_slider:input", "foo 5 baz");
+      testName("ctrlvalue_spinbutton:input", "foo 5 baz");
+      testName("ctrlvalue_combobox:input", "foo 5 baz");
+
 
       /////////////////////////////////////////////////////////////////////////
       // label with nested combobox (test for 'f' item of name computation guide)
@@ -198,7 +208,13 @@
 
       // Test equation image
       testName("img_eq", "x^2 + y^2 + z^2")
+      testName("input_img_eq", "x^2 + y^2 + z^2")
       testName("txt_eq", "x^2 + y^2 + z^2")
+
+      ////////////////////////////////////////////////////////////////////////
+      // tests for duplicate announcement of content
+
+      testName("test_note", null);
 
       SimpleTest.finish();
     }
@@ -214,38 +230,63 @@
   <a target="_blank"
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=428479"
      title="Bug 428479 - Support ARIA role=math">
-    Mozilla Bug 428479
-  </a><br>
+    Bug 428479
+  </a>
   <a target="_blank"
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=429666"
      title="Expose ROLE_DOCUMENT for ARIA landmarks that inherit from document">
-    Mozilla Bug 429666
-  </a><br>
+    Bug 429666
+  </a>
   <a target="_blank"
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=444279"
      title="mochitest for accessible name calculating">
-    Mozilla Bug 444279
-  </a><br>
+    Bug 444279
+  </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=459635"
+     title="nsIAccessible::name calculation for HTML buttons">
+    Bug 459635
+  </a>
   <a target="_blank"
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=530081"
-     title="Clean up our tree walker ">
-    Mozilla Bug 530081
+     title="Clean up our tree walker">
+    Bug 530081
   </a><br>
   <a target="_blank"
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=604391"
      title="Use placeholder as name if name is otherwise empty">
-    Mozilla Bug 604391
+    Bug 604391
   </a>
   <a target="_blank"
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=669312"
      title="Accessible name is duplicated when input has a label associated uisng for/id and is wrapped around the input">
-    Mozilla Bug 669312
+    Bug 669312
   </a>
   <a target="_blank"
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=704416"
      title="HTML acronym and abbr names should be provided by @title">
-    Mozilla Bug 704416
+    Bug 704416
   </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=812041"
+     title="ARIA slider and spinbutton don't provide a value for name computation">
+    Bug 812041
+  </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=823927"
+     title="Text is jammed with control's text in name computation">
+    Bug 823927
+  </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=835666"
+     title="ARIA combobox selected value is not a part of name computation">
+    Bug 835666
+  </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=833256"
+     title="role note shouldn't pick up the name from subtree">
+    Mozilla Bug 833256
+   </a>
   <p id="display"></p>
   <div id="content" style="display: none"></div>
   <pre id="test">
@@ -373,6 +414,11 @@
          value="Custom country"
          title="Input your country of origin"/ >
 
+  <!-- name from subtree, surround control by spaces to not jamm the text -->
+  <label id="insert_spaces_around_control">
+    start<input value="value">end
+  </label>
+
   <!-- no name from subtree because it holds whitespaces only -->
   <a id="from_label_ignore_ws_subtree" href="about:" title="about">&nbsp;&nbsp;  </a>
 
@@ -403,6 +449,9 @@
 
   <!-- name from children -->
   <span id="btn_children" role="button">14</span>
+
+  <!-- no name from content, ARIA role overrides this rule -->
+  <button id="btn_nonamefromcontent" role="img">1</button>
 
   <!-- name from children, hidden children -->
   <div role="listbox" tabindex="0">
@@ -441,9 +490,51 @@
     </label>
   </form>
 
-  <!-- submit buttons -->
-  <input type="submit" id="submit">
-  <input type="image" id="image_submit">
+  <!-- controls having a value used as part of computed name -->
+  <input type="checkbox" id="ctrlvalue_progressbar:input">
+  <label for="ctrlvalue_progressbar:input">
+    foo <span role="progressbar"
+               aria-valuenow="5" aria-valuemin="1"
+               aria-valuemax="10">5</span> baz
+  </label>
+
+  <input type="checkbox" id="ctrlvalue_scrollbar:input" />
+  <label for="ctrlvalue_scrollbar:input">
+    foo <span role="scrollbar"
+              aria-valuenow="5" aria-valuemin="1"
+              aria-valuemax="10">5</span> baz
+  </label>
+
+  <input type="checkbox" id="ctrlvalue_slider:input">
+  <label for="ctrlvalue_slider:input">
+    foo <input role="slider" type="range"
+               value="5" min="1" max="10"
+               aria-valuenow="5" aria-valuemin="1"
+               aria-valuemax="10"> baz
+  </label>
+
+  <input type="checkbox" id="ctrlvalue_spinbutton:input">
+  <label for="ctrlvalue_spinbutton:input">
+    foo <input role="spinbutton" type="number"
+               value="5" min="1" max="10"
+               aria-valuenow="5" aria-valuemin="1"
+               aria-valuemax="10">
+    baz
+  </label>
+
+  <input type="checkbox" id="ctrlvalue_combobox:input">
+  <label for="ctrlvalue_combobox:input">
+    foo
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option">1</li>
+        <li role="option" aria-selected="true">5</li>
+        <li role="option">3</li>
+      </ul>
+    </div>
+    baz
+  </label>
 
   <!-- a label with a nested control in the start, middle and end -->
   <form>
@@ -516,11 +607,15 @@
 
   <p>Image: 
     <img id="img_eq" role="math" src="foo" alt="x^2 + y^2 + z^2">
+    <input type="image"  id="input_img_eq" src="foo" alt="x^2 + y^2 + z^2">
   </p>
 
   <p>Text: 
     <span id="txt_eq" role="math" title="x^2 + y^2 + z^2">x<sup>2</sup> + 
       y<sup>2</sup> + z<sup>2</sup></span>
+
+  <!-- duplicate announcement -->
+  <div id="test_note" role="note">subtree</div>
 
 </body>
 </html>

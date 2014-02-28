@@ -22,18 +22,24 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/Attributes.h"
 #include "FrameMetrics.h"
+#include "nsStubMutationObserver.h"
 
 class nsIURI;
 class nsSubDocumentFrame;
-class nsIView;
+class nsView;
 class nsIInProcessContentFrameMessageManager;
 class AutoResetInShow;
 class nsITabParent;
+class nsIDocShellTreeItem;
+class nsIDocShellTreeOwner;
+class nsIDocShellTreeNode;
+class mozIApplication;
 
 namespace mozilla {
 namespace dom {
 class PBrowserParent;
 class TabParent;
+struct StructuredCloneData;
 }
 
 namespace layout {
@@ -41,7 +47,7 @@ class RenderFrameParent;
 }
 }
 
-#ifdef MOZ_WIDGET_GTK2
+#if defined(MOZ_WIDGET_GTK)
 typedef struct _GtkWidget GtkWidget;
 #endif
 #ifdef MOZ_WIDGET_QT
@@ -135,7 +141,9 @@ private:
 
 
 class nsFrameLoader MOZ_FINAL : public nsIFrameLoader,
-                                public nsIContentViewManager
+                                public nsIContentViewManager,
+                                public nsStubMutationObserver,
+                                public mozilla::dom::ipc::MessageManagerCallback
 {
   friend class AutoResetInShow;
   typedef mozilla::dom::PBrowserParent PBrowserParent;
@@ -166,12 +174,23 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsFrameLoader, nsIFrameLoader)
   NS_DECL_NSIFRAMELOADER
   NS_DECL_NSICONTENTVIEWMANAGER
+  NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
   NS_HIDDEN_(nsresult) CheckForRecursiveLoad(nsIURI* aURI);
   nsresult ReallyStartLoading();
   void Finalize();
   nsIDocShell* GetExistingDocShell() { return mDocShell; }
-  nsIDOMEventTarget* GetTabChildGlobalAsEventTarget();
+  mozilla::dom::EventTarget* GetTabChildGlobalAsEventTarget();
   nsresult CreateStaticClone(nsIFrameLoader* aDest);
+
+  /**
+   * MessageManagerCallback methods that we override.
+   */
+  virtual bool DoLoadFrameScript(const nsAString& aURL) MOZ_OVERRIDE;
+  virtual bool DoSendAsyncMessage(const nsAString& aMessage,
+                                  const mozilla::dom::StructuredCloneData& aData) MOZ_OVERRIDE;
+  virtual bool CheckPermission(const nsAString& aPermission) MOZ_OVERRIDE;
+  virtual bool CheckManifestURL(const nsAString& aManifestURL) MOZ_OVERRIDE;
+  virtual bool CheckAppHasPermission(const nsAString& aPermission) MOZ_OVERRIDE;
 
   /**
    * Called from the layout frame associated with this frame loader;
@@ -227,7 +246,7 @@ public:
    * The "current" render frame is the one on which the most recent
    * remote layer-tree transaction was executed.  If no content has
    * been drawn yet, or the remote browser doesn't have any drawn
-   * content for whatever reason, return NULL.  The returned render
+   * content for whatever reason, return nullptr.  The returned render
    * frame has an associated shadow layer tree.
    *
    * Note that the returned render frame might not be a frame
@@ -278,14 +297,14 @@ public:
    * document has changed during reframe, so we can discard the presentation 
    * in that case.
    */
-  void SetDetachedSubdocView(nsIView* aDetachedView,
+  void SetDetachedSubdocView(nsView* aDetachedView,
                              nsIDocument* aContainerDoc);
 
   /**
    * Retrieves the detached view and the document containing the view,
    * as set by SetDetachedSubdocView().
    */
-  nsIView* GetDetachedSubdocView(nsIDocument** aContainerDoc) const;
+  nsView* GetDetachedSubdocView(nsIDocument** aContainerDoc) const;
 
 private:
 
@@ -296,9 +315,9 @@ private:
   /**
    * Is this a frameloader for a bona fide <iframe mozbrowser> or
    * <iframe mozapp>?  (I.e., does the frame return true for
-   * nsIMozBrowserFrame::GetReallyIsBrowser()?)
+   * nsIMozBrowserFrame::GetReallyIsBrowserOrApp()?)
    */
-  bool OwnerIsBrowserFrame();
+  bool OwnerIsBrowserOrAppFrame();
 
   /**
    * Is this a frameloader for a bona fide <iframe mozapp>?  (I.e., does the
@@ -307,10 +326,27 @@ private:
   bool OwnerIsAppFrame();
 
   /**
+   * Is this a frame loader for a bona fide <iframe mozbrowser>?
+   */
+  bool OwnerIsBrowserFrame();
+
+  /**
    * Get our owning element's app manifest URL, or return the empty string if
    * our owning element doesn't have an app manifest URL.
    */
   void GetOwnerAppManifestURL(nsAString& aOut);
+
+  /**
+   * Get the app for our frame.  This is the app whose manifest is returned by
+   * GetOwnerAppManifestURL.
+   */
+  already_AddRefed<mozIApplication> GetOwnApp();
+
+  /**
+   * Get the app which contains this frame.  This is the app associated with
+   * the frame element's principal.
+   */
+  already_AddRefed<mozIApplication> GetContainingApp();
 
   /**
    * If we are an IPC frame, set mRemoteFrame. Otherwise, create and
@@ -321,12 +357,11 @@ private:
   NS_HIDDEN_(void) GetURL(nsString& aURL);
 
   // Properly retrieves documentSize of any subdocument type.
-  NS_HIDDEN_(nsIntSize) GetSubDocumentSize(const nsIFrame *aIFrame);
   nsresult GetWindowDimensions(nsRect& aRect);
 
   // Updates the subdocument position and size. This gets called only
   // when we have our own in-process DocShell.
-  NS_HIDDEN_(nsresult) UpdateBaseWindowPositionAndSize(nsIFrame *aIFrame);
+  NS_HIDDEN_(nsresult) UpdateBaseWindowPositionAndSize(nsSubDocumentFrame *aIFrame);
   nsresult CheckURILoad(nsIURI* aURI);
   void FireErrorEvent();
   nsresult ReallyStartLoadingInternal();
@@ -335,11 +370,29 @@ private:
   bool TryRemoteBrowser();
 
   // Tell the remote browser that it's now "virtually visible"
-  bool ShowRemoteFrame(const nsIntSize& size);
+  bool ShowRemoteFrame(const nsIntSize& size,
+                       nsSubDocumentFrame *aFrame = nullptr);
+
+  bool AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
+                              nsIDocShellTreeOwner* aOwner,
+                              int32_t aParentType,
+                              nsIDocShellTreeNode* aParentNode);
+
+  nsIAtom* TypeAttrName() const {
+    return mOwnerContent->IsXUL() ? nsGkAtoms::type : nsGkAtoms::mozframetype;
+  }
+
+  // Update the permission manager's app-id refcount based on mOwnerContent's
+  // own-or-containing-app.
+  void ResetPermissionManagerStatus();
 
   nsCOMPtr<nsIDocShell> mDocShell;
   nsCOMPtr<nsIURI> mURIToLoad;
   mozilla::dom::Element* mOwnerContent; // WEAK
+
+  // Note: this variable must be modified only by ResetPermissionManagerStatus()
+  uint32_t mAppIdSentToPermissionManager;
+
 public:
   // public because a callback needs these.
   nsRefPtr<nsFrameMessageManager> mMessageManager;
@@ -347,7 +400,7 @@ public:
 private:
   // Stores the root view of the subdocument while the subdocument is being
   // reframed. Used to restore the presentation after reframing.
-  nsIView* mDetachedSubdocViews;
+  nsView* mDetachedSubdocViews;
   // Stores the containing document of the frame corresponding to this
   // frame loader. This is reference is kept valid while the subframe's
   // presentation is detached and stored in mDetachedSubdocViews. This
@@ -373,6 +426,12 @@ private:
   bool mClipSubdocument : 1;
   bool mClampScrollPosition : 1;
   bool mRemoteBrowserInitialized : 1;
+  bool mObservingOwnerContent : 1;
+
+  // Backs nsIFrameLoader::{Get,Set}Visible.  Visibility state here relates to
+  // whether this frameloader's <iframe mozbrowser> is setVisible(true)'ed, and
+  // doesn't necessarily correlate with docshell/document visibility.
+  bool mVisible : 1;
 
   // XXX leaking
   nsCOMPtr<nsIObserver> mChildHost;

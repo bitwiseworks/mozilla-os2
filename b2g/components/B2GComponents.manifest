@@ -1,11 +1,6 @@
 # Scrollbars
 category agent-style-sheets browser-content-stylesheet chrome://browser/content/content.css
 
-# CameraContent.js
-component {eff4231b-abce-4f7f-a40a-d646e8fde3ce} CameraContent.js
-contract @mozilla.org/b2g-camera-content;1 {eff4231b-abce-4f7f-a40a-d646e8fde3ce}
-category JavaScript-navigator-property mozCamera @mozilla.org/b2g-camera-content;1
-
 # AlertsService.js
 component {fe33c107-82a4-41d6-8c64-5353267e04c9} AlertsService.js
 contract @mozilla.org/system-alerts-service;1 {fe33c107-82a4-41d6-8c64-5353267e04c9}
@@ -43,3 +38,34 @@ category app-startup ProcessGlobal service,@mozilla.org/b2g-process-global;1
 component {d18d0216-d50c-11e1-ba54-efb18d0ef0ac} ContentHandler.js
 contract @mozilla.org/uriloader/content-handler;1?type=application/pdf {d18d0216-d50c-11e1-ba54-efb18d0ef0ac}
 
+# PaymentGlue.js
+component {8b83eabc-7929-47f4-8b48-4dea8d887e4b} PaymentGlue.js
+contract @mozilla.org/payment/ui-glue;1 {8b83eabc-7929-47f4-8b48-4dea8d887e4b}
+
+# TelProtocolHandler.js
+component {782775dd-7351-45ea-aff1-0ffa872cfdd2} TelProtocolHandler.js
+contract @mozilla.org/network/protocol;1?name=tel {782775dd-7351-45ea-aff1-0ffa872cfdd2}
+
+# SmsProtocolHandler.js
+component {81ca20cb-0dad-4e32-8566-979c8998bd73} SmsProtocolHandler.js
+contract @mozilla.org/network/protocol;1?name=sms {81ca20cb-0dad-4e32-8566-979c8998bd73}
+
+# MailtoProtocolHandler.js
+component {50777e53-0331-4366-a191-900999be386c} MailtoProtocolHandler.js
+contract @mozilla.org/network/protocol;1?name=mailto {50777e53-0331-4366-a191-900999be386c}
+
+# YoutubeProtocolHandler.js
+component {c3f1b945-7e71-49c8-95c7-5ae9cc9e2bad} YoutubeProtocolHandler.js
+contract @mozilla.org/network/protocol;1?name=vnd.youtube {c3f1b945-7e71-49c8-95c7-5ae9cc9e2bad}
+
+# RecoveryService.js
+component {b3caca5d-0bb0-48c6-912b-6be6cbf08832} RecoveryService.js
+contract @mozilla.org/recovery-service;1 {b3caca5d-0bb0-48c6-912b-6be6cbf08832}
+
+# B2GAboutRedirector
+component {920400b1-cf8f-4760-a9c4-441417b15134} B2GAboutRedirector.js
+contract @mozilla.org/network/protocol/about;1?what=certerror {920400b1-cf8f-4760-a9c4-441417b15134}
+
+# FilePicker.js
+component {436ff8f9-0acc-4b11-8ec7-e293efba3141} FilePicker.js
+contract @mozilla.org/filepicker;1 {436ff8f9-0acc-4b11-8ec7-e293efba3141}

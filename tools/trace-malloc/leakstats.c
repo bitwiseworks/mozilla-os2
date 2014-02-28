@@ -25,12 +25,12 @@ int optind=1;
 static char *program;
 
 typedef struct handler_data {
-    uint32 current_heapsize;
-    uint32 max_heapsize;
-    uint32 bytes_allocated;
-    uint32 current_allocations;
-    uint32 total_allocations;
-    uint32 unmatched_frees;
+    uint32_t current_heapsize;
+    uint32_t max_heapsize;
+    uint32_t bytes_allocated;
+    uint32_t current_allocations;
+    uint32_t total_allocations;
+    uint32_t unmatched_frees;
     int finished;
 } handler_data;
 
@@ -120,8 +120,9 @@ int main(int argc, char **argv)
         for (i = j = 0; i < argc; i++) {
             fp = fopen(argv[i], "r");
             if (!fp) {
-                fprintf(stderr, "%s: can't open %s: %s\n",
-                        program, argv[i], strerror(errno));
+                fprintf(stderr,
+                        "TEST-UNEXPECTED-FAIL | leakstats | can't open %s: %s\n",
+                        argv[i], strerror(errno));
                 exit(1);
             }
             rv = tmreader_eventloop(tmr, argv[i], my_tmevent_handler);
@@ -136,7 +137,7 @@ int main(int argc, char **argv)
     }
     
     if (!data.finished) {
-        fprintf(stderr, "%s: log file incomplete\n", program);
+        fprintf(stderr, "TEST-UNEXPECTED-FAIL | leakstats | log file incomplete\n");
         exit(1);
     }
 

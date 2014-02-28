@@ -4,11 +4,14 @@
 
 package org.mozilla.gecko.sync.repositories.android;
 
+import java.io.IOException;
+
 import org.json.simple.JSONArray;
-import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.db.BrowserContract;
-import org.mozilla.gecko.sync.Logger;
+import org.mozilla.gecko.sync.ExtendedJSONObject;
+import org.mozilla.gecko.sync.NonArrayJSONException;
 import org.mozilla.gecko.sync.repositories.NullCursorException;
 import org.mozilla.gecko.sync.repositories.domain.ClientRecord;
 import org.mozilla.gecko.sync.repositories.domain.HistoryRecord;
@@ -112,7 +115,13 @@ public class RepoUtils {
       return new JSONArray();
     }
     try {
-      return (JSONArray) new JSONParser().parse(getStringFromCursor(cur, colId));
+      return ExtendedJSONObject.parseJSONArray(getStringFromCursor(cur, colId));
+    } catch (NonArrayJSONException e) {
+      Logger.error(LOG_TAG, "JSON parsing error for " + colId, e);
+      return null;
+    } catch (IOException e) {
+      Logger.error(LOG_TAG, "JSON parsing error for " + colId, e);
+      return null;
     } catch (ParseException e) {
       Logger.error(LOG_TAG, "JSON parsing error for " + colId, e);
       return null;
@@ -235,69 +244,6 @@ public class RepoUtils {
     if (a != null && b == null) return false;
     
     return a.equals(b);
-  }
-
-  private static String fixedWidth(int width, String s) {
-    if (s == null) {
-      return spaces(width);
-    }
-    int length = s.length();
-    if (width == length) {
-      return s;
-    }
-    if (width > length) {
-      return s + spaces(width - length);
-    }
-    return s.substring(0, width);
-  }
-
-  private static String spaces(int i) {
-    return "                                     ".substring(0, i);
-  }
-
-  private static String dashes(int i) {
-    return "-------------------------------------".substring(0, i);
-  }
-
-  public static void dumpCursor(Cursor cur) {
-    dumpCursor(cur, 18, "records");
-  }
-
-  public static void dumpCursor(Cursor cur, int columnWidth, String tag) {
-    int originalPosition = cur.getPosition();
-    try {
-      String[] columnNames = cur.getColumnNames();
-      int columnCount      = cur.getColumnCount();
-
-      for (int i = 0; i < columnCount; ++i) {
-        System.out.print(fixedWidth(columnWidth, columnNames[i]) + " | ");
-      }
-      System.out.println("(" + cur.getCount() + " " + tag + ")");
-      for (int i = 0; i < columnCount; ++i) {
-        System.out.print(dashes(columnWidth) + " | ");
-      }
-      System.out.println("");
-      if (!cur.moveToFirst()) {
-        System.out.println("EMPTY");
-        return;
-      }
-
-      cur.moveToFirst();
-      while (!cur.isAfterLast()) {
-        for (int i = 0; i < columnCount; ++i) {
-          System.out.print(fixedWidth(columnWidth, cur.getString(i)) + " | ");
-        }
-        System.out.println("");
-        cur.moveToNext();
-      }
-      for (int i = 0; i < columnCount-1; ++i) {
-        System.out.print(dashes(columnWidth + 3));
-      }
-      System.out.print(dashes(columnWidth + 3 - 1));
-      System.out.println("");
-    } finally {
-      cur.moveToPosition(originalPosition);
-    }
   }
 
   public static String computeSQLInClause(int items, String field) {

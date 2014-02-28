@@ -57,8 +57,7 @@ nsSupportsArrayEnumerator::CurrentItem(nsISupports **aItem)
   nsresult rv = mArray->Count(&cnt);
   if (NS_FAILED(rv)) return rv;
   if (mCursor >= 0 && mCursor < (int32_t)cnt) {
-    *aItem = mArray->ElementAt(mCursor);
-    return NS_OK;
+    return mArray->GetElementAt(mCursor, aItem);
   }
   return NS_ERROR_FAILURE;
 }
@@ -97,22 +96,4 @@ nsSupportsArrayEnumerator::Prev()
   else
     return NS_ERROR_FAILURE;
 }
-
-////////////////////////////////////////////////////////////////////////////////
-
-nsresult
-NS_NewISupportsArrayEnumerator(nsISupportsArray* array,
-                               nsIBidirectionalEnumerator* *aInstancePtrResult)
-{
-  if (aInstancePtrResult == 0)
-    return NS_ERROR_NULL_POINTER;
-  nsSupportsArrayEnumerator* e = new nsSupportsArrayEnumerator(array);
-  if (e == 0)
-    return NS_ERROR_OUT_OF_MEMORY;
-  NS_ADDREF(e);
-  *aInstancePtrResult = e;
-  return NS_OK;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 

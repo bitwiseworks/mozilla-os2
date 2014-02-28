@@ -9,14 +9,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = test_xulapp
-
-
-CPPSRCS = \
-  TestXREMakeCommandLineWin.cpp \
-  TestDllInterceptor.cpp \
-  $(NULL)
-
 OS_LIBS += $(call EXPAND_LIBNAME,comctl32 ws2_32 shell32)
 
 SIMPLE_PROGRAMS	= $(CPPSRCS:.cpp=$(BIN_SUFFIX))

@@ -46,12 +46,13 @@ public:
         virtual void OnChannelError() = 0;
         virtual Result OnMessageReceived(const Message& aMessage) = 0;
         virtual void OnProcessingError(Result aError) = 0;
+        virtual int32_t GetProtocolTypeId() = 0;
         virtual bool OnReplyTimeout() = 0;
         virtual Result OnMessageReceived(const Message& aMessage,
                                          Message*& aReply) = 0;
         virtual Result OnCallReceived(const Message& aMessage,
                                       Message*& aReply) = 0;
-        virtual void OnChannelConnected(int32 peer_pid) {};
+        virtual void OnChannelConnected(int32_t peer_pid) {}
 
         virtual void OnEnteredCxxStack()
         {
@@ -95,36 +96,10 @@ public:
     virtual bool Send(Message* msg) MOZ_OVERRIDE;
     virtual bool Send(Message* msg, Message* reply) MOZ_OVERRIDE;
 
-    // Asynchronously, send the child a message that puts it in such a
-    // state that it can't send messages to the parent unless the
-    // parent sends a message to it first.  The child stays in this
-    // state until the parent calls |UnblockChild()|.
-    //
-    // It is an error to
-    //  - call this on the child side of the channel.
-    //  - nest |BlockChild()| calls
-    //  - call this when the child is already blocked on a sync or RPC
-    //    in-/out- message/call
-    //
-    // Return true iff successful.
-    bool BlockChild();
-
-    // Asynchronously undo |BlockChild()|.
-    //
-    // It is an error to
-    //  - call this on the child side of the channel
-    //  - call this without a matching |BlockChild()|
-    //
-    // Return true iff successful.
-    bool UnblockChild();
-
     // Return true iff this has code on the C++ stack.
     bool IsOnCxxStack() const {
         return !mCxxStackFrames.empty();
     }
-
-    virtual bool OnSpecialMessage(uint16 id, const Message& msg) MOZ_OVERRIDE;
-
 
     /**
      * If there is a pending RPC message, process all pending messages.
@@ -151,7 +126,7 @@ private:
     // Called on worker thread only
 
     RPCListener* Listener() const {
-        return static_cast<RPCListener*>(mListener);
+        return static_cast<RPCListener*>(mListener.get());
     }
 
     virtual bool ShouldDeferNotifyMaybeError() const MOZ_OVERRIDE {
@@ -183,9 +158,6 @@ private:
 
     void Incall(const Message& call, size_t stackDepth);
     void DispatchIncall(const Message& call);
-
-    void BlockOnParent();
-    void UnblockFromParent();
 
     // This helper class managed RPCChannel.mCxxStackDepth on behalf
     // of RPCChannel.  When the stack depth is incremented from zero
@@ -224,7 +196,7 @@ private:
             return mMsg->is_rpc() && OUT_MESSAGE == mDirection;
         }
 
-        void Describe(int32* id, const char** dir, const char** sems,
+        void Describe(int32_t* id, const char** dir, const char** sems,
                       const char** name) const
         {
             *id = mMsg->routing_id();
@@ -237,7 +209,7 @@ private:
         const Message* mMsg;
     };
 
-    class NS_STACK_CLASS CxxStackFrame
+    class MOZ_STACK_CLASS CxxStackFrame
     {
     public:
 
@@ -294,8 +266,8 @@ private:
                     const char* type="rpc", bool reply=false) const;
 
     // This method is only safe to call on the worker thread, or in a
-    // debugger with all threads paused.  |outfile| defaults to stdout.
-    void DumpRPCStack(FILE* outfile=NULL, const char* const pfx="") const;
+    // debugger with all threads paused.
+    void DumpRPCStack(const char* const pfx="") const;
 
     // 
     // Queue of all incoming messages, except for replies to sync
@@ -339,6 +311,11 @@ private:
     //
     typedef std::deque<Message> MessageQueue;
     MessageQueue mPending;
+
+    // List of async and sync messages that have been received while waiting
+    // for an urgent reply, that need to be deferred until that reply has been
+    // received.
+    MessageQueue mNonUrgentDeferred;
 
     // 
     // Stack of all the RPC out-calls on which this RPCChannel is
@@ -389,9 +366,6 @@ private:
     // detect the same race.
     //
     size_t mRemoteStackDepthGuess;
-
-    // True iff the parent has put us in a |BlockChild()| state.
-    bool mBlockedOnParent;
 
     // Approximation of Sync/RPCChannel-code frames on the C++ stack.
     // It can only be interpreted as the implication

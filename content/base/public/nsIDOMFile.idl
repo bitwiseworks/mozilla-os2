@@ -28,7 +28,7 @@ interface nsIURI;
 interface nsIPrincipal;
 interface nsIDOMBlob;
 
-[scriptable, builtinclass, uuid(16e3f8d1-7f31-48cc-93f5-9c931a977cf6)]
+[scriptable, builtinclass, uuid(52d22585-7737-460e-9731-c658df03304a)]
 interface nsIDOMBlob : nsISupports
 {
   readonly attribute unsigned long long size;
@@ -61,7 +61,7 @@ interface nsIDOMBlob : nsISupports
   [notxpcom] FileInfo getFileInfo(in FileManager aFileManager);
 };
 
-[scriptable, builtinclass, uuid(cddf6087-0e83-4e1f-91b3-4861d5d4c53f)]
+[scriptable, builtinclass, uuid(6928584d-7d87-4d56-9ce1-1c89c24f2c6a)]
 interface nsIDOMFile : nsIDOMBlob
 {
   readonly attribute DOMString name;
@@ -73,19 +73,6 @@ interface nsIDOMFile : nsIDOMBlob
 
   // This performs no security checks!
   [noscript] readonly attribute DOMString mozFullPathInternal;
-};
 
-[scriptable, builtinclass, uuid(57195950-edd9-496b-9b45-e4893a9ffca9)]
-interface nsIDOMMozBlobBuilder : nsISupports
-{
-  nsIDOMBlob getBlob([optional] in DOMString contentType);
-  nsIDOMFile getFile(in DOMString name, [optional] in DOMString contentType);
-  [implicit_jscontext] void append(in jsval data,
-                                   [optional] in DOMString endings);
-};
-
-dictionary BlobPropertyBag
-{
-  DOMString type;
-  DOMString endings = "transparent";
+  [noscript] readonly attribute uint64_t mozLastModifiedDate;
 };

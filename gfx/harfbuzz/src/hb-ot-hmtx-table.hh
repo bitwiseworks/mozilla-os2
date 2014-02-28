@@ -30,6 +30,8 @@
 #include "hb-open-type-private.hh"
 
 
+namespace OT {
+
 
 /*
  * hmtx -- The Horizontal Metrics Table
@@ -51,7 +53,7 @@ struct hmtx
   static const hb_tag_t Tag	= HB_OT_TAG_hmtx;
 
   inline bool sanitize (hb_sanitize_context_t *c) {
-    TRACE_SANITIZE ();
+    TRACE_SANITIZE (this);
     /* We don't check for anything specific here.  The users of the
      * struct do all the hard work... */
     return TRACE_RETURN (true);
@@ -82,5 +84,9 @@ struct hmtx
   public:
   DEFINE_SIZE_ARRAY2 (0, longHorMetric, leftSideBearingX);
 };
+
+
+} /* namespace OT */
+
 
 #endif /* HB_OT_HMTX_TABLE_HH */

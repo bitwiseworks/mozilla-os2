@@ -8,13 +8,9 @@
 #ifndef nsChangeHint_h___
 #define nsChangeHint_h___
 
-#include "prtypes.h"
+#include "nsDebug.h"
 
 // Defines for various style related constants
-
-// For hints that don't guarantee that the change will be applied to all descendant
-// frames, style structs returning those hints from CalcDifference must have
-// their ForceCompare() return true.
 
 enum nsChangeHint {
   // change was visual only (e.g., COLOR=)
@@ -47,13 +43,12 @@ enum nsChangeHint {
   nsChangeHint_UpdateCursor = 0x40,
 
   /**
-   * SVG filter/mask/clip effects need to be recomputed because the URI
-   * in the filter/mask/clip-path property has changed. This wipes
-   * out cached nsSVGPropertyBase and subclasses which hold a reference to
-   * the element referenced by the URI, and a mutation observer for
-   * the DOM subtree rooted at that element. Also, for filters they store a
-   * bounding-box for the filter result so that if the filter changes we can
-   * invalidate the old covered area.
+   * Used when the computed value (a URI) of one or more of an element's
+   * filter/mask/clip/etc CSS properties changes, causing the element's frame
+   * to start/stop referencing (or reference different) SVG resource elements.
+   * (_Not_ used to handle changes to referenced resource elements.) Using this
+   * hint results in nsSVGEffects::UpdateEffects being called on the element's
+   * frame.
    */
   nsChangeHint_UpdateEffects = 0x80,
 
@@ -90,10 +85,41 @@ enum nsChangeHint {
   nsChangeHint_ChildrenOnlyTransform = 0x1000,
 
   /**
+   * The frame's offsets have changed, while its dimensions might have
+   * changed as well.  This hint is used for positioned frames if their
+   * offset changes.  If we decide that the dimensions are likely to
+   * change, this will trigger a reflow.
+   *
+   * Note that this should probably be used in combination with
+   * nsChangeHint_UpdateOverflow in order to get the overflow areas of
+   * the ancestors updated as well.
+   */
+  nsChangeHint_RecomputePosition = 0x2000,
+
+  /**
+   * Behaves like ReconstructFrame, but only if the frame has descendants
+   * that are absolutely or fixed position. Use this hint when a style change
+   * has changed whether the frame is a container for fixed-pos or abs-pos
+   * elements, but reframing is otherwise not needed.
+   */
+  nsChangeHint_AddOrRemoveTransform = 0x4000,
+
+  /**
+   * This change hint has *no* change handling behavior.  However, it
+   * exists to be a non-inherited hint, because when the border-style
+   * changes, and it's inherited by a child, that might require a reflow
+   * due to the border-width change on the child.
+   */
+  nsChangeHint_BorderStyleNoneChange = 0x8000,
+
+  /**
    * SVG textPath needs to be recomputed because the path has changed.
    * This means that the glyph positions of the text need to be recomputed.
    */
-  nsChangeHint_UpdateTextPath = 0x2000
+  nsChangeHint_UpdateTextPath = 0x10000
+
+  // IMPORTANT NOTE: When adding new hints, consider whether you need to
+  // add them to NS_HintsNotHandledForDescendantsIn() below.
 };
 
 // Redefine these operators to return nothing. This will catch any use
@@ -132,18 +158,71 @@ inline bool NS_IsHintSubset(nsChangeHint aSubset, nsChangeHint aSuperSet) {
   return (aSubset & aSuperSet) == aSubset;
 }
 
+/**
+ * We have an optimization when processing change hints which prevents
+ * us from visiting the descendants of a node when a hint on that node
+ * is being processed.  This optimization does not apply in some of the
+ * cases where applying a hint to an element does not necessarily result
+ * in the same hint being handled on the descendants.
+ */
+
+// The most hints that NS_HintsNotHandledForDescendantsIn could possibly return:
+#define nsChangeHint_Hints_NotHandledForDescendants nsChangeHint( \
+          nsChangeHint_UpdateTransformLayer | \
+          nsChangeHint_UpdateEffects | \
+          nsChangeHint_UpdateOpacityLayer | \
+          nsChangeHint_UpdateOverflow | \
+          nsChangeHint_ChildrenOnlyTransform | \
+          nsChangeHint_RecomputePosition | \
+          nsChangeHint_AddOrRemoveTransform | \
+          nsChangeHint_BorderStyleNoneChange | \
+          nsChangeHint_NeedReflow | \
+          nsChangeHint_ClearAncestorIntrinsics)
+
+inline nsChangeHint NS_HintsNotHandledForDescendantsIn(nsChangeHint aChangeHint) {
+  nsChangeHint result = nsChangeHint(aChangeHint & (
+    nsChangeHint_UpdateTransformLayer |
+    nsChangeHint_UpdateEffects |
+    nsChangeHint_UpdateOpacityLayer |
+    nsChangeHint_UpdateOverflow |
+    nsChangeHint_ChildrenOnlyTransform |
+    nsChangeHint_RecomputePosition |
+    nsChangeHint_AddOrRemoveTransform |
+    nsChangeHint_BorderStyleNoneChange));
+
+  if (!NS_IsHintSubset(nsChangeHint_NeedDirtyReflow, aChangeHint) &&
+      NS_IsHintSubset(nsChangeHint_NeedReflow, aChangeHint)) {
+    // If NeedDirtyReflow is *not* set, then NeedReflow is a
+    // non-inherited hint.
+    NS_UpdateHint(result, nsChangeHint_NeedReflow);
+  }
+
+  if (!NS_IsHintSubset(nsChangeHint_ClearDescendantIntrinsics, aChangeHint) &&
+      NS_IsHintSubset(nsChangeHint_ClearAncestorIntrinsics, aChangeHint)) {
+    // If ClearDescendantIntrinsics is *not* set, then
+    // ClearAncestorIntrinsics is a non-inherited hint.
+    NS_UpdateHint(result, nsChangeHint_ClearAncestorIntrinsics);
+  }
+
+  NS_ABORT_IF_FALSE(NS_IsHintSubset(result,
+                                    nsChangeHint_Hints_NotHandledForDescendants),
+                    "something is inconsistent");
+
+  return result;
+}
+
 // Redefine the old NS_STYLE_HINT constants in terms of the new hint structure
 #define NS_STYLE_HINT_NONE \
   nsChangeHint(0)
 #define NS_STYLE_HINT_VISUAL \
   nsChangeHint(nsChangeHint_RepaintFrame | nsChangeHint_SyncFrameView)
-#define nsChangeHint_ReflowFrame                        \
+#define nsChangeHint_AllReflowHints                     \
   nsChangeHint(nsChangeHint_NeedReflow |                \
                nsChangeHint_ClearAncestorIntrinsics |   \
                nsChangeHint_ClearDescendantIntrinsics | \
                nsChangeHint_NeedDirtyReflow)
 #define NS_STYLE_HINT_REFLOW \
-  nsChangeHint(NS_STYLE_HINT_VISUAL | nsChangeHint_ReflowFrame)
+  nsChangeHint(NS_STYLE_HINT_VISUAL | nsChangeHint_AllReflowHints)
 #define NS_STYLE_HINT_FRAMECHANGE \
   nsChangeHint(NS_STYLE_HINT_REFLOW | nsChangeHint_ReconstructFrame)
 

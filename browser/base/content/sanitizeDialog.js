@@ -47,11 +47,13 @@ var gSanitizePromptDialog = {
     for (let i = 0; i < sanitizeItemList.length; i++) {
       let prefItem = sanitizeItemList[i];
       let name = s.getNameFromPreference(prefItem.getAttribute("preference"));
-      if (!s.canClearItem(name)) {
-        prefItem.preference = null;
-        prefItem.checked = false;
-        prefItem.disabled = true;
-      }
+      s.canClearItem(name, function canClearCallback(aItem, aCanClear, aPrefItem) {
+        if (!aCanClear) {
+          aPrefItem.preference = null;
+          aPrefItem.checked = false;
+          aPrefItem.disabled = true;
+        }
+      }, prefItem);
     }
 
     document.documentElement.getButton("accept").label =
@@ -107,12 +109,23 @@ var gSanitizePromptDialog = {
     s.range = Sanitizer.getClearRange(this.selectedTimespan);
     s.ignoreTimespan = !s.range;
 
+    // As the sanitize is async, we disable the buttons, update the label on
+    // the 'accept' button to indicate things are happening and return false -
+    // once the async operation completes (either with or without errors)
+    // we close the window.
+    let docElt = document.documentElement;
+    let acceptButton = docElt.getButton("accept");
+    acceptButton.disabled = true;
+    acceptButton.setAttribute("label",
+                              this.bundleBrowser.getString("sanitizeButtonClearing"));
+    docElt.getButton("cancel").disabled = true;
     try {
-      s.sanitize();
+      s.sanitize().then(window.close, window.close);
     } catch (er) {
       Components.utils.reportError("Exception during sanitize: " + er);
+      return true; // We *do* want to close immediately on error.
     }
-    return true;
+    return false;
   },
 
   /**
@@ -281,11 +294,13 @@ var gSanitizePromptDialog = {
     for (let i = 0; i < sanitizeItemList.length; i++) {
       let prefItem = sanitizeItemList[i];
       let name = s.getNameFromPreference(prefItem.getAttribute("preference"));
-      if (!s.canClearItem(name)) {
-        prefItem.preference = null;
-        prefItem.checked = false;
-        prefItem.disabled = true;
-      }
+      s.canClearItem(name, function canClearCallback(aCanClear) {
+        if (!aCanClear) {
+          prefItem.preference = null;
+          prefItem.checked = false;
+          prefItem.disabled = true;
+        }
+      });
     }
 
     document.documentElement.getButton("accept").label =
@@ -804,9 +819,6 @@ var gContiguousSelectionTreeHelper = {
    */
   _makeTreeView: function CSTH__makeTreeView(aProtoTreeView)
   {
-    var atomServ = Cc["@mozilla.org/atom-service;1"].
-                   getService(Ci.nsIAtomService);
-
     var view = aProtoTreeView;
     var that = this;
 
@@ -837,28 +849,29 @@ var gContiguousSelectionTreeHelper = {
 
     view._getCellProperties = view.getCellProperties;
     view.getCellProperties =
-      function CSTH_View_getCellProperties(aRow, aCol, aProps)
+      function CSTH_View_getCellProperties(aRow, aCol)
       {
         var grippyRow = that.getGrippyRow();
         if (aRow === grippyRow)
-          aProps.AppendElement(atomServ.getAtom("grippyRow"));
-        else if (aRow < grippyRow)
-          this._getCellProperties(aRow, aCol, aProps);
-        else
-          this._getCellProperties(aRow - 1, aCol, aProps);
+          return "grippyRow";
+        if (aRow < grippyRow)
+          return this._getCellProperties(aRow, aCol);
+
+        return this._getCellProperties(aRow - 1, aCol);
       };
 
     view._getRowProperties = view.getRowProperties;
     view.getRowProperties =
-      function CSTH_View_getRowProperties(aRow, aProps)
+      function CSTH_View_getRowProperties(aRow)
       {
         var grippyRow = that.getGrippyRow();
         if (aRow === grippyRow)
-          aProps.AppendElement(atomServ.getAtom("grippyRow"));
-        else if (aRow < grippyRow)
-          this._getRowProperties(aRow, aProps);
-        else
-          this._getRowProperties(aRow - 1, aProps);
+          return "grippyRow";
+
+        if (aRow < grippyRow)
+          return this._getRowProperties(aRow);
+
+        return this._getRowProperties(aRow - 1);
       };
 
     view._getCellText = view.getCellText;

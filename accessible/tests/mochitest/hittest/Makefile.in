@@ -7,13 +7,14 @@ DEPTH		= @DEPTH@
 topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
-relativesrcdir  = accessible/hittest
+relativesrcdir	= @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_A11Y_FILES = \
 		test_browser.html \
 		test_general.html \
+		test_zoom_text.html \
 		test_zoom_tree.xul \
 		test_zoom.html \
 		zoom_tree.xul \

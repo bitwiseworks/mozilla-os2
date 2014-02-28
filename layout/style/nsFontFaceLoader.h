@@ -11,15 +11,12 @@
 
 #include "nsCOMPtr.h"
 #include "nsIStreamLoader.h"
-#include "nsIURI.h"
 #include "nsIChannel.h"
-#include "nsITimer.h"
 #include "gfxUserFontSet.h"
 #include "nsHashKeys.h"
 #include "nsTHashtable.h"
 #include "nsCSSRules.h"
 
-class nsIRequest;
 class nsISupports;
 class nsPresContext;
 class nsIPrincipal;
@@ -39,7 +36,8 @@ public:
 
   // starts loading process, creating and initializing a nsFontFaceLoader obj
   // returns whether load process successfully started or not
-  nsresult StartLoad(gfxProxyFontEntry *aFontToLoad,
+  nsresult StartLoad(gfxMixedFontFamily *aFamily,
+                     gfxProxyFontEntry *aFontToLoad,
                      const gfxFontFaceSrc *aFontFaceSrc);
 
   // Called by nsFontFaceLoader when the loader has completed normally.
@@ -50,7 +48,8 @@ public:
 
   nsPresContext *GetPresContext() { return mPresContext; }
 
-  virtual void ReplaceFontEntry(gfxProxyFontEntry *aProxy,
+  virtual void ReplaceFontEntry(gfxMixedFontFamily *aFamily,
+                                gfxProxyFontEntry *aProxy,
                                 gfxFontEntry *aFontEntry);
 
   nsCSSFontFaceRule *FindRuleForEntry(gfxFontEntry *aFontEntry);
@@ -69,19 +68,22 @@ protected:
                   nsTArray<FontFaceRuleRecord>& oldRules,
                   bool& aFontSetModified);
 
-  virtual nsresult LogMessage(gfxProxyFontEntry *aProxy,
+  virtual nsresult LogMessage(gfxMixedFontFamily *aFamily,
+                              gfxProxyFontEntry *aProxy,
                               const char *aMessage,
                               uint32_t aFlags = nsIScriptError::errorFlag,
                               nsresult aStatus = NS_OK);
 
-  nsresult CheckFontLoad(gfxProxyFontEntry *aFontToLoad,
-                         const gfxFontFaceSrc *aFontFaceSrc,
-                         nsIPrincipal **aPrincipal);
+  virtual nsresult CheckFontLoad(const gfxFontFaceSrc *aFontFaceSrc,
+                                 nsIPrincipal **aPrincipal,
+                                 bool *aBypassCache);
 
   virtual nsresult SyncLoadFontData(gfxProxyFontEntry *aFontToLoad,
                                     const gfxFontFaceSrc *aFontFaceSrc,
                                     uint8_t* &aBuffer,
                                     uint32_t &aBufferLength);
+
+  virtual bool GetPrivateBrowsing() MOZ_OVERRIDE;
 
   nsPresContext *mPresContext;  // weak reference
 
@@ -96,9 +98,10 @@ protected:
 class nsFontFaceLoader : public nsIStreamLoaderObserver
 {
 public:
-
-  nsFontFaceLoader(gfxProxyFontEntry *aFontToLoad, nsIURI *aFontURI, 
+  nsFontFaceLoader(gfxMixedFontFamily *aFontFamily,
+                   gfxProxyFontEntry *aFontToLoad, nsIURI *aFontURI, 
                    nsUserFontSet *aFontSet, nsIChannel *aChannel);
+
   virtual ~nsFontFaceLoader();
 
   NS_DECL_ISUPPORTS
@@ -120,8 +123,8 @@ public:
                                    nsISupports* aContext);
 
 private:
+  nsRefPtr<gfxMixedFontFamily> mFontFamily;
   nsRefPtr<gfxProxyFontEntry>  mFontEntry;
-  nsRefPtr<gfxFontFamily>      mFontFamily;
   nsCOMPtr<nsIURI>        mFontURI;
   nsRefPtr<nsUserFontSet> mFontSet;
   nsCOMPtr<nsIChannel>    mChannel;

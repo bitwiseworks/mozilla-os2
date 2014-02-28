@@ -11,19 +11,27 @@
 #include <shobjidl.h>
 #include "nsAutoPtr.h"
 #include "nsString.h"
+#include "nsRegion.h"
+#include "nsRect.h"
 
 #include "nsThreadUtils.h"
 #include "nsICryptoHash.h"
-#include "nsIFaviconService.h" 
+#ifdef MOZ_PLACES
+#include "nsIFaviconService.h"
+#endif
 #include "nsIDownloader.h"
+#include "nsIURI.h"
+#include "nsIWidget.h"
 
+#include "mozilla/Attributes.h"
 
 class nsWindow;
+struct KeyPair;
 
 namespace mozilla {
 namespace widget {
 
-class myDownloadObserver: public nsIDownloadObserver
+class myDownloadObserver MOZ_FINAL : public nsIDownloadObserver
 {
 public:
   NS_DECL_ISUPPORTS
@@ -36,13 +44,26 @@ public:
     WINXP_VERSION     = 0x501,
     WIN2K3_VERSION    = 0x502,
     VISTA_VERSION     = 0x600,
-    // WIN2K8_VERSION    = VISTA_VERSION,
-    WIN7_VERSION      = 0x601
-    // WIN2K8R2_VERSION  = WIN7_VERSION
-    // WIN8_VERSION      = 0x602
+    WIN7_VERSION      = 0x601,
+    WIN8_VERSION      = 0x602,
+    WIN8_1_VERSION    = 0x603
   };
   static WinVersion GetWindowsVersion();
 
+  // Retrieves the Service Pack version number.
+  // Returns true on success, false on failure.
+  static bool GetWindowsServicePackVersion(UINT& aOutMajor, UINT& aOutMinor);
+
+  /**
+   * PeekMessage() and GetMessage() are wrapper methods for PeekMessageW(),
+   * GetMessageW(), ITfMessageMgr::PeekMessageW() and
+   * ITfMessageMgr::GetMessageW().
+   * Don't call the native APIs directly.  You MUST use these methods instead.
+   */
+  static bool PeekMessage(LPMSG aMsg, HWND aWnd, UINT aFirstMessage,
+                          UINT aLastMessage, UINT aOption);
+  static bool GetMessage(LPMSG aMsg, HWND aWnd, UINT aFirstMessage,
+                         UINT aLastMessage);
   /**
    * Gets the value of a string-typed registry value.
    *
@@ -141,7 +162,7 @@ public:
    * InitMSG() returns an MSG struct which was initialized by the params.
    * Don't trust the other members in the result.
    */
-  static MSG InitMSG(UINT aMessage, WPARAM wParam, LPARAM lParam);
+  static MSG InitMSG(UINT aMessage, WPARAM wParam, LPARAM lParam, HWND aWnd);
 
   /**
    * GetScanCode() returns a scan code for the LPARAM of WM_KEYDOWN, WM_KEYUP,
@@ -184,12 +205,19 @@ public:
 
   /**
    * SHCreateItemFromParsingName() calls native SHCreateItemFromParsingName()
-   * API.  Note that you must call VistaCreateItemFromParsingNameInit() before
-   * calling this.  And the result must be TRUE.  Otherwise, returns E_FAIL.
+   * API which is available on Vista and up.
    */
   static HRESULT SHCreateItemFromParsingName(PCWSTR pszPath, IBindCtx *pbc,
                                              REFIID riid, void **ppv);
 
+  /**
+   * SHGetKnownFolderPath() calls native SHGetKnownFolderPath()
+   * API which is available on Vista and up.
+   */
+  static HRESULT SHGetKnownFolderPath(REFKNOWNFOLDERID rfid,
+                                      DWORD dwFlags,
+                                      HANDLE hToken,
+                                      PWSTR *ppszPath);
   /**
    * GetShellItemPath return the file or directory path of a shell item.
    * Internally calls IShellItem's GetDisplayName.
@@ -201,22 +229,50 @@ public:
   static bool GetShellItemPath(IShellItem* aItem,
                                nsString& aResultString);
 
+  /**
+   * ConvertHRGNToRegion converts a Windows HRGN to an nsIntRegion.
+   *
+   * aRgn the HRGN to convert.
+   * returns the nsIntRegion.
+   */
+  static nsIntRegion ConvertHRGNToRegion(HRGN aRgn);
+
+  /**
+   * ToIntRect converts a Windows RECT to a nsIntRect.
+   *
+   * aRect the RECT to convert.
+   * returns the nsIntRect.
+   */
+  static nsIntRect ToIntRect(const RECT& aRect);
+
+  /**
+   * Returns true if the context or IME state is enabled.  Otherwise, false.
+   */
+  static bool IsIMEEnabled(const InputContext& aInputContext);
+  static bool IsIMEEnabled(IMEState::Enabled aIMEState);
+
+  /**
+   * Returns modifier key array for aModifiers.  This is for
+   * nsIWidget::SynthethizeNative*Event().
+   */
+  static void SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
+                                        uint32_t aModifiers);
+
 private:
   typedef HRESULT (WINAPI * SHCreateItemFromParsingNamePtr)(PCWSTR pszPath,
                                                             IBindCtx *pbc,
                                                             REFIID riid,
                                                             void **ppv);
   static SHCreateItemFromParsingNamePtr sCreateItemFromParsingName;
-
-  /**
-   * VistaCreateItemFromParsingNameInit() initializes the static pointer for
-   * SHCreateItemFromParsingName() API which is usable only on Vista and later.
-   * This returns TRUE if the API is available.  Otherwise, FALSE.
-   */
-  static bool VistaCreateItemFromParsingNameInit();
+  typedef HRESULT (WINAPI * SHGetKnownFolderPathPtr)(REFKNOWNFOLDERID rfid,
+                                                     DWORD dwFlags,
+                                                     HANDLE hToken,
+                                                     PWSTR *ppszPath);
+  static SHGetKnownFolderPathPtr sGetKnownFolderPath;
 };
 
-class AsyncFaviconDataReady : public nsIFaviconDataCallback
+#ifdef MOZ_PLACES
+class AsyncFaviconDataReady MOZ_FINAL : public nsIFaviconDataCallback
 {
 public:
   NS_DECL_ISUPPORTS
@@ -231,31 +287,35 @@ private:
   nsCOMPtr<nsIThread> mIOThread;
   const bool mURLShortcut;
 };
+#endif
 
 /**
   * Asynchronously tries add the list to the build
   */
-class AsyncWriteIconToDisk : public nsIRunnable
+class AsyncEncodeAndWriteIcon : public nsIRunnable
 {
 public:
   const bool mURLShortcut;
   NS_DECL_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
-  // Warning: AsyncWriteIconToDisk assumes ownership of the aData buffer passed in
-  AsyncWriteIconToDisk(const nsAString &aIconPath,
-                       const nsACString &aMimeTypeOfInputData,
-                       uint8_t *aData, 
-                       uint32_t aDataLen,
-                       const bool aURLShortcut);
-  virtual ~AsyncWriteIconToDisk();
+  // Warning: AsyncEncodeAndWriteIcon assumes ownership of the aData buffer passed in
+  AsyncEncodeAndWriteIcon(const nsAString &aIconPath,
+                          uint8_t *aData, uint32_t aDataLen, uint32_t aStride,
+                          uint32_t aWidth, uint32_t aHeight,
+                          const bool aURLShortcut);
+  virtual ~AsyncEncodeAndWriteIcon();
 
 private:
   nsAutoString mIconPath;
-  nsCAutoString mMimeTypeOfInputData;
+  nsAutoCString mMimeTypeOfInputData;
   nsAutoArrayPtr<uint8_t> mBuffer;
   uint32_t mBufferLength;
+  uint32_t mStride;
+  uint32_t mWidth;
+  uint32_t mHeight;
 };
+
 
 class AsyncDeleteIconFromDisk : public nsIRunnable
 {

@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <?xml-stylesheet href="chrome://global/skin" type="text/css"?>
 <?xml-stylesheet href="chrome://mochikit/content/tests/SimpleTest/test.css" type="text/css"?>
+<?xml-stylesheet href="test_offsets.css" type="text/css"?>
 <!--
   XUL Tests for client/scroll properties
   -->
@@ -26,7 +27,7 @@
              style="margin: 0; padding: 0; border: 0;"/>
     </vbox>
     <vbox id="scrollbox-test">
-       <scrollbar orient="vertical" style="margin: 0; border: 0; padding: 0;"/>
+       <scrollbar orient="vertical" style="border: 0; padding: 0;"/>
     </vbox>
   </hbox>
 </vbox>

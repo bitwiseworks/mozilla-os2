@@ -21,27 +21,12 @@ relativesrcdir   = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = dom
 LIBRARY_NAME     = domsystemgonk_s
-XPIDL_MODULE     = dom_system_gonk
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/dom/dom-config.mk
-
-CPPSRCS = \
-  SystemWorkerManager.cpp \
-  $(NULL)
-
-XPIDLSRCS = \
-  nsIAudioManager.idl \
-  nsINetworkManager.idl \
-  nsIRadioInterfaceLayer.idl \
-  nsIVolume.idl \
-  nsIVolumeService.idl \
-  nsIVolumeStat.idl \
-  nsIWorkerHolder.idl \
-  $(NULL)
 
 LOCAL_INCLUDES = \
   -I$(topsrcdir)/dom/base \
@@ -52,48 +37,16 @@ LOCAL_INCLUDES = \
   -I$(topsrcdir)/content/events/src \
   $(NULL)
 
-ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
-CPPSRCS += \
-  AudioManager.cpp \
-  AutoMounter.cpp \
-  AutoMounterSetting.cpp \
-  GonkGPSGeolocationProvider.cpp \
-  nsVolume.cpp \
-  nsVolumeService.cpp \
-  nsVolumeStat.cpp \
-  Volume.cpp \
-  VolumeCommand.cpp \
-  VolumeManager.cpp \
-  VolumeServiceIOThread.cpp \
-  VolumeServiceTest.cpp \
-  $(NULL)
-# for our local copy of AudioSystem.h
-LOCAL_INCLUDES += -I$(topsrcdir)/media/libsydneyaudio/src
-EXPORTS = nsVolume.h
-endif
-
 EXTRA_COMPONENTS = \
   NetworkManager.manifest \
   NetworkManager.js \
   RadioInterfaceLayer.manifest \
   RadioInterfaceLayer.js \
   RILContentHelper.js \
+  NetworkInterfaceListService.manifest \
+  NetworkInterfaceListService.js \
   $(NULL)
-
-EXTRA_JS_MODULES = \
-  net_worker.js \
-  ril_consts.js \
-  ril_worker.js \
-  systemlibs.js \
-  $(NULL)
-
-ifdef ENABLE_TESTS
-XPCSHELL_TESTS = tests
-endif
 
 include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
-XPIDL_FLAGS += \
-  -I$(topsrcdir)/dom/network/interfaces \
-  $(NULL)

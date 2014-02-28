@@ -3,28 +3,54 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsTextNode_h
+#define nsTextNode_h
+
 /*
  * Implementation of DOM Core's nsIDOMText node.
  */
 
-#include "nsGenericDOMDataNode.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/dom/Text.h"
 #include "nsIDOMText.h"
+#include "nsDebug.h"
+
+class nsNodeInfoManager;
 
 /**
  * Class used to implement DOM text nodes
  */
-class nsTextNode : public nsGenericDOMDataNode,
+class nsTextNode : public mozilla::dom::Text,
                    public nsIDOMText
 {
+private:
+  void Init()
+  {
+    NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::TEXT_NODE,
+                      "Bad NodeType in aNodeInfo");
+    SetIsDOMBinding();
+  }
+
 public:
-  nsTextNode(already_AddRefed<nsINodeInfo> aNodeInfo);
+  nsTextNode(already_AddRefed<nsINodeInfo> aNodeInfo)
+    : mozilla::dom::Text(aNodeInfo)
+  {
+    Init();
+  }
+
+  nsTextNode(nsNodeInfoManager* aNodeInfoManager)
+    : mozilla::dom::Text(aNodeInfoManager->GetTextNodeInfo())
+  {
+    Init();
+  }
+
   virtual ~nsTextNode();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE(nsGenericDOMDataNode::)
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
 
   // nsIDOMCharacterData
   NS_FORWARD_NSIDOMCHARACTERDATA(nsGenericDOMDataNode::)
@@ -36,17 +62,27 @@ public:
   virtual bool IsNodeOfType(uint32_t aFlags) const;
 
   virtual nsGenericDOMDataNode* CloneDataNode(nsINodeInfo *aNodeInfo,
-                                              bool aCloneText) const;
+                                              bool aCloneText) const MOZ_OVERRIDE;
 
-  virtual nsXPCClassInfo* GetClassInfo();
+  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+                              nsIContent* aBindingParent,
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
+  virtual void UnbindFromTree(bool aDeep = true,
+                              bool aNullParent = true) MOZ_OVERRIDE;
 
   nsresult AppendTextForNormalize(const PRUnichar* aBuffer, uint32_t aLength,
                                   bool aNotify, nsIContent* aNextSibling);
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
 #ifdef DEBUG
-  virtual void List(FILE* out, int32_t aIndent) const;
-  virtual void DumpContent(FILE* out, int32_t aIndent, bool aDumpAll) const;
+  virtual void List(FILE* out, int32_t aIndent) const MOZ_OVERRIDE;
+  virtual void DumpContent(FILE* out, int32_t aIndent, bool aDumpAll) const MOZ_OVERRIDE;
 #endif
+
+protected:
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 };
+
+#endif // nsTextNode_h

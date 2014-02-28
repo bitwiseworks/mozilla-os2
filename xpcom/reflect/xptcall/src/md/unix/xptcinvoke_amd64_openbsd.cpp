@@ -24,7 +24,7 @@ invoke_count_words(uint32_t paramCount, nsXPTCVariant * s,
     nr_stack = 0;
 
     /* Compute number of eightbytes of class MEMORY.  */
-    for (uint32 i = 0; i < paramCount; i++, s++) {
+    for (uint32_t i = 0; i < paramCount; i++, s++) {
         if (!s->IsPtrData()
             && (s->type == nsXPTType::T_FLOAT || s->type == nsXPTType::T_DOUBLE)) {
             if (nr_fpr < FPR_COUNT)
@@ -49,7 +49,7 @@ invoke_copy_to_stack(uint64_t * d, uint32_t paramCount, nsXPTCVariant * s,
     uint32_t nr_fpr = 0;
     uint64_t value;
 
-    for (uint32 i = 0; i < paramCount; i++, s++) {
+    for (uint32_t i = 0; i < paramCount; i++, s++) {
         if (s->IsPtrData())
             value = (uint64_t) s->ptr;
         else {
@@ -100,7 +100,7 @@ invoke_copy_to_stack(uint64_t * d, uint32_t paramCount, nsXPTCVariant * s,
 }
 
 EXPORT_XPCOM_API(nsresult)
-NS_InvokeByIndex_P(nsISupports * that, uint32_t methodIndex,
+NS_InvokeByIndex(nsISupports * that, uint32_t methodIndex,
                  uint32_t paramCount, nsXPTCVariant * params)
 {
     uint32_t nr_gpr, nr_fpr, nr_stack;
@@ -172,7 +172,7 @@ NS_InvokeByIndex_P(nsISupports * that, uint32_t methodIndex,
     methodAddress += 8 * methodIndex;
     methodAddress = *((uint64_t *)methodAddress);
     
-    typedef uint32_t (*Method)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
-    uint32_t result = ((Method)methodAddress)(a0, a1, a2, a3, a4, a5);
+    typedef nsresult (*Method)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    nsresult result = ((Method)methodAddress)(a0, a1, a2, a3, a4, a5);
     return result;
 }

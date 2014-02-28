@@ -22,10 +22,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=627498
 
 var importObj = {};
 
-var Cc = SpecialPowers.wrap(Components).classes;
-var Ci = Components.interfaces;
+var Cc = SpecialPowers.Cc;
+var Ci = SpecialPowers.Ci;
 
 var sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
+var xr = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
 
 var windows = SpecialPowers.Services.ww.getWindowEnumerator();
 var windowutils;
@@ -33,8 +34,13 @@ var acceleratedWindows = 0;
 while (windows.hasMoreElements()) {
   windowutils = windows.getNext().QueryInterface(Ci.nsIInterfaceRequestor)
                                  .getInterface(Ci.nsIDOMWindowUtils);
-  if (windowutils.layerManagerType != "Basic") {
-    acceleratedWindows++;
+  try {
+    if (windowutils.layerManagerType != "Basic") {
+      acceleratedWindows++;
+    }
+  } catch (e) {
+    // The window may not have a layer manager, in which case we get an error.
+    // Don't count it as an accelerated window.
   }
 }
 
@@ -88,7 +94,11 @@ switch(osName)
     break;
 
   default: // Linux and others.
-    is(acceleratedWindows, 0, "Acceleration not supported on '" + osName + "'");
+    if (xr.OS == "Android" && xr.widgetToolkit != "gonk") {
+      isnot(acceleratedWindows, 0, "Acceleration enabled on Android");
+    } else {
+      is(acceleratedWindows, 0, "Acceleration not supported on '" + osName + "'");
+    }
 }
 
 </script>

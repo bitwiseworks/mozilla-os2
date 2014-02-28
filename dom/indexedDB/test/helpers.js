@@ -6,6 +6,18 @@
 var testGenerator = testSteps();
 var archiveReaderEnabled = false;
 
+// The test js is shared between xpcshell (which has no SpecialPowers object)
+// and content mochitests (where the |Components| object is accessible only as
+// SpecialPowers.Components). Expose Components if necessary here to make things
+// work everywhere.
+//
+// Even if the real |Components| doesn't exist, we might shim in a simple JS
+// placebo for compat. An easy way to differentiate this from the real thing
+// is whether the property is read-only or not.
+var c = Object.getOwnPropertyDescriptor(this, 'Components');
+if ((!c.value || c.writable) && typeof SpecialPowers === 'object')
+  Components = SpecialPowers.Components;
+
 function executeSoon(aFun)
 {
   let comp = SpecialPowers.wrap(Components);
@@ -33,20 +45,31 @@ function clearAllDatabases(callback) {
 
   let comp = SpecialPowers.wrap(Components);
 
-  let idbManager =
-    comp.classes["@mozilla.org/dom/indexeddb/manager;1"]
-        .getService(comp.interfaces.nsIIndexedDatabaseManager);
+  let quotaManager =
+    comp.classes["@mozilla.org/dom/quota/manager;1"]
+        .getService(comp.interfaces.nsIQuotaManager);
 
-  let uri = SpecialPowers.getDocumentURIObject(document);
+  let uri = SpecialPowers.wrap(document).documentURIObject;
 
-  idbManager.clearDatabasesForURI(uri);
-  idbManager.getUsageForURI(uri, function(uri, usage, fileUsage) {
+  // We need to pass a JS callback to getUsageForURI. However, that callback
+  // takes an XPCOM URI object, which will cause us to throw when we wrap it
+  // for the content compartment. So we need to define the function in a
+  // privileged scope, which we do using a sandbox.
+  var sysPrin = SpecialPowers.Services.scriptSecurityManager.getSystemPrincipal();
+  var sb = new SpecialPowers.Cu.Sandbox(sysPrin);
+  sb.ok = ok;
+  sb.runCallback = runCallback;
+  var cb = SpecialPowers.Cu.evalInSandbox((function(uri, usage, fileUsage) {
     if (usage) {
-      throw new Error("getUsageForURI returned non-zero usage after " +
-                      "clearing all databases!");
+      ok(false,
+         "getUsageForURI returned non-zero usage after clearing all " +
+         "storages!");
     }
     runCallback();
-  });
+  }).toSource(), sb);
+
+  quotaManager.clearStoragesForURI(uri);
+  quotaManager.getUsageForURI(uri, cb);
 }
 
 if (!window.runTest) {
@@ -71,6 +94,8 @@ function finishTest()
 {
   resetUnlimitedQuota();
   resetArchiveReader();
+  SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
+                                               "free");
 
   SimpleTest.executeSoon(function() {
     testGenerator.close();
@@ -122,6 +147,16 @@ function unexpectedSuccessHandler()
 {
   ok(false, "Got success, but did not expect it!");
   finishTest();
+}
+
+function expectedErrorHandler(name)
+{
+  return function(event) {
+    is(event.type, "error", "Got an error event");
+    is(event.target.error.name, name, "Expected error was thrown.");
+    event.preventDefault();
+    grabEventAndContinueHandler(event);
+  };
 }
 
 function ExpectError(name, preventDefault)

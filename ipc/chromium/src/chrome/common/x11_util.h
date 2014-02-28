@@ -11,7 +11,11 @@
 // we use a void* for Visual*). The Xlib headers are highly polluting so we try
 // hard to limit their spread into the rest of the code.
 
+#if (MOZ_WIDGET_GTK == 2)
 typedef struct _GdkDrawable GdkWindow;
+#else
+typedef struct _GdkWindow GdkWindow;
+#endif
 typedef struct _GtkWidget GtkWidget;
 typedef unsigned long XID;
 typedef struct _XDisplay Display;
@@ -19,11 +23,6 @@ typedef struct _XDisplay Display;
 namespace base {
 class Thread;
 }
-
-namespace gfx {
-class Size;
-}
-
 namespace x11_util {
 
 // These functions use the GDK default display and this /must/ be called from

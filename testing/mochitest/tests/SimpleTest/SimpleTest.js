@@ -225,6 +225,7 @@ SimpleTest.testPluginIsOOP = function () {
 
 SimpleTest._tests = [];
 SimpleTest._stopOnLoad = true;
+SimpleTest._cleanupFunctions = [];
 
 /**
  * Something like assert.
@@ -259,6 +260,17 @@ SimpleTest.ise = function (a, b, name) {
     SimpleTest.ok(pass, name, diag);
 };
 
+/**
+ * Check that the function call throws an exception.
+ */
+SimpleTest.doesThrow = function(fn, name) {
+    var gotException = false;
+    try {
+      fn();
+    } catch (ex) { gotException = true; }
+    ok(gotException, name);
+};
+
 //  --------------- Test.Builder/Test.More todo() -----------------
 
 SimpleTest.todo = function(condition, name, diag) {
@@ -286,8 +298,10 @@ SimpleTest._logResult = function(test, passString, failString) {
         } else {
             parentRunner.log(msg);
         }
-    } else {
+    } else if (typeof dump === "function") {
         dump(msg + "\n");
+    } else {
+        // Non-Mozilla browser?  Just do nothing.
     }
 };
 
@@ -466,6 +480,44 @@ SimpleTest.requestLongerTimeout = function (factor) {
     }
 }
 
+/**
+ * Note that the given range of assertions is to be expected.  When
+ * this function is not called, 0 assertions are expected.  When only
+ * one argument is given, that number of assertions are expected.
+ *
+ * A test where we expect to have assertions (which should largely be a
+ * transitional mechanism to get assertion counts down from our current
+ * situation) can call the SimpleTest.expectAssertions() function, with
+ * either one or two arguments:  one argument gives an exact number
+ * expected, and two arguments give a range.  For example, a test might do
+ * one of the following:
+ *
+ *   // Currently triggers two assertions (bug NNNNNN).
+ *   SimpleTest.expectAssertions(2);
+ *
+ *   // Currently triggers one assertion on Mac (bug NNNNNN).
+ *   if (navigator.platform.indexOf("Mac") == 0) {
+ *     SimpleTest.expectAssertions(1);
+ *   }
+ *
+ *   // Currently triggers two assertions on all platforms (bug NNNNNN),
+ *   // but intermittently triggers two additional assertions (bug NNNNNN)
+ *   // on Windows.
+ *   if (navigator.platform.indexOf("Win") == 0) {
+ *     SimpleTest.expectAssertions(2, 4);
+ *   } else {
+ *     SimpleTest.expectAssertions(2);
+ *   }
+ *
+ *   // Intermittently triggers up to three assertions (bug NNNNNN).
+ *   SimpleTest.expectAssertions(0, 3);
+ */
+SimpleTest.expectAssertions = function(min, max) {
+    if (parentRunner) {
+        parentRunner.expectAssertions(min, max);
+    }
+}
+
 SimpleTest.waitForFocus_started = false;
 SimpleTest.waitForFocus_loaded = false;
 SimpleTest.waitForFocus_focused = false;
@@ -600,7 +652,7 @@ SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
 
     // Build a default validator function for common string input.
     var inputValidatorFn = typeof(aExpectedStringOrValidatorFn) == "string"
-        ? function(aData) aData == aExpectedStringOrValidatorFn
+        ? function(aData) { return aData == aExpectedStringOrValidatorFn; }
         : aExpectedStringOrValidatorFn;
 
     // reset for the next use
@@ -628,7 +680,7 @@ SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
             reset();
             successFn();
         } else {
-            setTimeout(function() wait(validatorFn, successFn, failureFn, flavor), 100);
+            setTimeout(function() { return wait(validatorFn, successFn, failureFn, flavor); }, 100);
         }
     }
 
@@ -636,7 +688,7 @@ SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
     var preExpectedVal = SimpleTest._waitForClipboardMonotonicCounter +
                          "-waitForClipboard-known-value";
     SpecialPowers.clipboardCopyString(preExpectedVal);
-    wait(function(aData) aData  == preExpectedVal,
+    wait(function(aData) { return aData  == preExpectedVal; },
          function() {
            // Call the original setup fn
            aSetupFn();
@@ -653,13 +705,38 @@ SimpleTest.executeSoon = function(aFunc) {
         return SpecialPowers.executeSoon(aFunc, window);
     }
     setTimeout(aFunc, 0);
-}
+};
+
+SimpleTest.registerCleanupFunction = function(aFunc) {
+    SimpleTest._cleanupFunctions.push(aFunc);
+};
 
 /**
  * Finishes the tests. This is automatically called, except when
  * SimpleTest.waitForExplicitFinish() has been invoked.
 **/
 SimpleTest.finish = function () {
+    if (SimpleTest._alreadyFinished) {
+        SimpleTest.ok(false, "[SimpleTest.finish()] this test already called finish!");
+    }
+
+    SimpleTest._alreadyFinished = true;
+
+    // Execute all of our cleanup functions.
+    var func;
+    while ((func = SimpleTest._cleanupFunctions.pop())) {
+      try {
+        func();
+      }
+      catch (ex) {
+        SimpleTest.ok(false, "Cleanup function threw exception: " + ex);
+      }
+    }
+
+    if (SpecialPowers.DOMWindowUtils.isTestControllingRefreshes) {
+        SimpleTest.ok(false, "test left refresh driver under test control");
+        SpecialPowers.DOMWindowUtils.restoreNormalRefresh();
+    }
     if (SimpleTest._expectingUncaughtException) {
         SimpleTest.ok(false, "expectUncaughtException was called but no uncaught exception was detected!");
     }
@@ -685,6 +762,139 @@ SimpleTest.finish = function () {
     } else {
         SimpleTest.showReport();
     }
+};
+
+/**
+ * Monitor console output from now until endMonitorConsole is called.
+ *
+ * Expect to receive all console messages described by the elements of
+ * |msgs|, an array, in the order listed in |msgs|; each element is an
+ * object which may have any number of the following properties:
+ *   message, errorMessage, sourceName, sourceLine, category:
+ *     string or regexp
+ *   lineNumber, columnNumber: number
+ *   isScriptError, isWarning, isException, isStrict: boolean
+ * Strings, numbers, and booleans must compare equal to the named
+ * property of the Nth console message.  Regexps must match.  Any
+ * fields present in the message but not in the pattern object are ignored.
+ *
+ * In addition to the above properties, elements in |msgs| may have a |forbid|
+ * boolean property.  When |forbid| is true, a failure is logged each time a
+ * matching message is received.
+ *
+ * If |forbidUnexpectedMsgs| is true, then the messages received in the console
+ * must exactly match the non-forbidden messages in |msgs|; for each received
+ * message not described by the next element in |msgs|, a failure is logged.  If
+ * false, then other non-forbidden messages are ignored, but all expected
+ * messages must still be received.
+ *
+ * After endMonitorConsole is called, |continuation| will be called
+ * asynchronously.  (Normally, you will want to pass |SimpleTest.finish| here.)
+ *
+ * It is incorrect to use this function in a test which has not called
+ * SimpleTest.waitForExplicitFinish.
+ */
+SimpleTest.monitorConsole = function (continuation, msgs, forbidUnexpectedMsgs) {
+  if (SimpleTest._stopOnLoad) {
+    ok(false, "Console monitoring requires use of waitForExplicitFinish.");
+  }
+
+  function msgMatches(msg, pat) {
+    for (k in pat) {
+      if (!(k in msg)) {
+        return false;
+      }
+      if (pat[k] instanceof RegExp && typeof(msg[k]) === 'string') {
+        if (!pat[k].test(msg[k])) {
+          return false;
+        }
+      } else if (msg[k] !== pat[k]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  var forbiddenMsgs = [];
+  var i = 0;
+  while (i < msgs.length) {
+    var pat = msgs[i];
+    if ("forbid" in pat) {
+      var forbid = pat.forbid;
+      delete pat.forbid;
+      if (forbid) {
+        forbiddenMsgs.push(pat);
+        msgs.splice(i, 1);
+        continue;
+      }
+    }
+    i++;
+  }
+
+  var counter = 0;
+  function listener(msg) {
+    if (msg.message === "SENTINEL" && !msg.isScriptError) {
+      is(counter, msgs.length, "monitorConsole | number of messages");
+      SimpleTest.executeSoon(continuation);
+      return;
+    }
+    for (var pat of forbiddenMsgs) {
+      if (msgMatches(msg, pat)) {
+        ok(false, "monitorConsole | observed forbidden message " +
+                  JSON.stringify(msg));
+        return;
+      }
+    }
+    if (counter >= msgs.length) {
+      var str = "monitorConsole | extra message | " + JSON.stringify(msg);
+      if (forbidUnexpectedMsgs) {
+        ok(false, str);
+      } else {
+        info(str);
+      }
+      return;
+    }
+    var matches = msgMatches(msg, msgs[counter]);
+    if (forbidUnexpectedMsgs) {
+      ok(matches, "monitorConsole | [" + counter + "] must match " +
+                  JSON.stringify(msg));
+    } else {
+      info("monitorConsole | [" + counter + "] " +
+           (matches ? "matched " : "did not match ") + JSON.stringify(msg));
+    }
+    counter++;
+  }
+  SpecialPowers.registerConsoleListener(listener);
+};
+
+/**
+ * Stop monitoring console output.
+ */
+SimpleTest.endMonitorConsole = function () {
+  SpecialPowers.postConsoleSentinel();
+};
+
+/**
+ * Run |testfn| synchronously, and monitor its console output.
+ *
+ * |msgs| is handled as described above for monitorConsole.
+ *
+ * After |testfn| returns, console monitoring will stop, and
+ * |continuation| will be called asynchronously.
+ */
+SimpleTest.expectConsoleMessages = function (testfn, msgs, continuation) {
+  SimpleTest.monitorConsole(continuation, msgs);
+  testfn();
+  SimpleTest.executeSoon(SimpleTest.endMonitorConsole);
+};
+
+/**
+ * Wrapper around |expectConsoleMessages| for the case where the test has
+ * only one |testfn| to run.
+ */
+SimpleTest.runTestExpectingConsoleMessages = function(testfn, msgs) {
+  SimpleTest.waitForExplicitFinish();
+  SimpleTest.expectConsoleMessages(testfn, msgs, SimpleTest.finish);
 };
 
 /**
@@ -778,6 +988,9 @@ SimpleTest._deepCheck = function (e1, e2, stack, seen) {
         ok = SimpleTest._eqArray(e1, e2, stack, seen);
     } else if (typeof e1 == "object" && typeof e2 == "object") {
         ok = SimpleTest._eqAssoc(e1, e2, stack, seen);
+    } else if (typeof e1 == "number" && typeof e2 == "number"
+               && isNaN(e1) && isNaN(e2)) {
+        ok = true;
     } else {
         // If we get here, they're not the same (function references must
         // always simply reference the same function).

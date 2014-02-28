@@ -10,15 +10,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= nkgnomevfs
-LIBRARY_NAME	= nkgnomevfs
 SHORT_LIBNAME	= nkgnomevfs
 IS_COMPONENT	= 1
 
-
-CPPSRCS		= \
-		nsGnomeVFSProtocolHandler.cpp \
-		$(NULL)
 
 LOCAL_INCLUDES	= $(MOZ_GNOMEVFS_CFLAGS)
 

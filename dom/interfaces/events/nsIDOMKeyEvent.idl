@@ -5,7 +5,7 @@
 
 #include "nsIDOMUIEvent.idl"
 
-[scriptable, builtinclass, uuid(5d116380-8432-48cb-a717-200f04c39d2f)]
+[scriptable, builtinclass, uuid(91a3d7f2-223b-4e09-a566-634e7ee0a31d)]
 interface nsIDOMKeyEvent : nsIDOMUIEvent
 {
   const unsigned long DOM_VK_CANCEL         = 0x03;
@@ -146,6 +146,14 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
   const unsigned long DOM_VK_NUM_LOCK       = 0x90;
   const unsigned long DOM_VK_SCROLL_LOCK    = 0x91;
 
+  // OEM specific virtual keyCode of Windows should pass through DOM keyCode
+  // for compatibility with the other web browsers on Windows.
+  const unsigned long DOM_VK_WIN_OEM_FJ_JISHO   = 0x92;
+  const unsigned long DOM_VK_WIN_OEM_FJ_MASSHOU = 0x93;
+  const unsigned long DOM_VK_WIN_OEM_FJ_TOUROKU = 0x94;
+  const unsigned long DOM_VK_WIN_OEM_FJ_LOYA    = 0x95;
+  const unsigned long DOM_VK_WIN_OEM_FJ_ROYA    = 0x96;
+
   const unsigned long DOM_VK_CIRCUMFLEX     = 0xA0;
   const unsigned long DOM_VK_EXCLAMATION    = 0xA1;
   const unsigned long DOM_VK_DOUBLE_QUOTE   = 0xA2;
@@ -166,6 +174,10 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
 
   const unsigned long DOM_VK_TILDE          = 0xB0;
 
+  const unsigned long DOM_VK_VOLUME_MUTE    = 0xB5;
+  const unsigned long DOM_VK_VOLUME_DOWN    = 0xB6;
+  const unsigned long DOM_VK_VOLUME_UP      = 0xB7;
+
   const unsigned long DOM_VK_COMMA          = 0xBC;
   const unsigned long DOM_VK_PERIOD         = 0xBE;
   const unsigned long DOM_VK_SLASH          = 0xBF;
@@ -177,6 +189,39 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
 
   const unsigned long DOM_VK_META           = 0xE0;
   const unsigned long DOM_VK_ALTGR          = 0xE1;
+
+  // OEM specific virtual keyCode of Windows should pass through DOM keyCode
+  // for compatibility with the other web browsers on Windows.
+  const unsigned long DOM_VK_WIN_ICO_HELP    = 0xE3;
+  const unsigned long DOM_VK_WIN_ICO_00      = 0xE4;
+  const unsigned long DOM_VK_WIN_ICO_CLEAR   = 0xE6;
+  const unsigned long DOM_VK_WIN_OEM_RESET   = 0xE9;
+  const unsigned long DOM_VK_WIN_OEM_JUMP    = 0xEA;
+  const unsigned long DOM_VK_WIN_OEM_PA1     = 0xEB;
+  const unsigned long DOM_VK_WIN_OEM_PA2     = 0xEC;
+  const unsigned long DOM_VK_WIN_OEM_PA3     = 0xED;
+  const unsigned long DOM_VK_WIN_OEM_WSCTRL  = 0xEE;
+  const unsigned long DOM_VK_WIN_OEM_CUSEL   = 0xEF;
+  const unsigned long DOM_VK_WIN_OEM_ATTN    = 0xF0;
+  const unsigned long DOM_VK_WIN_OEM_FINISH  = 0xF1;
+  const unsigned long DOM_VK_WIN_OEM_COPY    = 0xF2;
+  const unsigned long DOM_VK_WIN_OEM_AUTO    = 0xF3;
+  const unsigned long DOM_VK_WIN_OEM_ENLW    = 0xF4;
+  const unsigned long DOM_VK_WIN_OEM_BACKTAB = 0xF5;
+
+  // Following keys are not used on most keyboards.  However, for compatibility
+  // with other browsers on Windows, we should define them.
+  const unsigned long DOM_VK_ATTN           = 0xF6;
+  const unsigned long DOM_VK_CRSEL          = 0xF7;
+  const unsigned long DOM_VK_EXSEL          = 0xF8;
+  const unsigned long DOM_VK_EREOF          = 0xF9;
+  const unsigned long DOM_VK_PLAY           = 0xFA;
+  const unsigned long DOM_VK_ZOOM           = 0xFB;
+  const unsigned long DOM_VK_PA1            = 0xFD;
+
+  // OEM specific virtual keyCode of Windows should pass through DOM keyCode
+  // for compatibility with the other web browsers on Windows.
+  const unsigned long DOM_VK_WIN_OEM_CLEAR  = 0xFE;
 
   readonly attribute unsigned long    charCode;
   readonly attribute unsigned long    keyCode;
@@ -207,4 +252,6 @@ interface nsIDOMKeyEvent : nsIDOMUIEvent
   const unsigned long DOM_KEY_LOCATION_JOYSTICK = 0x05;
 
   readonly attribute unsigned long location;
+
+  readonly attribute DOMString key;
 };

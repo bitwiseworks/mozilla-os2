@@ -19,13 +19,12 @@
 #include "mozilla/Attributes.h"
 
 #if defined(PR_LOGGING)
-static PRLogModuleInfo *gTimerLog = PR_NewLogModule("nsTimerImpl");
+extern PRLogModuleInfo *GetTimerLog();
 #define DEBUG_TIMERS 1
 #else
 #undef DEBUG_TIMERS
 #endif
 
-#define NS_TIMER_CLASSNAME "Timer"
 #define NS_TIMER_CID \
 { /* 5ff24248-1dd2-11b2-8427-fbab44f29bc8 */         \
      0x5ff24248,                                     \
@@ -52,6 +51,7 @@ public:
   static NS_HIDDEN_(void) Shutdown();
 
   friend class TimerThread;
+  friend struct TimerAdditionComparator;
 
   void Fire();
   nsresult PostTimerEvent();

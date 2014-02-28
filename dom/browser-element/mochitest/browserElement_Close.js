@@ -5,13 +5,12 @@
 "use strict";
 
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
-
   var iframe = document.createElement('iframe');
-  iframe.mozbrowser = true;
+  SpecialPowers.wrap(iframe).mozbrowser = true;
   document.body.appendChild(iframe);
 
   iframe.addEventListener("mozbrowserclose", function(e) {
@@ -22,4 +21,4 @@ function runTest() {
   iframe.src = "data:text/html,<html><body><script>window.close()</scr"+"ipt></body></html>";
 }
 
-runTest();
+addEventListener('testready', runTest);

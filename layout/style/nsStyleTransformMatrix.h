@@ -13,11 +13,11 @@
 #include "nsCSSValue.h"
 #include "gfxMatrix.h"
 #include "gfx3DMatrix.h"
-#include "nsRect.h"
 
 struct nsCSSValueList;
 class nsStyleContext;
 class nsPresContext;
+struct nsRect;
 
 /**
  * A helper to generate gfxMatrixes from css transform functions.
@@ -36,6 +36,14 @@ namespace nsStyleTransformMatrix {
                              bool& aCanStoreInRuleTree,
                              nscoord aSize,
                              float aAppUnitsPerMatrixUnit);
+
+  void
+  ProcessInterpolateMatrix(gfx3DMatrix& aMatrix,
+                            const nsCSSValue::Array* aData,
+                            nsStyleContext* aContext,
+                            nsPresContext* aPresContext,
+                            bool& aCanStoreInRuleTree,
+                            nsRect& aBounds, float aAppUnitsPerMatrixUnit);
 
   /**
    * Given an nsCSSValueList containing -moz-transform functions,

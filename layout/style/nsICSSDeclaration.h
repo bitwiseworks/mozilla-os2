@@ -19,8 +19,10 @@
  * consumers should continue to use nsIDOMCSSStyleDeclaration.
  */
 
+#include "mozilla/Attributes.h"
 #include "nsIDOMCSSStyleDeclaration.h"
 #include "nsCSSProperty.h"
+#include "CSSValue.h"
 #include "nsWrapperCache.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "nsString.h"
@@ -60,21 +62,34 @@ public:
 
   // Also have to declare all the nsIDOMCSSStyleDeclaration methods,
   // since we want to be able to call them from the WebIDL versions.
-  NS_IMETHOD GetCssText(nsAString& aCssText) = 0;
-  NS_IMETHOD SetCssText(const nsAString& aCssText) = 0;
+  NS_IMETHOD GetCssText(nsAString& aCssText) MOZ_OVERRIDE = 0;
+  NS_IMETHOD SetCssText(const nsAString& aCssText) MOZ_OVERRIDE = 0;
   NS_IMETHOD GetPropertyValue(const nsAString& aPropName,
-                              nsAString& aValue) = 0;
-  NS_IMETHOD GetPropertyCSSValue(const nsAString& aPropertyName,
-                                 nsIDOMCSSValue** aReturn) = 0;
+                              nsAString& aValue) MOZ_OVERRIDE = 0;
+  virtual already_AddRefed<mozilla::dom::CSSValue>
+    GetPropertyCSSValue(const nsAString& aPropertyName,
+                        mozilla::ErrorResult& aRv) = 0;
+  NS_IMETHOD GetPropertyCSSValue(const nsAString& aProp, nsIDOMCSSValue** aVal) MOZ_OVERRIDE
+  {
+    mozilla::ErrorResult error;
+    nsRefPtr<mozilla::dom::CSSValue> val = GetPropertyCSSValue(aProp, error);
+    if (error.Failed()) {
+      return error.ErrorCode();
+  }
+
+    nsCOMPtr<nsIDOMCSSValue> xpVal = do_QueryInterface(val);
+    xpVal.forget(aVal);
+    return NS_OK;
+  }
   NS_IMETHOD RemoveProperty(const nsAString& aPropertyName,
-                            nsAString& aReturn) = 0;
+                            nsAString& aReturn) MOZ_OVERRIDE = 0;
   NS_IMETHOD GetPropertyPriority(const nsAString& aPropertyName,
-                                 nsAString& aReturn) = 0;
+                                 nsAString& aReturn) MOZ_OVERRIDE = 0;
   NS_IMETHOD SetProperty(const nsAString& aPropertyName,
                          const nsAString& aValue,
-                         const nsAString& aPriority) = 0;
-  NS_IMETHOD GetLength(uint32_t* aLength) = 0;
-  NS_IMETHOD Item(uint32_t aIndex, nsAString& aReturn)
+                         const nsAString& aPriority) MOZ_OVERRIDE = 0;
+  NS_IMETHOD GetLength(uint32_t* aLength) MOZ_OVERRIDE = 0;
+  NS_IMETHOD Item(uint32_t aIndex, nsAString& aReturn) MOZ_OVERRIDE
   {
     bool found;
     IndexedGetter(aIndex, found, aReturn);
@@ -83,7 +98,7 @@ public:
     }
     return NS_OK;
   }
-  NS_IMETHOD GetParentRule(nsIDOMCSSRule * *aParentRule) = 0;
+  NS_IMETHOD GetParentRule(nsIDOMCSSRule * *aParentRule) MOZ_OVERRIDE = 0;
 
   // WebIDL interface for CSSStyleDeclaration
   void SetCssText(const nsAString& aString, mozilla::ErrorResult& rv) {
@@ -94,7 +109,7 @@ public:
     // |GetCssText(nsAString& aCssText)| overload, which does the real work.
     GetCssText(static_cast<nsAString&>(aString));
   }
-  uint32_t GetLength() {
+  uint32_t Length() {
     uint32_t length;
     GetLength(&length);
     return length;
@@ -110,24 +125,12 @@ public:
                         mozilla::ErrorResult& rv) {
     rv = GetPropertyValue(aPropName, aValue);
   }
-  already_AddRefed<nsIDOMCSSValue>
-    GetPropertyCSSValue(const nsAString& aPropName, mozilla::ErrorResult& rv) {
-    nsCOMPtr<nsIDOMCSSValue> val;
-    rv = GetPropertyCSSValue(aPropName, getter_AddRefs(val));
-    return val.forget();
-  }
   void GetPropertyPriority(const nsAString& aPropName, nsString& aPriority) {
     GetPropertyPriority(aPropName, static_cast<nsAString&>(aPriority));
   }
-  // XXXbz we should nix the Optional thing once bug 759622 is fixed.
   void SetProperty(const nsAString& aPropName, const nsAString& aValue,
-                   const mozilla::dom::Optional<nsAString>& aPriority,
-                   mozilla::ErrorResult& rv) {
-    if (aPriority.WasPassed()) {
-      rv = SetProperty(aPropName, aValue, aPriority.Value());
-    } else {
-      rv = SetProperty(aPropName, aValue, EmptyString());
-    }
+                   const nsAString& aPriority, mozilla::ErrorResult& rv) {
+    rv = SetProperty(aPropName, aValue, aPriority);
   }
   void RemoveProperty(const nsAString& aPropName, nsString& aRetval,
                       mozilla::ErrorResult& rv) {
@@ -147,5 +150,16 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsICSSDeclaration, NS_ICSSDECLARATION_IID)
                               nsAString& aValue);               \
   NS_IMETHOD SetPropertyValue(const nsCSSProperty aPropID,    \
                               const nsAString& aValue);
+
+#define NS_DECL_NSIDOMCSSSTYLEDECLARATION_HELPER \
+  NS_IMETHOD GetCssText(nsAString & aCssText); \
+  NS_IMETHOD SetCssText(const nsAString & aCssText); \
+  NS_IMETHOD GetPropertyValue(const nsAString & propertyName, nsAString & _retval); \
+  NS_IMETHOD RemoveProperty(const nsAString & propertyName, nsAString & _retval); \
+  NS_IMETHOD GetPropertyPriority(const nsAString & propertyName, nsAString & _retval); \
+  NS_IMETHOD SetProperty(const nsAString & propertyName, const nsAString & value, const nsAString & priority); \
+  NS_IMETHOD GetLength(uint32_t *aLength); \
+  NS_IMETHOD Item(uint32_t index, nsAString & _retval); \
+  NS_IMETHOD GetParentRule(nsIDOMCSSRule * *aParentRule);
 
 #endif // nsICSSDeclaration_h__

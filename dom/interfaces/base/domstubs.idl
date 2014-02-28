@@ -12,6 +12,7 @@ class nsWrapperCache;
 [ptr] native nsWrapperCachePtr(nsWrapperCache);
 
 typedef unsigned long long DOMTimeStamp;
+typedef double DOMHighResTimeStamp;
 
 // Core
 interface nsIDOMAttr;
@@ -23,13 +24,11 @@ interface nsIDOMDocument;
 interface nsIDOMDocumentFragment;
 interface nsIDOMDocumentType;
 interface nsIDOMElement;
-interface nsIDOMNamedNodeMap;
 interface nsIDOMNode;
 interface nsIDOMNodeList;
 interface nsIDOMProcessingInstruction;
 interface nsIDOMText;
 interface nsIDOMDOMStringList;
-interface nsIDOMDOMTokenList;
 interface nsIDOMClientRect;
 interface nsIDOMClientRectList;
 
@@ -49,7 +48,6 @@ interface nsIDOMPlugin;
 interface nsIDOMPluginArray;
 interface nsIDOMMimeType;
 interface nsIDOMMimeTypeArray;
-interface nsIDOMBarProp;
 interface nsIDOMNavigator;
 interface nsIDOMScreen;
 interface nsIDOMHistory;
@@ -67,16 +65,15 @@ interface nsIDOMHTMLHeadElement;
 
 // CSS
 interface nsIDOMCSSValue;
-interface nsIDOMCSSValueList;
 interface nsIDOMCSSPrimitiveValue;
 interface nsIDOMCSSRule;
 interface nsIDOMCSSRuleList;
 interface nsIDOMMozCSSKeyframeRule;
+interface nsIDOMCSSFontFeatureValuesRule;
 interface nsIDOMCSSStyleSheet;
 interface nsIDOMCSSStyleDeclaration;
 interface nsIDOMCounter;
 interface nsIDOMRect;
-interface nsIDOMRGBColor;
 interface nsIDOMCSSStyleRule;
 interface nsIDOMCSSStyleRuleCollection;
 interface nsIDOMHTMLTableCaptionElement;

@@ -6,6 +6,11 @@ import logging, re, os, sys
 import parserdata, parser, functions, process, util, implicit
 from cStringIO import StringIO
 
+if sys.version_info[0] < 3:
+    str_type = basestring
+else:
+    str_type = str
+
 _log = logging.getLogger('pymake.data')
 
 class DataError(util.MakeError):
@@ -35,7 +40,8 @@ def mtimeislater(deptime, targettime):
         return True
     if targettime is None:
         return False
-    return deptime > targettime
+    # int(1000*x) because of http://bugs.python.org/issue10148
+    return int(1000 * deptime) > int(1000 * targettime)
 
 def getmtime(path):
     try:
@@ -141,7 +147,7 @@ class StringExpansion(BaseExpansion):
     simple = True
 
     def __init__(self, s, loc):
-        assert isinstance(s, str)
+        assert isinstance(s, str_type)
         self.s = s
         self.loc = loc
 
@@ -227,7 +233,7 @@ class Expansion(BaseExpansion, list):
         return e
 
     def appendstr(self, s):
-        assert isinstance(s, str)
+        assert isinstance(s, str_type)
         if s == '':
             return
 
@@ -321,9 +327,9 @@ class Expansion(BaseExpansion, list):
             if isfunc:
                 e.resolve(makefile, variables, fd, setting)
             else:
-                assert isinstance(e, str)
+                assert isinstance(e, str_type)
                 fd.write(e)
-                    
+
     def resolvestr(self, makefile, variables, setting=[]):
         fd = StringIO()
         self.resolve(makefile, variables, fd, setting)
@@ -442,7 +448,7 @@ class Variables(object):
 
     def readfromenvironment(self, env):
         for k, v in env.iteritems():
-            self.set(k, self.FLAVOR_SIMPLE, self.SOURCE_ENVIRONMENT, v)
+            self.set(k, self.FLAVOR_RECURSIVE, self.SOURCE_ENVIRONMENT, v)
 
     def get(self, name, expand=True):
         """
@@ -501,7 +507,7 @@ class Variables(object):
     def set(self, name, flavor, source, value):
         assert flavor in (self.FLAVOR_RECURSIVE, self.FLAVOR_SIMPLE)
         assert source in (self.SOURCE_OVERRIDE, self.SOURCE_COMMANDLINE, self.SOURCE_MAKEFILE, self.SOURCE_ENVIRONMENT, self.SOURCE_AUTOMATIC, self.SOURCE_IMPLICIT)
-        assert isinstance(value, str), "expected str, got %s" % type(value)
+        assert isinstance(value, str_type), "expected str, got %s" % type(value)
 
         prevflavor, prevsource, prevvalue = self.get(name)
         if prevsource is not None and source > prevsource:
@@ -513,7 +519,7 @@ class Variables(object):
 
     def append(self, name, source, value, variables, makefile):
         assert source in (self.SOURCE_OVERRIDE, self.SOURCE_MAKEFILE, self.SOURCE_AUTOMATIC)
-        assert isinstance(value, str)
+        assert isinstance(value, str_type)
 
         if name not in self._map:
             self._map[name] = self.FLAVOR_APPEND, source, value, None
@@ -646,7 +652,7 @@ class Pattern(object):
         @param mustmatch If true and this pattern doesn't match the word, throw a DataError. Otherwise
                          return word unchanged.
         """
-        assert isinstance(replacement, str)
+        assert isinstance(replacement, str_type)
 
         stem = self.match(word)
         if stem is None:
@@ -965,7 +971,7 @@ class Target(object):
     wasremade = False
 
     def __init__(self, target, makefile):
-        assert isinstance(target, str)
+        assert isinstance(target, str_type)
         self.target = target
         self.vpathtarget = None
         self.rules = []
@@ -1399,24 +1405,24 @@ class _NativeWrapper(_CommandWrapper):
                  pycommandpath, **kwargs):
         _CommandWrapper.__init__(self, cline, ignoreErrors, loc, context,
                                  **kwargs)
-        # get the module and method to call
-        parts, badchar = process.clinetoargv(cline, blacklist_gray=False)
-        if parts is None:
-            raise DataError("native command '%s': shell metacharacter '%s' in command line" % (cline, badchar), self.loc)
-        if len(parts) < 2:
-            raise DataError("native command '%s': no method name specified" % cline, self.loc)
         if pycommandpath:
             self.pycommandpath = re.split('[%s\s]+' % os.pathsep,
                                           pycommandpath)
         else:
             self.pycommandpath = None
-        self.module = parts[0]
-        self.method = parts[1]
-        self.cline_list = parts[2:]
 
     def __call__(self, cb):
+        # get the module and method to call
+        parts, badchar = process.clinetoargv(self.cline, self.kwargs['cwd'])
+        if parts is None:
+            raise DataError("native command '%s': shell metacharacter '%s' in command line" % (self.cline, badchar), self.loc)
+        if len(parts) < 2:
+            raise DataError("native command '%s': no method name specified" % self.cline, self.loc)
+        module = parts[0]
+        method = parts[1]
+        cline_list = parts[2:]
         self.usercb = cb
-        process.call_native(self.module, self.method, self.cline_list,
+        process.call_native(module, method, cline_list,
                             loc=self.loc, cb=self._cb, context=self.context,
                             pycommandpath=self.pycommandpath, **self.kwargs)
 
@@ -1664,8 +1670,11 @@ class Makefile(object):
         Inform the makefile of a target which is a candidate for being the default target,
         if there isn't already a default target.
         """
-        if self.defaulttarget is None and t != '.PHONY':
+        flavor, source, value = self.variables.get('.DEFAULT_GOAL')
+        if self.defaulttarget is None and t != '.PHONY' and value is None:
             self.defaulttarget = t
+            self.variables.set('.DEFAULT_GOAL', Variables.FLAVOR_SIMPLE,
+                               Variables.SOURCE_AUTOMATIC, t)
 
     def getpatternvariables(self, pattern):
         assert isinstance(pattern, Pattern)
@@ -1686,15 +1695,15 @@ class Makefile(object):
     def hastarget(self, target):
         return target in self._targets
 
+    _globcheck = re.compile('[[*?]')
     def gettarget(self, target):
-        assert isinstance(target, str)
+        assert isinstance(target, str_type)
 
         target = target.rstrip('/')
 
         assert target != '', "empty target?"
 
-        if target.find('*') != -1 or target.find('?') != -1 or target.find('[') != -1:
-            raise DataError("wildcards should have been expanded by the parser: '%s'" % (target,))
+        assert not self._globcheck.match(target)
 
         t = self._targets.get(target, None)
         if t is None:
@@ -1751,7 +1760,10 @@ class Makefile(object):
         self.included.append((path, required))
         fspath = util.normaljoin(self.workdir, path)
         if os.path.exists(fspath):
-            stmts = parser.parsefile(fspath)
+            if weak:
+                stmts = parser.parsedepfile(fspath)
+            else:
+                stmts = parser.parsefile(fspath)
             self.variables.append('MAKEFILE_LIST', Variables.SOURCE_AUTOMATIC, path, None, self)
             stmts.execute(self, weak=weak)
             self.gettarget(path).explicit = True

@@ -1,0 +1,41 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'storage'
+
+EXPORTS.mozilla.storage += [
+    'Variant.h',
+    'Variant_inl.h',
+]
+
+CPP_SOURCES += [
+    'FileSystemModule.cpp',
+    'SQLCollations.cpp',
+    'StorageBaseStatementInternal.cpp',
+    'TelemetryVFS.cpp',
+    'VacuumManager.cpp',
+    'mozStorageArgValueArray.cpp',
+    'mozStorageAsyncStatement.cpp',
+    'mozStorageAsyncStatementExecution.cpp',
+    'mozStorageAsyncStatementJSHelper.cpp',
+    'mozStorageAsyncStatementParams.cpp',
+    'mozStorageBindingParams.cpp',
+    'mozStorageBindingParamsArray.cpp',
+    'mozStorageConnection.cpp',
+    'mozStorageError.cpp',
+    'mozStoragePrivateHelpers.cpp',
+    'mozStorageResultSet.cpp',
+    'mozStorageRow.cpp',
+    'mozStorageSQLFunctions.cpp',
+    'mozStorageService.cpp',
+    'mozStorageStatement.cpp',
+    'mozStorageStatementJSHelper.cpp',
+    'mozStorageStatementParams.cpp',
+    'mozStorageStatementRow.cpp',
+]
+
+LIBRARY_NAME = 'storage_s'
+

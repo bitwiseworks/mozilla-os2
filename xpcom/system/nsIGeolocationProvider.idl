@@ -17,7 +17,7 @@ interface nsIGeolocationPrompt;
  * Interface provides a way for a geolocation provider to
  * notify the system that a new location is available.
  */
-[scriptable, uuid(B89D7227-9F04-4236-A582-25A3F2779D72)]
+[scriptable, uuid(f00ff730-acff-4e8c-9991-0d4c84ba0e10)]
 interface nsIGeolocationUpdate : nsISupports {
 
   /**
@@ -26,6 +26,18 @@ interface nsIGeolocationUpdate : nsISupports {
    * This must be called on the main thread
    */
   void update(in nsIDOMGeoPosition position);
+
+  /**
+   * Notify the geolocation service of an error.
+   * This must be called on the main thread.
+   * The parameter refers to one of the constants in the
+   * nsIDOMGeoPositionError interface.
+   * Use this to report spurious errors coming from the
+   * provider; for errors occurring inside the methods in
+   * the nsIGeolocationProvider interface, just use the return
+   * value.
+   */
+  void notifyError(in unsigned short error);
 };
 
 
@@ -35,7 +47,7 @@ interface nsIGeolocationUpdate : nsISupports {
  * startup is called, any geo location change should call
  * callback.update().
  */
-[scriptable, uuid(483BE98B-F747-490A-8AF1-53146D2D5373)]
+[scriptable, uuid(AC4A133B-9F92-4F7C-B369-D40CB6B17650)]
 interface nsIGeolocationProvider : nsISupports {
 
   /**
@@ -46,7 +58,7 @@ interface nsIGeolocationProvider : nsISupports {
 
   /**
    * watch
-   * When a location change is observed, notify the callback
+   * When a location change is observed, notify the callback.
    */
   void watch(in nsIGeolocationUpdate callback);
 

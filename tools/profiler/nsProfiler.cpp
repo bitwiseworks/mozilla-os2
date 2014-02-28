@@ -8,30 +8,82 @@
 #ifdef MOZ_INSTRUMENT_EVENT_LOOP
 #include "EventTracer.h"
 #endif
-#include "sampler.h"
+#include "GeckoProfiler.h"
 #include "nsProfiler.h"
 #include "nsMemory.h"
-#include "shared-libraries.h"
 #include "nsString.h"
+#include "mozilla/Services.h"
+#include "nsIObserverService.h"
+#include "nsIInterfaceRequestor.h"
+#include "nsILoadContext.h"
+#include "nsIWebNavigation.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "shared-libraries.h"
 #include "jsapi.h"
 
 using std::string;
 
 NS_IMPL_ISUPPORTS1(nsProfiler, nsIProfiler)
 
-
 nsProfiler::nsProfiler()
+  : mLockedForPrivateBrowsing(false)
 {
 }
 
+nsProfiler::~nsProfiler()
+{
+  nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+  if (observerService) {
+    observerService->RemoveObserver(this, "chrome-document-global-created");
+    observerService->RemoveObserver(this, "last-pb-context-exited");
+  }
+}
+
+nsresult
+nsProfiler::Init() {
+  nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+  if (observerService) {
+    observerService->AddObserver(this, "chrome-document-global-created", false);
+    observerService->AddObserver(this, "last-pb-context-exited", false);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsProfiler::Observe(nsISupports *aSubject,
+                    const char *aTopic,
+                    const PRUnichar *aData)
+{
+  if (strcmp(aTopic, "chrome-document-global-created") == 0) {
+    nsCOMPtr<nsIInterfaceRequestor> requestor = do_QueryInterface(aSubject);
+    nsCOMPtr<nsIWebNavigation> parentWebNav = do_GetInterface(requestor);
+    nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(parentWebNav);
+    if (loadContext && loadContext->UsePrivateBrowsing() && !mLockedForPrivateBrowsing) {
+      mLockedForPrivateBrowsing = true;
+      profiler_lock();
+    }
+  } else if (strcmp(aTopic, "last-pb-context-exited") == 0) {
+    mLockedForPrivateBrowsing = false;
+    profiler_unlock();
+  }
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 nsProfiler::StartProfiler(uint32_t aEntries, uint32_t aInterval,
-                          const char** aFeatures, uint32_t aFeatureCount)
+                          const char** aFeatures, uint32_t aFeatureCount,
+                          const char** aThreadNameFilters, uint32_t aFilterCount)
 {
-  SAMPLER_START(aEntries, aInterval, aFeatures, aFeatureCount);
+  if (mLockedForPrivateBrowsing) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  profiler_start(aEntries, aInterval,
+                 aFeatures, aFeatureCount,
+                 aThreadNameFilters, aFilterCount);
 #ifdef MOZ_INSTRUMENT_EVENT_LOOP
-  mozilla::InitEventTracing();
+  bool printToConsole = false;
+  mozilla::InitEventTracing(printToConsole);
 #endif
   return NS_OK;
 }
@@ -39,16 +91,23 @@ nsProfiler::StartProfiler(uint32_t aEntries, uint32_t aInterval,
 NS_IMETHODIMP
 nsProfiler::StopProfiler()
 {
-  SAMPLER_STOP();
+  profiler_stop();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsProfiler::AddMarker(const char *aMarker)
+{
+  PROFILER_MARKER(aMarker);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsProfiler::GetProfile(char **aProfile)
 {
-  char *profile = SAMPLER_GET_PROFILE();
+  char *profile = profiler_get_profile();
   if (profile) {
-    uint32_t len = strlen(profile);
+    size_t len = strlen(profile);
     char *profileStr = static_cast<char *>
                          (nsMemory::Clone(profile, (len + 1) * sizeof(char)));
     profileStr[len] = '\0';
@@ -66,10 +125,30 @@ AddSharedLibraryInfoToStream(std::ostream& aStream, const SharedLibrary& aLib)
   aStream << ",\"end\":" << aLib.GetEnd();
   aStream << ",\"offset\":" << aLib.GetOffset();
   aStream << ",\"name\":\"" << aLib.GetName() << "\"";
+  const std::string &breakpadId = aLib.GetBreakpadId();
+  aStream << ",\"breakpadId\":\"" << breakpadId << "\"";
 #ifdef XP_WIN
-  aStream << ",\"pdbSignature\":\"" << aLib.GetPdbSignature().ToString() << "\"";
-  aStream << ",\"pdbAge\":" << aLib.GetPdbAge();
-  aStream << ",\"pdbName\":\"" << aLib.GetPdbName() << "\"";
+  // FIXME: remove this XP_WIN code when the profiler plugin has switched to
+  // using breakpadId.
+  std::string pdbSignature = breakpadId.substr(0, 32);
+  std::string pdbAgeStr = breakpadId.substr(32,  breakpadId.size() - 1);
+
+  std::stringstream stream;
+  stream << pdbAgeStr;
+
+  unsigned pdbAge;
+  stream << std::hex;
+  stream >> pdbAge;
+
+#ifdef DEBUG
+  std::ostringstream oStream;
+  oStream << pdbSignature << std::hex << std::uppercase << pdbAge;
+  MOZ_ASSERT(breakpadId == oStream.str());
+#endif
+
+  aStream << ",\"pdbSignature\":\"" << pdbSignature << "\"";
+  aStream << ",\"pdbAge\":" << pdbAge;
+  aStream << ",\"pdbName\":\"" << aLib.GetName() << "\"";
 #endif
   aStream << "}";
 }
@@ -101,11 +180,9 @@ nsProfiler::GetSharedLibraryInformation(nsAString& aOutString)
   return NS_OK;
 }
 
-
-
-NS_IMETHODIMP nsProfiler::GetProfileData(JSContext* aCx, jsval* aResult)
+NS_IMETHODIMP nsProfiler::GetProfileData(JSContext* aCx, JS::Value* aResult)
 {
-  JSObject *obj = SAMPLER_GET_PROFILE_DATA(aCx);
+  JSObject *obj = profiler_get_profile_jsobject(aCx);
   if (!obj)
     return NS_ERROR_FAILURE;
 
@@ -116,7 +193,7 @@ NS_IMETHODIMP nsProfiler::GetProfileData(JSContext* aCx, jsval* aResult)
 NS_IMETHODIMP
 nsProfiler::IsActive(bool *aIsActive)
 {
-  *aIsActive = SAMPLER_IS_ACTIVE();
+  *aIsActive = profiler_is_active();
   return NS_OK;
 }
 
@@ -124,7 +201,7 @@ NS_IMETHODIMP
 nsProfiler::GetResponsivenessTimes(uint32_t *aCount, double **aResult)
 {
   unsigned int len = 100;
-  const double* times = SAMPLER_GET_RESPONSIVENESS();
+  const double* times = profiler_get_responsiveness();
   if (!times) {
     *aCount = 0;
     *aResult = nullptr;
@@ -145,7 +222,7 @@ nsProfiler::GetFeatures(uint32_t *aCount, char ***aFeatures)
 {
   uint32_t len = 0;
 
-  const char **features = SAMPLER_GET_FEATURES();
+  const char **features = profiler_get_features();
   if (!features) {
     *aCount = 0;
     *aFeatures = nullptr;
@@ -160,7 +237,7 @@ nsProfiler::GetFeatures(uint32_t *aCount, char ***aFeatures)
                        (nsMemory::Alloc(len * sizeof(char*)));
 
   for (size_t i = 0; i < len; i++) {
-    uint32_t strLen = strlen(features[i]);
+    size_t strLen = strlen(features[i]);
     featureList[i] = static_cast<char *>
                          (nsMemory::Clone(features[i], (strLen + 1) * sizeof(char)));
   }

@@ -39,7 +39,6 @@
   const COUNT_CUMULATIVE = Ci.nsIMemoryReporter.UNITS_COUNT_CUMULATIVE;
   const PERCENTAGE = Ci.nsIMemoryReporter.UNITS_PERCENTAGE;
 
-  let explicitAmounts = [];
   let vsizeAmounts = [];
   let residentAmounts = [];
   let jsGcHeapAmounts = [];
@@ -60,9 +59,7 @@
   function handleReport(aProcess, aPath, aKind, aUnits, aAmount, aDescription)
   {
     // Record the values of some notable reporters.
-    if (aPath === "explicit") {
-      explicitAmounts.push(aAmount);
-    } else if (aPath === "vsize") {
+    if (aPath === "vsize") {
       vsizeAmounts.push(aAmount);
     } else if (aPath === "resident") {
       residentAmounts.push(aAmount);
@@ -76,7 +73,7 @@
     // Check the presence of some other notable reporters.
     } else if (aPath.search(/^explicit\/js-non-window\/.*compartment\(/) >= 0) {
       areJsNonWindowCompartmentsPresent = true;
-    } else if (aPath.search(/^explicit\/window-objects\/top\(.*\/js\/compartment\(/) >= 0) {
+    } else if (aPath.search(/^explicit\/window-objects\/top\(.*\/js-compartment\(/) >= 0) {
       areWindowObjectsJsCompartmentsPresent = true;
     } else if (aPath.search(/^explicit\/storage\/sqlite\/places.sqlite/) >= 0) {
       isPlacesPresent = true;
@@ -122,10 +119,8 @@
     let r = e.getNext().QueryInterface(Ci.nsIMemoryMultiReporter);
     r.collectReports(handleReport, null);
 
-    // Access |name| and |explicitNonHeap| to make sure they don't crash or
-    // assert.
+    // Access |name| to make sure it doesn't crash or assert.
     dummy = r.name;
-    dummy = r.explicitNonHeap;
   }
 
   function checkSpecialReport(aName, aAmounts)
@@ -139,7 +134,6 @@
 
   // If mgr.explicit failed, we won't have "heap-allocated" either.
   if (haveExplicit) {
-    checkSpecialReport("explicit",       explicitAmounts);
     checkSpecialReport("heap-allocated", heapAllocatedAmounts);
   }
   checkSpecialReport("vsize",          vsizeAmounts);

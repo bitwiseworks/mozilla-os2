@@ -10,26 +10,7 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = accessibility
-LIBRARY_NAME = accessibility_xul_s
 LIBXUL_LIBRARY = 1
-
-
-
-CPPSRCS = \
-  XULAlertAccessible.cpp \
-  XULColorPickerAccessible.cpp \
-  XULComboboxAccessible.cpp \
-  XULElementAccessibles.cpp \
-  XULFormControlAccessible.cpp \
-  XULListboxAccessible.cpp \
-  XULMenuAccessible.cpp \
-  XULSelectControlAccessible.cpp \
-  XULSliderAccessible.cpp \
-  XULTabAccessible.cpp \
-  XULTreeAccessible.cpp \
-  XULTreeGridAccessible.cpp \
-  $(NULL)
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -44,16 +25,18 @@ LOCAL_INCLUDES = \
   -I$(srcdir)/../xpcom \
   -I$(srcdir)/../../../layout/generic \
   -I$(srcdir)/../../../layout/xul/base/src \
+  -I$(srcdir)/../../../layout/xul/tree// \
   $(NULL)
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+ifdef MOZ_ENABLE_GTK
 LOCAL_INCLUDES += \
   -I$(srcdir)/../atk \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 LOCAL_INCLUDES += \
-  -I$(srcdir)/../msaa \
+  -I$(srcdir)/../windows/msaa \
+  -I$(srcdir)/../windows/ia2 \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
@@ -66,4 +49,8 @@ LOCAL_INCLUDES += \
   $(NULL)
 endif
 endif
+endif
+
+ifneq ($(A11Y_LOG),0)
+  DEFINES += -DA11Y_LOG
 endif

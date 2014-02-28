@@ -7,7 +7,7 @@
 #include "nsIInputStream.h"
 #include "nsIChannel.h"
 #include "nsError.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 nsStreamLoader::nsStreamLoader()
   : mData(nullptr),
@@ -68,15 +68,21 @@ nsStreamLoader::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
 {
   nsCOMPtr<nsIChannel> chan( do_QueryInterface(request) );
   if (chan) {
-    int32_t contentLength = -1;
+    int64_t contentLength = -1;
     chan->GetContentLength(&contentLength);
     if (contentLength >= 0) {
+      if (contentLength > UINT32_MAX) {
+        // Too big to fit into uint32, so let's bail.
+        // XXX we should really make mAllocated and mLength 64-bit instead.
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      uint32_t contentLength32 = uint32_t(contentLength);
       // preallocate buffer
-      mData = static_cast<uint8_t*>(NS_Alloc(contentLength));
+      mData = static_cast<uint8_t*>(NS_Alloc(contentLength32));
       if (!mData) {
         return NS_ERROR_OUT_OF_MEMORY;
       }
-      mAllocated = contentLength;
+      mAllocated = contentLength32;
     }
   }
   mContext = ctxt;
@@ -87,7 +93,7 @@ NS_IMETHODIMP
 nsStreamLoader::OnStopRequest(nsIRequest* request, nsISupports *ctxt,
                               nsresult aStatus)
 {
-  SAMPLE_LABEL("network", "nsStreamLoader::OnStopRequest");
+  PROFILER_LABEL("network", "nsStreamLoader::OnStopRequest");
   if (mObserver) {
     // provide nsIStreamLoader::request during call to OnStreamComplete
     mRequest = request;
@@ -118,7 +124,7 @@ nsStreamLoader::WriteSegmentFun(nsIInputStream *inStr,
 {
   nsStreamLoader *self = (nsStreamLoader *) closure;
 
-  if (count > PR_UINT32_MAX - self->mLength) {
+  if (count > UINT32_MAX - self->mLength) {
     return NS_ERROR_ILLEGAL_VALUE; // is there a better error to use here?
   }
 
@@ -144,7 +150,7 @@ nsStreamLoader::WriteSegmentFun(nsIInputStream *inStr,
 NS_IMETHODIMP 
 nsStreamLoader::OnDataAvailable(nsIRequest* request, nsISupports *ctxt, 
                                 nsIInputStream *inStr, 
-                                uint32_t sourceOffset, uint32_t count)
+                                uint64_t sourceOffset, uint32_t count)
 {
   uint32_t countRead;
   return inStr->ReadSegments(WriteSegmentFun, this, count, &countRead);

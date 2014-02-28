@@ -5,13 +5,13 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = ["ScratchpadManager"];
+this.EXPORTED_SYMBOLS = ["ScratchpadManager"];
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-const SCRATCHPAD_WINDOW_URL = "chrome://browser/content/scratchpad.xul";
+const SCRATCHPAD_WINDOW_URL = "chrome://browser/content/devtools/scratchpad.xul";
 const SCRATCHPAD_WINDOW_FEATURES = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
 
 Cu.import("resource://gre/modules/Services.jsm");
@@ -21,8 +21,9 @@ Cu.import("resource://gre/modules/Services.jsm");
  * of open scratchpads for session restore. There's only one ScratchpadManager in
  * the life of the browser.
  */
-var ScratchpadManager = {
+this.ScratchpadManager = {
 
+  _nextUid: 1,
   _scratchpads: [],
 
   /**
@@ -68,11 +69,29 @@ var ScratchpadManager = {
   saveOpenWindows: function SPM_saveOpenWindows() {
     this._scratchpads = [];
 
+    function clone(src) {
+      let dest = {};
+
+      for (let key in src) {
+        if (src.hasOwnProperty(key)) {
+          dest[key] = src[key];
+        }
+      }
+
+      return dest;
+    }
+
+    // We need to clone objects we get from Scratchpad instances
+    // because such (cross-window) objects have a property 'parent'
+    // that holds on to a ChromeWindow instance. This means that
+    // such objects are not primitive-values-only anymore so they
+    // can leak.
+
     let enumerator = Services.wm.getEnumerator("devtools:scratchpad");
     while (enumerator.hasMoreElements()) {
       let win = enumerator.getNext();
       if (!win.closed && win.Scratchpad.initialized) {
-        this._scratchpads.push(win.Scratchpad.getState());
+        this._scratchpads.push(clone(win.Scratchpad.getState()));
       }
     }
   },
@@ -89,18 +108,23 @@ var ScratchpadManager = {
    */
   openScratchpad: function SPM_openScratchpad(aState)
   {
-    let params = null;
+    let params = Cc["@mozilla.org/embedcomp/dialogparam;1"]
+                 .createInstance(Ci.nsIDialogParamBlock);
+
+    params.SetNumberStrings(2);
+    params.SetString(0, JSON.stringify(this._nextUid++));
+
     if (aState) {
       if (typeof aState != 'object') {
         return;
       }
-      params = Cc["@mozilla.org/embedcomp/dialogparam;1"]
-               .createInstance(Ci.nsIDialogParamBlock);
-      params.SetNumberStrings(1);
-      params.SetString(0, JSON.stringify(aState));
+
+      params.SetString(1, JSON.stringify(aState));
     }
+
     let win = Services.ww.openWindow(null, SCRATCHPAD_WINDOW_URL, "_blank",
                                      SCRATCHPAD_WINDOW_FEATURES, params);
+
     // Only add the shutdown observer if we've opened a scratchpad window.
     ShutdownObserver.init();
 
@@ -123,6 +147,7 @@ var ShutdownObserver = {
     }
 
     Services.obs.addObserver(this, "quit-application-granted", false);
+
     this._initialized = true;
   },
 

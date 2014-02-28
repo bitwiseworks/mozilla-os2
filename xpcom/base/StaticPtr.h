@@ -7,6 +7,9 @@
 #ifndef mozilla_StaticPtr_h
 #define mozilla_StaticPtr_h
 
+#include "mozilla/Assertions.h"
+#include "mozilla/NullPtr.h"
+
 namespace mozilla {
 
 /**
@@ -35,14 +38,15 @@ template<class T>
 class StaticAutoPtr
 {
   public:
+    // In debug builds, check that mRawPtr is initialized for us as we expect
+    // by the compiler.  In non-debug builds, don't declare a constructor
+    // so that the compiler can see that the constructor is trivial.
+#ifdef DEBUG
     StaticAutoPtr()
     {
-      // In debug builds, check that mRawPtr is initialized for us as we expect
-      // by the compiler.
       MOZ_ASSERT(!mRawPtr);
     }
-
-    ~StaticAutoPtr() {}
+#endif
 
     StaticAutoPtr<T>& operator=(T* rhs)
     {
@@ -72,8 +76,13 @@ class StaticAutoPtr
     }
 
   private:
-    // Disallow copy constructor.
+    // Disallow copy constructor, but only in debug mode.  We only define
+    // a default constructor in debug mode (see above); if we declared
+    // this constructor always, the compiler wouldn't generate a trivial
+    // default constructor for us in non-debug mode.
+#ifdef DEBUG
     StaticAutoPtr(StaticAutoPtr<T> &other);
+#endif
 
     void Assign(T* newPtr)
     {
@@ -90,14 +99,15 @@ template<class T>
 class StaticRefPtr
 {
 public:
+  // In debug builds, check that mRawPtr is initialized for us as we expect
+  // by the compiler.  In non-debug builds, don't declare a constructor
+  // so that the compiler can see that the constructor is trivial.
+#ifdef DEBUG
   StaticRefPtr()
   {
     MOZ_ASSERT(!mRawPtr);
   }
-
-  ~StaticRefPtr()
-  {
-  }
+#endif
 
   StaticRefPtr<T>& operator=(T* rhs)
   {
@@ -209,7 +219,7 @@ REFLEXIVE_EQUALITY_OPERATORS(const StaticAutoPtr<T>&, U*,
 
 // Let us compare StaticAutoPtr to 0.
 REFLEXIVE_EQUALITY_OPERATORS(const StaticAutoPtr<T>&, StaticPtr_internal::Zero*,
-                             lhs.get() == NULL, class T)
+                             lhs.get() == nullptr, class T)
 
 // StaticRefPtr (in)equality operators
 
@@ -235,7 +245,7 @@ REFLEXIVE_EQUALITY_OPERATORS(const StaticRefPtr<T>&, U*,
 
 // Let us compare StaticRefPtr to 0.
 REFLEXIVE_EQUALITY_OPERATORS(const StaticRefPtr<T>&, StaticPtr_internal::Zero*,
-                             lhs.get() == NULL, class T)
+                             lhs.get() == nullptr, class T)
 
 #undef REFLEXIVE_EQUALITY_OPERATORS
 

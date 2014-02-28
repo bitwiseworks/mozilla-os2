@@ -10,6 +10,7 @@
 #include "nsDirectoryServiceUtils.h"
 #include "nsPrintfCString.h"
 #include "prenv.h"
+#include "GLContext.h"
 
 namespace mozilla {
 namespace gl {
@@ -31,6 +32,18 @@ static const char *sExtensionNames[] = {
 
 static PRLibrary* LoadApitraceLibrary()
 {
+    static bool sUseApitraceInitialized = false;
+    static bool sUseApitrace = false;
+
+    if (!sUseApitraceInitialized) {
+        sUseApitrace = Preferences::GetBool("gfx.apitrace.enabled", false);
+        sUseApitraceInitialized = true;
+    }
+
+    if (!sUseApitrace) {
+        return nullptr;
+    }
+
     static PRLibrary* sApitraceLibrary = NULL;
 
     if (sApitraceLibrary)
@@ -44,7 +57,7 @@ static PRLibrary* LoadApitraceLibrary()
 
     // The firefox process can't write to /data/local, but it can write
     // to $GRE_HOME/
-    nsCAutoString logPath;
+    nsAutoCString logPath;
     logPath.AppendPrintf("%s/%s", getenv("GRE_HOME"), logFile.get());
 
     // apitrace uses the TRACE_FILE environment variable to determine where
@@ -100,12 +113,6 @@ GLLibraryEGL::EnsureInitialized()
         // order, because libEGL.dll depends on libGLESv2.dll which depends on the DXSDK
         // libraries. This matters especially for WebRT apps which are in a different directory.
         // See bug 760323 and bug 749459
-
-#ifndef MOZ_D3DX9_DLL
-#error MOZ_D3DX9_DLL should have been defined by the Makefile
-#endif
-        LoadLibraryForEGLOnWindows(NS_LITERAL_STRING(NS_STRINGIFY(MOZ_D3DX9_DLL)));
-        // intentionally leak the D3DX9_DLL library
 
 #ifndef MOZ_D3DCOMPILER_DLL
 #error MOZ_D3DCOMPILER_DLL should have been defined by the Makefile
@@ -186,11 +193,7 @@ GLLibraryEGL::EnsureInitialized()
         return false;
     }
 
-#if defined(MOZ_X11) && defined(MOZ_EGL_XRENDER_COMPOSITE)
-    mEGLDisplay = fGetDisplay((EGLNativeDisplayType) gdk_x11_get_default_xdisplay());
-#else
     mEGLDisplay = fGetDisplay(EGL_DEFAULT_DISPLAY);
-#endif
     if (!fInitialize(mEGLDisplay, NULL, NULL))
         return false;
 
@@ -266,6 +269,30 @@ GLLibraryEGL::EnsureInitialized()
         }
     }
 
+    if (IsExtensionSupported(KHR_image) || IsExtensionSupported(KHR_image_base)) {
+        GLLibraryLoader::SymLoadStruct imageSymbols[] = {
+            { (PRFuncPtr*) &mSymbols.fCreateImage,  { "eglCreateImageKHR",  nullptr } },
+            { (PRFuncPtr*) &mSymbols.fDestroyImage, { "eglDestroyImageKHR", nullptr } },
+            { nullptr, { nullptr } }
+        };
+
+        bool success = GLLibraryLoader::LoadSymbols(mEGLLibrary,
+                                                    &imageSymbols[0],
+                                                    lookupFunction);
+        if (!success) {
+            NS_ERROR("EGL supports KHR_image(_base) without exposing its functions!");
+
+            MarkExtensionUnsupported(KHR_image);
+            MarkExtensionUnsupported(KHR_image_base);
+            MarkExtensionUnsupported(KHR_image_pixmap);
+
+            mSymbols.fCreateImage = nullptr;
+            mSymbols.fDestroyImage = nullptr;
+        }
+    } else {
+        MarkExtensionUnsupported(KHR_image_pixmap);
+    }
+
     mInitialized = true;
     reporter.SetSuccessful();
     return true;
@@ -297,37 +324,6 @@ GLLibraryEGL::InitExtensions()
 #ifdef DEBUG
     firstRun = false;
 #endif
-}
-
-void
-GLLibraryEGL::LoadConfigSensitiveSymbols()
-{
-    GLLibraryLoader::PlatformLookupFunction lookupFunction =
-            (GLLibraryLoader::PlatformLookupFunction)mSymbols.fGetProcAddress;
-
-    if (IsExtensionSupported(KHR_image) || IsExtensionSupported(KHR_image_base)) {
-        GLLibraryLoader::SymLoadStruct imageSymbols[] = {
-            { (PRFuncPtr*) &mSymbols.fCreateImage,  { "eglCreateImageKHR",  nullptr } },
-            { (PRFuncPtr*) &mSymbols.fDestroyImage, { "eglDestroyImageKHR", nullptr } },
-            { nullptr, { nullptr } }
-        };
-
-        bool success = GLLibraryLoader::LoadSymbols(mEGLLibrary,
-                                                    &imageSymbols[0],
-                                                    lookupFunction);
-        if (!success) {
-            NS_ERROR("EGL supports KHR_image(_base) without exposing its functions!");
-
-            MarkExtensionUnsupported(KHR_image);
-            MarkExtensionUnsupported(KHR_image_base);
-            MarkExtensionUnsupported(KHR_image_pixmap);
-
-            mSymbols.fCreateImage = nullptr;
-            mSymbols.fDestroyImage = nullptr;
-        }
-    } else {
-        MarkExtensionUnsupported(KHR_image_pixmap);
-    }
 }
 
 void

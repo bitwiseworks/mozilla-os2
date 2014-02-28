@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <stdlib.h>
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttp.h"
 #include "nsHttpPipeline.h"
 #include "nsHttpHandler.h"
@@ -14,6 +16,7 @@
 #include "nsIPipe.h"
 #include "nsCOMPtr.h"
 #include "nsComponentManagerUtils.h"
+#include <algorithm>
 
 #ifdef DEBUG
 #include "prthread.h"
@@ -90,7 +93,7 @@ nsHttpPipeline::~nsHttpPipeline()
 nsresult
 nsHttpPipeline::AddTransaction(nsAHttpTransaction *trans)
 {
-    LOG(("nsHttpPipeline::AddTransaction [this=%x trans=%x]\n", this, trans));
+    LOG(("nsHttpPipeline::AddTransaction [this=%p trans=%x]\n", this, trans));
 
     if (mRequestQ.Length() || mResponseQ.Length())
         mUtilizedPipeline = true;
@@ -98,7 +101,7 @@ nsHttpPipeline::AddTransaction(nsAHttpTransaction *trans)
     NS_ADDREF(trans);
     mRequestQ.AppendElement(trans);
     uint32_t qlen = PipelineDepth();
-    
+
     if (qlen != 1) {
         trans->SetPipelinePosition(qlen);
     }
@@ -143,7 +146,7 @@ nsHttpPipeline::PipelinePosition()
     // The response queue is empty, so return oldest request
     if (mRequestQ.Length())
         return Request(mRequestQ.Length() - 1)->PipelinePosition();
-    
+
     // No transactions in the pipeline
     return 0;
 }
@@ -177,24 +180,23 @@ nsHttpPipeline::OnHeadersAvailable(nsAHttpTransaction *trans,
                                    nsHttpResponseHead *responseHead,
                                    bool *reset)
 {
-    LOG(("nsHttpPipeline::OnHeadersAvailable [this=%x]\n", this));
+    LOG(("nsHttpPipeline::OnHeadersAvailable [this=%p]\n", this));
 
-    NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
-    NS_ASSERTION(mConnection, "no connection");
-    
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+    MOZ_ASSERT(mConnection, "no connection");
+
     nsRefPtr<nsHttpConnectionInfo> ci;
     GetConnectionInfo(getter_AddRefs(ci));
+    MOZ_ASSERT(ci);
 
-    NS_ABORT_IF_FALSE(ci, "no connection info");
-    
     bool pipeliningBefore = gHttpHandler->ConnMgr()->SupportsPipelining(ci);
-    
+
     // trans has now received its response headers; forward to the real connection
     nsresult rv = mConnection->OnHeadersAvailable(trans,
                                                   requestHead,
                                                   responseHead,
                                                   reset);
-    
+
     if (!pipeliningBefore && gHttpHandler->ConnMgr()->SupportsPipelining(ci))
         // The received headers have expanded the eligible
         // pipeline depth for this connection
@@ -206,14 +208,14 @@ nsHttpPipeline::OnHeadersAvailable(nsAHttpTransaction *trans,
 void
 nsHttpPipeline::CloseTransaction(nsAHttpTransaction *trans, nsresult reason)
 {
-    LOG(("nsHttpPipeline::CloseTransaction [this=%x trans=%x reason=%x]\n",
+    LOG(("nsHttpPipeline::CloseTransaction [this=%p trans=%x reason=%x]\n",
         this, trans, reason));
 
-    NS_ABORT_IF_FALSE(PR_GetCurrentThread() == gSocketThread, "wrong thread");
-    NS_ASSERTION(NS_FAILED(reason), "expecting failure code");
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+    MOZ_ASSERT(NS_FAILED(reason), "expecting failure code");
 
     // the specified transaction is to be closed with the given "reason"
-    
+
     int32_t index;
     bool killPipeline = false;
 
@@ -287,10 +289,10 @@ nsHttpPipeline::DontReuse()
 nsresult
 nsHttpPipeline::PushBack(const char *data, uint32_t length)
 {
-    LOG(("nsHttpPipeline::PushBack [this=%x len=%u]\n", this, length));
-    
-    NS_ABORT_IF_FALSE(PR_GetCurrentThread() == gSocketThread, "wrong thread");
-    NS_ASSERTION(mPushBackLen == 0, "push back buffer already has data!");
+    LOG(("nsHttpPipeline::PushBack [this=%p len=%u]\n", this, length));
+
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+    MOZ_ASSERT(mPushBackLen == 0, "push back buffer already has data!");
 
     // If we have no chance for a pipeline (e.g. due to an Upgrade)
     // then push this data down to original connection
@@ -316,13 +318,13 @@ nsHttpPipeline::PushBack(const char *data, uint32_t length)
     }
     else if (length > mPushBackMax) {
         // grow push back buffer as necessary.
-        NS_ASSERTION(length <= nsIOService::gDefaultSegmentSize, "too big");
+        MOZ_ASSERT(length <= nsIOService::gDefaultSegmentSize, "too big");
         mPushBackMax = length;
         mPushBackBuf = (char *) realloc(mPushBackBuf, mPushBackMax);
         if (!mPushBackBuf)
             return NS_ERROR_OUT_OF_MEMORY;
     }
- 
+
     memcpy(mPushBackBuf, data, length);
     mPushBackLen = length;
 
@@ -404,10 +406,10 @@ nsHttpPipeline::TakeSubTransactions(
 void
 nsHttpPipeline::SetConnection(nsAHttpConnection *conn)
 {
-    LOG(("nsHttpPipeline::SetConnection [this=%x conn=%x]\n", this, conn));
+    LOG(("nsHttpPipeline::SetConnection [this=%p conn=%x]\n", this, conn));
 
-    NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
-    NS_ASSERTION(!mConnection, "already have a connection");
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+    MOZ_ASSERT(!mConnection, "already have a connection");
 
     NS_IF_ADDREF(mConnection = conn);
 }
@@ -415,17 +417,16 @@ nsHttpPipeline::SetConnection(nsAHttpConnection *conn)
 nsAHttpConnection *
 nsHttpPipeline::Connection()
 {
-    LOG(("nsHttpPipeline::Connection [this=%x conn=%x]\n", this, mConnection));
+    LOG(("nsHttpPipeline::Connection [this=%p conn=%x]\n", this, mConnection));
 
-    NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     return mConnection;
 }
 
 void
-nsHttpPipeline::GetSecurityCallbacks(nsIInterfaceRequestor **result,
-                                     nsIEventTarget        **target)
+nsHttpPipeline::GetSecurityCallbacks(nsIInterfaceRequestor **result)
 {
-    NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
     // depending on timing this could be either the request or the response
     // that is needed - but they both go to the same host. A request for these
@@ -435,11 +436,9 @@ nsHttpPipeline::GetSecurityCallbacks(nsIInterfaceRequestor **result,
     if (!trans)
         trans = Response(0);
     if (trans)
-        trans->GetSecurityCallbacks(result, target);
+        trans->GetSecurityCallbacks(result);
     else {
         *result = nullptr;
-        if (target)
-            *target = nullptr;
     }
 }
 
@@ -447,10 +446,10 @@ void
 nsHttpPipeline::OnTransportStatus(nsITransport* transport,
                                   nsresult status, uint64_t progress)
 {
-    LOG(("nsHttpPipeline::OnStatus [this=%x status=%x progress=%llu]\n",
+    LOG(("nsHttpPipeline::OnStatus [this=%p status=%x progress=%llu]\n",
         this, status, progress));
 
-    NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
     nsAHttpTransaction *trans;
     int32_t i, count;
@@ -483,7 +482,7 @@ nsHttpPipeline::OnTransportStatus(nsITransport* transport,
 
         if (mSuppressSendEvents) {
             mSuppressSendEvents = false;
-            
+
             // catch up by sending the event to all the transactions that have
             // moved from request to response and any that have been partially
             // sent. Also send WAITING_FOR to those that were completely sent
@@ -492,7 +491,7 @@ nsHttpPipeline::OnTransportStatus(nsITransport* transport,
                 Response(i)->OnTransportStatus(transport,
                                                NS_NET_STATUS_SENDING_TO,
                                                progress);
-                Response(i)->OnTransportStatus(transport, 
+                Response(i)->OnTransportStatus(transport,
                                                NS_NET_STATUS_WAITING_FOR,
                                                progress);
             }
@@ -504,12 +503,12 @@ nsHttpPipeline::OnTransportStatus(nsITransport* transport,
         }
         // otherwise ignore it
         break;
-        
-    case NS_NET_STATUS_WAITING_FOR: 
+
+    case NS_NET_STATUS_WAITING_FOR:
         // Created by nsHttpConnection when request pipeline has been totally
         // sent. Ignore it here because it is simulated in FillSendBuf() when
         // a request is moved from request to response.
-        
+
         // ignore it
         break;
 
@@ -535,7 +534,7 @@ bool
 nsHttpPipeline::IsDone()
 {
     bool done = true;
-    
+
     uint32_t i, count = mRequestQ.Length();
     for (i = 0; done && (i < count); i++)
         done = Request(i)->IsDone();
@@ -543,7 +542,7 @@ nsHttpPipeline::IsDone()
     count = mResponseQ.Length();
     for (i = 0; done && (i < count); i++)
         done = Response(i)->IsDone();
-    
+
     return done;
 }
 
@@ -553,7 +552,7 @@ nsHttpPipeline::Status()
     return mStatus;
 }
 
-uint8_t
+uint32_t
 nsHttpPipeline::Caps()
 {
     nsAHttpTransaction *trans = Request(0);
@@ -591,9 +590,9 @@ nsHttpPipeline::ReadSegments(nsAHttpSegmentReader *reader,
                              uint32_t count,
                              uint32_t *countRead)
 {
-    LOG(("nsHttpPipeline::ReadSegments [this=%x count=%u]\n", this, count));
+    LOG(("nsHttpPipeline::ReadSegments [this=%p count=%u]\n", this, count));
 
-    NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
     if (mClosed) {
         *countRead = 0;
@@ -639,14 +638,14 @@ nsHttpPipeline::WriteSegments(nsAHttpSegmentWriter *writer,
                               uint32_t count,
                               uint32_t *countWritten)
 {
-    LOG(("nsHttpPipeline::WriteSegments [this=%x count=%u]\n", this, count));
+    LOG(("nsHttpPipeline::WriteSegments [this=%p count=%u]\n", this, count));
 
-    NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
     if (mClosed)
         return NS_SUCCEEDED(mStatus) ? NS_BASE_STREAM_CLOSED : mStatus;
 
-    nsAHttpTransaction *trans; 
+    nsAHttpTransaction *trans;
     nsresult rv;
 
     trans = Response(0);
@@ -668,7 +667,7 @@ nsHttpPipeline::WriteSegments(nsAHttpSegmentWriter *writer,
             rv = NS_BASE_STREAM_CLOSED;
     }
     else {
-        // 
+        //
         // ask the transaction to consume data from the connection.
         // PushBack may be called recursively.
         //
@@ -769,7 +768,7 @@ nsHttpPipeline::CancelPipeline(nsresult originalReason)
 void
 nsHttpPipeline::Close(nsresult reason)
 {
-    LOG(("nsHttpPipeline::Close [this=%x reason=%x]\n", this, reason));
+    LOG(("nsHttpPipeline::Close [this=%p reason=%x]\n", this, reason));
 
     if (mClosed) {
         LOG(("  already closed\n"));
@@ -829,7 +828,7 @@ nsHttpPipeline::FillSendBuf()
     // when they have been completely read.
 
     nsresult rv;
-    
+
     if (!mSendBufIn) {
         // allocate a single-segment pipe
         rv = NS_NewPipe(getter_AddRefs(mSendBufIn),
@@ -855,9 +854,9 @@ nsHttpPipeline::FillSendBuf()
             nsAHttpTransaction *response = Response(0);
             if (response && !response->PipelinePosition())
                 response->SetPipelinePosition(1);
-            rv = trans->ReadSegments(this, (uint32_t)NS_MIN(avail, (uint64_t)PR_UINT32_MAX), &n);
+            rv = trans->ReadSegments(this, (uint32_t)std::min(avail, (uint64_t)UINT32_MAX), &n);
             if (NS_FAILED(rv)) return rv;
-            
+
             if (n == 0) {
                 LOG(("send pipe is full"));
                 break;

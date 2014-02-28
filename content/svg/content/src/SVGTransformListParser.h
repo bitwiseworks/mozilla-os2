@@ -7,6 +7,7 @@
 #ifndef MOZILLA_SVGTRANSFORMLISTPARSER_H__
 #define MOZILLA_SVGTRANSFORMLISTPARSER_H__
 
+#include "mozilla/Attributes.h"
 #include "nsSVGDataParser.h"
 #include "nsTArray.h"
 
@@ -21,20 +22,20 @@ class nsIAtom;
 
 namespace mozilla {
 
-class SVGTransform;
+class nsSVGTransform;
 
 class SVGTransformListParser : public nsSVGDataParser
 {
 public:
-  const nsTArray<SVGTransform>& GetTransformList() const {
+  const nsTArray<nsSVGTransform>& GetTransformList() const {
     return mTransforms;
   }
 
 private:
-  nsTArray<SVGTransform> mTransforms;
+  nsTArray<nsSVGTransform> mTransforms;
 
   // helpers
-  virtual nsresult Match();
+  virtual nsresult Match() MOZ_OVERRIDE;
 
   nsresult MatchNumberArguments(float *aResult,
                                 uint32_t aMaxNum,

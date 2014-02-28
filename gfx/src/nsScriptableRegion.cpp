@@ -127,14 +127,14 @@ NS_IMETHODIMP nsScriptableRegion::GetRects(JSContext* aCx, JS::Value* aRects)
     return NS_OK;
   }
 
-  JSObject* destArray = JS_NewArrayObject(aCx, numRects * 4, NULL);
+  JS::Rooted<JSObject*> destArray(aCx, JS_NewArrayObject(aCx, numRects * 4, nullptr));
   if (!destArray) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
   *aRects = OBJECT_TO_JSVAL(destArray);
 
-  uint32 n = 0;
+  uint32_t n = 0;
   nsIntRegionRectIterator iter(mRegion);
   const nsIntRect *rect;
 

@@ -26,6 +26,8 @@
 #include "nsIDocument.h"
 #include "jsfriendapi.h"
 #include "xpcprivate.h"
+#include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 
@@ -46,14 +48,13 @@ nsSecurityNameSet::~nsSecurityNameSet()
 NS_IMPL_ISUPPORTS1(nsSecurityNameSet, nsIScriptExternalNameSet)
 
 static JSBool
-netscape_security_enablePrivilege(JSContext *cx, unsigned argc, jsval *vp)
+netscape_security_enablePrivilege(JSContext *cx, unsigned argc, JS::Value *vp)
 {
-    xpc::EnableUniversalXPConnect(cx);
     Telemetry::Accumulate(Telemetry::ENABLE_PRIVILEGE_EVER_CALLED, true);
-    return JS_TRUE;
+    return xpc::EnableUniversalXPConnect(cx);
 }
 
-static JSFunctionSpec PrivilegeManager_static_methods[] = {
+static const JSFunctionSpec PrivilegeManager_static_methods[] = {
     JS_FS("enablePrivilege", netscape_security_enablePrivilege, 1, 0),
     JS_FS_END
 };
@@ -62,35 +63,39 @@ static JSFunctionSpec PrivilegeManager_static_methods[] = {
  * "Steal" calls to netscape.security.PrivilegeManager.enablePrivilege,
  * et al. so that code that worked with 4.0 can still work.
  */
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsSecurityNameSet::InitializeNameSet(nsIScriptContext* aScriptContext)
 {
-    JSContext* cx = aScriptContext->GetNativeContext();
-    JSObject *global = JS_ObjectToInnerObject(cx, JS_GetGlobalObject(cx));
+    AutoJSContext cx;
+    JS::Rooted<JSObject*> global(cx, aScriptContext->GetNativeGlobal());
+    JSAutoCompartment ac(cx, global);
 
     /*
      * Find Object.prototype's class by walking up the global object's
      * prototype chain.
      */
-    JSObject *obj = global;
-    JSObject *proto;
-    JSAutoRequest ar(cx);
-    while ((proto = JS_GetPrototype(obj)) != nullptr)
+    JS::Rooted<JSObject*> obj(cx, global);
+    JS::Rooted<JSObject*> proto(cx);
+    for (;;) {
+        MOZ_ALWAYS_TRUE(JS_GetPrototype(cx, obj, proto.address()));
+        if (!proto)
+            break;
         obj = proto;
+    }
     JSClass *objectClass = JS_GetClass(obj);
 
-    JS::Value v;
-    if (!JS_GetProperty(cx, global, "netscape", &v))
+    JS::Rooted<JS::Value> v(cx);
+    if (!JS_GetProperty(cx, global, "netscape", v.address()))
         return NS_ERROR_FAILURE;
 
-    JSObject *securityObj;
+    JS::Rooted<JSObject*> securityObj(cx);
     if (v.isObject()) {
         /*
          * "netscape" property of window object exists; get the
          * "security" property.
          */
         obj = &v.toObject();
-        if (!JS_GetProperty(cx, obj, "security", &v) || !v.isObject())
+        if (!JS_GetProperty(cx, obj, "security", v.address()) || !v.isObject())
             return NS_ERROR_FAILURE;
         securityObj = &v.toObject();
     } else {
@@ -110,7 +115,7 @@ nsSecurityNameSet::InitializeNameSet(nsIScriptContext* aScriptContext)
     // uses enablePrivilege. If you're not doing test automation, you _must_ not
     // flip this pref, or you will be exposing all your users to security
     // vulnerabilities.
-    if (!Preferences::GetBool("security.enablePrivilege.enable_for_tests"))
+    if (!Preferences::GetBool("security.turn_off_all_security_so_that_viruses_can_take_over_this_computer"))
         return NS_OK;
 
     /* Define PrivilegeManager object with the necessary "static" methods. */

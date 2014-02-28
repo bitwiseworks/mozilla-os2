@@ -252,6 +252,15 @@ class nsTString_CharT : public nsTSubstring_CharT
       int32_t ToInteger( nsresult* aErrorCode, uint32_t aRadix=kRadix10 ) const;
 
         /**
+         * Perform string to 64-bit int conversion.
+         * @param   aErrorCode will contain error if one occurs
+         * @param   aRadix tells us which radix to assume; kAutoDetect tells us to determine the radix for you.
+         * @return  64-bit int rep of string value, and possible (out) error code
+         */
+      int64_t ToInteger64( nsresult* aErrorCode, uint32_t aRadix=kRadix10 ) const;
+
+
+        /**
          * |Left|, |Mid|, and |Right| are annoying signatures that seem better almost
          * any _other_ way than they are now.  Consider these alternatives
          * 
@@ -277,7 +286,7 @@ class nsTString_CharT : public nsTSubstring_CharT
 
       size_type Right( self_type& aResult, size_type aCount ) const
         {
-          aCount = NS_MIN(mLength, aCount);
+          aCount = XPCOM_MIN(mLength, aCount);
           return Mid(aResult, mLength - aCount, aCount);
         }
 
@@ -422,9 +431,9 @@ class nsTFixedString_CharT : public nsTString_CharT
    *
    * NAMES:
    *   nsAutoString for wide characters
-   *   nsCAutoString for narrow characters
+   *   nsAutoCString for narrow characters
    */
-class NS_STACK_CLASS nsTAutoString_CharT : public nsTFixedString_CharT
+class nsTAutoString_CharT : public nsTFixedString_CharT
   {
     public:
 
@@ -586,7 +595,7 @@ class nsTXPIDLString_CharT : public nsTString_CharT
    *      // ...
    *    }
    */
-class NS_STACK_CLASS nsTGetterCopies_CharT
+class MOZ_STACK_CLASS nsTGetterCopies_CharT
   {
     public:
       typedef CharT char_type;

@@ -14,8 +14,6 @@ using namespace mozilla;
 
 //#define FCF_NOISY
 
-const int32_t kSizeNotSet = -1;
-
 nsFormControlFrame::nsFormControlFrame(nsStyleContext* aContext) :
   nsLeafFrame(aContext)
 {
@@ -139,7 +137,7 @@ nsFormControlFrame::HandleEvent(nsPresContext* aPresContext,
                                           nsEventStatus* aEventStatus)
 {
   // Check for user-input:none style
-  const nsStyleUserInterface* uiStyle = GetStyleUserInterface();
+  const nsStyleUserInterface* uiStyle = StyleUserInterface();
   if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE ||
       uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
     return nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
@@ -159,13 +157,6 @@ nsFormControlFrame::GetCurrentCheckState(bool *aState)
 nsresult
 nsFormControlFrame::SetFormProperty(nsIAtom* aName, const nsAString& aValue)
 {
-  return NS_OK;
-}
-
-nsresult
-nsFormControlFrame::GetFormProperty(nsIAtom* aName, nsAString& aValue) const
-{
-  aValue.Truncate();
   return NS_OK;
 }
 

@@ -5,15 +5,18 @@
 
 
 #include "ipc/AutoOpenSurface.h"
-#include "mozilla/layers/PLayers.h"
-#include "mozilla/layers/ShadowLayers.h"
-#include "ShadowBufferD3D9.h"
+#include "mozilla/layers/PLayerTransaction.h"
 
 #include "gfxImageSurface.h"
 #include "gfxWindowsSurface.h"
 #include "gfxWindowsPlatform.h"
+#include "SurfaceStream.h"
+#include "SharedSurfaceGL.h"
 
 #include "CanvasLayerD3D9.h"
+
+using namespace mozilla::gfx;
+using namespace mozilla::gl;
 
 namespace mozilla {
 namespace layers {
@@ -38,13 +41,13 @@ CanvasLayerD3D9::Initialize(const Data& aData)
   } else if (aData.mSurface) {
     mSurface = aData.mSurface;
     NS_ASSERTION(aData.mGLContext == nullptr,
-                 "CanvasLayer can't have both surface and GLContext");
+                 "CanvasLayer can't have both surface and WebGLContext");
     mNeedsYFlip = false;
     mDataIsPremultiplied = true;
   } else if (aData.mGLContext) {
-    NS_ASSERTION(aData.mGLContext->IsOffscreen(), "canvas gl context isn't offscreen");
     mGLContext = aData.mGLContext;
-    mDataIsPremultiplied = aData.mGLBufferIsPremultiplied;
+    NS_ASSERTION(mGLContext->IsOffscreen(), "Canvas GLContext must be offscreen.");
+    mDataIsPremultiplied = aData.mIsGLAlphaPremult;
     mNeedsYFlip = true;
   } else {
     NS_ERROR("CanvasLayer created without mSurface, mGLContext or mDrawTarget?");
@@ -58,9 +61,9 @@ CanvasLayerD3D9::Initialize(const Data& aData)
 void
 CanvasLayerD3D9::UpdateSurface()
 {
-  if (!mDirty && mTexture)
+  if (!IsDirty() && mTexture)
     return;
-  mDirty = false;
+  Painted();
 
   if (!mTexture) {
     CreateTexture();
@@ -72,6 +75,12 @@ CanvasLayerD3D9::UpdateSurface()
   }
 
   if (mGLContext) {
+    SharedSurface* surf = mGLContext->RequestFrame();
+    if (!surf)
+        return;
+
+    SharedSurface_Basic* shareSurf = SharedSurface_Basic::Cast(surf);
+
     // WebGL reads entire surface.
     LockTextureRectD3D9 textureLock(mTexture);
     if (!textureLock.HasLock()) {
@@ -79,34 +88,23 @@ CanvasLayerD3D9::UpdateSurface()
       return;
     }
 
-    D3DLOCKED_RECT r = textureLock.GetLockRect();
+    D3DLOCKED_RECT rect = textureLock.GetLockRect();
 
-    const bool stridesMatch = r.Pitch == mBounds.width * 4;
+    gfxImageSurface* frameData = shareSurf->GetData();
+    // Scope for gfxContext, so it's destroyed early.
+    {
+      nsRefPtr<gfxImageSurface> mapSurf =
+          new gfxImageSurface((uint8_t*)rect.pBits,
+                              shareSurf->Size(),
+                              rect.Pitch,
+                              gfxASurface::ImageFormatARGB32);
 
-    uint8_t *destination;
-    if (!stridesMatch) {
-      destination = GetTempBlob(mBounds.width * mBounds.height * 4);
-    } else {
-      DiscardTempBlob();
-      destination = (uint8_t*)r.pBits;
-    }
+      gfxContext ctx(mapSurf);
+      ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
+      ctx.SetSource(frameData);
+      ctx.Paint();
 
-    mGLContext->MakeCurrent();
-
-    nsRefPtr<gfxImageSurface> tmpSurface =
-      new gfxImageSurface(destination,
-                          gfxIntSize(mBounds.width, mBounds.height),
-                          mBounds.width * 4,
-                          gfxASurface::ImageFormatARGB32);
-    mGLContext->ReadScreenIntoImageSurface(tmpSurface);
-    tmpSurface = nullptr;
-
-    if (!stridesMatch) {
-      for (int y = 0; y < mBounds.height; y++) {
-        memcpy((uint8_t*)r.pBits + r.Pitch * y,
-               destination + mBounds.width * 4 * y,
-               mBounds.width * 4);
-      }
+      mapSurf->Flush();
     }
   } else {
     RECT r;
@@ -170,6 +168,7 @@ CanvasLayerD3D9::GetLayer()
 void
 CanvasLayerD3D9::RenderLayer()
 {
+  FirePreTransactionCallback();
   UpdateSurface();
   if (mD3DManager->CompositingDisabled()) {
     return;
@@ -257,98 +256,6 @@ CanvasLayerD3D9::CreateTexture()
     return;
   }
 }
-
-ShadowCanvasLayerD3D9::ShadowCanvasLayerD3D9(LayerManagerD3D9* aManager)
-  : ShadowCanvasLayer(aManager, nullptr)
-  , LayerD3D9(aManager)
-  , mNeedsYFlip(false)
-{
-  mImplData = static_cast<LayerD3D9*>(this);
-}
- 
-ShadowCanvasLayerD3D9::~ShadowCanvasLayerD3D9()
-{}
-
-void
-ShadowCanvasLayerD3D9::Initialize(const Data& aData)
-{
-  NS_RUNTIMEABORT("Non-shadow layer API unexpectedly used for shadow layer");
-}
-
-void
-ShadowCanvasLayerD3D9::Init(bool needYFlip)
-{
-  if (!mBuffer) {
-    mBuffer = new ShadowBufferD3D9(this);
-  }
-
-  mNeedsYFlip = needYFlip;
-}
-
-void
-ShadowCanvasLayerD3D9::Swap(const CanvasSurface& aNewFront,
-                            bool needYFlip,
-                            CanvasSurface* aNewBack)
-{
-  NS_ASSERTION(aNewFront.type() == CanvasSurface::TSurfaceDescriptor, 
-    "ShadowCanvasLayerD3D9::Swap expected CanvasSurface surface");
-
-  AutoOpenSurface surf(OPEN_READ_ONLY, aNewFront);
-  if (!mBuffer) {
-    Init(needYFlip);
-  }
-  mBuffer->Upload(surf.Get(), GetVisibleRegion().GetBounds());
-
-  *aNewBack = aNewFront;
-}
-
-void
-ShadowCanvasLayerD3D9::DestroyFrontBuffer()
-{
-  Destroy();
-}
-
-void
-ShadowCanvasLayerD3D9::Disconnect()
-{
-  Destroy();
-}
-
-void
-ShadowCanvasLayerD3D9::Destroy()
-{
-  mBuffer = nullptr;
-}
-
-void
-ShadowCanvasLayerD3D9::CleanResources()
-{
-  Destroy();
-}
-
-void
-ShadowCanvasLayerD3D9::LayerManagerDestroyed()
-{
-  mD3DManager->deviceManager()->mLayersWithResources.RemoveElement(this);
-  mD3DManager = nullptr;
-}
-
-Layer*
-ShadowCanvasLayerD3D9::GetLayer()
-{
-  return this;
-}
-
-void
-ShadowCanvasLayerD3D9::RenderLayer()
-{
-  if (!mBuffer || mD3DManager->CompositingDisabled()) {
-    return;
-  }
-
-  mBuffer->RenderTo(mD3DManager, GetEffectiveVisibleRegion());
-}
-
 
 } /* namespace layers */
 } /* namespace mozilla */

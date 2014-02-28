@@ -6,6 +6,8 @@
 
 #include <string.h>
 
+#include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/Base64.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Selection.h"
 #include "mozilla/Util.h"
@@ -38,7 +40,6 @@
 #include "nsIDOMDocumentFragment.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMHTMLAnchorElement.h"
-#include "nsIDOMHTMLBodyElement.h"
 #include "nsIDOMHTMLEmbedElement.h"
 #include "nsIDOMHTMLFrameElement.h"
 #include "nsIDOMHTMLIFrameElement.h"
@@ -47,9 +48,6 @@
 #include "nsIDOMHTMLLinkElement.h"
 #include "nsIDOMHTMLObjectElement.h"
 #include "nsIDOMHTMLScriptElement.h"
-#include "nsIDOMHTMLTableCellElement.h"
-#include "nsIDOMHTMLTableElement.h"
-#include "nsIDOMHTMLTableRowElement.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMRange.h"
 #include "nsIDocument.h"
@@ -89,15 +87,13 @@
 #include "nsWSRunObject.h"
 #include "nsXPCOM.h"
 #include "nscore.h"
-#include "plbase64.h"
-#include "prmem.h"
-#include "prtypes.h"
 
 class nsIAtom;
 class nsILoadContext;
 class nsISupports;
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 const PRUnichar nbsp = 160;
 
@@ -158,6 +154,8 @@ NS_IMETHODIMP nsHTMLEditor::LoadHTML(const nsAString & aInputString)
 
   nsTextRulesInfo ruleInfo(EditAction::loadHTML);
   bool cancel, handled;
+  // Protect the edit rules object from dying
+  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
   nsresult rv = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   NS_ENSURE_SUCCESS(rv, rv);
   if (cancel) {
@@ -717,141 +715,6 @@ nsHTMLEditor::DoInsertHTMLWithContext(const nsAString & aInputString,
   return mRules->DidDoAction(selection, &ruleInfo, rv);
 }
 
-// returns empty string if nothing to modify on node
-nsresult
-nsHTMLEditor::GetAttributeToModifyOnNode(nsIDOMNode *aNode, nsAString &aAttr)
-{
-  aAttr.Truncate();
-
-  NS_NAMED_LITERAL_STRING(srcStr, "src");
-  nsCOMPtr<nsIDOMHTMLImageElement> nodeAsImage = do_QueryInterface(aNode);
-  if (nodeAsImage)
-  {
-    aAttr = srcStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLAnchorElement> nodeAsAnchor = do_QueryInterface(aNode);
-  if (nodeAsAnchor)
-  {
-    aAttr.AssignLiteral("href");
-    return NS_OK;
-  }
-
-  NS_NAMED_LITERAL_STRING(bgStr, "background");
-  nsCOMPtr<nsIDOMHTMLBodyElement> nodeAsBody = do_QueryInterface(aNode);
-  if (nodeAsBody)
-  {
-    aAttr = bgStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLTableElement> nodeAsTable = do_QueryInterface(aNode);
-  if (nodeAsTable)
-  {
-    aAttr = bgStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLTableRowElement> nodeAsTableRow = do_QueryInterface(aNode);
-  if (nodeAsTableRow)
-  {
-    aAttr = bgStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLTableCellElement> nodeAsTableCell = do_QueryInterface(aNode);
-  if (nodeAsTableCell)
-  {
-    aAttr = bgStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLScriptElement> nodeAsScript = do_QueryInterface(aNode);
-  if (nodeAsScript)
-  {
-    aAttr = srcStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLEmbedElement> nodeAsEmbed = do_QueryInterface(aNode);
-  if (nodeAsEmbed)
-  {
-    aAttr = srcStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLObjectElement> nodeAsObject = do_QueryInterface(aNode);
-  if (nodeAsObject)
-  {
-    aAttr.AssignLiteral("data");
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLLinkElement> nodeAsLink = do_QueryInterface(aNode);
-  if (nodeAsLink)
-  {
-    // Test if the link has a rel value indicating it to be a stylesheet
-    nsAutoString linkRel;
-    if (NS_SUCCEEDED(nodeAsLink->GetRel(linkRel)) && !linkRel.IsEmpty())
-    {
-      nsReadingIterator<PRUnichar> start;
-      nsReadingIterator<PRUnichar> end;
-      nsReadingIterator<PRUnichar> current;
-
-      linkRel.BeginReading(start);
-      linkRel.EndReading(end);
-
-      // Walk through space delimited string looking for "stylesheet"
-      for (current = start; current != end; ++current)
-      {
-        // Ignore whitespace
-        if (nsCRT::IsAsciiSpace(*current))
-          continue;
-
-        // Grab the next space delimited word
-        nsReadingIterator<PRUnichar> startWord = current;
-        do {
-          ++current;
-        } while (current != end && !nsCRT::IsAsciiSpace(*current));
-
-        // Store the link for fix up if it says "stylesheet"
-        if (Substring(startWord, current).LowerCaseEqualsLiteral("stylesheet"))
-        {
-          aAttr.AssignLiteral("href");
-          return NS_OK;
-        }
-        if (current == end)
-          break;
-      }
-    }
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLFrameElement> nodeAsFrame = do_QueryInterface(aNode);
-  if (nodeAsFrame)
-  {
-    aAttr = srcStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLIFrameElement> nodeAsIFrame = do_QueryInterface(aNode);
-  if (nodeAsIFrame)
-  {
-    aAttr = srcStr;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDOMHTMLInputElement> nodeAsInput = do_QueryInterface(aNode);
-  if (nodeAsInput)
-  {
-    aAttr = srcStr;
-    return NS_OK;
-  }
-
-  return NS_OK;
-}
-
 nsresult
 nsHTMLEditor::AddInsertionListener(nsIContentFilter *aListener)
 {
@@ -1040,7 +903,7 @@ FindIntegerAfterString(const char *aLeadingString,
   if (numBack == -1)
     return false;
 
-  nsCAutoString numStr(Substring(aCStr, numFront, numBack-numFront));
+  nsAutoCString numStr(Substring(aCStr, numFront, numBack-numFront));
   nsresult errorCode;
   foundNumber = numStr.ToInteger(&errorCode);
   return true;
@@ -1102,7 +965,7 @@ nsHTMLEditor::ParseCFHTML(nsCString & aCfhtml, PRUnichar **aStuffToPaste, PRUnic
   }
 
   // create context string
-  nsCAutoString contextUTF8(Substring(aCfhtml, startHTML, startFragment - startHTML) +
+  nsAutoCString contextUTF8(Substring(aCfhtml, startHTML, startFragment - startHTML) +
                             NS_LITERAL_CSTRING("<!--" kInsertCookie "-->") +
                             Substring(aCfhtml, endFragment, endHTML - endFragment));
 
@@ -1137,7 +1000,7 @@ nsHTMLEditor::ParseCFHTML(nsCString & aCfhtml, PRUnichar **aStuffToPaste, PRUnic
   }
 
   // create fragment string
-  nsCAutoString fragmentUTF8(Substring(aCfhtml, startFragment, endFragment-startFragment));
+  nsAutoCString fragmentUTF8(Substring(aCfhtml, startFragment, endFragment-startFragment));
 
   // remove the StartFragment/EndFragment comments from the fragment, if present
   RemoveFragComments(fragmentUTF8);
@@ -1194,7 +1057,7 @@ nsresult nsHTMLEditor::InsertObject(const char* aType, nsISupports* aObject, boo
 
       nsCOMPtr<nsIMIMEService> mime = do_GetService("@mozilla.org/mime;1");
       NS_ENSURE_TRUE(mime, NS_ERROR_FAILURE);
-      nsCAutoString contentType;
+      nsAutoCString contentType;
       rv = mime->GetTypeFromFile(fileObj, contentType);
       NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1223,20 +1086,21 @@ nsresult nsHTMLEditor::InsertObject(const char* aType, nsISupports* aObject, boo
     }
 
     nsCString imageData;
-    rv = NS_ConsumeStream(imageStream, PR_UINT32_MAX, imageData);
+    rv = NS_ConsumeStream(imageStream, UINT32_MAX, imageData);
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = imageStream->Close();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    char * base64 = PL_Base64Encode(imageData.get(), imageData.Length(), nullptr);
-    NS_ENSURE_TRUE(base64, NS_ERROR_OUT_OF_MEMORY);
+    nsAutoCString data64;
+    rv = Base64Encode(imageData, data64);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     nsAutoString stuffToPaste;
     stuffToPaste.AssignLiteral("<IMG src=\"data:");
     AppendUTF8toUTF16(type, stuffToPaste);
     stuffToPaste.AppendLiteral(";base64,");
-    AppendUTF8toUTF16(base64, stuffToPaste);
+    AppendUTF8toUTF16(data64, stuffToPaste);
     stuffToPaste.AppendLiteral("\" alt=\"\" >");
     nsAutoEditBatch beginBatching(this);
     rv = DoInsertHTMLWithContext(stuffToPaste, EmptyString(), EmptyString(), 
@@ -1245,7 +1109,6 @@ nsresult nsHTMLEditor::InsertObject(const char* aType, nsISupports* aObject, boo
                                  aDestinationNode, aDestOffset,
                                  aDoDeleteSelection,
                                  aIsSafe);
-    PR_Free(base64);
   }
 
   return NS_OK;
@@ -1289,7 +1152,7 @@ NS_IMETHODIMP nsHTMLEditor::InsertFromTransferable(nsITransferable *transferable
       nsCOMPtr<nsISupportsCString> textDataObj = do_QueryInterface(genericDataObj);
       if (textDataObj && len > 0)
       {
-        nsCAutoString cfhtml;
+        nsAutoCString cfhtml;
         textDataObj->GetData(cfhtml);
         NS_ASSERTION(cfhtml.Length() <= (len), "Invalid length!");
         nsXPIDLString cfcontext, cffragment, cfselection; // cfselection left emtpy for now
@@ -1327,7 +1190,7 @@ NS_IMETHODIMP nsHTMLEditor::InsertFromTransferable(nsITransferable *transferable
       } else {
         nsCOMPtr<nsISupportsCString> textDataObj(do_QueryInterface(genericDataObj));
         if (textDataObj && len > 0) {
-          nsCAutoString text;
+          nsAutoCString text;
           textDataObj->GetData(text);
           NS_ASSERTION(text.Length() <= len, "Invalid length!");
           stuffToPaste.Assign(NS_ConvertUTF8toUTF16(Substring(text, 0, len)));
@@ -1374,8 +1237,6 @@ nsresult nsHTMLEditor::InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
                                               int32_t aDestOffset,
                                               bool aDoDeleteSelection)
 {
-  nsresult rv = NS_OK;
-
   nsCOMPtr<nsIDOMDOMStringList> types;
   aDataTransfer->MozTypesAt(aIndex, getter_AddRefs(types));
 
@@ -1384,7 +1245,7 @@ nsresult nsHTMLEditor::InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
 
   bool isText = IsPlaintextEditor();
   bool isSafe = IsSafeToInsertData(aSourceDoc);
-  
+
   uint32_t length;
   types->GetLength(&length);
   for (uint32_t t = 0; t < length; t++) {
@@ -1402,10 +1263,8 @@ nsresult nsHTMLEditor::InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
         if (variant) {
           nsCOMPtr<nsISupports> object;
           variant->GetAsISupports(getter_AddRefs(object));
-          rv = InsertObject(NS_ConvertUTF16toUTF8(type).get(), object, isSafe,
-                            aSourceDoc, aDestinationNode, aDestOffset, aDoDeleteSelection);
-          if (NS_SUCCEEDED(rv))
-            return NS_OK;
+          return InsertObject(NS_ConvertUTF16toUTF8(type).get(), object, isSafe,
+                              aSourceDoc, aDestinationNode, aDestOffset, aDoDeleteSelection);
         }
       }
       else if (!hasPrivateHTMLFlavor && type.EqualsLiteral(kNativeHTMLMime)) {
@@ -1415,18 +1274,16 @@ nsresult nsHTMLEditor::InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
 
         nsXPIDLString cfcontext, cffragment, cfselection; // cfselection left emtpy for now
 
-        rv = ParseCFHTML(cfhtml, getter_Copies(cffragment), getter_Copies(cfcontext));
+        nsresult rv = ParseCFHTML(cfhtml, getter_Copies(cffragment), getter_Copies(cfcontext));
         if (NS_SUCCEEDED(rv) && !cffragment.IsEmpty())
         {
           nsAutoEditBatch beginBatching(this);
-          rv = DoInsertHTMLWithContext(cffragment,
-                                       cfcontext, cfselection, type,
-                                       aSourceDoc,
-                                       aDestinationNode, aDestOffset,
-                                       aDoDeleteSelection,
-                                       isSafe);
-          if (NS_SUCCEEDED(rv))
-            return NS_OK;
+          return DoInsertHTMLWithContext(cffragment,
+                                         cfcontext, cfselection, type,
+                                         aSourceDoc,
+                                         aDestinationNode, aDestOffset,
+                                         aDoDeleteSelection,
+                                         isSafe);
         }
       }
       else if (type.EqualsLiteral(kHTMLMime)) {
@@ -1437,14 +1294,12 @@ nsresult nsHTMLEditor::InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
 
         nsAutoEditBatch beginBatching(this);
         if (type.EqualsLiteral(kHTMLMime)) {
-          rv = DoInsertHTMLWithContext(text,
-                                       contextString, infoString, type,
-                                       aSourceDoc,
-                                       aDestinationNode, aDestOffset,
-                                       aDoDeleteSelection,
-                                       isSafe);
-          if (NS_SUCCEEDED(rv))
-            return NS_OK;
+          return DoInsertHTMLWithContext(text,
+                                         contextString, infoString, type,
+                                         aSourceDoc,
+                                         aDestinationNode, aDestOffset,
+                                         aDoDeleteSelection,
+                                         isSafe);
         }
       }
     }
@@ -1455,13 +1310,11 @@ nsresult nsHTMLEditor::InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
       GetStringFromDataTransfer(aDataTransfer, type, aIndex, text);
 
       nsAutoEditBatch beginBatching(this);
-      rv = InsertTextAt(text, aDestinationNode, aDestOffset, aDoDeleteSelection);
-      if (NS_SUCCEEDED(rv))
-        return NS_OK;
+      return InsertTextAt(text, aDestinationNode, aDestOffset, aDoDeleteSelection);
     }
   }
 
-  return rv;
+  return NS_OK;
 }
 
 bool nsHTMLEditor::HavePrivateHTMLFlavor(nsIClipboard *aClipboard)
@@ -1724,6 +1577,8 @@ NS_IMETHODIMP nsHTMLEditor::PasteAsCitedQuotation(const nsAString & aCitation,
   // give rules a chance to handle or cancel
   nsTextRulesInfo ruleInfo(EditAction::insertElement);
   bool cancel, handled;
+  // Protect the edit rules object from dying
+  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
   nsresult rv = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   NS_ENSURE_SUCCESS(rv, rv);
   if (cancel || handled) {
@@ -1928,6 +1783,8 @@ nsHTMLEditor::InsertAsPlaintextQuotation(const nsAString & aQuotedText,
   // give rules a chance to handle or cancel
   nsTextRulesInfo ruleInfo(EditAction::insertElement);
   bool cancel, handled;
+  // Protect the edit rules object from dying
+  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
   nsresult rv = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   NS_ENSURE_SUCCESS(rv, rv);
   if (cancel || handled) {
@@ -2021,6 +1878,8 @@ nsHTMLEditor::InsertAsCitedQuotation(const nsAString & aQuotedText,
   // give rules a chance to handle or cancel
   nsTextRulesInfo ruleInfo(EditAction::insertElement);
   bool cancel, handled;
+  // Protect the edit rules object from dying
+  nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
   nsresult rv = mRules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
   NS_ENSURE_SUCCESS(rv, rv);
   if (cancel || handled) {
@@ -2110,7 +1969,7 @@ void RemoveBodyAndHead(nsIDOMNode *aNode)
 /**
  * This function finds the target node that we will be pasting into. aStart is
  * the context that we're given and aResult will be the target. Initially,
- * *aResult must be NULL.
+ * *aResult must be nullptr.
  *
  * The target for a paste is found by either finding the node that contains
  * the magical comment node containing kInsertCookie or, failing that, the
@@ -2127,7 +1986,7 @@ nsresult FindTargetNode(nsIDOMNode *aStart, nsCOMPtr<nsIDOMNode> &aResult)
 
   if (!child)
   {
-    // If the current result is NULL, then aStart is a leaf, and is the
+    // If the current result is nullptr, then aStart is a leaf, and is the
     // fallback result.
     if (!aResult)
       aResult = aStart;
@@ -2295,10 +2154,8 @@ nsresult nsHTMLEditor::ParseFragment(const nsAString & aFragStr,
 {
   nsAutoScriptBlockerSuppressNodeRemoved autoBlocker;
 
-  nsCOMPtr<nsIDOMDocumentFragment> frag;
-  NS_NewDocumentFragment(getter_AddRefs(frag),
-                         aTargetDocument->NodeInfoManager());
-  nsCOMPtr<nsIContent> fragment = do_QueryInterface(frag);
+  nsRefPtr<DocumentFragment> fragment =
+    new DocumentFragment(aTargetDocument->NodeInfoManager());
   nsresult rv = nsContentUtils::ParseFragmentHTML(aFragStr,
                                                   fragment,
                                                   aContextLocalName ?
@@ -2312,7 +2169,7 @@ nsresult nsHTMLEditor::ParseFragment(const nsAString & aFragStr,
                               nsIParserUtils::SanitizerAllowComments);
     sanitizer.Sanitize(fragment);
   }
-  *outNode = do_QueryInterface(frag);
+  *outNode = fragment.forget();
   return rv;
 }
 

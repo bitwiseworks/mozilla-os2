@@ -13,7 +13,7 @@ var gAddon = null;
 
 // If the user enables the add-on through some other UI close this window
 var EnableListener = {
-  onEnabling: function(aAddon) {
+  onEnabling: function EnableListener_onEnabling(aAddon) {
     if (aAddon.id == gAddon.id)
       window.close();
   }
@@ -38,7 +38,7 @@ function initialize() {
 
   let bundle = Services.strings.createBundle("chrome://mozapps/locale/extensions/newaddon.properties");
 
-  AddonManager.getAddonByID(id, function(aAddon) {
+  AddonManager.getAddonByID(id, function initialize_getAddonByID(aAddon) {
     // If the add-on doesn't exist or it is already enabled or it cannot be
     // enabled then this UI is useless, just close it. This shouldn't normally
     // happen unless session restore restores the tab
@@ -51,7 +51,7 @@ function initialize() {
     gAddon = aAddon;
 
     document.getElementById("addon-info").setAttribute("type", aAddon.type);
-    
+
     let icon = document.getElementById("icon");
     if (aAddon.icon64URL)
       icon.src = aAddon.icon64URL;
@@ -60,7 +60,7 @@ function initialize() {
 
     let name = bundle.formatStringFromName("name", [aAddon.name, aAddon.version],
                                            2);
-    document.getElementById("name").value = name
+    document.getElementById("name").value = name;
 
     if (aAddon.creator) {
       let creator = bundle.formatStringFromName("author", [aAddon.creator], 1);

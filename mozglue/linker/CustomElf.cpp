@@ -102,7 +102,7 @@ private:
 TemporaryRef<LibHandle>
 CustomElf::Load(Mappable *mappable, const char *path, int flags)
 {
-  debug("CustomElf::Load(\"%s\", %x) = ...", path, flags);
+  debug("CustomElf::Load(\"%s\", 0x%x) = ...", path, flags);
   if (!mappable)
     return NULL;
   /* Keeping a RefPtr of the CustomElf is going to free the appropriate
@@ -219,7 +219,7 @@ CustomElf::Load(Mappable *mappable, const char *path, int flags)
     return NULL;
 
   elf->stats("oneLibLoaded");
-  debug("CustomElf::Load(\"%s\", %x) = %p", path, flags,
+  debug("CustomElf::Load(\"%s\", 0x%x) = %p", path, flags,
         static_cast<void *>(elf));
   return elf;
 }
@@ -308,11 +308,6 @@ CustomElf::GetSymbolPtrInDeps(const char *symbol) const
       return const_cast<CustomElf *>(this);
     if (strcmp(symbol + 2, "moz_linker_stats") == 0)
       return FunctionPtr(&ElfLoader::stats);
-  } else if (symbol[0] == 's' && symbol[1] == 'i') {
-    if (strcmp(symbol + 2, "gnal") == 0)
-      return FunctionPtr(__wrap_signal);
-    if (strcmp(symbol + 2, "gaction") == 0)
-      return FunctionPtr(__wrap_sigaction);
   }
 
   void *sym;
@@ -414,7 +409,7 @@ CustomElf::LoadSegment(const Phdr *pt_load) const
      * (p_vaddr == 0). But subsequent segments may not be 16k aligned
      * and fail to mmap. In such case, try to mmap again at the p_align
      * boundary instead of page boundary. */
-    debug("%s: Failed to mmap, retrying");
+    debug("%s: Failed to mmap, retrying", GetPath());
     align = pt_load->p_align;
   } while (1);
 
@@ -428,6 +423,16 @@ CustomElf::LoadSegment(const Phdr *pt_load) const
     return false;
   }
 
+  /* Ensure the availability of all pages within the mapping if on-demand
+   * decompression is disabled (MOZ_LINKER_ONDEMAND=0 or signal handler not
+   * registered). */
+  const char *ondemand = getenv("MOZ_LINKER_ONDEMAND");
+  if (!ElfLoader::Singleton.hasRegisteredHandler() ||
+      (ondemand && !strncmp(ondemand, "0", 2 /* Including '\0' */))) {
+    for (Addr off = 0; off < pt_load->p_filesz; off += PAGE_SIZE) {
+      mappable->ensure(reinterpret_cast<char *>(mapped) + off);
+    }
+  }
   /* When p_memsz is greater than p_filesz, we need to have nulled out memory
    * after p_filesz and before p_memsz.
    * Mappable::mmap already guarantees that after p_filesz and up to the end
@@ -439,7 +444,7 @@ CustomElf::LoadSegment(const Phdr *pt_load) const
   if (pt_load->p_memsz > pt_load->p_filesz) {
     Addr file_end = pt_load->p_vaddr + pt_load->p_filesz;
     Addr mem_end = pt_load->p_vaddr + pt_load->p_memsz;
-    Addr next_page = (file_end & ~(PAGE_SIZE - 1)) + PAGE_SIZE;
+    Addr next_page = (file_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     if (mem_end > next_page) {
       if (mprotect(GetPtr(next_page), mem_end - next_page, prot) < 0) {
         log("%s: Failed to mprotect", GetPath());
@@ -566,7 +571,7 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
         break;
       case DT_FLAGS:
         {
-           Word flags = dyn->d_un.d_val;
+           Addr flags = dyn->d_un.d_val;
            /* Treat as a DT_TEXTREL tag */
            if (flags & DF_TEXTREL) {
              log("%s: Text relocations are not supported", GetPath());
@@ -588,6 +593,8 @@ CustomElf::InitDyn(const Phdr *pt_dyn)
                           * libraries. They are not supported anyways. */
       case UNSUPPORTED_RELOC(COUNT): /* This should error out, but it doesn't
                                       * really matter. */
+      case DT_FLAGS_1: /* Additional linker-internal flags that we don't care about. See
+                        * DF_1_* values in src/include/elf/common.h in binutils. */
       case DT_VERSYM: /* DT_VER* entries are used for symbol versioning, which */
       case DT_VERDEF: /* this linker doesn't support yet. */
       case DT_VERDEFNUM:
@@ -743,4 +750,14 @@ CustomElf::CallFini()
   }
   if (fini)
     CallFunction(fini);
+}
+
+Mappable *
+CustomElf::GetMappable() const
+{
+  if (!mappable)
+    return NULL;
+  if (mappable->GetKind() == Mappable::MAPPABLE_EXTRACT_FILE)
+    return mappable;
+  return ElfLoader::GetMappableFromPath(GetPath());
 }

@@ -40,7 +40,7 @@
 #include "nsGUIEvent.h"
 #include "nsIXULWindow.h"
 
-class nsIView;
+class nsView;
 class nsIPresShell;
 
 class nsIWidgetListener
@@ -55,9 +55,9 @@ public:
   virtual nsIXULWindow* GetXULWindow() { return nullptr; }
 
   /**
-   * If this listener is for an nsIView, return it.
+   * If this listener is for an nsView, return it.
    */
-  virtual nsIView* GetView() { return nullptr; }
+  virtual nsView* GetView() { return nullptr; }
 
   /**
    * Return the presshell for this widget listener.
@@ -113,23 +113,32 @@ public:
   virtual bool RequestWindowClose(nsIWidget* aWidget) { return false; }
 
   /*
-   * Indicate that a paint is about to occur on this window.
+   * Indicate that a paint is about to occur on this window. This is called
+   * at a time when it's OK to change the geometry of this widget or of
+   * other widgets. Must be called before every call to PaintWindow.
    */
-  virtual void WillPaintWindow(nsIWidget* aWidget, bool aWillSendDidPaint) { }
+  virtual void WillPaintWindow(nsIWidget* aWidget) { }
 
   /**
-   * Paint the specified region of the window. If aSentWillPaint is true,
-   * then WillPaintWindow has already been called. If aWillSendDidPaint is true,
-   * then a call to DidPaintWindow will be made afterwards. Returns true if the
+   * Paint the specified region of the window. Returns true if the
    * notification was handled.
+   * This is called at a time when it is not OK to change the geometry of
+   * this widget or of other widgets.
    */
-  virtual bool PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion,
-                           bool aSentWillPaint, bool aWillSendDidPaint) { return false; }
+  virtual bool PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion) { return false; }
 
   /**
-   * On some platforms, indicates that a paint occurred.
+   * Indicates that a paint occurred.
+   * This is called at a time when it is OK to change the geometry of
+   * this widget or of other widgets.
+   * Must be called after every call to PaintWindow.
    */
   virtual void DidPaintWindow() { }
+
+  /**
+   * Request that layout schedules a repaint on the next refresh driver tick.
+   */
+  virtual void RequestRepaint() { }
 
   /**
    * Handle an event.

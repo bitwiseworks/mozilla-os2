@@ -321,7 +321,7 @@ function whenDelayedStartupFinished(win, callback) {
     if (win != aSubject)
       return;
 
-    Services.obs.removeObserver(onStartup, topic, false);
+    Services.obs.removeObserver(onStartup, topic);
     executeSoon(callback);
   }, topic, false);
 }
@@ -375,24 +375,6 @@ function restoreTab(callback, index, win) {
     tab._tabViewTabItem.removeSubscriber("reconnected", onReconnected);
     finalize();
   });
-}
-
-// ----------
-function togglePrivateBrowsing(callback) {
-  let topic = "private-browsing-transition-complete";
-
-  Services.obs.addObserver(function observe() {
-    Services.obs.removeObserver(observe, topic);
-
-    // use executeSoon() to let Panorama load its group data from the session
-    // before we call afterAllTabsLoaded()
-    executeSoon(function () afterAllTabsLoaded(callback));
-  }, topic, false);
-
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
-
-  pb.privateBrowsingEnabled = !pb.privateBrowsingEnabled;
 }
 
 // ----------

@@ -10,8 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= reftest
-
 EXTRA_COMPONENTS= \
 		reftest-cmdline.js \
 		$(NULL)
@@ -60,9 +58,11 @@ _HARNESS_FILES = \
   $(srcdir)/runreftestb2g.py \
   $(srcdir)/b2g_start_script.js \
   automation.py \
-  $(topsrcdir)/build/mobile/devicemanager.py \
-  $(topsrcdir)/build/mobile/devicemanagerADB.py \
-  $(topsrcdir)/build/mobile/devicemanagerSUT.py \
+  $(topsrcdir)/testing/mozbase/mozdevice/mozdevice/devicemanager.py \
+  $(topsrcdir)/testing/mozbase/mozdevice/mozdevice/devicemanagerADB.py \
+  $(topsrcdir)/testing/mozbase/mozdevice/mozdevice/devicemanagerSUT.py \
+  $(topsrcdir)/testing/mozbase/mozdevice/mozdevice/droid.py \
+  $(topsrcdir)/testing/mozbase/mozdevice/mozdevice/Zeroconf.py \
   $(topsrcdir)/build/mobile/b2gautomation.py \
   $(topsrcdir)/build/automationutils.py \
   $(topsrcdir)/build/mobile/remoteautomation.py \

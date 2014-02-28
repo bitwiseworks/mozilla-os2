@@ -8,12 +8,14 @@
  <name>Init dictionary for the event constructor. """
 
 simple_events = [
+    'ProgressEvent',
     'StorageEvent',
     'DeviceProximityEvent',
     'MozSettingsEvent',
     'UserProximityEvent',
     'CustomEvent',
     'PageTransitionEvent',
+    'DOMTransactionEvent',
     'PopStateEvent',
     'HashChangeEvent',
     'CloseEvent',
@@ -21,25 +23,64 @@ simple_events = [
     'DeviceOrientationEvent',
     'DeviceLightEvent',
     'MozApplicationEvent',
+    'SmartCardEvent',
+    'StyleRuleChangeEvent',
+    'StyleSheetChangeEvent',
+    'StyleSheetApplicableStateChangeEvent',
 #ifdef MOZ_B2G_BT
-    'BluetoothAuthorizeEvent',
     'BluetoothDeviceEvent',
-    'BluetoothDeviceAddressEvent',
-    'BluetoothPairingEvent',
+#endif
+#ifdef MOZ_B2G_RIL
+    'CallEvent',
+    'CFStateChangeEvent',
+    'DataErrorEvent',
+    'IccCardLockErrorEvent',
+    'MozWifiStatusChangeEvent',
+    'MozWifiConnectionInfoEvent',
+    'MozCellBroadcastEvent',
+    'MozVoicemailEvent',
+    'USSDReceivedEvent',
+#endif
+    'ElementReplaceEvent',
+    'MozSmsEvent',
+    'MozMmsEvent',
+#ifdef MOZ_WEBSPEECH
+    'SpeechSynthesisEvent',
 #endif
     'DeviceStorageChangeEvent',
-    'PopupBlockedEvent'
+    'PopupBlockedEvent',
+    'BlobEvent',
+#ifdef MOZ_GAMEPAD
+    'GamepadEvent',
+    'GamepadButtonEvent',
+    'GamepadAxisMoveEvent',
+#endif
+#ifdef MOZ_WEBSPEECH
+    'SpeechRecognitionEvent',
+    'SpeechRecognitionError',
+#endif
   ]
 
 """ include file names """
 special_includes = [
     'DictionaryHelpers.h',
     'nsContentUtils.h',
-    'nsIDOMApplicationRegistry.h'
+    'nsIDOMApplicationRegistry.h',
+    'nsIDOMFile.h'
   ]
 
 """ name of the type to not include using #include "typename.h" """
 exclude_automatic_type_include = [
     'nsISupports',
-    'mozIDOMApplication'
+    'mozIDOMApplication',
+    'nsIDOMBlob'
   ]
+
+""" Map xpidl interface names to implementation classes. The third column is the canonical interface. """
+xpidl_to_native = [
+    ['nsIDOMDocument', 'nsIDocument', 'nsIDocument'],
+    ['nsIDOMElement', 'mozilla::dom::Element', 'mozilla::dom::Element'],
+    ['nsIDOMCSSStyleSheet', 'nsCSSStyleSheet', 'nsIStyleSheet'],
+    ['nsIDOMGamepad', 'Gamepad', 'nsIDOMGamepad']
+  ]
+

@@ -47,12 +47,10 @@ class ChildNotificationTask : public Task {
 
 
 
-ChildProcessHost::ChildProcessHost(
-    ProcessType type, ResourceDispatcherHost* resource_dispatcher_host)
+ChildProcessHost::ChildProcessHost(ProcessType type)
     :
       ChildProcessInfo(type),
       ALLOW_THIS_IN_INITIALIZER_LIST(listener_(this)),
-      resource_dispatcher_host_(resource_dispatcher_host),
       opening_channel_(false),
       process_event_(NULL) {
   Singleton<ChildProcessList>::get()->push_back(this);
@@ -167,7 +165,7 @@ void ChildProcessHost::ListenerHook::OnMessageReceived(
 #endif
 }
 
-void ChildProcessHost::ListenerHook::OnChannelConnected(int32 peer_pid) {
+void ChildProcessHost::ListenerHook::OnChannelConnected(int32_t peer_pid) {
   host_->opening_channel_ = false;
   host_->OnChannelConnected(peer_pid);
 

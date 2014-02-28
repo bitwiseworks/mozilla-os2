@@ -28,6 +28,8 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Attributes.h"
 #include "nsIDOMNode.h"
+#include "nsINode.h"
+#include "nsIDocument.h"
 
 using namespace mozilla;
 
@@ -55,12 +57,8 @@ static PRLogModuleInfo *gPrefetchLog;
 static inline uint32_t
 PRTimeToSeconds(PRTime t_usec)
 {
-    PRTime usec_per_sec;
-    uint32_t t_sec;
-    LL_I2L(usec_per_sec, PR_USEC_PER_SEC);
-    LL_DIV(t_usec, t_usec, usec_per_sec);
-    LL_L2I(t_sec, t_usec);
-    return t_sec;
+    PRTime usec_per_sec = PR_USEC_PER_SEC;
+    return uint32_t(t_usec /= usec_per_sec);
 }
 
 #define NowInSeconds() PRTimeToSeconds(PR_Now())
@@ -179,9 +177,16 @@ nsPrefetchNode::nsPrefetchNode(nsPrefetchService *aService,
 nsresult
 nsPrefetchNode::OpenChannel()
 {
+    nsCOMPtr<nsINode> source = do_QueryReferent(mSource);
+    if (!source) {
+        // Don't attempt to prefetch if we don't have a source node
+        // (which should never happen).
+        return NS_ERROR_FAILURE;
+    }
+    nsCOMPtr<nsILoadGroup> loadGroup = source->OwnerDoc()->GetDocumentLoadGroup();
     nsresult rv = NS_NewChannel(getter_AddRefs(mChannel),
                                 mURI,
-                                nullptr, nullptr, this,
+                                nullptr, loadGroup, this,
                                 nsIRequest::LOAD_BACKGROUND |
                                 nsICachingChannel::LOAD_ONLY_IF_MODIFIED);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -281,13 +286,13 @@ NS_IMETHODIMP
 nsPrefetchNode::OnDataAvailable(nsIRequest *aRequest,
                                 nsISupports *aContext,
                                 nsIInputStream *aStream,
-                                uint32_t aOffset,
+                                uint64_t aOffset,
                                 uint32_t aCount)
 {
     uint32_t bytesRead = 0;
     aStream->ReadSegments(NS_DiscardSegment, nullptr, aCount, &bytesRead);
     mBytesRead += bytesRead;
-    LOG(("prefetched %u bytes [offset=%u]\n", bytesRead, aOffset));
+    LOG(("prefetched %u bytes [offset=%llu]\n", bytesRead, aOffset));
     return NS_OK;
 }
 
@@ -456,7 +461,7 @@ nsPrefetchService::ProcessNextURI()
 
 #if defined(PR_LOGGING)
         if (LOG_ENABLED()) {
-            nsCAutoString spec;
+            nsAutoCString spec;
             mCurrentNode->mURI->GetSpec(spec);
             LOG(("ProcessNextURI [%s]\n", spec.get()));
         }
@@ -465,7 +470,8 @@ nsPrefetchService::ProcessNextURI()
         //
         // if opening the channel fails, then just skip to the next uri
         //
-        rv = mCurrentNode->OpenChannel();
+        nsRefPtr<nsPrefetchNode> node = mCurrentNode;
+        rv = node->OpenChannel();
     }
     while (NS_FAILED(rv));
 }
@@ -642,7 +648,7 @@ nsPrefetchService::Prefetch(nsIURI *aURI,
 
 #if defined(PR_LOGGING)
     if (LOG_ENABLED()) {
-        nsCAutoString spec;
+        nsAutoCString spec;
         aURI->GetSpec(spec);
         LOG(("PrefetchURI [%s]\n", spec.get()));
     }
@@ -691,7 +697,7 @@ nsPrefetchService::Prefetch(nsIURI *aURI,
     if (!aExplicit) {
         nsCOMPtr<nsIURL> url(do_QueryInterface(aURI, &rv));
         if (NS_FAILED(rv)) return rv;
-        nsCAutoString query;
+        nsAutoCString query;
         rv = url->GetQuery(query);
         if (NS_FAILED(rv) || !query.IsEmpty()) {
             LOG(("rejected: URL has a query string\n"));
@@ -746,22 +752,8 @@ nsPrefetchService::PrefetchURI(nsIURI *aURI,
 }
 
 NS_IMETHODIMP
-nsPrefetchService::PrefetchURIForOfflineUse(nsIURI *aURI,
-                                            nsIURI *aReferrerURI,
-                                            nsIDOMNode *aSource,
-                                            bool aExplicit)
+nsPrefetchService::EnumerateQueue(nsISimpleEnumerator **aEnumerator)
 {
-    return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-nsPrefetchService::EnumerateQueue(bool aIncludeNormalItems,
-                                  bool aIncludeOfflineItems,
-                                  nsISimpleEnumerator **aEnumerator)
-{
-    NS_ENSURE_TRUE(aIncludeNormalItems && !aIncludeOfflineItems,
-                   NS_ERROR_NOT_IMPLEMENTED);
-
     *aEnumerator = new nsPrefetchQueueEnumerator(this);
     if (!*aEnumerator) return NS_ERROR_OUT_OF_MEMORY;
 
@@ -787,7 +779,7 @@ nsPrefetchNode::GetSource(nsIDOMNode **aSource)
 NS_IMETHODIMP
 nsPrefetchNode::GetUri(nsAString &aURI)
 {
-    nsCAutoString spec;
+    nsAutoCString spec;
     nsresult rv = mURI->GetSpec(spec);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -799,7 +791,11 @@ NS_IMETHODIMP
 nsPrefetchNode::GetTotalSize(int32_t *aTotalSize)
 {
     if (mChannel) {
-        return mChannel->GetContentLength(aTotalSize);
+        int64_t size64;
+        nsresult rv = mChannel->GetContentLength(&size64);
+        NS_ENSURE_SUCCESS(rv, rv);
+        *aTotalSize = int32_t(size64); // XXX - loses precision
+        return NS_OK;
     }
 
     *aTotalSize = -1;
@@ -809,7 +805,7 @@ nsPrefetchNode::GetTotalSize(int32_t *aTotalSize)
 NS_IMETHODIMP
 nsPrefetchNode::GetLoadedSize(int32_t *aLoadedSize)
 {
-    *aLoadedSize = mBytesRead;
+    *aLoadedSize = int32_t(mBytesRead); // XXX - loses precision
     return NS_OK;
 }
 
@@ -835,15 +831,6 @@ nsPrefetchNode::GetStatus(uint16_t *aStatus)
     uint32_t httpStatus;
     rv = httpChannel->GetResponseStatus(&httpStatus);
     if (rv == NS_ERROR_NOT_AVAILABLE) {
-        // Someone's calling this before we got a response... Check our
-        // ReadyState.  If we're at RECEIVING or LOADED, then this means the
-        // connection errored before we got any data; return a somewhat
-        // sensible error code in that case.
-        if (mState >= nsIDOMLoadStatus::RECEIVING) {
-            *aStatus = NS_ERROR_NOT_AVAILABLE;
-            return NS_OK;
-        }
-
         *aStatus = 0;
         return NS_OK;
     }

@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * Test script cloning.
  */
@@ -104,10 +104,10 @@ BEGIN_TEST(test_cloneScriptWithPrincipals)
     // Compile in A
     {
         JSAutoCompartment a(cx, A);
-        JSFunction *fun;
-        CHECK(fun = JS_CompileFunctionForPrincipals(cx, A, principalsA, "f",
-                                                    mozilla::ArrayLength(argnames), argnames,
-                                                    source, strlen(source), __FILE__, 1));
+        JS::RootedFunction fun(cx, JS_CompileFunctionForPrincipals(cx, A, principalsA, "f",
+                                                               mozilla::ArrayLength(argnames), argnames,
+                                                               source, strlen(source), __FILE__, 1));
+        CHECK(fun);
 
         JSScript *script;
         CHECK(script = JS_GetFunctionScript(cx, fun));
@@ -130,9 +130,9 @@ BEGIN_TEST(test_cloneScriptWithPrincipals)
 
         CHECK(JS_GetScriptPrincipals(script) == principalsB);
 
-        JS::Value v;
+        JS::RootedValue v(cx);
         JS::Value args[] = { JS::Int32Value(1) };
-        CHECK(JS_CallFunctionValue(cx, B, JS::ObjectValue(*cloned), 1, args, &v));
+        CHECK(JS_CallFunctionValue(cx, B, JS::ObjectValue(*cloned), 1, args, v.address()));
         CHECK(v.isObject());
 
         JSObject *funobj = &v.toObject();

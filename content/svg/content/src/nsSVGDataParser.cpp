@@ -18,7 +18,6 @@
 
 #include "nsSVGDataParser.h"
 #include "prdtoa.h"
-#include "nsSVGUtils.h"
 #include "nsMathUtils.h"
 #include "nsMemory.h"
 #include "nsReadableUtils.h"
@@ -95,36 +94,6 @@ void nsSVGDataParser::RewindTo(const char* aPos)
 {
   mInputPos = aPos;
   GetNextToken();
-}
-
-//----------------------------------------------------------------------
-
-nsresult nsSVGDataParser::MatchNonNegativeNumber(float* aX)
-{
-  // XXX inefficient implementation. We probably hit the RewindTo case
-  // often.
-  
-  const char* pos = mTokenPos;
-
-  nsresult rv = MatchFloatingPointConst();
-
-  if (NS_FAILED(rv)) {
-    RewindTo(pos);
-    ENSURE_MATCHED(MatchIntegerConst());
-  }
-
-  char* end;
-  *aX = float(PR_strtod(pos, &end));
-  if (pos != end && NS_finite(*aX)) {
-    return NS_OK;
-  }
-  
-  return NS_ERROR_FAILURE;
-}
-
-bool nsSVGDataParser::IsTokenNonNegativeNumberStarter()
-{
-  return (mTokenType == DIGIT || mTokenType == POINT);
 }
 
 //----------------------------------------------------------------------

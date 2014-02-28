@@ -13,12 +13,13 @@
 #ifndef nsStyleLinkElement_h___
 #define nsStyleLinkElement_h___
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsIDOMLinkStyle.h"
 #include "nsIStyleSheetLinkingElement.h"
-#include "nsIStyleSheet.h"
-#include "nsIURI.h"
+#include "nsCSSStyleSheet.h"
 #include "nsTArray.h"
+#include "mozilla/CORSMode.h"
 
 #define PREFETCH      0x00000001
 #define DNS_PREFETCH  0x00000002
@@ -27,6 +28,7 @@
 #define ALTERNATE     0x00000010
 
 class nsIDocument;
+class nsIURI;
 
 class nsStyleLinkElement : public nsIDOMLinkStyle,
                            public nsIStyleSheetLinkingElement
@@ -35,23 +37,25 @@ public:
   nsStyleLinkElement();
   virtual ~nsStyleLinkElement();
 
-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) = 0;
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) MOZ_OVERRIDE = 0;
 
   // nsIDOMLinkStyle
   NS_DECL_NSIDOMLINKSTYLE
 
+  nsCSSStyleSheet* GetSheet() const { return mStyleSheet; }
+
   // nsIStyleSheetLinkingElement  
-  NS_IMETHOD SetStyleSheet(nsIStyleSheet* aStyleSheet);
-  NS_IMETHOD GetStyleSheet(nsIStyleSheet*& aStyleSheet);
-  NS_IMETHOD InitStyleLinkElement(bool aDontLoadStyle);
+  NS_IMETHOD SetStyleSheet(nsCSSStyleSheet* aStyleSheet) MOZ_OVERRIDE;
+  NS_IMETHOD GetStyleSheet(nsIStyleSheet*& aStyleSheet) MOZ_OVERRIDE;
+  NS_IMETHOD InitStyleLinkElement(bool aDontLoadStyle) MOZ_OVERRIDE;
   NS_IMETHOD UpdateStyleSheet(nsICSSLoaderObserver* aObserver,
                               bool* aWillNotify,
-                              bool* aIsAlternate);
-  NS_IMETHOD SetEnableUpdates(bool aEnableUpdates);
-  NS_IMETHOD GetCharset(nsAString& aCharset);
+                              bool* aIsAlternate) MOZ_OVERRIDE;
+  NS_IMETHOD SetEnableUpdates(bool aEnableUpdates) MOZ_OVERRIDE;
+  NS_IMETHOD GetCharset(nsAString& aCharset) MOZ_OVERRIDE;
 
-  virtual void OverrideBaseURI(nsIURI* aNewBaseURI);
-  virtual void SetLineNumber(uint32_t aLineNumber);
+  virtual void OverrideBaseURI(nsIURI* aNewBaseURI) MOZ_OVERRIDE;
+  virtual void SetLineNumber(uint32_t aLineNumber) MOZ_OVERRIDE;
 
   static uint32_t ParseLinkTypes(const nsAString& aTypes);
   
@@ -68,13 +72,20 @@ protected:
   nsresult UpdateStyleSheetInternal(nsIDocument *aOldDocument,
                                     bool aForceUpdate = false);
 
+  void UpdateStyleSheetScopedness(bool aIsNowScoped);
+
   virtual already_AddRefed<nsIURI> GetStyleSheetURL(bool* aIsInline) = 0;
   virtual void GetStyleSheetInfo(nsAString& aTitle,
                                  nsAString& aType,
                                  nsAString& aMedia,
+                                 bool* aIsScoped,
                                  bool* aIsAlternate) = 0;
 
-  nsIStyleSheet* GetStyleSheet() { return mStyleSheet; }
+  virtual mozilla::CORSMode GetCORSMode() const
+  {
+    // Default to no CORS
+    return mozilla::CORS_NONE;
+  }
 
   // CC methods
   void Unlink();
@@ -95,7 +106,7 @@ private:
                               bool* aIsAlternate,
                               bool aForceUpdate);
 
-  nsCOMPtr<nsIStyleSheet> mStyleSheet;
+  nsRefPtr<nsCSSStyleSheet> mStyleSheet;
 protected:
   bool mDontLoadStyle;
   bool mUpdatesEnabled;

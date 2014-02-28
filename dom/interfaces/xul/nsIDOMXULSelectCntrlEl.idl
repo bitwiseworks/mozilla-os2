@@ -6,7 +6,7 @@
 #include "nsIDOMXULControlElement.idl"
 interface nsIDOMXULSelectControlItemElement;
 
-[scriptable, uuid(5775F3E3-B6C1-4047-B59A-5775937D87F2)]
+[scriptable, uuid(9bf188a7-d6f9-431b-b5c7-118013998e8b)]
 interface nsIDOMXULSelectControlElement : nsIDOMXULControlElement {
   attribute nsIDOMXULSelectControlItemElement selectedItem;
   attribute long selectedIndex;

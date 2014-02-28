@@ -28,19 +28,26 @@ const CC = Components.Constructor;
 
 // Some binary data to send.
 const DATA_ARRAY = [0, 255, 254, 0, 1, 2, 3, 0, 255, 255, 254, 0],
-      TYPED_DATA_ARRAY = new Uint8Array(DATA_ARRAY),
+      DATA_ARRAY_BUFFER = new ArrayBuffer(DATA_ARRAY.length),
+      TYPED_DATA_ARRAY = new Uint8Array(DATA_ARRAY_BUFFER),
       HELLO_WORLD = "hlo wrld. ",
       BIG_ARRAY = new Array(65539),
       BIG_ARRAY_2 = new Array(65539);
+
+TYPED_DATA_ARRAY.set(DATA_ARRAY, 0);
 
 for (var i_big = 0; i_big < BIG_ARRAY.length; i_big++) {
   BIG_ARRAY[i_big] = Math.floor(Math.random() * 256);
   BIG_ARRAY_2[i_big] = Math.floor(Math.random() * 256);
 }
 
-const BIG_TYPED_ARRAY = new Uint8Array(BIG_ARRAY),
-      BIG_TYPED_ARRAY_2 = new Uint8Array(BIG_ARRAY_2);
-      
+const BIG_ARRAY_BUFFER = new ArrayBuffer(BIG_ARRAY.length),
+      BIG_ARRAY_BUFFER_2 = new ArrayBuffer(BIG_ARRAY_2.length);
+const BIG_TYPED_ARRAY = new Uint8Array(BIG_ARRAY_BUFFER),
+      BIG_TYPED_ARRAY_2 = new Uint8Array(BIG_ARRAY_BUFFER_2);
+BIG_TYPED_ARRAY.set(BIG_ARRAY);
+BIG_TYPED_ARRAY_2.set(BIG_ARRAY_2);
+
 const ServerSocket = CC("@mozilla.org/network/server-socket;1",
                         "nsIServerSocket",
                         "init"),
@@ -56,11 +63,22 @@ const ServerSocket = CC("@mozilla.org/network/server-socket;1",
       TCPSocket = new (CC("@mozilla.org/tcp-socket;1",
                      "nsIDOMTCPSocket"))();
 
+const gInChild = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime)
+                  .processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+
+Cu.import("resource://gre/modules/Services.jsm");
+
 /**
  *
  * Helper functions
  *
  */
+
+function get_platform() {
+  var xulRuntime = Components.classes["@mozilla.org/xre/app-info;1"]
+                              .getService(Components.interfaces.nsIXULRuntime);
+  return xulRuntime.OS;
+}
 
 /**
  * Spin up a listening socket and associate at most one live, accepted socket
@@ -171,7 +189,7 @@ function makeFailureCase(name) {
     let argstr;
     if (arguments.length) {
       argstr = '(args: ' +
-        Array.map(arguments, function(x) { return x + ""; }).join(" ") + ')';
+        Array.map(arguments, function(x) { return x.data + ""; }).join(" ") + ')';
     }
     else {
       argstr = '(no arguments)';
@@ -182,36 +200,46 @@ function makeFailureCase(name) {
 
 function makeExpectData(name, expectedData, fromEvent, callback) {
   let dataBuffer = fromEvent ? null : [], done = false;
+  let dataBufferView = null;
   return function(receivedData) {
-    if (fromEvent) {
+    if (receivedData.data) {
       receivedData = receivedData.data;
+    }
+    let recvLength = receivedData.byteLength !== undefined ?
+        receivedData.byteLength : receivedData.length;
+
+    if (fromEvent) {
       if (dataBuffer) {
-        let newBuffer = new Uint8Array(dataBuffer.length + receivedData.length);
-        newBuffer.set(dataBuffer, 0);
-        newBuffer.set(receivedData, dataBuffer.length);
+        let newBuffer = new ArrayBuffer(dataBuffer.byteLength + recvLength);
+        let newBufferView = new Uint8Array(newBuffer);
+        newBufferView.set(dataBufferView, 0);
+        newBufferView.set(receivedData, dataBuffer.byteLength);
         dataBuffer = newBuffer;
+        dataBufferView = newBufferView;
       }
       else {
         dataBuffer = receivedData;
+        dataBufferView = new Uint8Array(dataBuffer);
       }
     }
     else {
       dataBuffer = dataBuffer.concat(receivedData);
     }
-    do_print(name + ' received ' + receivedData.length + ' bytes');
+    do_print(name + ' received ' + recvLength + ' bytes');
 
     if (done)
       do_throw(name + ' Received data event when already done!');
 
-    if (dataBuffer.length >= expectedData.length) {
+    let dataView = dataBuffer.byteLength !== undefined ? new Uint8Array(dataBuffer) : dataBuffer;
+    if (dataView.length >= expectedData.length) {
       // check the bytes are equivalent
       for (let i = 0; i < expectedData.length; i++) {
-        if (dataBuffer[i] !== expectedData[i]) {
+        if (dataView[i] !== expectedData[i]) {
           do_throw(name + ' Received mismatched character at position ' + i);
         }
       }
-      if (dataBuffer.length > expectedData.length)
-        do_throw(name + ' Received ' + dataBuffer.length + ' bytes but only expected ' +
+      if (dataView.length > expectedData.length)
+        do_throw(name + ' Received ' + dataView.length + ' bytes but only expected ' +
                  expectedData.length + ' bytes.');
 
       done = true;
@@ -264,7 +292,7 @@ function connectSock() {
 
 function sendData() {
   server.ondata = makeExpectData('serverdata', DATA_ARRAY);
-  if (!sock.send(TYPED_DATA_ARRAY)) {
+  if (!sock.send(DATA_ARRAY_BUFFER)) {
     do_throw("send should not have buffered such a small amount of data");
   }
 }
@@ -278,11 +306,11 @@ function sendData() {
 function sendBig() {
   var yays = makeJointSuccess(['serverdata', 'clientdrain']),
       amount = 0;
-      
+
   server.ondata = function (data) {
     amount += data.length;
     if (amount === BIG_TYPED_ARRAY.length) {
-      yays.serverdata();      
+      yays.serverdata();
     }
   };
   sock.ondrain = function(evt) {
@@ -291,7 +319,7 @@ function sendBig() {
     }
     yays.clientdrain(evt);
   }
-  if (sock.send(BIG_TYPED_ARRAY)) {
+  if (sock.send(BIG_ARRAY_BUFFER)) {
     do_throw("expected sock.send to return false on large buffer send");
   }
 }
@@ -349,7 +377,7 @@ function bufferedClose() {
     "ondata", BIG_TYPED_ARRAY, false, yays.serverdata);
   server.onclose = yays.serverclose;
   sock.onclose = yays.clientclose;
-  sock.send(BIG_TYPED_ARRAY);
+  sock.send(BIG_ARRAY_BUFFER);
   sock.close();
 }
 
@@ -357,16 +385,26 @@ function bufferedClose() {
  * Connect to a port we know is not listening so an error is assured,
  * and make sure that onerror and onclose are fired on the client side.
  */
- 
+
 function badConnect() {
   // There's probably nothing listening on tcp port 2.
   sock = TCPSocket.open('127.0.0.1', 2);
 
   sock.onopen = makeFailureCase('open');
   sock.ondata = makeFailureCase('data');
-  sock.onclose = makeFailureCase('close');
 
-  sock.onerror = makeSuccessCase('error');
+  let success = makeSuccessCase('error');
+  let gotError = false;
+  sock.onerror = function(event) {
+    do_check_eq(event.data.name, 'ConnectionRefusedError');
+    gotError = true;
+  };
+  sock.onclose = function() {
+    if (!gotError)
+      do_throw('got close without error!');
+    else
+      success();
+  };
 }
 
 /**
@@ -388,7 +426,7 @@ function drainTwice() {
 
     sock.ondrain = yays.ondrain2;
 
-    if (sock.send(BIG_TYPED_ARRAY_2)) {
+    if (sock.send(BIG_ARRAY_BUFFER_2)) {
       do_throw("sock.send(BIG_TYPED_ARRAY_2) did not return false to indicate buffering");
     }
 
@@ -402,7 +440,7 @@ function drainTwice() {
   sock.onclose = yays.clientclose;
   sock.ondrain = yays.ondrain;
 
-  if (sock.send(BIG_TYPED_ARRAY)) {
+  if (sock.send(BIG_ARRAY_BUFFER)) {
     throw new Error("sock.send(BIG_TYPED_ARRAY) did not return false to indicate buffering");
   }
 }
@@ -410,6 +448,8 @@ function drainTwice() {
 function cleanup() {
   do_print("Cleaning up");
   sock.close();
+  if (!gInChild)
+    Services.prefs.clearUserPref('dom.mozTCPSocket.enabled');
   run_next_test();
 }
 
@@ -434,10 +474,10 @@ function bufferTwice() {
     yays.ondrain();
   }
 
-  if (sock.send(BIG_TYPED_ARRAY)) {
+  if (sock.send(BIG_ARRAY_BUFFER)) {
     throw new Error("sock.send(BIG_TYPED_ARRAY) did not return false to indicate buffering");
   }
-  if (sock.send(BIG_TYPED_ARRAY_2)) {
+  if (sock.send(BIG_ARRAY_BUFFER_2)) {
     throw new Error("sock.send(BIG_TYPED_ARRAY_2) did not return false to indicate buffering on second synchronous call to send");
   }
 }
@@ -458,8 +498,12 @@ add_test(clientCloses);
 add_test(connectSock);
 add_test(bufferedClose);
 
-// - get an error on an attempt to connect to a non-listening port
-add_test(badConnect);
+if (get_platform() !== "Darwin") {
+  // This test intermittently fails way too often on OS X, for unknown reasons.
+  // Please, diagnose and fix it if you can.
+  // - get an error on an attempt to connect to a non-listening port
+  add_test(badConnect);
+}
 
 // send a buffer, get a drain, send a buffer, get a drain
 add_test(connectSock);
@@ -473,6 +517,9 @@ add_test(bufferTwice);
 add_test(cleanup);
 
 function run_test() {
+  if (!gInChild)
+    Services.prefs.setBoolPref('dom.mozTCPSocket.enabled', true);
+
   server = new TestServer();
 
   run_next_test();

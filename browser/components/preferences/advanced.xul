@@ -50,23 +50,36 @@
                   type="bool"/>
 #endif
 
+      <!-- Data Choices tab -->
+
+#ifdef MOZ_TELEMETRY_REPORTING
       <preference id="toolkit.telemetry.enabled"
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+                  name="toolkit.telemetry.enabledPreRelease"
+#else
                   name="toolkit.telemetry.enabled"
+#endif
                   type="bool"/>
+#endif
 
       <!-- Network tab -->
       <preference id="browser.cache.disk.capacity"     name="browser.cache.disk.capacity"     type="int"/>
       <preference id="browser.offline-apps.notify"     name="browser.offline-apps.notify"     type="bool"/>
- 
+
       <preference id="browser.cache.disk.smart_size.enabled"
                   name="browser.cache.disk.smart_size.enabled"
                   inverted="true"
                   type="bool"/>
- 
+
      <!-- Update tab -->
 #ifdef MOZ_UPDATER
       <preference id="app.update.enabled"              name="app.update.enabled"              type="bool"/>
       <preference id="app.update.auto"                 name="app.update.auto"                 type="bool"/>
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+      <preference id="app.update.metro.enabled"        name="app.update.metro.enabled"        type="bool"/>
+#endif
+#endif
       <preference id="app.update.mode"                 name="app.update.mode"                 type="int"/>
 
       <preference id="app.update.disable_button.showUpdateHistory"
@@ -83,26 +96,21 @@
       <preference id="browser.search.update"           name="browser.search.update"           type="bool"/>
 
       <!-- Encryption tab -->
-      <preference id="security.enable_ssl3"            name="security.enable_ssl3"            type="bool"/>
-      <preference id="security.enable_tls"             name="security.enable_tls"             type="bool"/>
-
       <preference id="security.default_personal_cert"  name="security.default_personal_cert"  type="string"/>
 
       <preference id="security.disable_button.openCertManager"
                   name="security.disable_button.openCertManager"
                   type="bool"/>
-      <preference id="security.OCSP.disable_button.managecrl"
-                  name="security.OCSP.disable_button.managecrl"
-                  type="bool"/>
       <preference id="security.disable_button.openDeviceManager"
                   name="security.disable_button.openDeviceManager"
                   type="bool"/>
     </preferences>
-    
+
 #ifdef HAVE_SHELL_SERVICE
     <stringbundle id="bundleShell" src="chrome://browser/locale/shellservice.properties"/>
     <stringbundle id="bundleBrand" src="chrome://branding/locale/brand.properties"/>
 #endif
+    <stringbundle id="bundlePreferences" src="chrome://browser/locale/preferences/preferences.properties"/>
 
     <script type="application/javascript" src="chrome://browser/content/preferences/advanced.js"/>
 
@@ -111,9 +119,12 @@
 
       <tabs id="tabsElement">
         <tab id="generalTab" label="&generalTab.label;" helpTopic="prefs-advanced-general"/>
+#ifdef MOZ_DATA_REPORTING
+        <tab id="dataChoicesTab" label="&dataChoicesTab.label;" helpTopic="prefs-advanced-data-choices"/>
+#endif
         <tab id="networkTab" label="&networkTab.label;" helpTopic="prefs-advanced-network"/>
         <tab id="updateTab" label="&updateTab.label;"  helpTopic="prefs-advanced-update"/>
-        <tab id="encryptionTab" label="&encryptionTab.label;" helpTopic="prefs-advanced-encryption"/>
+        <tab id="encryptionTab" label="&certificateTab.label;" helpTopic="prefs-advanced-encryption"/>
       </tabs>
 
       <tabpanels flex="1">
@@ -163,11 +174,11 @@
                       preference="layout.spellcheckDefault"/>
           </groupbox>
 
+#ifdef HAVE_SHELL_SERVICE
           <!-- System Defaults -->
           <groupbox id="systemDefaultsGroup" orient="vertical">
             <caption label="&systemDefaults.label;"/>
 
-#ifdef HAVE_SHELL_SERVICE
             <checkbox id="alwaysCheckDefault" preference="browser.shell.checkDefaultBrowser"
                       label="&alwaysCheckDefault.label;" accesskey="&alwaysCheckDefault.accesskey;"
                       flex="1"/>
@@ -180,18 +191,67 @@
                 <description>&isDefault.label;</description>
               </deck>
             </hbox>
-#ifdef MOZ_CRASHREPORTER
-            <checkbox id="submitCrashesBox" flex="1"
-                      oncommand="gAdvancedPane.updateSubmitCrashes();"
-                      label="&submitCrashes.label;" accesskey="&submitCrashes.accesskey;"/>
-#endif
-#endif
-            <checkbox id="submitTelemetryBox" flex="1"
-                      preference="toolkit.telemetry.enabled"
-                      label="&submitTelemetry.label;" accesskey="&submitTelemetry.accesskey;"/>
           </groupbox>
+#endif
         </tabpanel>
 
+#ifdef MOZ_DATA_REPORTING
+        <!-- Data Choices -->
+        <tabpanel id="dataChoicesPanel" orient="vertical">
+#ifdef MOZ_TELEMETRY_REPORTING
+          <groupbox>
+            <caption label="&telemetrySection.label;"/>
+            <description>&telemetryDesc.label;</description>
+            <hbox>
+              <checkbox id="submitTelemetryBox"
+                        preference="toolkit.telemetry.enabled"
+                        label="&enableTelemetry.label;"
+                        accesskey="&enableTelemetry.accesskey;"/>
+              <spacer flex="1"/>
+              <label id="telemetryLearnMore"
+                     class="text-link"
+                     value="&telemetryLearnMore.label;"
+                     onclick="gAdvancedPane.openTextLink(event)"/>
+            </hbox>
+          </groupbox>
+#endif
+#ifdef MOZ_SERVICES_HEALTHREPORT
+          <groupbox>
+            <caption label="&healthReportSection.label;"/>
+            <description>&healthReportDesc.label;</description>
+            <hbox>
+              <checkbox id="submitHealthReportBox"
+                        oncommand="gAdvancedPane.updateSubmitHealthReport();"
+                        label="&enableHealthReport.label;"
+                        accesskey="&enableHealthReport.accesskey;"/>
+              <spacer flex="1"/>
+              <label id="FHRLearnMore"
+                     class="text-link"
+                     value="&healthReportLearnMore.label;"
+                     onclick="gAdvancedPane.openTextLink(event)"/>
+            </hbox>
+          </groupbox>
+#endif
+#ifdef MOZ_CRASHREPORTER
+          <groupbox>
+            <caption label="&crashReporterSection.label;"/>
+            <description>&crashReporterDesc.label;</description>
+            <hbox>
+              <checkbox id="submitCrashesBox"
+                        oncommand="gAdvancedPane.updateSubmitCrashes();"
+                        label="&enableCrashReporter.label;"
+                        accesskey="&enableCrashReporter.accesskey;"/>
+
+              <spacer flex="1"/>
+              <label id="crashReporterLearnMore"
+                     class="text-link"
+                     value="&crashReporterLearnMore.label;"
+                     onclick="gAdvancedPane.openTextLink(event)"/>
+            </hbox>
+          </groupbox>
+#endif
+        </tabpanel>
+#endif
         <!-- Network -->
         <tabpanel id="networkPanel" orient="vertical">
 
@@ -220,11 +280,11 @@
             <checkbox preference="browser.cache.disk.smart_size.enabled"
                       id="allowSmartSize" flex="1"
                       onsyncfrompreference="return gAdvancedPane.readSmartSizeEnabled();"
-                      label="&overrideSmartCacheSize.label;" 
+                      label="&overrideSmartCacheSize.label;"
                       accesskey="&overrideSmartCacheSize.accesskey;"/>
             <hbox align="center" class="indent">
               <label id="useCacheBefore" control="cacheSize"
-                     accesskey="&limitCacheSizeBefore.accesskey;" 
+                     accesskey="&limitCacheSizeBefore.accesskey;"
                      value="&limitCacheSizeBefore.label;"/>
               <textbox id="cacheSize" type="number" size="4" max="1024"
                        preference="browser.cache.disk.capacity"
@@ -269,7 +329,7 @@
                 <button id="offlineAppsListRemove"
                         disabled="true"
                         label="&offlineAppsListRemove.label;"
-                        accesskey="&offlineAppsListRemove.accesskey;" 
+                        accesskey="&offlineAppsListRemove.accesskey;"
                         oncommand="gAdvancedPane.removeOfflineApp();"/>
               </vbox>
             </hbox>
@@ -283,9 +343,22 @@
             <caption label="&updateApp.label;"/>
             <radiogroup id="updateRadioGroup"
                         oncommand="gAdvancedPane.updateWritePrefs();">
-              <radio value="auto"
-                     label="&updateAuto.label;"
-                     accesskey="&updateAuto.accesskey;"/>
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+              <radio id="autoMetro"
+                     value="autoMetro"
+                     label="&updateAutoMetro.label;"
+                     accesskey="&updateAutoMetro.accesskey;"/>
+              <hbox id="autoMetroIndent"
+                    class="indent">
+                <label value="&updateAutoMetroWarn.label;"/>
+              </hbox>
+#endif
+#endif
+              <radio id="autoDesktop"
+                     value="auto"
+                     label="&updateAuto1.label;"
+                     accesskey="&updateAuto1.accesskey;"/>
               <hbox class="indent">
                 <checkbox id="warnIncompatible"
                           label="&updateAutoAddonWarn.label;"
@@ -327,38 +400,8 @@
           </groupbox>
         </tabpanel>
 
-        <!-- Encryption -->
+        <!-- Certificates -->
         <tabpanel id="encryptionPanel" orient="vertical">
-
-          <!-- Protocols -->
-          <groupbox id="protocolsGroup">
-            <caption label="&protocols.label;"/>
-
-            <grid>
-              <columns>
-                <column flex="1"/>
-                <column flex="1"/>
-              </columns>
-              <rows>
-                <row>
-                  <hbox>
-                    <checkbox id="useSSL3" label="&useSSL3.label;"
-                              accesskey="&useSSL3.accesskey;"
-                              preference="security.enable_ssl3"/>
-                  </hbox>
-                  <hbox>
-                    <checkbox id="useTLS1" label="&useTLS1.label;"
-                              accesskey="&useTLS1.accesskey;"
-                              preference="security.enable_tls"/>
-                  </hbox>
-                </row>
-              </rows>
-            </grid>
-          </groupbox>
-
-          <!-- Certificates -->
-          <groupbox id="certificatesGroup">
-            <caption id="CertGroupCaption" label="&certificates.label;"/>
 
             <description id="CertSelectionDesc" control="certSelection">&certSelection.description;</description>
 
@@ -369,43 +412,28 @@
             -->
             <radiogroup id="certSelection" orient="horizontal" preftype="string"
                         preference="security.default_personal_cert"
-                        aria-labelledby="CertGroupCaption CertSelectionDesc">
-              <radio label="&certs.auto;" accesskey="&certs.auto.accesskey;" 
+                        aria-labelledby="CertSelectionDesc">
+              <radio label="&certs.auto;" accesskey="&certs.auto.accesskey;"
                      value="Select Automatically"/>
-              <radio label="&certs.ask;" accesskey="&certs.ask.accesskey;" 
+              <radio label="&certs.ask;" accesskey="&certs.ask.accesskey;"
                      value="Ask Every Time"/>
             </radiogroup>
 
             <separator/>
 
-#ifdef XP_MACOSX
-            <vbox>
-#endif
             <hbox>
               <button id="viewCertificatesButton"
-                      label="&viewCerts.label;" accesskey="&viewCerts.accesskey;" 
+                      label="&viewCerts.label;" accesskey="&viewCerts.accesskey;"
                       oncommand="gAdvancedPane.showCertificates();"
                       preference="security.disable_button.openCertManager"/>
-              <button id="viewCRLButton"
-                      label="&viewCRLs.label;" accesskey="&viewCRLs.accesskey;" 
-                      oncommand="gAdvancedPane.showCRLs();"
-                      preference="security.OCSP.disable_button.managecrl"/>
               <button id="verificationButton"
-                      label="&verify2.label;" accesskey="&verify2.accesskey;" 
+                      label="&verify2.label;" accesskey="&verify2.accesskey;"
                       oncommand="gAdvancedPane.showOCSP();"/>
-#ifdef XP_MACOSX
-            </hbox>
-            <hbox>
-#endif
               <button id="viewSecurityDevicesButton"
                       label="&viewSecurityDevices.label;" accesskey="&viewSecurityDevices.accesskey;"
                       oncommand="gAdvancedPane.showSecurityDevices();"
                       preference="security.disable_button.openDeviceManager"/>
             </hbox>
-#ifdef XP_MACOSX
-            </vbox>
-#endif
-          </groupbox>
         </tabpanel>
 
       </tabpanels>

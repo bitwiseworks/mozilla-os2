@@ -43,6 +43,58 @@
 #define syllable()		var1.u8[2] /* GSUB/GPOS shaping boundaries */
 #define lig_props()		var1.u8[3] /* GSUB/GPOS ligature tracking */
 
+/* buffer var allocations, used during the entire shaping process */
+#define unicode_props0()	var2.u8[0]
+#define unicode_props1()	var2.u8[1]
+
+
+inline void
+_hb_glyph_info_set_unicode_props (hb_glyph_info_t *info, hb_unicode_funcs_t *unicode)
+{
+  info->unicode_props0() = ((unsigned int) unicode->general_category (info->codepoint)) |
+			   (unicode->is_default_ignorable (info->codepoint) ? 0x80 : 0) |
+			   (info->codepoint == 0x200C ? 0x40 : 0) |
+			   (info->codepoint == 0x200D ? 0x20 : 0);
+  info->unicode_props1() = unicode->modified_combining_class (info->codepoint);
+}
+
+inline hb_unicode_general_category_t
+_hb_glyph_info_get_general_category (const hb_glyph_info_t *info)
+{
+  return (hb_unicode_general_category_t) (info->unicode_props0() & 0x1F);
+}
+
+inline void
+_hb_glyph_info_set_modified_combining_class (hb_glyph_info_t *info, unsigned int modified_class)
+{
+  info->unicode_props1() = modified_class;
+}
+
+inline unsigned int
+_hb_glyph_info_get_modified_combining_class (const hb_glyph_info_t *info)
+{
+  return info->unicode_props1();
+}
+
+inline hb_bool_t
+_hb_glyph_info_is_default_ignorable (const hb_glyph_info_t *info)
+{
+  return !!(info->unicode_props0() & 0x80);
+}
+
+inline hb_bool_t
+_hb_glyph_info_is_zwnj (const hb_glyph_info_t *info)
+{
+  return !!(info->unicode_props0() & 0x40);
+}
+
+inline hb_bool_t
+_hb_glyph_info_is_zwj (const hb_glyph_info_t *info)
+{
+  return !!(info->unicode_props0() & 0x20);
+}
+
+
 #define hb_ot_layout_from_face(face) ((hb_ot_layout_t *) face->shaper_data.ot)
 
 /*
@@ -50,12 +102,12 @@
  */
 
 typedef enum {
-  HB_OT_LAYOUT_GLYPH_CLASS_UNCLASSIFIED	= 0x0001,
-  HB_OT_LAYOUT_GLYPH_CLASS_BASE_GLYPH	= 0x0002,
-  HB_OT_LAYOUT_GLYPH_CLASS_LIGATURE	= 0x0004,
-  HB_OT_LAYOUT_GLYPH_CLASS_MARK		= 0x0008,
-  HB_OT_LAYOUT_GLYPH_CLASS_COMPONENT	= 0x0010
-} hb_ot_layout_glyph_class_t;
+  HB_OT_LAYOUT_GLYPH_PROPS_UNCLASSIFIED	= 1 << HB_OT_LAYOUT_GLYPH_CLASS_UNCLASSIFIED,
+  HB_OT_LAYOUT_GLYPH_PROPS_BASE_GLYPH	= 1 << HB_OT_LAYOUT_GLYPH_CLASS_BASE_GLYPH,
+  HB_OT_LAYOUT_GLYPH_PROPS_LIGATURE	= 1 << HB_OT_LAYOUT_GLYPH_CLASS_LIGATURE,
+  HB_OT_LAYOUT_GLYPH_PROPS_MARK		= 1 << HB_OT_LAYOUT_GLYPH_CLASS_MARK,
+  HB_OT_LAYOUT_GLYPH_PROPS_COMPONENT	= 1 << HB_OT_LAYOUT_GLYPH_CLASS_COMPONENT
+} hb_ot_layout_glyph_class_mask_t;
 
 
 
@@ -123,7 +175,7 @@ get_lig_comp (const hb_glyph_info_t &info)
 static inline unsigned int
 get_lig_num_comps (const hb_glyph_info_t &info)
 {
-  if ((info.glyph_props() & HB_OT_LAYOUT_GLYPH_CLASS_LIGATURE) && is_a_ligature (info))
+  if ((info.glyph_props() & HB_OT_LAYOUT_GLYPH_PROPS_LIGATURE) && is_a_ligature (info))
     return info.lig_props() & 0x0F;
   else
     return 1;
@@ -138,10 +190,11 @@ static inline uint8_t allocate_lig_id (hb_buffer_t *buffer) {
 
 
 HB_INTERNAL hb_bool_t
-hb_ot_layout_would_substitute_lookup_fast (hb_face_t            *face,
+hb_ot_layout_lookup_would_substitute_fast (hb_face_t            *face,
+					   unsigned int          lookup_index,
 					   const hb_codepoint_t *glyphs,
 					   unsigned int          glyphs_length,
-					   unsigned int          lookup_index);
+					   hb_bool_t             zero_context);
 
 
 /* Should be called before all the substitute_lookup's are done. */
@@ -153,7 +206,8 @@ HB_INTERNAL hb_bool_t
 hb_ot_layout_substitute_lookup (hb_font_t    *font,
 				hb_buffer_t  *buffer,
 				unsigned int  lookup_index,
-				hb_mask_t     mask);
+				hb_mask_t     mask,
+				hb_bool_t     auto_zwj);
 
 /* Should be called after all the substitute_lookup's are done */
 HB_INTERNAL void
@@ -170,13 +224,13 @@ HB_INTERNAL hb_bool_t
 hb_ot_layout_position_lookup (hb_font_t    *font,
 			      hb_buffer_t  *buffer,
 			      unsigned int  lookup_index,
-			      hb_mask_t     mask);
+			      hb_mask_t     mask,
+			      hb_bool_t     auto_zwj);
 
 /* Should be called after all the position_lookup's are done */
 HB_INTERNAL void
 hb_ot_layout_position_finish (hb_font_t    *font,
-			      hb_buffer_t  *buffer,
-			      hb_bool_t     zero_width_attached_marks);
+			      hb_buffer_t  *buffer);
 
 
 
@@ -184,15 +238,21 @@ hb_ot_layout_position_finish (hb_font_t    *font,
  * hb_ot_layout_t
  */
 
+namespace OT {
+  struct GDEF;
+  struct GSUB;
+  struct GPOS;
+}
+
 struct hb_ot_layout_t
 {
   hb_blob_t *gdef_blob;
   hb_blob_t *gsub_blob;
   hb_blob_t *gpos_blob;
 
-  const struct GDEF *gdef;
-  const struct GSUB *gsub;
-  const struct GPOS *gpos;
+  const struct OT::GDEF *gdef;
+  const struct OT::GSUB *gsub;
+  const struct OT::GPOS *gpos;
 
   unsigned int gsub_lookup_count;
   unsigned int gpos_lookup_count;

@@ -19,6 +19,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
+                                  "resource://gre/modules/FormHistory.jsm");
 
 function Bookmarks(aBookmarksFile) {
   this._file = aBookmarksFile;
@@ -337,9 +339,9 @@ Preferences.prototype = {
         this._set("WebKitDefaultTextEncodingName", "intl.charset.default",
           function(webkitCharset) {
             // We don't support x-mac-korean (see bug 713516), but it mostly matches
-            // x-windows-949.
+            // EUC-KR.
             if (webkitCharset == "x-mac-korean")
-              return "x-windows-949";
+              return "EUC-KR";
 
             // getCharsetAlias throws if an invalid value is passed in.
             try {
@@ -540,11 +542,11 @@ SearchStrings.prototype = {
         if (aDict.has("RecentSearchStrings")) {
           let recentSearchStrings = aDict.get("RecentSearchStrings");
           if (recentSearchStrings && recentSearchStrings.length > 0) {
-            let formHistory = Cc["@mozilla.org/satchel/form-history;1"].
-                              getService(Ci.nsIFormHistory2);
-            for (let searchString of recentSearchStrings) {
-              formHistory.addEntry("searchbar-history", searchString);
-            }
+            let changes = [{op: "add",
+                            fieldname: "searchbar-history",
+                            value: searchString}
+                           for (searchString of recentSearchStrings)];
+            FormHistory.update(changes);
           }
         }
       }.bind(this), aCallback));
@@ -677,4 +679,4 @@ SafariProfileMigrator.prototype.classDescription = "Safari Profile Migrator";
 SafariProfileMigrator.prototype.contractID = "@mozilla.org/profile/migrator;1?app=browser&type=safari";
 SafariProfileMigrator.prototype.classID = Components.ID("{4b609ecf-60b2-4655-9df4-dc149e474da1}");
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([SafariProfileMigrator]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SafariProfileMigrator]);

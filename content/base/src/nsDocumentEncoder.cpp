@@ -34,22 +34,21 @@
 #include "nsICharsetConverterManager.h"
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
-#include "nsIEnumerator.h"
 #include "nsIParserService.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsISelection.h"
+#include "mozilla/Selection.h"
 #include "nsISelectionPrivate.h"
 #include "nsITransferable.h" // for kUnicodeMime
 #include "nsContentUtils.h"
+#include "nsNodeUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsReadableUtils.h"
 #include "nsTArray.h"
 #include "nsIFrame.h"
 #include "nsStringBuffer.h"
 #include "mozilla/dom/Element.h"
-#include "nsIEditorDocShell.h"
 #include "nsIEditor.h"
 #include "nsIHTMLEditor.h"
 #include "nsIDocShell.h"
@@ -119,7 +118,7 @@ protected:
           }
           return false;
         }
-        bool isVisible = frame->GetStyleVisibility()->IsVisible();
+        bool isVisible = frame->StyleVisibility()->IsVisible();
         if (!isVisible && aNode->IsNodeOfType(nsINode::eTEXT))
           return false;
       }
@@ -164,8 +163,6 @@ protected:
   nsStringBuffer*   mCachedBuffer;
 };
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDocumentEncoder)
-
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDocumentEncoder)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDocumentEncoder)
 
@@ -174,27 +171,13 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocumentEncoder)
    NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocumentEncoder)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mDocument)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mSelection)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRange)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mNode)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mCommonParent)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDocumentEncoder)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mDocument)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mSelection)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mRange, nsIDOMRange)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mNode)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mCommonParent)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_5(nsDocumentEncoder,
+                           mDocument, mSelection, mRange, mNode, mCommonParent)
 
 nsDocumentEncoder::nsDocumentEncoder() : mCachedBuffer(nullptr)
 {
   Initialize();
   mMimeType.AssignLiteral("text/plain");
-
 }
 
 void nsDocumentEncoder::Initialize(bool aClearCachedSerializer)
@@ -346,17 +329,14 @@ IsInvisibleBreak(nsINode *aNode) {
     if (window) {
       nsIDocShell *docShell = window->GetDocShell();
       if (docShell) {
-        nsCOMPtr<nsIEditorDocShell> editorDocShell = do_QueryInterface(docShell);
-        if (editorDocShell) {
-          nsCOMPtr<nsIEditor> editor;
-          editorDocShell->GetEditor(getter_AddRefs(editor));
-          nsCOMPtr<nsIHTMLEditor> htmlEditor = do_QueryInterface(editor);
-          if (htmlEditor) {
-            bool isVisible = false;
-            nsCOMPtr<nsIDOMNode> domNode = do_QueryInterface(aNode);
-            htmlEditor->BreakIsVisible(domNode, &isVisible);
-            return !isVisible;
-          }
+        nsCOMPtr<nsIEditor> editor;
+        docShell->GetEditor(getter_AddRefs(editor));
+        nsCOMPtr<nsIHTMLEditor> htmlEditor = do_QueryInterface(editor);
+        if (htmlEditor) {
+          bool isVisible = false;
+          nsCOMPtr<nsIDOMNode> domNode = do_QueryInterface(aNode);
+          htmlEditor->BreakIsVisible(domNode, &isVisible);
+          return !isVisible;
         }
       }
     }
@@ -502,7 +482,8 @@ nsDocumentEncoder::SerializeToStringRecursive(nsINode* aNode,
 
   nsINode* node = serializeClonedChildren ? maybeFixedNode : aNode;
 
-  for (nsINode* child = node->GetFirstChild(); child;
+  for (nsINode* child = nsNodeUtils::GetFirstChildOfTemplateOrNode(node);
+       child;
        child = child->GetNextSibling()) {
     rv = SerializeToStringRecursive(child, aStr, false);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -535,7 +516,7 @@ nsDocumentEncoder::SerializeToStringIterative(nsINode* aNode,
       node = current->GetNextSibling();
       if (!node) {
         // Perhaps parent node has siblings.
-        current = current->GetNodeParent();
+        current = current->GetParentNode();
       }
     }
   }
@@ -567,8 +548,8 @@ ConvertAndWrite(const nsAString& aString,
   startCharLength = charLength;
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString charXferString;
-  if (!EnsureStringLength(charXferString, charLength))
+  nsAutoCString charXferString;
+  if (!charXferString.SetLength(charLength, fallible_t()))
     return NS_ERROR_OUT_OF_MEMORY;
 
   char* charXferBuf = charXferString.BeginWriting();
@@ -608,7 +589,7 @@ ConvertAndWrite(const nsAString& aString,
       rv = aStream->Write(finish_buf, charLength, &written);
       NS_ENSURE_SUCCESS(rv, rv);
 
-      nsCAutoString entString("&#");
+      nsAutoCString entString("&#");
       if (NS_IS_HIGH_SURROGATE(unicodeBuf[unicodeLength - 1]) && 
           unicodeLength < startLength && NS_IS_LOW_SURROGATE(unicodeBuf[unicodeLength]))  {
         entString.AppendInt(SURROGATE_TO_UCS4(unicodeBuf[unicodeLength - 1],
@@ -619,7 +600,7 @@ ConvertAndWrite(const nsAString& aString,
         entString.AppendInt(unicodeBuf[unicodeLength - 1]);
       entString.Append(';');
 
-      // Since entString is an nsCAutoString we know entString.get()
+      // Since entString is an nsAutoCString we know entString.get()
       // returns a null-terminated string, so no need for extra
       // null-termination before calling Write() here.
 
@@ -1027,7 +1008,7 @@ nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
   nsString output;
   static const size_t bufferSize = 2048;
   if (!mCachedBuffer) {
-    mCachedBuffer = nsStringBuffer::Alloc(bufferSize);
+    mCachedBuffer = nsStringBuffer::Alloc(bufferSize).get();
   }
   NS_ASSERTION(!mCachedBuffer->IsReadonly(),
                "DocumentEncoder shouldn't keep reference to non-readonly buffer!");
@@ -1038,7 +1019,7 @@ nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
   
 
   if (!mSerializer) {
-    nsCAutoString progId(NS_CONTENTSERIALIZER_CONTRACTID_PREFIX);
+    nsAutoCString progId(NS_CONTENTSERIALIZER_CONTRACTID_PREFIX);
     AppendUTF16toUTF8(mMimeType, progId);
 
     mSerializer = do_CreateInstance(progId.get());
@@ -1091,7 +1072,7 @@ nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
           if (!prevNode) {
             // Went from a non-<tr> to a <tr>
             mCommonAncestors.Clear();
-            nsContentUtils::GetAncestors(n->GetNodeParent(), mCommonAncestors);
+            nsContentUtils::GetAncestors(n->GetParentNode(), mCommonAncestors);
             rv = SerializeRangeContextStart(mCommonAncestors, output);
             NS_ENSURE_SUCCESS(rv, rv);
             // Don't let SerializeRangeToString serialize the context again
@@ -1104,7 +1085,7 @@ nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
         } else if (prevNode) {
           // Went from a <tr> to a non-<tr>
           mCommonAncestors.Clear();
-          nsContentUtils::GetAncestors(p->GetNodeParent(), mCommonAncestors);
+          nsContentUtils::GetAncestors(p->GetParentNode(), mCommonAncestors);
           mDisableContextSerialize = false;
           rv = SerializeRangeContextEnd(mCommonAncestors, output);
           NS_ENSURE_SUCCESS(rv, rv);
@@ -1122,7 +1103,7 @@ nsDocumentEncoder::EncodeToString(nsAString& aOutputString)
       rv = SerializeNodeEnd(p, output);
       NS_ENSURE_SUCCESS(rv, rv);
       mCommonAncestors.Clear();
-      nsContentUtils::GetAncestors(p->GetNodeParent(), mCommonAncestors);
+      nsContentUtils::GetAncestors(p->GetParentNode(), mCommonAncestors);
       mDisableContextSerialize = false; 
       rv = SerializeRangeContextEnd(mCommonAncestors, output);
       NS_ENSURE_SUCCESS(rv, rv);
@@ -1202,17 +1183,11 @@ nsDocumentEncoder::EncodeToStream(nsIOutputStream* aStream)
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  bool chromeCaller = nsContentUtils::IsCallerChrome();
-  if (chromeCaller) {
-    mStream = aStream;
-  }
+  mStream = aStream;
+
   nsAutoString buf;
 
   rv = EncodeToString(buf);
-
-  if (!chromeCaller) {
-    mStream = aStream;
-  }
 
   // Force a flush of the last chunk of data.
   FlushText(buf, true);
@@ -1265,6 +1240,7 @@ public:
   NS_IMETHOD EncodeToStringWithContext(nsAString& aContextString,
                                        nsAString& aInfoString,
                                        nsAString& aEncodedString);
+  NS_IMETHOD EncodeToString(nsAString& aOutputString);
 
 protected:
 
@@ -1350,19 +1326,17 @@ nsHTMLCopyEncoder::SetSelection(nsISelection* aSelection)
   
   nsCOMPtr<nsIDOMRange> range;
   nsCOMPtr<nsIDOMNode> commonParent;
-  int32_t count = 0;
-
-  nsresult rv = aSelection->GetRangeCount(&count);
-  NS_ENSURE_SUCCESS(rv, rv);
+  Selection* selection = static_cast<Selection*>(aSelection);
+  uint32_t rangeCount = selection->GetRangeCount();
 
   // if selection is uninitialized return
-  if (!count)
+  if (!rangeCount)
     return NS_ERROR_FAILURE;
   
   // we'll just use the common parent of the first range.  Implicit assumption
   // here that multi-range selections are table cell selections, in which case
   // the common parent is somewhere in the table and we don't really care where.
-  rv = aSelection->GetRangeAt(0, getter_AddRefs(range));
+  nsresult rv = aSelection->GetRangeAt(0, getter_AddRefs(range));
   NS_ENSURE_SUCCESS(rv, rv);
   if (!range)
     return NS_ERROR_NULL_POINTER;
@@ -1396,16 +1370,20 @@ nsHTMLCopyEncoder::SetSelection(nsISelection* aSelection)
     }
   }
   
-  // also consider ourselves in a text widget if we can't find an html document
-  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(mDocument);
-  if (!(htmlDoc && mDocument->IsHTML()))
-    mIsTextWidget = true;
-  
   // normalize selection if we are not in a widget
   if (mIsTextWidget) 
   {
     mSelection = aSelection;
     mMimeType.AssignLiteral("text/plain");
+    return NS_OK;
+  }
+
+  // also consider ourselves in a text widget if we can't find an html document
+  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(mDocument);
+  if (!(htmlDoc && mDocument->IsHTML())) {
+    mIsTextWidget = true;
+    mSelection = aSelection;
+    // mMimeType is set to text/plain when encoding starts.
     return NS_OK;
   }
   
@@ -1414,25 +1392,10 @@ nsHTMLCopyEncoder::SetSelection(nsISelection* aSelection)
   //NS_ENSURE_SUCCESS(rv, rv);
   NS_NewDomSelection(getter_AddRefs(mSelection));
   NS_ENSURE_TRUE(mSelection, NS_ERROR_FAILURE);
-  nsCOMPtr<nsISelectionPrivate> privSelection( do_QueryInterface(aSelection) );
-  NS_ENSURE_TRUE(privSelection, NS_ERROR_FAILURE);
   
-  // get selection range enumerator
-  nsCOMPtr<nsIEnumerator> enumerator;
-  rv = privSelection->GetEnumerator(getter_AddRefs(enumerator));
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(enumerator, NS_ERROR_FAILURE);
-
   // loop thru the ranges in the selection
-  enumerator->First(); 
-  nsCOMPtr<nsISupports> currentItem;
-  while (static_cast<nsresult>(NS_ENUMERATOR_FALSE) == enumerator->IsDone())
-  {
-    rv = enumerator->CurrentItem(getter_AddRefs(currentItem));
-    NS_ENSURE_SUCCESS(rv, rv);
-    NS_ENSURE_TRUE(currentItem, NS_ERROR_FAILURE);
-    
-    range = do_QueryInterface(currentItem);
+  for (uint32_t rangeIdx = 0; rangeIdx < rangeCount; ++rangeIdx) {
+    range = selection->GetRangeAt(rangeIdx);
     NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
     nsCOMPtr<nsIDOMRange> myRange;
     range->CloneRange(getter_AddRefs(myRange));
@@ -1444,11 +1407,18 @@ nsHTMLCopyEncoder::SetSelection(nsISelection* aSelection)
     
     rv = mSelection->AddRange(myRange);
     NS_ENSURE_SUCCESS(rv, rv);
-
-    enumerator->Next();
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHTMLCopyEncoder::EncodeToString(nsAString& aOutputString)
+{
+  if (mIsTextWidget) {
+    mMimeType.AssignLiteral("text/plain");
+  }
+  return nsDocumentEncoder::EncodeToString(aOutputString);
 }
 
 NS_IMETHODIMP
@@ -2014,11 +1984,11 @@ nsHTMLCopyEncoder::GetImmediateContextCount(const nsTArray<nsINode*>& aAncestorA
       break;
     }
     nsCOMPtr<nsIContent> content(do_QueryInterface(node));
-    if (!content || !content->IsHTML() || content->Tag() != nsGkAtoms::tr    &&
-                                          content->Tag() != nsGkAtoms::thead &&
-                                          content->Tag() != nsGkAtoms::tbody &&
-                                          content->Tag() != nsGkAtoms::tfoot &&
-                                          content->Tag() != nsGkAtoms::table) {
+    if (!content || !content->IsHTML() || (content->Tag() != nsGkAtoms::tr    &&
+                                           content->Tag() != nsGkAtoms::thead &&
+                                           content->Tag() != nsGkAtoms::tbody &&
+                                           content->Tag() != nsGkAtoms::tfoot &&
+                                           content->Tag() != nsGkAtoms::table)) {
       break;
     }
     ++j;

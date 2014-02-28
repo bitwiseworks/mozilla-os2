@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttp.h"
 #include "pldhash.h"
 #include "mozilla/Mutex.h"
@@ -98,7 +101,7 @@ static const PLDHashTableOps ops = {
 nsresult
 nsHttp::CreateAtomTable()
 {
-    NS_ASSERTION(!sAtomTable.ops, "atom table already initialized");
+    MOZ_ASSERT(!sAtomTable.ops, "atom table already initialized");
 
     if (!sLock) {
         sLock = new Mutex("nsHttp.sLock");
@@ -126,8 +129,8 @@ nsHttp::CreateAtomTable()
                                                  (PL_DHashTableOperate(&sAtomTable, atoms[i], PL_DHASH_ADD));
         if (!stub)
             return NS_ERROR_OUT_OF_MEMORY;
-        
-        NS_ASSERTION(!stub->key, "duplicate static atom");
+
+        MOZ_ASSERT(!stub->key, "duplicate static atom");
         stub->key = atoms[i];
     }
 
@@ -286,3 +289,39 @@ nsHttp::ParseInt64(const char *input, const char **next, int64_t *r)
         *next = input;
     return true;
 }
+
+bool
+nsHttp::IsPermanentRedirect(uint32_t httpStatus)
+{
+  return httpStatus == 301 || httpStatus == 308;
+}
+
+bool
+nsHttp::ShouldRewriteRedirectToGET(uint32_t httpStatus, nsHttpAtom method)
+{
+  // for 301 and 302, only rewrite POST
+  if (httpStatus == 301 || httpStatus == 302)
+    return method == nsHttp::Post;
+
+  // rewrite for 303 unless it was HEAD
+  if (httpStatus == 303)
+    return method != nsHttp::Head;
+
+  // otherwise, such as for 307, do not rewrite
+  return false;
+}
+
+bool
+nsHttp::IsSafeMethod(nsHttpAtom method)
+{
+  // This code will need to be extended for new safe methods, otherwise
+  // they'll default to "not safe".
+  return method == nsHttp::Get ||
+         method == nsHttp::Head ||
+         method == nsHttp::Options ||
+         method == nsHttp::Propfind ||
+         method == nsHttp::Report ||
+         method == nsHttp::Search ||
+         method == nsHttp::Trace;
+}
+

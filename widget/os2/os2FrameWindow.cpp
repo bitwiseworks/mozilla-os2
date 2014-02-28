@@ -21,9 +21,6 @@
 //-----------------------------------------------------------------------------
 // External Variables (in nsWindow.cpp)
 
-extern nsIRollupListener*  gRollupListener;
-extern nsIWidget*          gRollupWidget;
-extern bool                gRollupConsumeRollupEvent;
 extern uint32_t            gOS2Flags;
 
 #ifdef DEBUG_FOCUS
@@ -221,8 +218,7 @@ nsresult os2FrameWindow::Show(bool aState)
     ulFlags = SWP_SHOW | SWP_ACTIVATE;
 
     uint32_t ulStyle = WinQueryWindowULong(mFrameWnd, QWL_STYLE);
-    int32_t sizeMode;
-    mOwner->GetSizeMode(&sizeMode);
+    int32_t sizeMode = mOwner->SizeMode();
     if (!(ulStyle & WS_VISIBLE)) {
       if (sizeMode == nsSizeMode_Maximized) {
         ulFlags |= SWP_MAXIMIZE;
@@ -317,9 +313,7 @@ void os2FrameWindow::ActivateTopLevelWidget()
   // be restored as soon as the user clicks on it.  When the user
   // explicitly restores it, SetSizeMode() will call this method.
   if (mNeedActivation) {
-    int32_t sizeMode;
-    mOwner->GetSizeMode(&sizeMode);
-    if (sizeMode != nsSizeMode_Minimized) {
+    if (mOwner->SizeMode() != nsSizeMode_Minimized) {
       mNeedActivation = false;
       DEBUGFOCUS(NS_ACTIVATE);
       mOwner->DispatchActivationEvent(NS_ACTIVATE);
@@ -336,8 +330,7 @@ void os2FrameWindow::ActivateTopLevelWidget()
 
 nsresult os2FrameWindow::SetSizeMode(int32_t aMode)
 {
-  int32_t previousMode;
-  mOwner->GetSizeMode(&previousMode);
+  int32_t previousMode = mOwner->SizeMode();
 
   // save the new state
   nsresult rv = mOwner->nsBaseWidget::SetSizeMode(aMode);
@@ -485,7 +478,7 @@ nsresult os2FrameWindow::SetIcon(const nsAString& aIconSpec)
 
   // if the file was found, try to use it
   if (iconFile) {
-    nsCAutoString path;
+    nsAutoCString path;
     iconFile->GetNativePath(path);
 
     if (mFrameIcon) {
@@ -591,13 +584,15 @@ nsresult os2FrameWindow::ConstrainPosition(bool aAllowSlop,
 MRESULT EXPENTRY fnwpFrame(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
 {
   // check to see if we have a rollup listener registered
-  if (gRollupListener && gRollupWidget) {
+  nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  if (rollupListener) {
+    nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
     if (msg == WM_TRACKFRAME || msg == WM_MINMAXFRAME ||
         msg == WM_BUTTON1DOWN || msg == WM_BUTTON2DOWN ||
         msg == WM_BUTTON3DOWN) {
       // Rollup if the event is outside the popup
-      if (!nsWindow::EventIsInsideWindow((nsWindow*)gRollupWidget)) {
-        gRollupListener->Rollup(PR_UINT32_MAX);
+      if (!nsWindow::EventIsInsideWindow((nsWindow*)rollupWidget)) {
+        rollupListener->Rollup(UINT32_MAX);
       }
     }
   }

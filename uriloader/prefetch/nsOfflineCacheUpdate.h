@@ -37,6 +37,7 @@ class nsOfflineCacheUpdate;
 
 class nsICacheEntryDescriptor;
 class nsIUTF8StringEnumerator;
+class nsILoadContext;
 
 class nsOfflineCacheUpdateItem : public nsIDOMLoadStatus
                                , public nsIStreamListener
@@ -81,7 +82,7 @@ private:
     uint16_t                       mState;
 
 protected:
-    int32_t                        mBytesRead;
+    int64_t                        mBytesRead;
 };
 
 
@@ -200,7 +201,6 @@ public:
     nsresult Init();
 
     nsresult Begin();
-    nsresult Cancel();
 
     void LoadCompleted(nsOfflineCacheUpdateItem *aItem);
     void ManifestCheckCompleted(nsresult aStatus,
@@ -209,6 +209,8 @@ public:
 
     void SetOwner(nsOfflineCacheUpdateOwner *aOwner);
 
+    bool IsForGroupID(const nsCSubstring &groupID);
+
     virtual nsresult UpdateFinished(nsOfflineCacheUpdate *aUpdate);
 
 protected:
@@ -216,6 +218,7 @@ protected:
     void OnByteProgress(uint64_t byteIncrement);
 
 private:
+    nsresult InitInternal(nsIURI *aManifestURI);
     nsresult HandleManifest(bool *aDoUpdate);
     nsresult AddURI(nsIURI *aURI, uint32_t aItemType);
 
@@ -227,12 +230,16 @@ private:
     nsresult AddExistingItems(uint32_t aType,
                               nsTArray<nsCString>* namespaceFilter = nullptr);
     nsresult ScheduleImplicit();
-    nsresult AssociateDocuments(nsIApplicationCache* cache);
+    void AssociateDocuments(nsIApplicationCache* cache);
+    bool CheckUpdateAvailability();
+    void NotifyUpdateAvailability(bool updateAvailable);
 
-    nsresult GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserver> &aObservers);
-    nsresult NotifyState(uint32_t state);
+    void GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserver> &aObservers);
+    void NotifyState(uint32_t state);
     nsresult Finish();
     nsresult FinishNoNotify();
+
+    void AsyncFinishWithError();
 
     // Find one non-pinned cache group and evict it.
     nsresult EvictOneNonPinned();
@@ -250,13 +257,20 @@ private:
 
     bool mAddedItems;
     bool mPartialUpdate;
+    bool mOnlyCheckUpdate;
     bool mSucceeded;
     bool mObsolete;
 
     nsCString mUpdateDomain;
+    nsCString mGroupID;
     nsCOMPtr<nsIURI> mManifestURI;
     nsCOMPtr<nsIURI> mDocumentURI;
     nsCOMPtr<nsIFile> mCustomProfileDir;
+
+    uint32_t mAppID;
+    bool mInBrowser;
+
+    nsCOMPtr<nsIObserver> mUpdateAvailableObserver;
 
     nsCOMPtr<nsIApplicationCache> mApplicationCache;
     nsCOMPtr<nsIApplicationCache> mPreviousApplicationCache;
@@ -308,7 +322,8 @@ public:
 
     nsresult ScheduleUpdate(nsOfflineCacheUpdate *aUpdate);
     nsresult FindUpdate(nsIURI *aManifestURI,
-                        nsIURI *aDocumentURI,
+                        uint32_t aAppID,
+                        bool aInBrowser,
                         nsOfflineCacheUpdate **aUpdate);
 
     nsresult Schedule(nsIURI *aManifestURI,
@@ -316,6 +331,8 @@ public:
                       nsIDOMDocument *aDocument,
                       nsIDOMWindow* aWindow,
                       nsIFile* aCustomProfileDir,
+                      uint32_t aAppID,
+                      bool aInBrowser,
                       nsIOfflineCacheUpdate **aUpdate);
 
     virtual nsresult UpdateFinished(nsOfflineCacheUpdate *aUpdate);
@@ -340,6 +357,7 @@ private:
 
     bool mDisabled;
     bool mUpdateRunning;
+    bool mLowFreeSpace;
 };
 
 #endif

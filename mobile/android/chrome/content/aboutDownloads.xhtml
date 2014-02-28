@@ -18,16 +18,28 @@
       xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 <head>
   <title>&aboutDownloads.title;</title>
-  <meta name="viewport" content="width=480; initial-scale=.6667; user-scalable=0" />
-  <link rel="icon" type="image/png" href="chrome://branding/content/favicon32.png" />
+  <meta name="viewport" content="width=device-width; user-scalable=0" />
+  <link rel="icon" type="image/png" sizes="64x64" href="chrome://branding/content/favicon64.png" />
+  <link rel="stylesheet" href="chrome://browser/skin/aboutBase.css" type="text/css"/>
   <link rel="stylesheet" href="chrome://browser/skin/aboutDownloads.css" type="text/css"/>
 </head>
 
 <body dir="&locale.dir;" onload="Downloads.init();" onunload="Downloads.uninit();">
+  <menu type="context" id="downloadmenu">
+    <menuitem id="contextmenu-open" label="&aboutDownloads.open;" onclick="ContextMenus.open();"></menuitem>
+    <menuitem id="contextmenu-retry" label="&aboutDownloads.retry;" onclick="ContextMenus.retry();"></menuitem>
+    <menuitem id="contextmenu-remove" label="&aboutDownloads.remove;" onclick="ContextMenus.remove();"></menuitem>
+    <menuitem id="contextmenu-pause" label="&aboutDownloads.pause;" onclick="ContextMenus.pause();"></menuitem>
+    <menuitem id="contextmenu-resume" label="&aboutDownloads.resume;" onclick="ContextMenus.resume();"></menuitem>
+    <menuitem id="contextmenu-cancel" label="&aboutDownloads.cancel;" onclick="ContextMenus.cancel();"></menuitem>
+    <menuitem id="contextmenu-removeall" label="&aboutDownloads.removeAll;" onclick="ContextMenus.removeAll();"></menuitem>
+  </menu>
+
   <div class="header">
     <div>&aboutDownloads.header;</div>
   </div>
-  <ul id="downloads-list"></ul>
+  <ul id="private-downloads-list" class="list"></ul>
+  <ul id="normal-downloads-list" class="list"></ul>
   <span id="no-downloads-indicator">&aboutDownloads.empty;</span>
   <script type="application/javascript;version=1.8" src="chrome://browser/content/aboutDownloads.js"/>
 </body>

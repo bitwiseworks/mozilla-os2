@@ -70,18 +70,22 @@ class ExpandArgsMore(ExpandArgs):
             if os.path.splitext(arg)[1] == conf.LIB_SUFFIX:
                 if os.path.exists(arg + conf.LIBS_DESC_SUFFIX):
                     newlist += self._extract(self._expand_desc(arg))
-                elif os.path.exists(arg) and len(ar_extract):
+                    continue
+                elif os.path.exists(arg) and (len(ar_extract) or conf.AR == 'lib'):
                     tmp = tempfile.mkdtemp(dir=os.curdir)
                     self.tmp.append(tmp)
-                    subprocess.call(ar_extract + [os.path.abspath(arg)], cwd=tmp)
+                    if conf.AR == 'lib':
+                        out = subprocess.check_output([conf.AR, '-NOLOGO', '-LIST', arg])
+                        for l in out.splitlines():
+                            subprocess.call([conf.AR, '-NOLOGO', '-EXTRACT:%s' % l, os.path.abspath(arg)], cwd=tmp)
+                    else:
+                        subprocess.call(ar_extract + [os.path.abspath(arg)], cwd=tmp)
                     objs = []
                     for root, dirs, files in os.walk(tmp):
                         objs += [relativize(os.path.join(root, f)) for f in files if isObject(f)]
-                    newlist += objs
-                else:
-                    newlist += [arg]
-            else:
-                newlist += [arg]
+                    newlist += sorted(objs)
+                    continue
+            newlist += [arg]
         return newlist
 
     def makelist(self):
@@ -94,6 +98,9 @@ class ExpandArgsMore(ExpandArgs):
         if conf.EXPAND_LIBS_LIST_STYLE == "linkerscript":
             content = ['INPUT("%s")\n' % obj for obj in objs]
             ref = tmp
+        elif conf.EXPAND_LIBS_LIST_STYLE == "filelist":
+            content = ["%s\n" % obj for obj in objs]
+            ref = "-Wl,-filelist," + tmp
         elif conf.EXPAND_LIBS_LIST_STYLE == "list":
             content = ["%s\n" % obj for obj in objs]
             ref = "@" + tmp
@@ -129,7 +136,7 @@ class ExpandArgsMore(ExpandArgs):
         for l in stderr.split('\n'):
             quoted = l.split("'")
             if len(quoted) > 5 and quoted[1] != quoted[5]:
-                result[quoted[1]] = quoted[5]
+                result[quoted[1]] = [quoted[5]]
                 if quoted[5] in result:
                     result[quoted[5]].append(quoted[1])
                 else:
@@ -267,6 +274,14 @@ class SectionFinder(object):
                 syms.append((tmp[-1], tmp[0]))
         return syms
 
+def print_command(out, args):
+    print >>out, "Executing: " + " ".join(args)
+    for tmp in [f for f in args.tmp if os.path.isfile(f)]:
+        print >>out, tmp + ":"
+        with open(tmp) as file:
+            print >>out, "".join(["    " + l for l in file.readlines()])
+    out.flush()
+
 def main():
     parser = OptionParser()
     parser.add_option("--depend", dest="depend", metavar="FILE",
@@ -302,21 +317,24 @@ def main():
             args.makelist()
 
         if options.verbose:
-            print >>sys.stderr, "Executing: " + " ".join(args)
-            for tmp in [f for f in args.tmp if os.path.isfile(f)]:
-                print >>sys.stderr, tmp + ":"
-                with open(tmp) as file:
-                    print >>sys.stderr, "".join(["    " + l for l in file.readlines()])
-            sys.stderr.flush()
-        ret = subprocess.call(args)
-        if ret:
-            exit(ret)
+            print_command(sys.stderr, args)
+        proc = subprocess.Popen(args, stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
+        (stdout, stderr) = proc.communicate()
+        if proc.returncode and not options.verbose:
+            print_command(sys.stderr, args)
+        sys.stderr.write(stdout)
+        sys.stderr.flush()
+        if proc.returncode:
+            exit(proc.returncode)
     if not options.depend:
         return
     ensureParentDir(options.depend)
     with open(options.depend, 'w') as depfile:
         depfile.write("%s : %s\n" % (options.target, ' '.join(dep for dep in deps if os.path.isfile(dep) and dep != options.target)))
 
+        for dep in deps:
+            if os.path.isfile(dep) and dep != options.target:
+                depfile.write("%s :\n" % dep)
 
 if __name__ == '__main__':
     main()

@@ -17,6 +17,7 @@
 #include "nsThreadUtils.h"
 #include "nsIWeakReference.h"
 #include "nsEnumeratorUtils.h"
+#include "mozilla/net/NeckoCommon.h"
 
 #define NOTIFY_GLOBAL_OBSERVERS
 
@@ -30,8 +31,15 @@
 //
 // this enables PR_LOG_DEBUG level information and places all output in
 // the file nspr.log
-  PRLogModuleInfo* observerServiceLog = PR_NewLogModule("ObserverService");
-  #define LOG(x)  PR_LOG(observerServiceLog, PR_LOG_DEBUG, x)
+static PRLogModuleInfo*
+GetObserverServiceLog()
+{
+    static PRLogModuleInfo *sLog;
+    if (!sLog)
+        sLog = PR_NewLogModule("ObserverService");
+    return sLog;
+}
+  #define LOG(x)  PR_LOG(GetObserverServiceLog(), PR_LOG_DEBUG, x)
 #else
   #define LOG(x)
 #endif /* PR_LOGGING */
@@ -94,6 +102,10 @@ nsObserverService::AddObserver(nsIObserver* anObserver, const char* aTopic,
 
     NS_ENSURE_VALIDCALL
     NS_ENSURE_ARG(anObserver && aTopic);
+
+    if (mozilla::net::IsNeckoChild() && !strncmp(aTopic, "http-on-", 8)) {
+      return NS_ERROR_NOT_IMPLEMENTED;
+    }
 
     nsObserverList *observerList = mObserverTopicTable.PutEntry(aTopic);
     if (!observerList)

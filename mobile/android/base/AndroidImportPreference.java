@@ -5,7 +5,7 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.util.GeckoBackgroundThread;
+import org.mozilla.gecko.util.ThreadUtils;
 
 import android.app.ProgressDialog;
 import android.content.Context;
@@ -74,8 +74,10 @@ class AndroidImportPreference extends MultiChoicePreference {
                                 true);
 
         final Runnable stopCallback = new Runnable() {
+            @Override
             public void run() {
-                GeckoApp.mAppContext.runOnUiThread(new Runnable() {
+                ThreadUtils.postToUiThread(new Runnable() {
+                    @Override
                     public void run() {
                         dialog.dismiss();
                     }
@@ -83,10 +85,11 @@ class AndroidImportPreference extends MultiChoicePreference {
             }
         };
 
-        GeckoBackgroundThread.getHandler().post(
+        ThreadUtils.postToBackgroundThread(
             // Constructing AndroidImport may need finding the profile,
             // which hits disk, so it needs to go into a Runnable too.
             new Runnable() {
+                @Override
                 public void run() {
                     new AndroidImport(mContext, stopCallback, doBookmarks, doHistory).run();
                 }

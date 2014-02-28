@@ -33,16 +33,17 @@
 //
 // Author: Mark Mentovai
 
+#include <assert.h>
+#include <string>
 
-#include "processor/postfix_evaluator-inl.h"
-
+#include "common/scoped_ptr.h"
 #include "google_breakpad/processor/call_stack.h"
 #include "google_breakpad/processor/code_modules.h"
 #include "google_breakpad/processor/memory_region.h"
 #include "google_breakpad/processor/source_line_resolver_interface.h"
 #include "google_breakpad/processor/stack_frame_cpu.h"
-#include "processor/logging.h"
-#include "processor/scoped_ptr.h"
+#include "common/logging.h"
+#include "processor/postfix_evaluator-inl.h"
 #include "processor/stackwalker_x86.h"
 #include "processor/windows_frame_info.h"
 #include "processor/cfi_frame_info.h"
@@ -57,37 +58,36 @@ StackwalkerX86::cfi_register_map_[] = {
   // restored upon return. But the callee_saves flags here really means
   // that the walker should assume they're unchanged if the CFI doesn't
   // mention them, which is clearly wrong for $eip and $esp.
-  { "$eip", ".ra",  false,
+  { ToUniqueString("$eip"), ToUniqueString(".ra"),  false,
     StackFrameX86::CONTEXT_VALID_EIP, &MDRawContextX86::eip },
-  { "$esp", ".cfa", false,
+  { ToUniqueString("$esp"), ToUniqueString(".cfa"), false,
     StackFrameX86::CONTEXT_VALID_ESP, &MDRawContextX86::esp },
-  { "$ebp", NULL,   true,
+  { ToUniqueString("$ebp"), NULL,   true,
     StackFrameX86::CONTEXT_VALID_EBP, &MDRawContextX86::ebp },
-  { "$eax", NULL,   false,
+  { ToUniqueString("$eax"), NULL,   false,
     StackFrameX86::CONTEXT_VALID_EAX, &MDRawContextX86::eax },
-  { "$ebx", NULL,   true,
+  { ToUniqueString("$ebx"), NULL,   true,
     StackFrameX86::CONTEXT_VALID_EBX, &MDRawContextX86::ebx },
-  { "$ecx", NULL,   false,
+  { ToUniqueString("$ecx"), NULL,   false,
     StackFrameX86::CONTEXT_VALID_ECX, &MDRawContextX86::ecx },
-  { "$edx", NULL,   false,
+  { ToUniqueString("$edx"), NULL,   false,
     StackFrameX86::CONTEXT_VALID_EDX, &MDRawContextX86::edx },
-  { "$esi", NULL,   true,
+  { ToUniqueString("$esi"), NULL,   true,
     StackFrameX86::CONTEXT_VALID_ESI, &MDRawContextX86::esi },
-  { "$edi", NULL,   true,
+  { ToUniqueString("$edi"), NULL,   true,
     StackFrameX86::CONTEXT_VALID_EDI, &MDRawContextX86::edi },
 };
 
-StackwalkerX86::StackwalkerX86(const SystemInfo *system_info,
-                               const MDRawContextX86 *context,
-                               MemoryRegion *memory,
-                               const CodeModules *modules,
-                               SymbolSupplier *supplier,
-                               SourceLineResolverInterface *resolver)
-    : Stackwalker(system_info, memory, modules, supplier, resolver),
+StackwalkerX86::StackwalkerX86(const SystemInfo* system_info,
+                               const MDRawContextX86* context,
+                               MemoryRegion* memory,
+                               const CodeModules* modules,
+                               StackFrameSymbolizer* resolver_helper)
+    : Stackwalker(system_info, memory, modules, resolver_helper),
       context_(context),
       cfi_walker_(cfi_register_map_,
                   (sizeof(cfi_register_map_) / sizeof(cfi_register_map_[0]))) {
-  if (memory_->GetBase() + memory_->GetSize() - 1 > 0xffffffff) {
+  if (memory_ && memory_->GetBase() + memory_->GetSize() - 1 > 0xffffffff) {
     // The x86 is a 32-bit CPU, the limits of the supplied stack are invalid.
     // Mark memory_ = NULL, which will cause stackwalking to fail.
     BPLOG(ERROR) << "Memory out of range for stackwalking: " <<
@@ -106,30 +106,36 @@ StackFrameX86::~StackFrameX86() {
   cfi_frame_info = NULL;
 }
 
-StackFrame *StackwalkerX86::GetContextFrame() {
-  if (!context_ || !memory_) {
-    BPLOG(ERROR) << "Can't get context frame without context or memory";
+uint64_t StackFrameX86::ReturnAddress() const
+{
+  assert(context_validity & StackFrameX86::CONTEXT_VALID_EIP);
+  return context.eip;   
+}
+
+StackFrame* StackwalkerX86::GetContextFrame() {
+  if (!context_) {
+    BPLOG(ERROR) << "Can't get context frame without context";
     return NULL;
   }
 
-  StackFrameX86 *frame = new StackFrameX86();
+  StackFrameX86* frame = new StackFrameX86();
 
   // The instruction pointer is stored directly in a register, so pull it
   // straight out of the CPU context structure.
   frame->context = *context_;
   frame->context_validity = StackFrameX86::CONTEXT_VALID_ALL;
-  frame->trust = StackFrameX86::FRAME_TRUST_CONTEXT;
+  frame->trust = StackFrame::FRAME_TRUST_CONTEXT;
   frame->instruction = frame->context.eip;
 
   return frame;
 }
 
-StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
-    const vector<StackFrame *> &frames,
-    WindowsFrameInfo *last_frame_info) {
-  StackFrameX86::FrameTrust trust = StackFrameX86::FRAME_TRUST_NONE;
+StackFrameX86* StackwalkerX86::GetCallerByWindowsFrameInfo(
+    const vector<StackFrame*> &frames,
+    WindowsFrameInfo* last_frame_info) {
+  StackFrame::FrameTrust trust = StackFrame::FRAME_TRUST_NONE;
 
-  StackFrameX86 *last_frame = static_cast<StackFrameX86 *>(frames.back());
+  StackFrameX86* last_frame = static_cast<StackFrameX86*>(frames.back());
 
   // Save the stack walking info we found, in case we need it later to
   // find the callee of the frame we're constructing now.
@@ -173,12 +179,12 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
   // are unknown, 0 is also used in that case.  When that happens, it should
   // be possible to walk to the next frame without reference to %esp.
 
-  u_int32_t last_frame_callee_parameter_size = 0;
+  uint32_t last_frame_callee_parameter_size = 0;
   int frames_already_walked = frames.size();
   if (frames_already_walked >= 2) {
-    const StackFrameX86 *last_frame_callee
-        = static_cast<StackFrameX86 *>(frames[frames_already_walked - 2]);
-    WindowsFrameInfo *last_frame_callee_info
+    const StackFrameX86* last_frame_callee
+        = static_cast<StackFrameX86*>(frames[frames_already_walked - 2]);
+    WindowsFrameInfo* last_frame_callee_info
         = last_frame_callee->windows_frame_info;
     if (last_frame_callee_info &&
         (last_frame_callee_info->valid
@@ -191,23 +197,50 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
   // Set up the dictionary for the PostfixEvaluator.  %ebp and %esp are used
   // in each program string, and their previous values are known, so set them
   // here.
-  PostfixEvaluator<u_int32_t>::DictionaryType dictionary;
+  PostfixEvaluator<uint32_t>::DictionaryType dictionary;
   // Provide the current register values.
-  dictionary["$ebp"] = last_frame->context.ebp;
-  dictionary["$esp"] = last_frame->context.esp;
+  dictionary.set(ustr__ZSebp(), last_frame->context.ebp);
+  dictionary.set(ustr__ZSesp(), last_frame->context.esp);
   // Provide constants from the debug info for last_frame and its callee.
   // .cbCalleeParams is a Breakpad extension that allows us to use the
   // PostfixEvaluator engine when certain types of debugging information
   // are present without having to write the constants into the program
   // string as literals.
-  dictionary[".cbCalleeParams"] = last_frame_callee_parameter_size;
-  dictionary[".cbSavedRegs"] = last_frame_info->saved_register_size;
-  dictionary[".cbLocals"] = last_frame_info->local_size;
-  dictionary[".raSearchStart"] = last_frame->context.esp +
-                                 last_frame_callee_parameter_size +
-                                 last_frame_info->local_size +
-                                 last_frame_info->saved_register_size;
-  dictionary[".cbParams"] = last_frame_info->parameter_size;
+  dictionary.set(ustr__ZDcbCalleeParams(), last_frame_callee_parameter_size);
+  dictionary.set(ustr__ZDcbSavedRegs(), last_frame_info->saved_register_size);
+  dictionary.set(ustr__ZDcbLocals(), last_frame_info->local_size);
+
+  uint32_t raSearchStart = last_frame->context.esp +
+                            last_frame_callee_parameter_size +
+                            last_frame_info->local_size +
+                            last_frame_info->saved_register_size;
+
+  uint32_t raSearchStartOld = raSearchStart;
+  uint32_t found = 0;  // dummy value
+  // Scan up to three words above the calculated search value, in case
+  // the stack was aligned to a quadword boundary.
+  if (ScanForReturnAddress(raSearchStart, &raSearchStart, &found, 3) &&
+      last_frame->trust == StackFrame::FRAME_TRUST_CONTEXT &&
+      last_frame->windows_frame_info != NULL &&
+      last_frame_info->type_ == WindowsFrameInfo::STACK_INFO_FPO &&
+      raSearchStartOld == raSearchStart &&
+      found == last_frame->context.eip) {
+    // The context frame represents an FPO-optimized Windows system call.
+    // On the top of the stack we have a pointer to the current instruction.
+    // This means that the callee has returned but the return address is still
+    // on the top of the stack which is very atypical situaltion.
+    // Skip one slot from the stack and do another scan in order to get the
+    // actual return address.
+    raSearchStart += 4;
+    ScanForReturnAddress(raSearchStart, &raSearchStart, &found, 3);
+  }
+
+  // The difference between raSearch and raSearchStart is unknown,
+  // but making them the same seems to work well in practice.
+  dictionary.set(ustr__ZDraSearchStart(), raSearchStart);
+  dictionary.set(ustr__ZDraSearch(), raSearchStart);
+
+  dictionary.set(ustr__ZDcbParams(), last_frame_info->parameter_size);
 
   // Decide what type of program string to use. The program string is in
   // postfix notation and will be passed to PostfixEvaluator::Evaluate.
@@ -219,7 +252,7 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
   string program_string;
   bool recover_ebp = true;
 
-  trust = StackFrameX86::FRAME_TRUST_CFI;
+  trust = StackFrame::FRAME_TRUST_CFI;
   if (!last_frame_info->program_string.empty()) {
     // The FPO data has its own program string, which will tell us how to
     // get to the caller frame, and may even fill in the values of
@@ -293,20 +326,20 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
 
   // Now crank it out, making sure that the program string set at least the
   // two required variables.
-  PostfixEvaluator<u_int32_t> evaluator =
-      PostfixEvaluator<u_int32_t>(&dictionary, memory_);
-  PostfixEvaluator<u_int32_t>::DictionaryValidityType dictionary_validity;
+  PostfixEvaluator<uint32_t> evaluator =
+      PostfixEvaluator<uint32_t>(&dictionary, memory_);
+  PostfixEvaluator<uint32_t>::DictionaryValidityType dictionary_validity;
   if (!evaluator.Evaluate(program_string, &dictionary_validity) ||
-      dictionary_validity.find("$eip") == dictionary_validity.end() ||
-      dictionary_validity.find("$esp") == dictionary_validity.end()) {
+      !dictionary_validity.have(ustr__ZSeip()) ||
+      !dictionary_validity.have(ustr__ZSesp())) {
     // Program string evaluation failed. It may be that %eip is not somewhere
     // with stack frame info, and %ebp is pointing to non-stack memory, so
     // our evaluation couldn't succeed. We'll scan the stack for a return
     // address. This can happen if the stack is in a module for which
     // we don't have symbols, and that module is compiled without a
     // frame pointer.
-    u_int32_t location_start = last_frame->context.esp;
-    u_int32_t location, eip;
+    uint32_t location_start = last_frame->context.esp;
+    uint32_t location, eip;
     if (!ScanForReturnAddress(location_start, &location, &eip)) {
       // if we can't find an instruction pointer even with stack scanning,
       // give up.
@@ -316,9 +349,9 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
     // This seems like a reasonable return address. Since program string
     // evaluation failed, use it and set %esp to the location above the
     // one where the return address was found.
-    dictionary["$eip"] = eip;
-    dictionary["$esp"] = location + 4;
-    trust = StackFrameX86::FRAME_TRUST_SCAN;
+    dictionary.set(ustr__ZSeip(), eip);
+    dictionary.set(ustr__ZSesp(), location + 4);
+    trust = StackFrame::FRAME_TRUST_SCAN;
   }
 
   // Since this stack frame did not use %ebp in a traditional way,
@@ -328,7 +361,8 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
   // However, if program string evaluation resulted in both %eip and
   // %ebp values of 0, trust that the end of the stack has been
   // reached and don't scan for anything else.
-  if (dictionary["$eip"] != 0 || dictionary["$ebp"] != 0) {
+  if (dictionary.get(ustr__ZSeip()) != 0 ||
+      dictionary.get(ustr__ZSebp()) != 0) {
     int offset = 0;
 
     // This scan can only be done if a CodeModules object is available, to
@@ -343,48 +377,58 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
     // ability, older OSes (pre-XP SP2) and CPUs (pre-P4) don't enforce
     // an independent execute privilege on memory pages.
 
-    u_int32_t eip = dictionary["$eip"];
+    uint32_t eip = dictionary.get(ustr__ZSeip());
     if (modules_ && !modules_->GetModuleForAddress(eip)) {
       // The instruction pointer at .raSearchStart was invalid, so start
       // looking one 32-bit word above that location.
-      u_int32_t location_start = dictionary[".raSearchStart"] + 4;
-      u_int32_t location;
+      uint32_t location_start = dictionary.get(ustr__ZDraSearchStart()) + 4;
+      uint32_t location;
       if (ScanForReturnAddress(location_start, &location, &eip)) {
         // This is a better return address that what program string
         // evaluation found.  Use it, and set %esp to the location above the
         // one where the return address was found.
-        dictionary["$eip"] = eip;
-        dictionary["$esp"] = location + 4;
+        dictionary.set(ustr__ZSeip(), eip);
+        dictionary.set(ustr__ZSesp(), location + 4);
         offset = location - location_start;
-        trust = StackFrameX86::FRAME_TRUST_CFI_SCAN;
+        trust = StackFrame::FRAME_TRUST_CFI_SCAN;
       }
     }
 
-    // When trying to recover the previous value of the frame pointer (%ebp),
-    // start looking at the lowest possible address in the saved-register
-    // area, and look at the entire saved register area, increased by the
-    // size of |offset| to account for additional data that may be on the
-    // stack.  The scan is performed from the highest possible address to
-    // the lowest, because we expect that the function's prolog would have
-    // saved %ebp early.
-    u_int32_t ebp = dictionary["$ebp"];
-    u_int32_t value;  // throwaway variable to check pointer validity
-    if (recover_ebp && !memory_->GetMemoryAtAddress(ebp, &value)) {
-      int fp_search_bytes = last_frame_info->saved_register_size + offset;
-      u_int32_t location_end = last_frame->context.esp +
-                               last_frame_callee_parameter_size;
+    if (recover_ebp) {
+      // When trying to recover the previous value of the frame pointer (%ebp),
+      // start looking at the lowest possible address in the saved-register
+      // area, and look at the entire saved register area, increased by the
+      // size of |offset| to account for additional data that may be on the
+      // stack.  The scan is performed from the highest possible address to
+      // the lowest, because the expectation is that the function's prolog
+      // would have saved %ebp early.
+      uint32_t ebp = dictionary.get(ustr__ZSebp());
 
-      for (u_int32_t location = location_end + fp_search_bytes;
-           location >= location_end;
-           location -= 4) {
-        if (!memory_->GetMemoryAtAddress(location, &ebp))
-          break;
+      // When a scan for return address is used, it is possible to skip one or
+      // more frames (when return address is not in a known module).  One
+      // indication for skipped frames is when the value of %ebp is lower than
+      // the location of the return address on the stack
+      bool has_skipped_frames =
+        (trust != StackFrame::FRAME_TRUST_CFI && ebp <= raSearchStart + offset);
 
-        if (memory_->GetMemoryAtAddress(ebp, &value)) {
-          // The candidate value is a pointer to the same memory region
-          // (the stack).  Prefer it as a recovered %ebp result.
-          dictionary["$ebp"] = ebp;
-          break;
+      uint32_t value;  // throwaway variable to check pointer validity
+      if (has_skipped_frames || !memory_->GetMemoryAtAddress(ebp, &value)) {
+        int fp_search_bytes = last_frame_info->saved_register_size + offset;
+        uint32_t location_end = last_frame->context.esp +
+                                 last_frame_callee_parameter_size;
+
+        for (uint32_t location = location_end + fp_search_bytes;
+             location >= location_end;
+             location -= 4) {
+          if (!memory_->GetMemoryAtAddress(location, &ebp))
+            break;
+
+          if (memory_->GetMemoryAtAddress(ebp, &value)) {
+            // The candidate value is a pointer to the same memory region
+            // (the stack).  Prefer it as a recovered %ebp result.
+            dictionary.set(ustr__ZSebp(), ebp);
+            break;
+          }
         }
       }
     }
@@ -392,39 +436,39 @@ StackFrameX86 *StackwalkerX86::GetCallerByWindowsFrameInfo(
 
   // Create a new stack frame (ownership will be transferred to the caller)
   // and fill it in.
-  StackFrameX86 *frame = new StackFrameX86();
+  StackFrameX86* frame = new StackFrameX86();
 
   frame->trust = trust;
   frame->context = last_frame->context;
-  frame->context.eip = dictionary["$eip"];
-  frame->context.esp = dictionary["$esp"];
-  frame->context.ebp = dictionary["$ebp"];
+  frame->context.eip = dictionary.get(ustr__ZSeip());
+  frame->context.esp = dictionary.get(ustr__ZSesp());
+  frame->context.ebp = dictionary.get(ustr__ZSebp());
   frame->context_validity = StackFrameX86::CONTEXT_VALID_EIP |
                                 StackFrameX86::CONTEXT_VALID_ESP |
                                 StackFrameX86::CONTEXT_VALID_EBP;
 
   // These are nonvolatile (callee-save) registers, and the program string
   // may have filled them in.
-  if (dictionary_validity.find("$ebx") != dictionary_validity.end()) {
-    frame->context.ebx = dictionary["$ebx"];
+  if (dictionary_validity.have(ustr__ZSebx())) {
+    frame->context.ebx = dictionary.get(ustr__ZSebx());
     frame->context_validity |= StackFrameX86::CONTEXT_VALID_EBX;
   }
-  if (dictionary_validity.find("$esi") != dictionary_validity.end()) {
-    frame->context.esi = dictionary["$esi"];
+  if (dictionary_validity.have(ustr__ZSesi())) {
+    frame->context.esi = dictionary.get(ustr__ZSesi());
     frame->context_validity |= StackFrameX86::CONTEXT_VALID_ESI;
   }
-  if (dictionary_validity.find("$edi") != dictionary_validity.end()) {
-    frame->context.edi = dictionary["$edi"];
+  if (dictionary_validity.have(ustr__ZSedi())) {
+    frame->context.edi = dictionary.get(ustr__ZSedi());
     frame->context_validity |= StackFrameX86::CONTEXT_VALID_EDI;
   }
 
   return frame;
 }
 
-StackFrameX86 *StackwalkerX86::GetCallerByCFIFrameInfo(
+StackFrameX86* StackwalkerX86::GetCallerByCFIFrameInfo(
     const vector<StackFrame*> &frames,
-    CFIFrameInfo *cfi_frame_info) {
-  StackFrameX86 *last_frame = static_cast<StackFrameX86*>(frames.back());
+    CFIFrameInfo* cfi_frame_info) {
+  StackFrameX86* last_frame = static_cast<StackFrameX86*>(frames.back());
   last_frame->cfi_frame_info = cfi_frame_info;
 
   scoped_ptr<StackFrameX86> frame(new StackFrameX86());
@@ -433,7 +477,7 @@ StackFrameX86 *StackwalkerX86::GetCallerByCFIFrameInfo(
                            last_frame->context, last_frame->context_validity,
                            &frame->context, &frame->context_validity))
     return NULL;
-  
+
   // Make sure we recovered all the essentials.
   static const int essentials = (StackFrameX86::CONTEXT_VALID_EIP
                                  | StackFrameX86::CONTEXT_VALID_ESP
@@ -441,17 +485,17 @@ StackFrameX86 *StackwalkerX86::GetCallerByCFIFrameInfo(
   if ((frame->context_validity & essentials) != essentials)
     return NULL;
 
-  frame->trust = StackFrameX86::FRAME_TRUST_CFI;
+  frame->trust = StackFrame::FRAME_TRUST_CFI;
 
   return frame.release();
 }
 
-StackFrameX86 *StackwalkerX86::GetCallerByEBPAtBase(
-    const vector<StackFrame *> &frames) {
-  StackFrameX86::FrameTrust trust;
-  StackFrameX86 *last_frame = static_cast<StackFrameX86 *>(frames.back());
-  u_int32_t last_esp = last_frame->context.esp;
-  u_int32_t last_ebp = last_frame->context.ebp;
+StackFrameX86* StackwalkerX86::GetCallerByEBPAtBase(
+    const vector<StackFrame*> &frames) {
+  StackFrame::FrameTrust trust;
+  StackFrameX86* last_frame = static_cast<StackFrameX86*>(frames.back());
+  uint32_t last_esp = last_frame->context.esp;
+  uint32_t last_ebp = last_frame->context.ebp;
 
   // Assume that the standard %ebp-using x86 calling convention is in
   // use.
@@ -476,12 +520,12 @@ StackFrameX86 *StackwalkerX86::GetCallerByEBPAtBase(
   // %esp_new = %ebp_old + 8
   // %ebp_new = *(%ebp_old)
 
-  u_int32_t caller_eip, caller_esp, caller_ebp;
+  uint32_t caller_eip, caller_esp, caller_ebp;
 
   if (memory_->GetMemoryAtAddress(last_ebp + 4, &caller_eip) &&
       memory_->GetMemoryAtAddress(last_ebp, &caller_ebp)) {
     caller_esp = last_ebp + 8;
-    trust = StackFrameX86::FRAME_TRUST_FP;
+    trust = StackFrame::FRAME_TRUST_FP;
   } else {
     // We couldn't read the memory %ebp refers to. It may be that %ebp
     // is pointing to non-stack memory. We'll scan the stack for a
@@ -491,7 +535,7 @@ StackFrameX86 *StackwalkerX86::GetCallerByEBPAtBase(
     if (!ScanForReturnAddress(last_esp, &caller_esp, &caller_eip)) {
       // if we can't find an instruction pointer even with stack scanning,
       // give up.
-      return false;
+      return NULL;
     }
 
     // ScanForReturnAddress found a reasonable return address. Advance
@@ -500,12 +544,12 @@ StackFrameX86 *StackwalkerX86::GetCallerByEBPAtBase(
     caller_esp += 4;
     caller_ebp = last_ebp;
 
-    trust = StackFrameX86::FRAME_TRUST_SCAN;
+    trust = StackFrame::FRAME_TRUST_SCAN;
   }
 
   // Create a new stack frame (ownership will be transferred to the caller)
   // and fill it in.
-  StackFrameX86 *frame = new StackFrameX86();
+  StackFrameX86* frame = new StackFrameX86();
 
   frame->trust = trust;
   frame->context = last_frame->context;
@@ -519,25 +563,26 @@ StackFrameX86 *StackwalkerX86::GetCallerByEBPAtBase(
   return frame;
 }
 
-StackFrame *StackwalkerX86::GetCallerFrame(const CallStack *stack) {
+StackFrame* StackwalkerX86::GetCallerFrame(const CallStack* stack) {
   if (!memory_ || !stack) {
     BPLOG(ERROR) << "Can't get caller frame without memory or stack";
     return NULL;
   }
 
-  const vector<StackFrame *> &frames = *stack->frames();
-  StackFrameX86 *last_frame = static_cast<StackFrameX86 *>(frames.back());
+  const vector<StackFrame*> &frames = *stack->frames();
+  StackFrameX86* last_frame = static_cast<StackFrameX86*>(frames.back());
   scoped_ptr<StackFrameX86> new_frame;
 
   // If the resolver has Windows stack walking information, use that.
-  WindowsFrameInfo *windows_frame_info
-      = resolver_->FindWindowsFrameInfo(last_frame);
+  WindowsFrameInfo* windows_frame_info
+      = frame_symbolizer_->FindWindowsFrameInfo(last_frame);
   if (windows_frame_info)
     new_frame.reset(GetCallerByWindowsFrameInfo(frames, windows_frame_info));
 
   // If the resolver has DWARF CFI information, use that.
   if (!new_frame.get()) {
-    CFIFrameInfo *cfi_frame_info = resolver_->FindCFIFrameInfo(last_frame);
+    CFIFrameInfo* cfi_frame_info =
+        frame_symbolizer_->FindCFIFrameInfo(last_frame);
     if (cfi_frame_info)
       new_frame.reset(GetCallerByCFIFrameInfo(frames, cfi_frame_info));
   }
@@ -549,7 +594,7 @@ StackFrame *StackwalkerX86::GetCallerFrame(const CallStack *stack) {
   // If nothing worked, tell the caller.
   if (!new_frame.get())
     return NULL;
-  
+
   // Treat an instruction address of 0 as end-of-stack.
   if (new_frame->context.eip == 0)
     return NULL;
@@ -560,40 +605,14 @@ StackFrame *StackwalkerX86::GetCallerFrame(const CallStack *stack) {
   if (new_frame->context.esp <= last_frame->context.esp)
     return NULL;
 
-  // new_frame->context.eip is the return address, which is one instruction
-  // past the CALL that caused us to arrive at the callee. Set
-  // new_frame->instruction to one less than that. This won't reference the
-  // beginning of the CALL instruction, but it's guaranteed to be within
-  // the CALL, which is sufficient to get the source line information to
-  // match up with the line that contains a function call. Callers that
-  // require the exact return address value may access the context.eip
-  // field of StackFrameX86.
+  // new_frame->context.eip is the return address, which is the instruction
+  // after the CALL that caused us to arrive at the callee. Set
+  // new_frame->instruction to one less than that, so it points within the
+  // CALL instruction. See StackFrame::instruction for details, and
+  // StackFrameAMD64::ReturnAddress.
   new_frame->instruction = new_frame->context.eip - 1;
 
   return new_frame.release();
-}
-
-bool StackwalkerX86::ScanForReturnAddress(u_int32_t location_start,
-                                          u_int32_t *location_found,
-                                          u_int32_t *eip_found) {
-  const int kRASearchWords = 15;
-  for (u_int32_t location = location_start;
-       location <= location_start + kRASearchWords * 4;
-       location += 4) {
-    u_int32_t eip;
-    if (!memory_->GetMemoryAtAddress(location, &eip))
-      break;
-
-    if (modules_ && modules_->GetModuleForAddress(eip) &&
-        InstructionAddressSeemsValid(eip)) {
-
-      *eip_found = eip;
-      *location_found = location;
-      return true;
-    }
-  }
-  // nothing found
-  return false;
 }
 
 }  // namespace google_breakpad

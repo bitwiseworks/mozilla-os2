@@ -14,6 +14,7 @@
 
 class nsDocShell;
 class nsIWebNavigationInfo;
+class nsIHttpChannel;
 
 class nsDSURIContentListener :
     public nsIURIContentListener,
@@ -38,9 +39,18 @@ protected:
     // Determine if X-Frame-Options allows content to be framed
     // as a subdocument
     bool CheckFrameOptions(nsIRequest* request);
-    bool CheckOneFrameOptionsPolicy(nsIRequest* request,
+    bool CheckOneFrameOptionsPolicy(nsIHttpChannel* httpChannel,
                                     const nsAString& policy);
 
+    enum XFOHeader {
+      eDENY,
+      eSAMEORIGIN,
+      eALLOWFROM
+    };
+
+    void ReportXFOViolation(nsIDocShellTreeItem* aTopDocShellItem,
+                            nsIURI* aThisURI,
+                            XFOHeader aHeader);
 protected:
     nsDocShell*                      mDocShell;
 

@@ -43,6 +43,7 @@ GfxInfo::Init()
     mIsFGLRX = false;
     mIsNouveau = false;
     mIsIntel = false;
+    mIsOldSwrast = false;
     mIsLlvmpipe = false;
     mHasTextureFromPixmap = false;
     return GfxInfoBase::Init();
@@ -185,7 +186,7 @@ GfxInfo::GetData()
     mAdapterDescription.AppendLiteral(" -- ");
     mAdapterDescription.Append(mRenderer);
 
-    nsCAutoString note;
+    nsAutoCString note;
     note.Append("OpenGL: ");
     note.Append(mAdapterDescription);
     note.Append(" -- ");
@@ -215,6 +216,8 @@ GfxInfo::GetData()
             mIsIntel = true;
         if (strcasestr(mRenderer.get(), "llvmpipe"))
             mIsLlvmpipe = true;
+        if (strcasestr(mRenderer.get(), "software rasterizer"))
+            mIsOldSwrast = true;
     } else if (strstr(mVendor.get(), "NVIDIA Corporation")) {
         mIsNVIDIA = true;
         // with the NVIDIA driver, the version string contains "NVIDIA major.minor"
@@ -326,20 +329,18 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
       }
 
       if (mIsMesa) {
-        if (aFeature == nsIGfxInfo::FEATURE_WEBGL_OPENGL) {
-            *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
-            aSuggestedDriverVersion.AssignLiteral("Not Mesa");
-        }
         if (mIsNouveau && version(mMajorVersion, mMinorVersion) < version(8,0)) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
           aSuggestedDriverVersion.AssignLiteral("Mesa 8.0");
-        } else if (version(mMajorVersion, mMinorVersion, mRevisionVersion) < version(7,10,3)) {
+        }
+        else if (version(mMajorVersion, mMinorVersion, mRevisionVersion) < version(7,10,3)) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
           aSuggestedDriverVersion.AssignLiteral("Mesa 7.10.3");
-        } else if (mIsLlvmpipe) {
+        }
+        else if (mIsOldSwrast || mIsLlvmpipe) {
           *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;
         }
-        if (aFeature == nsIGfxInfo::FEATURE_WEBGL_MSAA)
+        else if (aFeature == nsIGfxInfo::FEATURE_WEBGL_MSAA)
         {
           if (mIsIntel && version(mMajorVersion, mMinorVersion) < version(8,1))
             *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION;

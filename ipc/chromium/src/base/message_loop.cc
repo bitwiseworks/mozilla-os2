@@ -19,8 +19,8 @@
 #if defined(OS_POSIX)
 #include "base/message_pump_libevent.h"
 #endif
-#if defined(OS_LINUX)
-#ifdef MOZ_WIDGET_GTK2
+#if defined(OS_LINUX) || defined(OS_BSD)
+#if defined(MOZ_WIDGET_GTK)
 #include "base/message_pump_glib.h"
 #endif
 #ifdef MOZ_WIDGET_QT
@@ -35,6 +35,7 @@
 
 using base::Time;
 using base::TimeDelta;
+using base::TimeTicks;
 
 // A lazily created thread local storage for quick access to a thread's message
 // loop, if one exists.  This should be safe and free of static constructors.
@@ -85,11 +86,15 @@ MessageLoop* MessageLoop::current() {
   return lazy_tls_ptr.Pointer()->Get();
 }
 
+int32_t message_loop_id_seq = 0;
+
 MessageLoop::MessageLoop(Type type)
     : type_(type),
+      id_(PR_ATOMIC_INCREMENT(&message_loop_id_seq)),
       nestable_tasks_allowed_(true),
       exception_restoration_(false),
       state_(NULL),
+      run_depth_base_(1),
 #ifdef OS_WIN
       os_modal_loop_(false),
 #endif  // OS_WIN
@@ -102,6 +107,12 @@ MessageLoop::MessageLoop(Type type)
   }
   if (type_ == TYPE_MOZILLA_CHILD) {
     pump_ = new mozilla::ipc::MessagePumpForChildProcess();
+    // There is a MessageLoop Run call from XRE_InitChildProcess
+    // and another one from MessagePumpForChildProcess. The one
+    // from MessagePumpForChildProcess becomes the base, so we need
+    // to set run_depth_base_ to 2 or we'll never be able to process
+    // Idle tasks.
+    run_depth_base_ = 2;
     return;
   }
 
@@ -119,7 +130,7 @@ MessageLoop::MessageLoop(Type type)
   if (type_ == TYPE_UI) {
 #if defined(OS_MACOSX)
     pump_ = base::MessagePumpMac::Create();
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_BSD)
     pump_ = new base::MessagePumpForUI();
 #endif  // OS_LINUX
   } else if (type_ == TYPE_IO) {
@@ -212,7 +223,7 @@ void MessageLoop::RunInternal() {
 // Wrapper functions for use in above message loop framework.
 
 bool MessageLoop::ProcessNextDelayedNonNestableTask() {
-  if (state_->run_depth != 1)
+  if (state_->run_depth > run_depth_base_)
     return false;
 
   if (deferred_non_nestable_work_queue_.empty())
@@ -274,7 +285,7 @@ void MessageLoop::PostTask_Helper(
 
   if (delay_ms > 0) {
     pending_task.delayed_run_time =
-        Time::Now() + TimeDelta::FromMilliseconds(delay_ms);
+        TimeTicks::Now() + TimeDelta::FromMilliseconds(delay_ms);
   } else {
     DCHECK(delay_ms == 0) << "delay should not be negative";
   }
@@ -330,7 +341,7 @@ void MessageLoop::RunTask(Task* task) {
 }
 
 bool MessageLoop::DeferOrRunPendingTask(const PendingTask& pending_task) {
-  if (pending_task.nestable || state_->run_depth == 1) {
+  if (pending_task.nestable || state_->run_depth <= run_depth_base_) {
     RunTask(pending_task.task);
     // Show that we ran a task (Note: a new one might arrive as a
     // consequence!).
@@ -441,13 +452,13 @@ bool MessageLoop::DoWork() {
   return false;
 }
 
-bool MessageLoop::DoDelayedWork(Time* next_delayed_work_time) {
+bool MessageLoop::DoDelayedWork(TimeTicks* next_delayed_work_time) {
   if (!nestable_tasks_allowed_ || delayed_work_queue_.empty()) {
-    *next_delayed_work_time = Time();
+    *next_delayed_work_time = TimeTicks();
     return false;
   }
 
-  if (delayed_work_queue_.top().delayed_run_time > Time::Now()) {
+  if (delayed_work_queue_.top().delayed_run_time > TimeTicks::Now()) {
     *next_delayed_work_time = delayed_work_queue_.top().delayed_run_time;
     return false;
   }

@@ -1,0 +1,89 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+TEST_DIRS += ['test']
+
+XPIDL_SOURCES += [
+    'nsINativeAppSupport.idl',
+]
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+    XPIDL_SOURCES += [
+        'nsIWinAppHelper.idl',
+    ]
+
+MODULE = 'xulapp'
+
+if CONFIG['MOZ_INSTRUMENT_EVENT_LOOP']:
+    EXPORTS += ['EventTracer.h']
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    EXPORTS += ['nsWindowsDllInterceptor.h']
+    CPP_SOURCES += [
+        'nsNativeAppSupportWin.cpp',
+        'nsWindowsDllBlocklist.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    EXPORTS += ['MacQuirks.h']
+    CPP_SOURCES += [
+        'nsCommandLineServiceMac.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
+    EXPORTS += ['nsQAppInstance.h']
+    CPP_SOURCES += [
+        'moc_nsNativeAppSupportQt.cpp',
+        'nsNativeAppSupportQt.cpp',
+        'nsQAppInstance.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    CPP_SOURCES += [
+        'nsNativeAppSupportOS2.cpp',
+    ]
+elif CONFIG['MOZ_ENABLE_GTK']:
+    CPP_SOURCES += [
+        'nsNativeAppSupportUnix.cpp',
+    ]
+else:
+    CPP_SOURCES += [
+        'nsNativeAppSupportDefault.cpp',
+    ]
+
+if CONFIG['MOZ_X11']:
+    CPP_SOURCES += [
+        'nsX11ErrorHandler.cpp',
+    ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    CPP_SOURCES += [
+        'nsAndroidStartup.cpp',
+    ]
+
+CPP_SOURCES += [
+    'CreateAppData.cpp',
+    'ProfileReset.cpp',
+    'nsAppRunner.cpp',
+    'nsConsoleWriter.cpp',
+    'nsEmbedFunctions.cpp',
+    'nsNativeAppSupportBase.cpp',
+    'nsSigHandlers.cpp',
+    'nsXREDirProvider.cpp',
+]
+
+if CONFIG['MOZ_GL_DEFAULT_PROVIDER'] == 'GLX':
+    CPP_SOURCES += [
+        'glxtest.cpp',
+    ]
+
+if CONFIG['MOZ_INSTRUMENT_EVENT_LOOP']:
+    CPP_SOURCES += [
+        'EventTracer.cpp',
+    ]
+
+if CONFIG['MOZ_UPDATER']:
+    if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+        CPP_SOURCES += [
+            'nsUpdateDriver.cpp',
+        ]

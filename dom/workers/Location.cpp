@@ -20,8 +20,8 @@ namespace {
 class Location
 {
   static JSClass sClass;
-  static JSPropertySpec sProperties[];
-  static JSFunctionSpec sFunctions[];
+  static const JSPropertySpec sProperties[];
+  static const JSFunctionSpec sFunctions[];
 
   enum SLOT {
     SLOT_href = 0,
@@ -45,9 +45,10 @@ public:
   }
 
   static JSObject*
-  Create(JSContext* aCx, JSString* aHref, JSString* aProtocol, JSString* aHost,
-         JSString* aHostname, JSString* aPort, JSString* aPathname,
-         JSString* aSearch, JSString* aHash)
+  Create(JSContext* aCx, JS::Handle<JSString*> aHref, JS::Handle<JSString*> aProtocol,
+         JS::Handle<JSString*> aHost, JS::Handle<JSString*> aHostname,
+         JS::Handle<JSString*> aPort, JS::Handle<JSString*> aPathname,
+         JS::Handle<JSString*> aSearch, JS::Handle<JSString*> aHash)
   {
     JSObject* obj = JS_NewObject(aCx, &sClass, NULL, NULL);
     if (!obj) {
@@ -128,7 +129,8 @@ private:
   }
 
   static JSBool
-  GetProperty(JSContext* aCx, JSHandleObject aObj, JSHandleId aIdval, JSMutableHandleValue aVp)
+  GetProperty(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
+              JS::MutableHandle<JS::Value> aVp)
   {
     JSClass* classPtr = JS_GetClass(aObj);
     if (classPtr != &sClass) {
@@ -149,11 +151,11 @@ private:
 JSClass Location::sClass = {
   "WorkerLocation",
   JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(SLOT_COUNT),
-  JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Finalize
 };
 
-JSPropertySpec Location::sProperties[] = {
+const JSPropertySpec Location::sProperties[] = {
   { "href", SLOT_href, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
     JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
   { "protocol", SLOT_protocol, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
@@ -173,7 +175,7 @@ JSPropertySpec Location::sProperties[] = {
   { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 };
 
-JSFunctionSpec Location::sFunctions[] = {
+const JSFunctionSpec Location::sFunctions[] = {
   JS_FN("toString", ToString, 0, 0),
   JS_FS_END
 };
@@ -191,9 +193,11 @@ InitClass(JSContext* aCx, JSObject* aGlobal)
 }
 
 JSObject*
-Create(JSContext* aCx, JSString* aHref, JSString* aProtocol, JSString* aHost,
-       JSString* aHostname, JSString* aPort, JSString* aPathname,
-       JSString* aSearch, JSString* aHash)
+Create(JSContext* aCx,
+       JS::Handle<JSString*> aHref, JS::Handle<JSString*> aProtocol,
+       JS::Handle<JSString*> aHost, JS::Handle<JSString*> aHostname,
+       JS::Handle<JSString*> aPort, JS::Handle<JSString*> aPathname,
+       JS::Handle<JSString*> aSearch, JS::Handle<JSString*> aHash)
 {
   return Location::Create(aCx, aHref, aProtocol, aHost, aHostname, aPort,
                           aPathname, aSearch, aHash);

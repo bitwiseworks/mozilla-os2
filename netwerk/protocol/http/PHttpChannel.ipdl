@@ -9,17 +9,18 @@ include protocol PNecko;
 include InputStreamParams;
 include URIParams;
 
+include protocol PBlob; //FIXME: bug #792908
+
 include "mozilla/net/PHttpChannelParams.h";
 include "mozilla/net/NeckoMessageUtils.h";
+include "mozilla/net/DNS.h";
 include "prio.h";
-include "SerializedLoadContext.h";
 
 using RequestHeaderTuples;
 using nsHttpHeaderArray;
 using nsHttpResponseHead;
 using nsHttpAtom;
-using IPC::SerializedLoadContext;
-using PRNetAddr;
+using mozilla::net::NetAddr;
 
 namespace mozilla {
 namespace net {
@@ -30,41 +31,14 @@ protocol PHttpChannel
   manager PNecko;
 
 parent:
-  AsyncOpen(URIParams           uri,
-            // - TODO: bug 571161: unclear if any HTTP channel clients ever
-            // set originalURI != uri (about:credits?); also not clear if
-            // chrome channel would ever need to know.  Get rid of next arg?
-            OptionalURIParams   original,
-            OptionalURIParams   doc,
-            OptionalURIParams   referrer,
-            uint32_t            loadFlags,
-            RequestHeaderTuples requestHeaders,
-            nsHttpAtom          requestMethod,
-            OptionalInputStreamParams uploadStream,
-            bool                uploadStreamHasHeaders,
-            uint16_t            priority,
-            uint8_t             redirectionLimit,
-            bool                allowPipelining,
-            bool                forceAllowThirdPartyCookie,
-            bool                resumeAt,
-            uint64_t            startPos,
-            nsCString           entityID,
-            bool                chooseApplicationCache,
-            nsCString           appCacheClientID,
-            bool                allowSpdy,
-            SerializedLoadContext loadContext);
-
-  // Used to connect redirected-to channel on the parent with redirected-to
-  // channel on the child.
-  ConnectChannel(uint32_t channelId);
+  // Note: channels are opened during construction, so no open method here:
+  // see PNecko.ipdl
 
   SetPriority(uint16_t priority);
 
   SetCacheTokenCachedCharset(nsCString charset);
 
-  UpdateAssociatedContentSecurity(int32_t high,
-                                  int32_t low,
-                                  int32_t broken,
+  UpdateAssociatedContentSecurity(int32_t broken,
                                   int32_t no);
   Suspend();
   Resume();
@@ -72,24 +46,25 @@ parent:
   Cancel(nsresult status);
 
   // Reports approval/veto of redirect by child process redirect observers
-  Redirect2Verify(nsresult result, RequestHeaderTuples changedHeaders);
+  Redirect2Verify(nsresult result, RequestHeaderTuples changedHeaders,
+                  OptionalURIParams apiRedirectTo);
 
   // For document loads we keep this protocol open after child's
   // OnStopRequest, and send this msg (instead of __delete__) to allow
-  // partial cleanup on parent. 
+  // partial cleanup on parent.
   DocumentChannelCleanup();
 
   // This might have to be sync. If this fails we must fail the document load
   // to avoid endless loop.
   //
   // Explanation: the document loaded was loaded from the offline cache. But
-  // the cache group id (the manifest URL) of the cache group it was loaded 
-  // from is different then the manifest the document refers to in the html 
-  // tag. If we detect this during the cache selection algorithm, we must not 
+  // the cache group id (the manifest URL) of the cache group it was loaded
+  // from is different then the manifest the document refers to in the html
+  // tag. If we detect this during the cache selection algorithm, we must not
   // load this document from the offline cache group it was just loaded from.
   // Marking the cache entry as foreign in its cache group will prevent
   // the document to load from the bad offline cache group. After it is marked,
-  // we reload the document to take the effect. If we fail to mark the entry 
+  // we reload the document to take the effect. If we fail to mark the entry
   // as foreign, we will end up in the same situation and reload again and
   // again, indefinitely.
   MarkOfflineCacheEntryAsForeign();
@@ -105,8 +80,8 @@ child:
                  uint32_t            cacheExpirationTime,
                  nsCString           cachedCharset,
                  nsCString           securityInfoSerialization,
-                 PRNetAddr           selfAddr,
-                 PRNetAddr           peerAddr);
+                 NetAddr             selfAddr,
+                 NetAddr             peerAddr);
 
   // Combines a single OnDataAvailable and its associated OnProgress &
   // OnStatus calls into one IPDL message
@@ -114,7 +89,7 @@ child:
                      uint64_t  progress,
                      uint64_t  progressMax,
                      nsCString data,
-                     uint32_t  offset,
+                     uint64_t  offset,
                      uint32_t  count);
 
   OnStopRequest(nsresult statusCode);

@@ -5,6 +5,7 @@
 
 #include "nsISupports.idl"
 
+interface nsIRequest;
 interface nsIFrame;
 interface nsIObjectFrame;
 interface nsIPluginTag;
@@ -19,9 +20,12 @@ interface nsIURI;
 
 /**
  * This interface represents a content node that loads objects.
+ *
+ * Please make sure to update the MozObjectLoadingContent WebIDL
+ * interface to mirror this interface when changing it.
  */
 
-[scriptable, uuid(a812424b-4820-4e28-96c8-dd2b69e36496)]
+[scriptable, uuid(070bfc7f-f8b8-4e84-aa31-a0bfaffa8e8e)]
 interface nsIObjectLoadingContent : nsISupports
 {
   /**
@@ -32,6 +36,8 @@ interface nsIObjectLoadingContent : nsISupports
   const unsigned long TYPE_PLUGIN   = 2;
   const unsigned long TYPE_DOCUMENT = 3;
   const unsigned long TYPE_NULL     = 4;
+
+  const unsigned long PLUGIN_ACTIVE               = 0xFF;
 
   // The content type is not supported (e.g. plugin not installed)
   const unsigned long PLUGIN_UNSUPPORTED          = 0;
@@ -49,8 +55,10 @@ interface nsIObjectLoadingContent : nsISupports
   const unsigned long PLUGIN_SUPPRESSED           = 6;
   // Blocked by content policy
   const unsigned long PLUGIN_USER_DISABLED        = 7;
-  /// ** All values >= PLUGIN_CLICK_TO_PLAY and <= PLUGIN_VULNERABLE_NO_UPDATE
-  ///    are click-to-play types.
+  /// ** All values >= PLUGIN_CLICK_TO_PLAY are plugin placeholder types that
+  ///    would be replaced by a real plugin if activated (playPlugin())
+  /// ** Furthermore, values >= PLUGIN_CLICK_TO_PLAY and
+  ///    <= PLUGIN_VULNERABLE_NO_UPDATE are click-to-play types.
   // The plugin is disabled until the user clicks on it
   const unsigned long PLUGIN_CLICK_TO_PLAY        = 8;
   // The plugin is vulnerable (update available)
@@ -80,6 +88,13 @@ interface nsIObjectLoadingContent : nsISupports
   unsigned long getContentTypeForMIMEType(in AUTF8String aMimeType);
 
   /**
+   * Returns the base URI of the object as seen by plugins. This differs from
+   * the normal codebase in that it takes <param> tags and plugin-specific
+   * quirks into account.
+   */
+  [noscript] readonly attribute nsIURI baseURI;
+
+  /**
    * Returns the plugin instance if it has already been instantiated. This
    * will never instantiate the plugin and so is safe to call even when
    * content script must not execute.
@@ -95,8 +110,6 @@ interface nsIObjectLoadingContent : nsISupports
    */
   [noscript] void hasNewFrame(in nsIObjectFrame aFrame);
 
-  [noscript] void disconnectFrame();
-
   /**
    * If this object is in going to be printed, this method
    * returns the nsIObjectFrame object which should be used when
@@ -105,6 +118,10 @@ interface nsIObjectLoadingContent : nsISupports
    */
   [noscript] nsIFrame getPrintFrame();
 
+  /*
+   * Notifications from pluginhost that our instance crashed or was destroyed.
+   */
+  [noscript] void pluginDestroyed();
   [noscript] void pluginCrashed(in nsIPluginTag pluginTag,
                                 in AString pluginDumpID,
                                 in AString browserDumpID,
@@ -112,13 +129,14 @@ interface nsIObjectLoadingContent : nsISupports
 
   /**
    * This method will play a plugin that has been stopped by the
-   * click-to-play plugins feature.
+   * click-to-play plugins or play-preview features.
    */
   void playPlugin();
 
   /**
-   * This attribute will return true if the plugin has been activated and
-   * false if the plugin is still in the click-to-play or play preview state.
+   * This attribute will return true if the current content type has been
+   * activated, either explicitly or by passing checks that would have it be
+   * click-to-play or play-preview.
    */
   readonly attribute boolean activated;
 
@@ -128,12 +146,35 @@ interface nsIObjectLoadingContent : nsISupports
   [noscript] void asyncStartPluginInstance();
 
   /**
+   * Puts the tag in the "waiting on a channel" state and adopts this
+   * channel. This does not override the normal logic of examining attributes
+   * and the channel type, so the load may cancel this channel if it decides not
+   * to use one.
+   *
+   * This assumes:
+   *  - This tag has not begun loading yet
+   *  - This channel has not yet hit OnStartRequest
+   *  - The caller will continue to pass channel events to us as a listener
+   */
+  [noscript] void initializeFromChannel(in nsIRequest request);
+
+  /**
    * The URL of the data/src loaded in the object. This may be null (i.e.
    * an <embed> with no src).
    */
   readonly attribute nsIURI srcURI;
 
+  /**
+   * The plugin's current state of fallback content. This property
+   * only makes sense if the plugin is not activated.
+   */
   readonly attribute unsigned long pluginFallbackType;
+
+  /**
+   * If this object currently owns a running plugin, regardless of whether or
+   * not one is pending spawn/despawn.
+   */
+  readonly attribute bool hasRunningPlugin;
 
   /**
    * This method will disable the play-preview plugin state.

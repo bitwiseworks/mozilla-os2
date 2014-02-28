@@ -5,8 +5,10 @@
 
 #include "gfxFT2FontBase.h"
 #include "gfxFT2Utils.h"
+#include "mozilla/Likely.h"
 #include FT_TRUETYPE_TAGS_H
 #include FT_TRUETYPE_TABLES_H
+#include <algorithm>
 
 #ifdef HAVE_FONTCONFIG_FCFREETYPE_H
 #include <fontconfig/fcfreetype.h>
@@ -33,7 +35,7 @@ ScaleRoundDesignUnits(FT_Short aDesignMetric, FT_Fixed aScale)
 static void
 SnapLineToPixels(gfxFloat& aOffset, gfxFloat& aSize)
 {
-    gfxFloat snappedSize = NS_MAX(floor(aSize + 0.5), 1.0);
+    gfxFloat snappedSize = std::max(floor(aSize + 0.5), 1.0);
     // Correct offset for change in size
     gfxFloat offset = aOffset - 0.5 * (aSize - snappedSize);
     // Snap offset
@@ -48,7 +50,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
     NS_PRECONDITION(aMetrics != NULL, "aMetrics must not be NULL");
     NS_PRECONDITION(aSpaceGlyph != NULL, "aSpaceGlyph must not be NULL");
 
-    if (NS_UNLIKELY(!mFace)) {
+    if (MOZ_UNLIKELY(!mFace)) {
         // No face.  This unfortunate situation might happen if the font
         // file is (re)moved at the wrong time.
         aMetrics->emHeight = mGfxFont->GetStyle()->size;
@@ -115,10 +117,12 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
 
         // maxAscent/maxDescent get used for frame heights, and some fonts
         // don't have the HHEA table ascent/descent set (bug 279032).
-        if (aMetrics->emAscent > aMetrics->maxAscent)
-            aMetrics->maxAscent = aMetrics->emAscent;
-        if (aMetrics->emDescent > aMetrics->maxDescent)
-            aMetrics->maxDescent = aMetrics->emDescent;
+        // We use NS_round here to parallel the pixel-rounded values that
+        // freetype gives us for ftMetrics.ascender/descender.
+        aMetrics->maxAscent =
+            std::max(aMetrics->maxAscent, NS_round(aMetrics->emAscent));
+        aMetrics->maxDescent =
+            std::max(aMetrics->maxDescent, NS_round(aMetrics->emDescent));
     } else {
         aMetrics->emAscent = aMetrics->maxAscent;
         aMetrics->emDescent = aMetrics->maxDescent;
@@ -164,10 +168,10 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
         gfxFloat avgCharWidth =
             ScaleRoundDesignUnits(os2->xAvgCharWidth, ftMetrics.x_scale);
         aMetrics->aveCharWidth =
-            NS_MAX(aMetrics->aveCharWidth, avgCharWidth);
+            std::max(aMetrics->aveCharWidth, avgCharWidth);
     }
     aMetrics->aveCharWidth =
-        NS_MAX(aMetrics->aveCharWidth, aMetrics->zeroOrAveCharWidth);
+        std::max(aMetrics->aveCharWidth, aMetrics->zeroOrAveCharWidth);
     if (aMetrics->aveCharWidth == 0.0) {
         aMetrics->aveCharWidth = aMetrics->spaceWidth;
     }
@@ -176,7 +180,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
     }
     // Apparently hinting can mean that max_advance is not always accurate.
     aMetrics->maxAdvance =
-        NS_MAX(aMetrics->maxAdvance, aMetrics->aveCharWidth);
+        std::max(aMetrics->maxAdvance, aMetrics->aveCharWidth);
 
     // gfxFont::Metrics::underlineOffset is the position of the top of the
     // underline.
@@ -221,7 +225,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
     if (os2 && os2->ySuperscriptYOffset) {
         gfxFloat val = ScaleRoundDesignUnits(os2->ySuperscriptYOffset,
                                              ftMetrics.y_scale);
-        aMetrics->superscriptOffset = NS_MAX(1.0, val);
+        aMetrics->superscriptOffset = std::max(1.0, val);
     } else {
         aMetrics->superscriptOffset = aMetrics->xHeight;
     }
@@ -231,7 +235,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
                                              ftMetrics.y_scale);
         // some fonts have the incorrect sign. 
         val = fabs(val);
-        aMetrics->subscriptOffset = NS_MAX(1.0, val);
+        aMetrics->subscriptOffset = std::max(1.0, val);
     } else {
         aMetrics->subscriptOffset = aMetrics->xHeight;
     }
@@ -253,7 +257,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
 
     // Text input boxes currently don't work well with lineHeight
     // significantly less than maxHeight (with Verdana, for example).
-    lineHeight = floor(NS_MAX(lineHeight, aMetrics->maxHeight) + 0.5);
+    lineHeight = floor(std::max(lineHeight, aMetrics->maxHeight) + 0.5);
     aMetrics->externalLeading =
         lineHeight - aMetrics->internalLeading - aMetrics->emHeight;
 
@@ -267,7 +271,7 @@ gfxFT2LockedFace::GetMetrics(gfxFont::Metrics* aMetrics,
 uint32_t
 gfxFT2LockedFace::GetGlyph(uint32_t aCharCode)
 {
-    if (NS_UNLIKELY(!mFace))
+    if (MOZ_UNLIKELY(!mFace))
         return 0;
 
 #ifdef HAVE_FONTCONFIG_FCFREETYPE_H
@@ -297,7 +301,7 @@ gfxFT2LockedFace::GetUVSGlyph(uint32_t aCharCode, uint32_t aVariantSelector)
 {
     NS_PRECONDITION(aVariantSelector, "aVariantSelector should not be NULL");
 
-    if (NS_UNLIKELY(!mFace))
+    if (MOZ_UNLIKELY(!mFace))
         return 0;
 
     // This function is available from FreeType 2.3.6 (June 2008).
@@ -314,31 +318,6 @@ gfxFT2LockedFace::GetUVSGlyph(uint32_t aCharCode, uint32_t aVariantSelector)
 #endif
 
     return (*sGetCharVariantPtr)(mFace, aCharCode, aVariantSelector);
-}
-
-bool
-gfxFT2LockedFace::GetFontTable(uint32_t aTag, FallibleTArray<uint8_t>& aBuffer)
-{
-    if (!mFace || !FT_IS_SFNT(mFace))
-        return false;
-
-    FT_ULong length = 0;
-    // TRUETYPE_TAG is defined equivalent to FT_MAKE_TAG
-    FT_Error error = FT_Load_Sfnt_Table(mFace, aTag, 0, NULL, &length);
-    if (error != 0)
-        return false;
-
-    if (NS_UNLIKELY(length > static_cast<FallibleTArray<uint8_t>::size_type>(-1))
-        || NS_UNLIKELY(!aBuffer.SetLength(length)))
-        return false;
-        
-    error = FT_Load_Sfnt_Table(mFace, aTag, 0, aBuffer.Elements(), &length);
-    if (NS_UNLIKELY(error != 0)) {
-        aBuffer.Clear();
-        return false;
-    }
-
-    return true;
 }
 
 uint32_t

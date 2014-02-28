@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set sw=4 ts=8 et tw=80 : */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -20,8 +20,11 @@
 #include "nsIFileURL.h"
 
 #include "mozilla/Preferences.h"
+#include "mozilla/net/RemoteOpenFileChild.h"
+#include "nsITabChild.h"
 
 using namespace mozilla;
+using namespace mozilla::net;
 
 static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 
@@ -32,6 +35,12 @@ static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 
 //-----------------------------------------------------------------------------
 
+// Ignore any LOG macro that we inherit from arbitrary headers. (We define our
+// own LOG macro below.)
+#ifdef LOG
+#undef LOG
+#endif
+
 #if defined(PR_LOGGING)
 //
 // set NSPR_LOG_MODULES=nsJarProtocol:5
@@ -39,6 +48,7 @@ static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 static PRLogModuleInfo *gJarProtocolLog = nullptr;
 #endif
 
+// If you ever want to define PR_FORCE_LOGGING in this file, see bug 545995
 #define LOG(args)     PR_LOG(gJarProtocolLog, PR_LOG_DEBUG, args)
 #define LOG_ENABLED() PR_LOG_TEST(gJarProtocolLog, 4)
 
@@ -57,8 +67,8 @@ public:
     nsJARInputThunk(nsIZipReader *zipReader,
                     nsIURI* fullJarURI,
                     const nsACString &jarEntry,
-                    nsIZipReaderCache *jarCache)
-        : mJarCache(jarCache)
+                    bool usingJarCache)
+        : mUsingJarCache(usingJarCache)
         , mJarReader(zipReader)
         , mJarEntry(jarEntry)
         , mContentLength(-1)
@@ -74,40 +84,31 @@ public:
 
     virtual ~nsJARInputThunk()
     {
-        if (!mJarCache && mJarReader)
-            mJarReader->Close();
+        Close();
     }
 
-    void GetJarReader(nsIZipReader **result)
-    {
-        NS_IF_ADDREF(*result = mJarReader);
-    }
-
-    int32_t GetContentLength()
+    int64_t GetContentLength()
     {
         return mContentLength;
     }
 
-    nsresult EnsureJarStream();
+    nsresult Init();
 
 private:
 
-    nsCOMPtr<nsIZipReaderCache> mJarCache;
+    bool                        mUsingJarCache;
     nsCOMPtr<nsIZipReader>      mJarReader;
     nsCString                   mJarDirSpec;
     nsCOMPtr<nsIInputStream>    mJarStream;
     nsCString                   mJarEntry;
-    int32_t                     mContentLength;
+    int64_t                     mContentLength;
 };
 
 NS_IMPL_THREADSAFE_ISUPPORTS1(nsJARInputThunk, nsIInputStream)
 
 nsresult
-nsJARInputThunk::EnsureJarStream()
+nsJARInputThunk::Init()
 {
-    if (mJarStream)
-        return NS_OK;
-
     nsresult rv;
     if (ENTRY_IS_DIRECTORY(mJarEntry)) {
         // A directory stream also needs the Spec of the FullJarURI
@@ -136,7 +137,7 @@ nsJARInputThunk::EnsureJarStream()
     rv = mJarStream->Available((uint64_t *) &avail);
     if (NS_FAILED(rv)) return rv;
 
-    mContentLength = avail < PR_INT32_MAX ? (int32_t) avail : -1;
+    mContentLength = avail < INT64_MAX ? (int64_t) avail : -1;
 
     return NS_OK;
 }
@@ -144,27 +145,28 @@ nsJARInputThunk::EnsureJarStream()
 NS_IMETHODIMP
 nsJARInputThunk::Close()
 {
-    if (mJarStream)
-        return mJarStream->Close();
+    nsresult rv = NS_OK;
 
-    return NS_OK;
+    if (mJarStream)
+        rv = mJarStream->Close();
+
+    if (!mUsingJarCache && mJarReader)
+        mJarReader->Close();
+
+    mJarReader = nullptr;
+
+    return rv;
 }
 
 NS_IMETHODIMP
 nsJARInputThunk::Available(uint64_t *avail)
 {
-    nsresult rv = EnsureJarStream();
-    if (NS_FAILED(rv)) return rv;
-
     return mJarStream->Available(avail);
 }
 
 NS_IMETHODIMP
 nsJARInputThunk::Read(char *buf, uint32_t count, uint32_t *countRead)
 {
-    nsresult rv = EnsureJarStream();
-    if (NS_FAILED(rv)) return rv;
-
     return mJarStream->Read(buf, count, countRead);
 }
 
@@ -189,13 +191,14 @@ nsJARInputThunk::IsNonBlocking(bool *nonBlocking)
 
 
 nsJARChannel::nsJARChannel()
-    : mAppURI(nullptr)
+    : mOpened(false)
+    , mAppURI(nullptr)
     , mContentLength(-1)
     , mLoadFlags(LOAD_NORMAL)
     , mStatus(NS_OK)
     , mIsPending(false)
     , mIsUnsafe(true)
-    , mJarInput(nullptr)
+    , mOpeningRemote(false)
 {
 #if defined(PR_LOGGING)
     if (!gJarProtocolLog)
@@ -208,21 +211,19 @@ nsJARChannel::nsJARChannel()
 
 nsJARChannel::~nsJARChannel()
 {
-    // with the exception of certain error cases mJarInput will already be null.
-    NS_IF_RELEASE(mJarInput);
-
     // release owning reference to the jar handler
     nsJARProtocolHandler *handler = gJarHandler;
     NS_RELEASE(handler); // NULL parameter
 }
 
-NS_IMPL_ISUPPORTS_INHERITED6(nsJARChannel,
+NS_IMPL_ISUPPORTS_INHERITED7(nsJARChannel,
                              nsHashPropertyBag,
                              nsIRequest,
                              nsIChannel,
                              nsIStreamListener,
                              nsIRequestObserver,
                              nsIDownloadObserver,
+                             nsIRemoteOpenFileListener,
                              nsIJARChannel)
 
 nsresult 
@@ -260,8 +261,10 @@ nsJARChannel::Init(nsIURI *uri)
 }
 
 nsresult
-nsJARChannel::CreateJarInput(nsIZipReaderCache *jarCache)
+nsJARChannel::CreateJarInput(nsIZipReaderCache *jarCache, nsJARInputThunk **resultInput)
 {
+    MOZ_ASSERT(resultInput);
+
     // important to pass a clone of the file since the nsIFile impl is not
     // necessarily MT-safe
     nsCOMPtr<nsIFile> clonedFile;
@@ -272,9 +275,9 @@ nsJARChannel::CreateJarInput(nsIZipReaderCache *jarCache)
     nsCOMPtr<nsIZipReader> reader;
     if (jarCache) {
         if (mInnerJarEntry.IsEmpty())
-            rv = jarCache->GetZip(mJarFile, getter_AddRefs(reader));
-        else 
-            rv = jarCache->GetInnerZip(mJarFile, mInnerJarEntry,
+            rv = jarCache->GetZip(clonedFile, getter_AddRefs(reader));
+        else
+            rv = jarCache->GetInnerZip(clonedFile, mInnerJarEntry,
                                        getter_AddRefs(reader));
     } else {
         // create an uncached jar reader
@@ -282,7 +285,7 @@ nsJARChannel::CreateJarInput(nsIZipReaderCache *jarCache)
         if (NS_FAILED(rv))
             return rv;
 
-        rv = outerReader->Open(mJarFile);
+        rv = outerReader->Open(clonedFile);
         if (NS_FAILED(rv))
             return rv;
 
@@ -299,26 +302,37 @@ nsJARChannel::CreateJarInput(nsIZipReaderCache *jarCache)
     if (NS_FAILED(rv))
         return rv;
 
-    mJarInput = new nsJARInputThunk(reader, mJarURI, mJarEntry, jarCache);
-    if (!mJarInput)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(mJarInput);
+    nsRefPtr<nsJARInputThunk> input = new nsJARInputThunk(reader,
+                                                          mJarURI,
+                                                          mJarEntry,
+                                                          jarCache != nullptr
+                                                          );
+    rv = input->Init();
+    if (NS_FAILED(rv))
+        return rv;
+
+    // Make GetContentLength meaningful
+    mContentLength = input->GetContentLength();
+
+    input.forget(resultInput);
     return NS_OK;
 }
 
 nsresult
-nsJARChannel::EnsureJarInput(bool blocking)
+nsJARChannel::LookupFile()
 {
-    LOG(("nsJARChannel::EnsureJarInput [this=%x %s]\n", this, mSpec.get()));
+    LOG(("nsJARChannel::LookupFile [this=%x %s]\n", this, mSpec.get()));
 
     nsresult rv;
     nsCOMPtr<nsIURI> uri;
 
     rv = mJarURI->GetJARFile(getter_AddRefs(mJarBaseURI));
-    if (NS_FAILED(rv)) return rv;
+    if (NS_FAILED(rv))
+        return rv;
 
     rv = mJarURI->GetJAREntry(mJarEntry);
-    if (NS_FAILED(rv)) return rv;
+    if (NS_FAILED(rv))
+        return rv;
 
     // The name of the JAR entry must not contain URL-escaped characters:
     // we're moving from URL domain to a filename domain here. nsStandardURL
@@ -331,6 +345,44 @@ nsJARChannel::EnsureJarInput(bool blocking)
         nsCOMPtr<nsIFileURL> fileURL = do_QueryInterface(mJarBaseURI);
         if (fileURL)
             fileURL->GetFile(getter_AddRefs(mJarFile));
+    }
+    // if we're in child process and have special "remoteopenfile:://" scheme,
+    // create special nsIFile that gets file handle from parent when opened.
+    if (!mJarFile && !gJarHandler->IsMainProcess()) {
+        nsAutoCString scheme;
+        rv = mJarBaseURI->GetScheme(scheme);
+        if (NS_SUCCEEDED(rv) && scheme.EqualsLiteral("remoteopenfile")) {
+            nsRefPtr<RemoteOpenFileChild> remoteFile = new RemoteOpenFileChild();
+            rv = remoteFile->Init(mJarBaseURI);
+            NS_ENSURE_SUCCESS(rv, rv);
+            mJarFile = remoteFile;
+
+            nsIZipReaderCache *jarCache = gJarHandler->JarCache();
+            if (jarCache) {
+                bool cached = false;
+                rv = jarCache->IsCached(mJarFile, &cached);
+                if (NS_SUCCEEDED(rv) && cached) {
+                    // zipcache already has file mmapped: don't open on parent,
+                    // just return and proceed to cache hit in CreateJarInput()
+                    return NS_OK;
+                }
+            }
+
+            mOpeningRemote = true;
+
+            if (gJarHandler->RemoteOpenFileInProgress(remoteFile, this)) {
+                // JarHandler will trigger OnRemoteFileOpen() after the first
+                // request for this file completes and we'll get a JAR cache
+                // hit.
+                return NS_OK;
+            }
+
+            // Open file on parent: OnRemoteFileOpenComplete called when done
+            nsCOMPtr<nsITabChild> tabChild;
+            NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup, tabChild);
+            rv = remoteFile->AsyncRemoteFileOpen(PR_RDONLY, this, tabChild.get());
+            NS_ENSURE_SUCCESS(rv, rv);
+        }
     }
     // try to handle a nested jar
     if (!mJarFile) {
@@ -348,27 +400,39 @@ nsJARChannel::EnsureJarInput(bool blocking)
         }
     }
 
-    if (mJarFile) {
-        mIsUnsafe = false;
-
-        // NOTE: we do not need to deal with mSecurityInfo here,
-        // because we're loading from a local file
-        rv = CreateJarInput(gJarHandler->JarCache());
-    }
-    else if (blocking) {
-        NS_NOTREACHED("need sync downloader");
-        rv = NS_ERROR_NOT_IMPLEMENTED;
-    }
-    else {
-        // kick off an async download of the base URI...
-        rv = NS_NewDownloader(getter_AddRefs(mDownloader), this);
-        if (NS_SUCCEEDED(rv))
-            rv = NS_OpenURI(mDownloader, nullptr, mJarBaseURI, nullptr,
-                            mLoadGroup, mCallbacks,
-                            mLoadFlags & ~(LOAD_DOCUMENT_URI | LOAD_CALL_CONTENT_SNIFFERS));
-    }
     return rv;
+}
 
+nsresult
+nsJARChannel::OpenLocalFile()
+{
+    MOZ_ASSERT(mIsPending);
+
+    // Local files are always considered safe.
+    mIsUnsafe = false;
+
+    nsRefPtr<nsJARInputThunk> input;
+    nsresult rv = CreateJarInput(gJarHandler->JarCache(),
+                                 getter_AddRefs(input));
+    if (NS_SUCCEEDED(rv)) {
+        // Create input stream pump and call AsyncRead as a block.
+        rv = NS_NewInputStreamPump(getter_AddRefs(mPump), input);
+        if (NS_SUCCEEDED(rv))
+            rv = mPump->AsyncRead(this, nullptr);
+    }
+
+    return rv;
+}
+
+void
+nsJARChannel::NotifyError(nsresult aError)
+{
+    MOZ_ASSERT(NS_FAILED(aError));
+
+    mStatus = aError;
+
+    OnStartRequest(nullptr, nullptr);
+    OnStopRequest(nullptr, nullptr, aError);
 }
 
 //-----------------------------------------------------------------------------
@@ -530,7 +594,15 @@ nsJARChannel::GetSecurityInfo(nsISupports **aSecurityInfo)
 NS_IMETHODIMP
 nsJARChannel::GetContentType(nsACString &result)
 {
+    // If the Jar file has not been open yet,
+    // We return application/x-unknown-content-type
+    if (!mOpened) {
+      result.Assign(UNKNOWN_CONTENT_TYPE);
+      return NS_OK;
+    }
+
     if (mContentType.IsEmpty()) {
+
         //
         // generate content type and set it
         //
@@ -602,7 +674,19 @@ nsJARChannel::GetContentDisposition(uint32_t *aContentDisposition)
 }
 
 NS_IMETHODIMP
+nsJARChannel::SetContentDisposition(uint32_t aContentDisposition)
+{
+    return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 nsJARChannel::GetContentDispositionFilename(nsAString &aContentDispositionFilename)
+{
+    return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+nsJARChannel::SetContentDispositionFilename(const nsAString &aContentDispositionFilename)
 {
     return NS_ERROR_NOT_AVAILABLE;
 }
@@ -618,18 +702,14 @@ nsJARChannel::GetContentDispositionHeader(nsACString &aContentDispositionHeader)
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetContentLength(int32_t *result)
+nsJARChannel::GetContentLength(int64_t *result)
 {
-    // if content length is unknown, query mJarInput...
-    if (mContentLength < 0 && mJarInput)
-        mContentLength = mJarInput->GetContentLength();
-
     *result = mContentLength;
     return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetContentLength(int32_t aContentLength)
+nsJARChannel::SetContentLength(int64_t aContentLength)
 {
     // XXX does this really make any sense at all?
     mContentLength = aContentLength;
@@ -641,24 +721,31 @@ nsJARChannel::Open(nsIInputStream **stream)
 {
     LOG(("nsJARChannel::Open [this=%x]\n", this));
 
-    NS_ENSURE_TRUE(!mJarInput, NS_ERROR_IN_PROGRESS);
+    NS_ENSURE_TRUE(!mOpened, NS_ERROR_IN_PROGRESS);
     NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
 
     mJarFile = nullptr;
     mIsUnsafe = true;
 
-    nsresult rv = EnsureJarInput(true);
-    if (NS_FAILED(rv)) return rv;
+    nsresult rv = LookupFile();
+    if (NS_FAILED(rv))
+        return rv;
 
-    if (!mJarInput)
-        return NS_ERROR_UNEXPECTED;
+    // If mJarInput was not set by LookupFile, the JAR is a remote jar.
+    if (!mJarFile) {
+        NS_NOTREACHED("need sync downloader");
+        return NS_ERROR_NOT_IMPLEMENTED;
+    }
 
-    // force load the jar file now so GetContentLength will return a
-    // meaningful value once we return.
-    rv = mJarInput->EnsureJarStream();
-    if (NS_FAILED(rv)) return rv;
+    nsRefPtr<nsJARInputThunk> input;
+    rv = CreateJarInput(gJarHandler->JarCache(), getter_AddRefs(input));
+    if (NS_FAILED(rv))
+        return rv;
 
-    NS_ADDREF(*stream = mJarInput);
+    input.forget(stream);
+    mOpened = true;
+    // local files are always considered safe
+    mIsUnsafe = false;
     return NS_OK;
 }
 
@@ -668,6 +755,7 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
     LOG(("nsJARChannel::AsyncOpen [this=%x]\n", this));
 
     NS_ENSURE_ARG_POINTER(listener);
+    NS_ENSURE_TRUE(!mOpened, NS_ERROR_IN_PROGRESS);
     NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
 
     mJarFile = nullptr;
@@ -676,33 +764,44 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
     // Initialize mProgressSink
     NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup, mProgressSink);
 
-    nsresult rv = EnsureJarInput(false);
-    if (NS_FAILED(rv)) return rv;
+    nsresult rv = LookupFile();
+    if (NS_FAILED(rv))
+        return rv;
 
     // These variables must only be set if we're going to trigger an
     // OnStartRequest, either from AsyncRead or OnDownloadComplete.
+    // 
+    // That means: Do not add early return statements beyond this point!
     mListener = listener;
     mListenerContext = ctx;
     mIsPending = true;
-    if (mJarInput) {
-        // create input stream pump and call AsyncRead as a block
-        rv = NS_NewInputStreamPump(getter_AddRefs(mPump), mJarInput);
-        if (NS_SUCCEEDED(rv))
-            rv = mPump->AsyncRead(this, nullptr);
 
-        // If we failed to create the pump or initiate the AsyncRead,
-        // then we need to clear these variables.
-        if (NS_FAILED(rv)) {
-            mIsPending = false;
-            mListenerContext = nullptr;
-            mListener = nullptr;
-            return rv;
-        }
+    if (!mJarFile) {
+        // Not a local file...
+        // kick off an async download of the base URI...
+        rv = NS_NewDownloader(getter_AddRefs(mDownloader), this);
+        if (NS_SUCCEEDED(rv))
+            rv = NS_OpenURI(mDownloader, nullptr, mJarBaseURI, nullptr,
+                            mLoadGroup, mCallbacks,
+                            mLoadFlags & ~(LOAD_DOCUMENT_URI | LOAD_CALL_CONTENT_SNIFFERS));
+    } else if (mOpeningRemote) {
+        // nothing to do: already asked parent to open file.
+    } else {
+        rv = OpenLocalFile();
     }
+
+    if (NS_FAILED(rv)) {
+        mIsPending = false;
+        mListenerContext = nullptr;
+        mListener = nullptr;
+        return rv;
+    }
+
 
     if (mLoadGroup)
         mLoadGroup->AddRequest(this, nullptr);
 
+    mOpened = true;
     return NS_OK;
 }
 
@@ -720,7 +819,7 @@ NS_IMETHODIMP
 nsJARChannel::SetAppURI(nsIURI *aURI) {
     NS_ENSURE_ARG_POINTER(aURI);
 
-    nsCAutoString scheme;
+    nsAutoCString scheme;
     aURI->GetScheme(scheme);
     if (!scheme.EqualsLiteral("app")) {
         return NS_ERROR_INVALID_ARG;
@@ -779,13 +878,13 @@ nsJARChannel::OnDownloadComplete(nsIDownloader *downloader,
             // We only want to run scripts if the server really intended to
             // send us a JAR file.  Check the server-supplied content type for
             // a JAR type.
-            nsCAutoString header;
+            nsAutoCString header;
             httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("Content-Type"),
                                            header);
-            nsCAutoString contentType;
-            nsCAutoString charset;
+            nsAutoCString contentType;
+            nsAutoCString charset;
             NS_ParseContentType(header, contentType, charset);
-            nsCAutoString channelContentType;
+            nsAutoCString channelContentType;
             channel->GetContentType(channelContentType);
             mIsUnsafe = !(contentType.Equals(channelContentType) &&
                           (contentType.EqualsLiteral("application/java-archive") ||
@@ -818,11 +917,12 @@ nsJARChannel::OnDownloadComplete(nsIDownloader *downloader,
 
     if (NS_SUCCEEDED(status)) {
         mJarFile = file;
-    
-        rv = CreateJarInput(nullptr);
+
+        nsRefPtr<nsJARInputThunk> input;
+        rv = CreateJarInput(nullptr, getter_AddRefs(input));
         if (NS_SUCCEEDED(rv)) {
             // create input stream pump
-            rv = NS_NewInputStreamPump(getter_AddRefs(mPump), mJarInput);
+            rv = NS_NewInputStreamPump(getter_AddRefs(mPump), input);
             if (NS_SUCCEEDED(rv))
                 rv = mPump->AsyncRead(this, nullptr);
         }
@@ -830,9 +930,28 @@ nsJARChannel::OnDownloadComplete(nsIDownloader *downloader,
     }
 
     if (NS_FAILED(status)) {
-        mStatus = status;
-        OnStartRequest(nullptr, nullptr);
-        OnStopRequest(nullptr, nullptr, status);
+        NotifyError(status);
+    }
+
+    return NS_OK;
+}
+
+//-----------------------------------------------------------------------------
+// nsIRemoteOpenFileListener
+//-----------------------------------------------------------------------------
+nsresult
+nsJARChannel::OnRemoteFileOpenComplete(nsresult aOpenStatus)
+{
+    nsresult rv = aOpenStatus;
+
+    // NS_ERROR_ALREADY_OPENED here means we'll hit JAR cache in
+    // OpenLocalFile().
+    if (NS_SUCCEEDED(rv) || rv == NS_ERROR_ALREADY_OPENED) {
+        rv = OpenLocalFile();
+    }
+
+    if (NS_FAILED(rv)) {
+        NotifyError(rv);
     }
 
     return NS_OK;
@@ -869,7 +988,6 @@ nsJARChannel::OnStopRequest(nsIRequest *req, nsISupports *ctx, nsresult status)
         mLoadGroup->RemoveRequest(this, nullptr, status);
 
     mPump = 0;
-    NS_IF_RELEASE(mJarInput);
     mIsPending = false;
     mDownloader = 0; // this may delete the underlying jar file
 
@@ -883,7 +1001,7 @@ nsJARChannel::OnStopRequest(nsIRequest *req, nsISupports *ctx, nsresult status)
 NS_IMETHODIMP
 nsJARChannel::OnDataAvailable(nsIRequest *req, nsISupports *ctx,
                                nsIInputStream *stream,
-                               uint32_t offset, uint32_t count)
+                               uint64_t offset, uint32_t count)
 {
 #if defined(PR_LOGGING)
     LOG(("nsJARChannel::OnDataAvailable [this=%x %s]\n", this, mSpec.get()));
@@ -897,7 +1015,7 @@ nsJARChannel::OnDataAvailable(nsIRequest *req, nsISupports *ctx,
     // nsITransportEventSink implementation.
     // XXX do the 64-bit stuff for real
     if (mProgressSink && NS_SUCCEEDED(rv) && !(mLoadFlags & LOAD_BACKGROUND))
-        mProgressSink->OnProgress(this, nullptr, uint64_t(offset + count),
+        mProgressSink->OnProgress(this, nullptr, offset + count,
                                   uint64_t(mContentLength));
 
     return rv; // let the pump cancel on failure

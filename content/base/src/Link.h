@@ -11,11 +11,13 @@
 #ifndef mozilla_dom_Link_h__
 #define mozilla_dom_Link_h__
 
-#include "mozilla/dom/Element.h"
 #include "mozilla/IHistory.h"
+#include "nsIContent.h"
 
 namespace mozilla {
 namespace dom {
+
+class Element;
 
 #define MOZILLA_DOM_LINK_IMPLEMENTATION_IID \
   { 0x7EA57721, 0xE373, 0x458E, \
@@ -26,13 +28,10 @@ class Link : public nsISupports
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(MOZILLA_DOM_LINK_IMPLEMENTATION_IID)
 
-  static const nsLinkState defaultState = eLinkState_Unknown;
-
   /**
    * aElement is the element pointer corresponding to this link.
    */
   Link(Element* aElement);
-  nsLinkState GetLinkState() const;
   virtual void SetLinkState(nsLinkState aState);
 
   /**
@@ -53,20 +52,20 @@ public:
   /**
    * Helper methods for modifying and obtaining parts of the URI of the Link.
    */
-  nsresult SetProtocol(const nsAString &aProtocol);
-  nsresult SetHost(const nsAString &aHost);
-  nsresult SetHostname(const nsAString &aHostname);
-  nsresult SetPathname(const nsAString &aPathname);
-  nsresult SetSearch(const nsAString &aSearch);
-  nsresult SetPort(const nsAString &aPort);
-  nsresult SetHash(const nsAString &aHash);
-  nsresult GetProtocol(nsAString &_protocol);
-  nsresult GetHost(nsAString &_host);
-  nsresult GetHostname(nsAString &_hostname);
-  nsresult GetPathname(nsAString &_pathname);
-  nsresult GetSearch(nsAString &_search);
-  nsresult GetPort(nsAString &_port);
-  nsresult GetHash(nsAString &_hash);
+  void SetProtocol(const nsAString &aProtocol);
+  void SetHost(const nsAString &aHost);
+  void SetHostname(const nsAString &aHostname);
+  void SetPathname(const nsAString &aPathname);
+  void SetSearch(const nsAString &aSearch);
+  void SetPort(const nsAString &aPort);
+  void SetHash(const nsAString &aHash);
+  void GetProtocol(nsAString &_protocol);
+  void GetHost(nsAString &_host);
+  void GetHostname(nsAString &_hostname);
+  void GetPathname(nsAString &_pathname);
+  void GetSearch(nsAString &_search);
+  void GetPort(nsAString &_port);
+  void GetHash(nsAString &_hash);
 
   /**
    * Invalidates any link caching, and resets the state to the default.
@@ -75,7 +74,7 @@ public:
    *        true if ResetLinkState should notify the owning document about style
    *        changes or false if it should not.
    */
-  void ResetLinkState(bool aNotify);
+  void ResetLinkState(bool aNotify, bool aHasHref);
   
   // This method nevers returns a null element.
   Element* GetElement() const { return mElement; }
@@ -100,6 +99,8 @@ public:
 
   virtual size_t
     SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+
+  bool ElementHasHref() const;
 
 protected:
   virtual ~Link();
@@ -138,6 +139,8 @@ private:
   nsCOMPtr<IHistory> mHistory;
 
   uint16_t mLinkState;
+
+  bool mNeedsRegistration;
 
   bool mRegistered;
 };

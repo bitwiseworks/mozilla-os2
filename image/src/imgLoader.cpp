@@ -4,27 +4,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Attributes.h"
-#include "mozilla/FunctionTimer.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/ClearOnShutdown.h"
 
 #include "ImageLogging.h"
 #include "imgLoader.h"
 #include "imgRequestProxy.h"
 
 #include "RasterImage.h"
-/* We end up pulling in windows.h because we eventually hit gfxWindowsSurface;
- * windows.h defines LoadImage, so we have to #undef it or imgLoader::LoadImage
- * gets changed.
- * This #undef needs to be in multiple places because we don't always pull
- * headers in in the same order.
- */
-#undef LoadImage
 
 #include "nsCOMPtr.h"
 
 #include "nsContentUtils.h"
 #include "nsCrossSiteListenerProxy.h"
 #include "nsNetUtil.h"
+#include "nsMimeTypes.h"
 #include "nsStreamUtils.h"
 #include "nsIHttpChannel.h"
 #include "nsICachingChannel.h"
@@ -50,21 +44,22 @@
 #include "nsIApplicationCacheContainer.h"
 
 #include "nsIMemoryReporter.h"
-#include "nsIPrivateBrowsingService.h"
 
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
 // until this point, we have an evil hack:
-#include "nsIHttpChannelInternal.h"  
+#include "nsIHttpChannelInternal.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIChannelPolicy.h"
+#include "nsILoadContext.h"
+#include "nsILoadGroupChild.h"
 
 #include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::image;
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(ImagesMallocSizeOf, "images")
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(ImagesMallocSizeOf)
 
 class imgMemoryReporter MOZ_FINAL :
   public nsIMemoryMultiReporter
@@ -87,8 +82,11 @@ public:
   {
     AllSizes chrome;
     AllSizes content;
-    imgLoader::sChromeCache.EnumerateRead(EntryAllSizes, &chrome);
-    imgLoader::sCache.EnumerateRead(EntryAllSizes, &content);
+
+    for (uint32_t i = 0; i < mKnownLoaders.Length(); i++) {
+      mKnownLoaders[i]->mChromeCache.EnumerateRead(EntryAllSizes, &chrome);
+      mKnownLoaders[i]->mCache.EnumerateRead(EntryAllSizes, &content);
+    }
 
 #define REPORT(_path, _kind, _amount, _desc)                                  \
     do {                                                                      \
@@ -152,23 +150,28 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD GetExplicitNonHeap(int64_t *n)
-  {
-    size_t n2 = 0;
-    imgLoader::sChromeCache.EnumerateRead(EntryExplicitNonHeapSize, &n2);
-    imgLoader::sCache.EnumerateRead(EntryExplicitNonHeapSize, &n2);
-    *n = n2;
-    return NS_OK;
-  }
-
   static int64_t GetImagesContentUsedUncompressed()
   {
     size_t n = 0;
-    imgLoader::sCache.EnumerateRead(EntryUsedUncompressedSize, &n);
+    for (uint32_t i = 0; i < imgLoader::sMemReporter->mKnownLoaders.Length(); i++) {
+      imgLoader::sMemReporter->mKnownLoaders[i]->mCache.EnumerateRead(EntryUsedUncompressedSize, &n);
+    }
     return n;
   }
 
+  void RegisterLoader(imgLoader* aLoader)
+  {
+    mKnownLoaders.AppendElement(aLoader);
+  }
+
+  void UnregisterLoader(imgLoader* aLoader)
+  {
+    mKnownLoaders.RemoveElement(aLoader);
+  }
+
 private:
+  nsTArray<imgLoader*> mKnownLoaders;
+
   struct AllSizes {
     size_t mUsedRaw;
     size_t mUsedUncompressedHeap;
@@ -208,20 +211,6 @@ private:
     return PL_DHASH_NEXT;
   }
 
-  static PLDHashOperator EntryExplicitNonHeapSize(const nsACString&,
-                                                  imgCacheEntry *entry,
-                                                  void *userArg)
-  {
-    size_t *n = static_cast<size_t*>(userArg);
-    nsRefPtr<imgRequest> req = entry->GetRequest();
-    Image *image = static_cast<Image*>(req->mImage.get());
-    if (image) {
-      *n += image->NonHeapSizeOfDecoded();
-    }
-
-    return PL_DHASH_NEXT;
-  }
-
   static PLDHashOperator EntryUsedUncompressedSize(const nsACString&,
                                                    imgCacheEntry *entry,
                                                    void *userArg)
@@ -231,7 +220,12 @@ private:
       nsRefPtr<imgRequest> req = entry->GetRequest();
       Image *image = static_cast<Image*>(req->mImage.get());
       if (image) {
-        *n += image->HeapSizeOfDecodedWithComputedFallback(ImagesMallocSizeOf);
+        // Both this and EntryAllSizes measure images-content-used-uncompressed
+        // memory.  This function's measurement is secondary -- the result
+        // doesn't go in the "explicit" tree -- so we use moz_malloc_size_of
+        // instead of ImagesMallocSizeOf to prevent DMD from seeing it reported
+        // twice.
+        *n += image->HeapSizeOfDecodedWithComputedFallback(moz_malloc_size_of);
         *n += image->NonHeapSizeOfDecoded();
       }
     }
@@ -339,11 +333,11 @@ nsProgressNotificationProxy::GetInterface(const nsIID& iid,
   return NS_NOINTERFACE;
 }
 
-static void NewRequestAndEntry(bool aForcePrincipalCheckForCacheEntry,
+static void NewRequestAndEntry(bool aForcePrincipalCheckForCacheEntry, imgLoader* aLoader,
                                imgRequest **aRequest, imgCacheEntry **aEntry)
 {
-  nsRefPtr<imgRequest> request = new imgRequest();
-  nsRefPtr<imgCacheEntry> entry = new imgCacheEntry(request, aForcePrincipalCheckForCacheEntry);
+  nsRefPtr<imgRequest> request = new imgRequest(aLoader);
+  nsRefPtr<imgCacheEntry> entry = new imgCacheEntry(aLoader, request, aForcePrincipalCheckForCacheEntry);
   request.forget(aRequest);
   entry.forget(aEntry);
 }
@@ -373,8 +367,8 @@ static bool ShouldRevalidateEntry(imgCacheEntry *aEntry,
     // entries to be used unless they have been explicitly marked to
     // indicate that revalidation is necessary.
     //
-    if (aFlags & (nsIRequest::VALIDATE_NEVER | 
-                  nsIRequest::VALIDATE_ONCE_PER_SESSION)) 
+    if (aFlags & (nsIRequest::VALIDATE_NEVER |
+                  nsIRequest::VALIDATE_ONCE_PER_SESSION))
     {
       bValidateEntry = false;
     }
@@ -443,7 +437,7 @@ static nsresult NewImageChannel(nsIChannel **aResult,
   nsresult rv;
   nsCOMPtr<nsIChannel> newChannel;
   nsCOMPtr<nsIHttpChannel> newHttpChannel;
- 
+
   nsCOMPtr<nsIInterfaceRequestor> callbacks;
 
   if (aLoadGroup) {
@@ -464,7 +458,7 @@ static nsresult NewImageChannel(nsIChannel **aResult,
   // canceled too.
   //
   rv = NS_NewChannel(aResult,
-                     aURI,        // URI 
+                     aURI,        // URI
                      nullptr,      // Cached IOService
                      nullptr,      // LoadGroup
                      callbacks,   // Notification Callbacks
@@ -511,8 +505,9 @@ static uint32_t SecondsFromPRTime(PRTime prTime)
   return uint32_t(int64_t(prTime) / int64_t(PR_USEC_PER_SEC));
 }
 
-imgCacheEntry::imgCacheEntry(imgRequest *request, bool forcePrincipalCheck)
- : mRequest(request),
+imgCacheEntry::imgCacheEntry(imgLoader* loader, imgRequest *request, bool forcePrincipalCheck)
+ : mLoader(loader),
+   mRequest(request),
    mDataSize(0),
    mTouchedTime(SecondsFromPRTime(PR_Now())),
    mExpiryTime(0),
@@ -526,12 +521,12 @@ imgCacheEntry::imgCacheEntry(imgRequest *request, bool forcePrincipalCheck)
 
 imgCacheEntry::~imgCacheEntry()
 {
-  LOG_FUNC(gImgLog, "imgCacheEntry::~imgCacheEntry()");
+  LOG_FUNC(GetImgLog(), "imgCacheEntry::~imgCacheEntry()");
 }
 
 void imgCacheEntry::Touch(bool updateTime /* = true */)
 {
-  LOG_SCOPE(gImgLog, "imgCacheEntry::Touch");
+  LOG_SCOPE(GetImgLog(), "imgCacheEntry::Touch");
 
   if (updateTime)
     mTouchedTime = SecondsFromPRTime(PR_Now());
@@ -546,7 +541,7 @@ void imgCacheEntry::UpdateCache(int32_t diff /* = 0 */)
   if (!Evicted() && HasNoProxies()) {
     nsCOMPtr<nsIURI> uri;
     mRequest->GetURI(getter_AddRefs(uri));
-    imgLoader::CacheEntriesChanged(uri, diff);
+    mLoader->CacheEntriesChanged(uri, diff);
   }
 }
 
@@ -555,13 +550,13 @@ void imgCacheEntry::SetHasNoProxies(bool hasNoProxies)
 #if defined(PR_LOGGING)
   nsCOMPtr<nsIURI> uri;
   mRequest->GetURI(getter_AddRefs(uri));
-  nsCAutoString spec;
+  nsAutoCString spec;
   if (uri)
     uri->GetSpec(spec);
   if (hasNoProxies)
-    LOG_FUNC_WITH_PARAM(gImgLog, "imgCacheEntry::SetHasNoProxies true", "uri", spec.get());
+    LOG_FUNC_WITH_PARAM(GetImgLog(), "imgCacheEntry::SetHasNoProxies true", "uri", spec.get());
   else
-    LOG_FUNC_WITH_PARAM(gImgLog, "imgCacheEntry::SetHasNoProxies false", "uri", spec.get());
+    LOG_FUNC_WITH_PARAM(GetImgLog(), "imgCacheEntry::SetHasNoProxies false", "uri", spec.get());
 #endif
 
   mHasNoProxies = hasNoProxies;
@@ -616,9 +611,7 @@ already_AddRefed<imgCacheEntry> imgCacheQueue::Pop()
   mQueue.pop_back();
 
   mSize -= entry->GetDataSize();
-  imgCacheEntry *ret = entry;
-  NS_ADDREF(ret);
-  return ret;
+  return entry.forget();
 }
 
 void imgCacheQueue::Refresh()
@@ -661,23 +654,17 @@ imgCacheQueue::const_iterator imgCacheQueue::end() const
 }
 
 nsresult imgLoader::CreateNewProxyForRequest(imgRequest *aRequest, nsILoadGroup *aLoadGroup,
-                                             imgIDecoderObserver *aObserver,
-                                             nsLoadFlags aLoadFlags, imgIRequest *aProxyRequest,
-                                             imgIRequest **_retval)
+                                             imgINotificationObserver *aObserver,
+                                             nsLoadFlags aLoadFlags, imgRequestProxy **_retval)
 {
-  LOG_SCOPE_WITH_PARAM(gImgLog, "imgLoader::CreateNewProxyForRequest", "imgRequest", aRequest);
+  LOG_SCOPE_WITH_PARAM(GetImgLog(), "imgLoader::CreateNewProxyForRequest", "imgRequest", aRequest);
 
   /* XXX If we move decoding onto separate threads, we should save off the
      calling thread here and pass it off to |proxyRequest| so that it call
      proxy calls to |aObserver|.
    */
 
-  imgRequestProxy *proxyRequest;
-  if (aProxyRequest) {
-    proxyRequest = static_cast<imgRequestProxy *>(aProxyRequest);
-  } else {
-    proxyRequest = new imgRequestProxy();
-  }
+  imgRequestProxy *proxyRequest = new imgRequestProxy();
   NS_ADDREF(proxyRequest);
 
   /* It is important to call |SetLoadFlags()| before calling |Init()| because
@@ -689,14 +676,14 @@ nsresult imgLoader::CreateNewProxyForRequest(imgRequest *aRequest, nsILoadGroup 
   aRequest->GetURI(getter_AddRefs(uri));
 
   // init adds itself to imgRequest's list of observers
-  nsresult rv = proxyRequest->Init(aRequest, aLoadGroup, aRequest->mImage, uri, aObserver);
+  nsresult rv = proxyRequest->Init(aRequest, aLoadGroup, uri, aObserver);
   if (NS_FAILED(rv)) {
     NS_RELEASE(proxyRequest);
     return rv;
   }
 
   // transfer reference to caller
-  *_retval = static_cast<imgIRequest*>(proxyRequest);
+  *_retval = proxyRequest;
 
   return NS_OK;
 }
@@ -706,8 +693,6 @@ class imgCacheObserver MOZ_FINAL : public nsIObserver
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
-private:
-  imgLoader mLoader;
 };
 
 NS_IMPL_ISUPPORTS1(imgCacheObserver, nsIObserver)
@@ -717,10 +702,6 @@ imgCacheObserver::Observe(nsISupports* aSubject, const char* aTopic, const PRUni
 {
   if (strcmp(aTopic, "memory-pressure") == 0) {
     DiscardTracker::DiscardAll();
-    mLoader.MinimizeCaches();
-  } else if (strcmp(aTopic, "chrome-flush-skin-caches") == 0 ||
-             strcmp(aTopic, "chrome-flush-caches") == 0) {
-    mLoader.ClearChromeImageCache();
   }
   return NS_OK;
 }
@@ -751,54 +732,67 @@ void imgCacheExpirationTracker::NotifyExpired(imgCacheEntry *entry)
   if (req) {
     nsCOMPtr<nsIURI> uri;
     req->GetURI(getter_AddRefs(uri));
-    nsCAutoString spec;
+    nsAutoCString spec;
     uri->GetSpec(spec);
-    LOG_FUNC_WITH_PARAM(gImgLog, "imgCacheExpirationTracker::NotifyExpired", "entry", spec.get());
+    LOG_FUNC_WITH_PARAM(GetImgLog(), "imgCacheExpirationTracker::NotifyExpired", "entry", spec.get());
   }
 #endif
 
   // We can be called multiple times on the same entry. Don't do work multiple
   // times.
   if (!entry->Evicted())
-    imgLoader::RemoveFromCache(entry);
+    entry->Loader()->RemoveFromCache(entry);
 
-  imgLoader::VerifyCacheSizes();
+  entry->Loader()->VerifyCacheSizes();
 }
 
 imgCacheObserver *gCacheObserver;
-imgCacheExpirationTracker *gCacheTracker;
-
-imgLoader::imgCacheTable imgLoader::sCache;
-imgCacheQueue imgLoader::sCacheQueue;
-
-imgLoader::imgCacheTable imgLoader::sChromeCache;
-imgCacheQueue imgLoader::sChromeCacheQueue;
 
 double imgLoader::sCacheTimeWeight;
 uint32_t imgLoader::sCacheMaxSize;
+imgMemoryReporter* imgLoader::sMemReporter;
 
 NS_IMPL_ISUPPORTS5(imgLoader, imgILoader, nsIContentSniffer, imgICache, nsISupportsWeakReference, nsIObserver)
 
 imgLoader::imgLoader()
+: mRespectPrivacy(false)
 {
-  /* member initializers and constructor code */
+  sMemReporter->AddRef();
+  sMemReporter->RegisterLoader(this);
+}
+
+already_AddRefed<imgLoader>
+imgLoader::GetInstance()
+{
+  static StaticRefPtr<imgLoader> singleton;
+  if (!singleton) {
+    singleton = imgLoader::Create();
+    if (!singleton)
+        return nullptr;
+    ClearOnShutdown(&singleton);
+  }
+  nsRefPtr<imgLoader> loader = singleton.get();
+  return loader.forget();
 }
 
 imgLoader::~imgLoader()
 {
-  /* destructor code */
+  ClearChromeImageCache();
+  ClearImageCache();
+  sMemReporter->UnregisterLoader(this);
+  sMemReporter->Release();
 }
 
 void imgLoader::VerifyCacheSizes()
 {
 #ifdef DEBUG
-  if (!gCacheTracker)
+  if (!mCacheTracker)
     return;
 
-  uint32_t cachesize = sCache.Count() + sChromeCache.Count();
-  uint32_t queuesize = sCacheQueue.GetNumElements() + sChromeCacheQueue.GetNumElements();
+  uint32_t cachesize = mCache.Count() + mChromeCache.Count();
+  uint32_t queuesize = mCacheQueue.GetNumElements() + mChromeCacheQueue.GetNumElements();
   uint32_t trackersize = 0;
-  for (nsExpirationTracker<imgCacheEntry, 3>::Iterator it(gCacheTracker); it.Next(); )
+  for (nsExpirationTracker<imgCacheEntry, 3>::Iterator it(mCacheTracker); it.Next(); )
     trackersize++;
   NS_ABORT_IF_FALSE(queuesize == trackersize, "Queue and tracker sizes out of sync!");
   NS_ABORT_IF_FALSE(queuesize <= cachesize, "Queue has more elements than cache!");
@@ -810,9 +804,9 @@ imgLoader::imgCacheTable & imgLoader::GetCache(nsIURI *aURI)
   bool chrome = false;
   aURI->SchemeIs("chrome", &chrome);
   if (chrome)
-    return sChromeCache;
+    return mChromeCache;
   else
-    return sCache;
+    return mCache;
 }
 
 imgCacheQueue & imgLoader::GetCacheQueue(nsIURI *aURI)
@@ -820,34 +814,22 @@ imgCacheQueue & imgLoader::GetCacheQueue(nsIURI *aURI)
   bool chrome = false;
   aURI->SchemeIs("chrome", &chrome);
   if (chrome)
-    return sChromeCacheQueue;
+    return mChromeCacheQueue;
   else
-    return sCacheQueue;
+    return mCacheQueue;
 }
 
-nsresult imgLoader::InitCache()
+void imgLoader::GlobalInit()
 {
-  NS_TIME_FUNCTION;
-
-  nsresult rv;
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (!os)
-    return NS_ERROR_FAILURE;
-  
   gCacheObserver = new imgCacheObserver();
   NS_ADDREF(gCacheObserver);
 
-  os->AddObserver(gCacheObserver, "memory-pressure", false);
-  os->AddObserver(gCacheObserver, "chrome-flush-skin-caches", false);
-  os->AddObserver(gCacheObserver, "chrome-flush-caches", false);
-
-  gCacheTracker = new imgCacheExpirationTracker();
-
-  sCache.Init();
-  sChromeCache.Init();
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (os)
+    os->AddObserver(gCacheObserver, "memory-pressure", false);
 
   int32_t timeweight;
-  rv = Preferences::GetInt("image.cache.timeweight", &timeweight);
+  nsresult rv = Preferences::GetInt("image.cache.timeweight", &timeweight);
   if (NS_SUCCEEDED(rv))
     sCacheTimeWeight = timeweight / 1000.0;
   else
@@ -860,23 +842,47 @@ nsresult imgLoader::InitCache()
   else
     sCacheMaxSize = 5 * 1024 * 1024;
 
-  NS_RegisterMemoryMultiReporter(new imgMemoryReporter());
+  sMemReporter = new imgMemoryReporter();
+  NS_RegisterMemoryMultiReporter(sMemReporter);
   NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(ImagesContentUsedUncompressed));
-  
-  return NS_OK;
+}
+
+nsresult imgLoader::InitCache()
+{
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (!os)
+    return NS_ERROR_FAILURE;
+
+  os->AddObserver(this, "memory-pressure", false);
+  os->AddObserver(this, "chrome-flush-skin-caches", false);
+  os->AddObserver(this, "chrome-flush-caches", false);
+  os->AddObserver(this, "last-pb-context-exited", false);
+  os->AddObserver(this, "profile-before-change", false);
+  os->AddObserver(this, "xpcom-shutdown", false);
+
+  mCacheTracker = new imgCacheExpirationTracker();
+
+  mCache.Init();
+  mChromeCache.Init();
+
+    return NS_OK;
 }
 
 nsresult imgLoader::Init()
 {
+  InitCache();
+
   ReadAcceptHeaderPref();
 
   Preferences::AddWeakObserver(this, "image.http.accept");
 
-  // Listen for when we leave private browsing mode
-  nsCOMPtr<nsIObserverService> obService = mozilla::services::GetObserverService();
-  if (obService)
-    obService->AddObserver(this, NS_PRIVATE_BROWSING_SWITCH_TOPIC, true);
+    return NS_OK;
+}
 
+NS_IMETHODIMP
+imgLoader::RespectPrivacyNotifications()
+{
+  mRespectPrivacy = true;
   return NS_OK;
 }
 
@@ -888,12 +894,21 @@ imgLoader::Observe(nsISupports* aSubject, const char* aTopic, const PRUnichar* a
     if (!strcmp(NS_ConvertUTF16toUTF8(aData).get(), "image.http.accept")) {
       ReadAcceptHeaderPref();
     }
-  }
 
-  // ...and exits from private browsing.
-  else if (!strcmp(aTopic, NS_PRIVATE_BROWSING_SWITCH_TOPIC)) {
-    if (NS_LITERAL_STRING(NS_PRIVATE_BROWSING_LEAVE).Equals(aData))
+  } else if (strcmp(aTopic, "memory-pressure") == 0) {
+    MinimizeCaches();
+  } else if (strcmp(aTopic, "chrome-flush-skin-caches") == 0 ||
+             strcmp(aTopic, "chrome-flush-caches") == 0) {
+    MinimizeCaches();
+    ClearChromeImageCache();
+  } else if (strcmp(aTopic, "last-pb-context-exited") == 0) {
+    if (mRespectPrivacy) {
       ClearImageCache();
+      ClearChromeImageCache();
+    }
+  } else if (strcmp(aTopic, "profile-before-change") == 0 ||
+             strcmp(aTopic, "xpcom-shutdown") == 0) {
+    mCacheTracker = nullptr;
   }
 
   // (Nothing else should bring us here)
@@ -910,7 +925,7 @@ void imgLoader::ReadAcceptHeaderPref()
   if (accept)
     mAcceptHeader = accept;
   else
-    mAcceptHeader = "image/png,image/*;q=0.8,*/*;q=0.5";
+    mAcceptHeader = IMAGE_PNG "," IMAGE_WILDCARD ";q=0.8," ANY_WILDCARD ";q=0.5";
 }
 
 /* void clearCache (in boolean chrome); */
@@ -935,15 +950,15 @@ NS_IMETHODIMP imgLoader::RemoveEntry(nsIURI *uri)
 NS_IMETHODIMP imgLoader::FindEntryProperties(nsIURI *uri, nsIProperties **_retval)
 {
   nsRefPtr<imgCacheEntry> entry;
-  nsCAutoString spec;
+  nsAutoCString spec;
   imgCacheTable &cache = GetCache(uri);
 
   uri->GetSpec(spec);
   *_retval = nullptr;
 
   if (cache.Get(spec, getter_AddRefs(entry)) && entry) {
-    if (gCacheTracker && entry->HasNoProxies())
-      gCacheTracker->MarkUsed(entry);
+    if (mCacheTracker && entry->HasNoProxies())
+      mCacheTracker->MarkUsed(entry);
 
     nsRefPtr<imgRequest> request = getter_AddRefs(entry->GetRequest());
     if (request) {
@@ -957,55 +972,51 @@ NS_IMETHODIMP imgLoader::FindEntryProperties(nsIURI *uri, nsIProperties **_retva
 
 void imgLoader::Shutdown()
 {
-  ClearChromeImageCache();
-  ClearImageCache();
-  NS_IF_RELEASE(gCacheObserver);
-  delete gCacheTracker;
-  gCacheTracker = nullptr;
+  NS_RELEASE(gCacheObserver);
 }
 
 nsresult imgLoader::ClearChromeImageCache()
 {
-  return EvictEntries(sChromeCache);
+  return EvictEntries(mChromeCache);
 }
 
 nsresult imgLoader::ClearImageCache()
 {
-  return EvictEntries(sCache);
+  return EvictEntries(mCache);
 }
 
 void imgLoader::MinimizeCaches()
 {
-  EvictEntries(sCacheQueue);
-  EvictEntries(sChromeCacheQueue);
+  EvictEntries(mCacheQueue);
+  EvictEntries(mChromeCacheQueue);
 }
 
 bool imgLoader::PutIntoCache(nsIURI *key, imgCacheEntry *entry)
 {
   imgCacheTable &cache = GetCache(key);
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   key->GetSpec(spec);
 
-  LOG_STATIC_FUNC_WITH_PARAM(gImgLog, "imgLoader::PutIntoCache", "uri", spec.get());
+  LOG_STATIC_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::PutIntoCache", "uri", spec.get());
 
   // Check to see if this request already exists in the cache and is being
   // loaded on a different thread. If so, don't allow this entry to be added to
   // the cache.
   nsRefPtr<imgCacheEntry> tmpCacheEntry;
   if (cache.Get(spec, getter_AddRefs(tmpCacheEntry)) && tmpCacheEntry) {
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
            ("[this=%p] imgLoader::PutIntoCache -- Element already in the cache", nullptr));
     nsRefPtr<imgRequest> tmpRequest = getter_AddRefs(tmpCacheEntry->GetRequest());
 
     // If it already exists, and we're putting the same key into the cache, we
     // should remove the old version.
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
            ("[this=%p] imgLoader::PutIntoCache -- Replacing cached element", nullptr));
 
     RemoveFromCache(key);
   } else {
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
            ("[this=%p] imgLoader::PutIntoCache -- Element NOT already in the cache", nullptr));
   }
 
@@ -1020,8 +1031,8 @@ bool imgLoader::PutIntoCache(nsIURI *key, imgCacheEntry *entry)
   if (entry->HasNoProxies()) {
     nsresult addrv = NS_OK;
 
-    if (gCacheTracker)
-      addrv = gCacheTracker->AddObject(entry);
+    if (mCacheTracker)
+      addrv = mCacheTracker->AddObject(entry);
 
     if (NS_SUCCEEDED(addrv)) {
       imgCacheQueue &queue = GetCacheQueue(key);
@@ -1038,10 +1049,10 @@ bool imgLoader::PutIntoCache(nsIURI *key, imgCacheEntry *entry)
 bool imgLoader::SetHasNoProxies(nsIURI *key, imgCacheEntry *entry)
 {
 #if defined(PR_LOGGING)
-  nsCAutoString spec;
+  nsAutoCString spec;
   key->GetSpec(spec);
 
-  LOG_STATIC_FUNC_WITH_PARAM(gImgLog, "imgLoader::SetHasNoProxies", "uri", spec.get());
+  LOG_STATIC_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::SetHasNoProxies", "uri", spec.get());
 #endif
 
   if (entry->Evicted())
@@ -1051,8 +1062,8 @@ bool imgLoader::SetHasNoProxies(nsIURI *key, imgCacheEntry *entry)
 
   nsresult addrv = NS_OK;
 
-  if (gCacheTracker)
-    addrv = gCacheTracker->AddObject(entry);
+  if (mCacheTracker)
+    addrv = mCacheTracker->AddObject(entry);
 
   if (NS_SUCCEEDED(addrv)) {
     queue.Push(entry);
@@ -1071,18 +1082,18 @@ bool imgLoader::SetHasProxies(nsIURI *key)
 
   imgCacheTable &cache = GetCache(key);
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   key->GetSpec(spec);
 
-  LOG_STATIC_FUNC_WITH_PARAM(gImgLog, "imgLoader::SetHasProxies", "uri", spec.get());
+  LOG_STATIC_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::SetHasProxies", "uri", spec.get());
 
   nsRefPtr<imgCacheEntry> entry;
   if (cache.Get(spec, getter_AddRefs(entry)) && entry && entry->HasNoProxies()) {
     imgCacheQueue &queue = GetCacheQueue(key);
     queue.Remove(entry);
 
-    if (gCacheTracker)
-      gCacheTracker->RemoveObject(entry);
+    if (mCacheTracker)
+      mCacheTracker->RemoveObject(entry);
 
     entry->SetHasNoProxies(false);
 
@@ -1102,7 +1113,7 @@ void imgLoader::CacheEntriesChanged(nsIURI *uri, int32_t sizediff /* = 0 */)
 void imgLoader::CheckCacheLimits(imgCacheTable &cache, imgCacheQueue &queue)
 {
   if (queue.GetNumElements() == 0)
-    NS_ASSERTION(queue.GetSize() == 0, 
+    NS_ASSERTION(queue.GetSize() == 0,
                  "imgLoader::CheckCacheLimits -- incorrect cache size");
 
   // Remove entries from the cache until we're back under our desired size.
@@ -1117,9 +1128,9 @@ void imgLoader::CheckCacheLimits(imgCacheTable &cache, imgCacheQueue &queue)
     if (req) {
       nsCOMPtr<nsIURI> uri;
       req->GetURI(getter_AddRefs(uri));
-      nsCAutoString spec;
+      nsAutoCString spec;
       uri->GetSpec(spec);
-      LOG_STATIC_FUNC_WITH_PARAM(gImgLog, "imgLoader::CheckCacheLimits", "entry", spec.get());
+      LOG_STATIC_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::CheckCacheLimits", "entry", spec.get());
     }
 #endif
 
@@ -1133,11 +1144,10 @@ bool imgLoader::ValidateRequestWithNewChannel(imgRequest *request,
                                                 nsIURI *aInitialDocumentURI,
                                                 nsIURI *aReferrerURI,
                                                 nsILoadGroup *aLoadGroup,
-                                                imgIDecoderObserver *aObserver,
+                                                imgINotificationObserver *aObserver,
                                                 nsISupports *aCX,
                                                 nsLoadFlags aLoadFlags,
-                                                imgIRequest *aExistingRequest,
-                                                imgIRequest **aProxyRequest,
+                                                imgRequestProxy **aProxyRequest,
                                                 nsIChannelPolicy *aPolicy,
                                                 nsIPrincipal* aLoadingPrincipal,
                                                 int32_t aCORSMode)
@@ -1152,8 +1162,7 @@ bool imgLoader::ValidateRequestWithNewChannel(imgRequest *request,
   // back a proxy to it; the required work will be done for us.
   if (request->mValidator) {
     rv = CreateNewProxyForRequest(request, aLoadGroup, aObserver,
-                                  aLoadFlags, aExistingRequest, 
-                                  reinterpret_cast<imgIRequest **>(aProxyRequest));
+                                  aLoadFlags, aProxyRequest);
     if (NS_FAILED(rv)) {
       return false;
     }
@@ -1193,9 +1202,9 @@ bool imgLoader::ValidateRequestWithNewChannel(imgRequest *request,
       return false;
     }
 
-    nsCOMPtr<imgIRequest> req;
+    nsRefPtr<imgRequestProxy> req;
     rv = CreateNewProxyForRequest(request, aLoadGroup, aObserver,
-                                  aLoadFlags, aExistingRequest, getter_AddRefs(req));
+                                  aLoadFlags, getter_AddRefs(req));
     if (NS_FAILED(rv)) {
       return false;
     }
@@ -1207,7 +1216,7 @@ bool imgLoader::ValidateRequestWithNewChannel(imgRequest *request,
       return false;
 
     nsRefPtr<imgCacheValidator> hvc =
-      new imgCacheValidator(progressproxy, request, aCX, forcePrincipalCheck);
+      new imgCacheValidator(progressproxy, this, request, aCX, forcePrincipalCheck);
 
     nsCOMPtr<nsIStreamListener> listener = hvc.get();
 
@@ -1218,8 +1227,9 @@ bool imgLoader::ValidateRequestWithNewChannel(imgRequest *request,
 
     if (aCORSMode != imgIRequest::CORS_NONE) {
       bool withCredentials = aCORSMode == imgIRequest::CORS_USE_CREDENTIALS;
-      nsCOMPtr<nsIStreamListener> corsproxy =
-        new nsCORSListenerProxy(hvc, aLoadingPrincipal, newChannel, withCredentials, &rv);
+      nsRefPtr<nsCORSListenerProxy> corsproxy =
+        new nsCORSListenerProxy(hvc, aLoadingPrincipal, withCredentials);
+      rv = corsproxy->Init(newChannel);
       if (NS_FAILED(rv)) {
         return false;
       }
@@ -1254,17 +1264,16 @@ bool imgLoader::ValidateEntry(imgCacheEntry *aEntry,
                                 nsIURI *aInitialDocumentURI,
                                 nsIURI *aReferrerURI,
                                 nsILoadGroup *aLoadGroup,
-                                imgIDecoderObserver *aObserver,
+                                imgINotificationObserver *aObserver,
                                 nsISupports *aCX,
                                 nsLoadFlags aLoadFlags,
                                 bool aCanMakeNewChannel,
-                                imgIRequest *aExistingRequest,
-                                imgIRequest **aProxyRequest,
+                                imgRequestProxy **aProxyRequest,
                                 nsIChannelPolicy *aPolicy,
                                 nsIPrincipal* aLoadingPrincipal,
                                 int32_t aCORSMode)
 {
-  LOG_SCOPE(gImgLog, "imgLoader::ValidateEntry");
+  LOG_SCOPE(GetImgLog(), "imgLoader::ValidateEntry");
 
   bool hasExpired;
   uint32_t expirationTime = aEntry->GetExpiryTime();
@@ -1303,6 +1312,12 @@ bool imgLoader::ValidateEntry(imgCacheEntry *aEntry,
                                 aCORSMode, aLoadingPrincipal))
     return false;
 
+  // Never validate data URIs.
+  nsAutoCString scheme;
+  aURI->GetScheme(scheme);
+  if (scheme.EqualsLiteral("data"))
+    return true;
+
   bool validateRequest = false;
 
   // If the request's loadId is the same as the aCX, then it is ok to use
@@ -1321,17 +1336,17 @@ bool imgLoader::ValidateEntry(imgCacheEntry *aEntry,
     // Determine whether the cache aEntry must be revalidated...
     validateRequest = ShouldRevalidateEntry(aEntry, aLoadFlags, hasExpired);
 
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
-           ("imgLoader::ValidateEntry validating cache entry. " 
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
+           ("imgLoader::ValidateEntry validating cache entry. "
             "validateRequest = %d", validateRequest));
   }
 #if defined(PR_LOGGING)
   else if (!key) {
-    nsCAutoString spec;
+    nsAutoCString spec;
     aURI->GetSpec(spec);
 
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
-           ("imgLoader::ValidateEntry BYPASSING cache validation for %s " 
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
+           ("imgLoader::ValidateEntry BYPASSING cache validation for %s "
             "because of NULL LoadID", spec.get()));
   }
 #endif
@@ -1347,7 +1362,7 @@ bool imgLoader::ValidateEntry(imgCacheEntry *aEntry,
     appCacheContainer->GetApplicationCache(getter_AddRefs(groupAppCache));
 
   if (requestAppCache != groupAppCache) {
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
            ("imgLoader::ValidateEntry - Unable to use cached imgRequest "
             "[request=%p] because of mismatched application caches\n",
             address_of(request)));
@@ -1355,12 +1370,11 @@ bool imgLoader::ValidateEntry(imgCacheEntry *aEntry,
   }
 
   if (validateRequest && aCanMakeNewChannel) {
-    LOG_SCOPE(gImgLog, "imgLoader::ValidateRequest |cache hit| must validate");
+    LOG_SCOPE(GetImgLog(), "imgLoader::ValidateRequest |cache hit| must validate");
 
     return ValidateRequestWithNewChannel(request, aURI, aInitialDocumentURI,
                                          aReferrerURI, aLoadGroup, aObserver,
-                                         aCX, aLoadFlags, aExistingRequest,
-                                         aProxyRequest, aPolicy,
+                                         aCX, aLoadFlags, aProxyRequest, aPolicy,
                                          aLoadingPrincipal, aCORSMode);
   }
 
@@ -1375,10 +1389,10 @@ bool imgLoader::RemoveFromCache(nsIURI *aKey)
   imgCacheTable &cache = GetCache(aKey);
   imgCacheQueue &queue = GetCacheQueue(aKey);
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   aKey->GetSpec(spec);
 
-  LOG_STATIC_FUNC_WITH_PARAM(gImgLog, "imgLoader::RemoveFromCache", "uri", spec.get());
+  LOG_STATIC_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::RemoveFromCache", "uri", spec.get());
 
   nsRefPtr<imgCacheEntry> entry;
   if (cache.Get(spec, getter_AddRefs(entry)) && entry) {
@@ -1388,8 +1402,8 @@ bool imgLoader::RemoveFromCache(nsIURI *aKey)
 
     // Entries with no proxies are in the tracker.
     if (entry->HasNoProxies()) {
-      if (gCacheTracker)
-        gCacheTracker->RemoveObject(entry);
+      if (mCacheTracker)
+        mCacheTracker->RemoveObject(entry);
       queue.Remove(entry);
     }
 
@@ -1406,7 +1420,7 @@ bool imgLoader::RemoveFromCache(nsIURI *aKey)
 
 bool imgLoader::RemoveFromCache(imgCacheEntry *entry)
 {
-  LOG_STATIC_FUNC(gImgLog, "imgLoader::RemoveFromCache entry");
+  LOG_STATIC_FUNC(GetImgLog(), "imgLoader::RemoveFromCache entry");
 
   nsRefPtr<imgRequest> request(getter_AddRefs(entry->GetRequest()));
   if (request) {
@@ -1414,17 +1428,17 @@ bool imgLoader::RemoveFromCache(imgCacheEntry *entry)
     if (NS_SUCCEEDED(request->GetURI(getter_AddRefs(key))) && key) {
       imgCacheTable &cache = GetCache(key);
       imgCacheQueue &queue = GetCacheQueue(key);
-      nsCAutoString spec;
+      nsAutoCString spec;
       key->GetSpec(spec);
 
-      LOG_STATIC_FUNC_WITH_PARAM(gImgLog, "imgLoader::RemoveFromCache", "entry's uri", spec.get());
+      LOG_STATIC_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::RemoveFromCache", "entry's uri", spec.get());
 
       cache.Remove(spec);
 
       if (entry->HasNoProxies()) {
-        LOG_STATIC_FUNC(gImgLog, "imgLoader::RemoveFromCache removing from tracker");
-        if (gCacheTracker)
-          gCacheTracker->RemoveObject(entry);
+        LOG_STATIC_FUNC(GetImgLog(), "imgLoader::RemoveFromCache removing from tracker");
+        if (mCacheTracker)
+          mCacheTracker->RemoveObject(entry);
         queue.Remove(entry);
       }
 
@@ -1438,11 +1452,11 @@ bool imgLoader::RemoveFromCache(imgCacheEntry *entry)
   return false;
 }
 
-static PLDHashOperator EnumEvictEntries(const nsACString&, 
+static PLDHashOperator EnumEvictEntries(const nsACString&,
                                         nsRefPtr<imgCacheEntry> &aData,
                                         void *data)
 {
-  nsTArray<nsRefPtr<imgCacheEntry> > *entries = 
+  nsTArray<nsRefPtr<imgCacheEntry> > *entries =
     reinterpret_cast<nsTArray<nsRefPtr<imgCacheEntry> > *>(data);
 
   entries->AppendElement(aData);
@@ -1452,7 +1466,7 @@ static PLDHashOperator EnumEvictEntries(const nsACString&,
 
 nsresult imgLoader::EvictEntries(imgCacheTable &aCacheToClear)
 {
-  LOG_STATIC_FUNC(gImgLog, "imgLoader::EvictEntries table");
+  LOG_STATIC_FUNC(GetImgLog(), "imgLoader::EvictEntries table");
 
   // We have to make a temporary, since RemoveFromCache removes the element
   // from the queue, invalidating iterators.
@@ -1468,7 +1482,7 @@ nsresult imgLoader::EvictEntries(imgCacheTable &aCacheToClear)
 
 nsresult imgLoader::EvictEntries(imgCacheQueue &aQueueToClear)
 {
-  LOG_STATIC_FUNC(gImgLog, "imgLoader::EvictEntries queue");
+  LOG_STATIC_FUNC(GetImgLog(), "imgLoader::EvictEntries queue");
 
   // We have to make a temporary, since RemoveFromCache removes the element
   // from the queue, invalidating iterators.
@@ -1490,32 +1504,60 @@ nsresult imgLoader::EvictEntries(imgCacheQueue &aQueueToClear)
                                   nsIRequest::VALIDATE_NEVER |    \
                                   nsIRequest::VALIDATE_ONCE_PER_SESSION)
 
-
-/* imgIRequest loadImage (in nsIURI aURI, in nsIURI initialDocumentURI, in nsIPrincipal loadingPrincipal, in nsILoadGroup aLoadGroup, in imgIDecoderObserver aObserver, in nsISupports aCX, in nsLoadFlags aLoadFlags, in nsISupports cacheKey, in imgIRequest aRequest); */
-
-NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI, 
+NS_IMETHODIMP imgLoader::LoadImageXPCOM(nsIURI *aURI,
                                    nsIURI *aInitialDocumentURI,
                                    nsIURI *aReferrerURI,
                                    nsIPrincipal* aLoadingPrincipal,
                                    nsILoadGroup *aLoadGroup,
-                                   imgIDecoderObserver *aObserver,
+                                   imgINotificationObserver *aObserver,
                                    nsISupports *aCX,
                                    nsLoadFlags aLoadFlags,
                                    nsISupports *aCacheKey,
-                                   imgIRequest *aRequest,
                                    nsIChannelPolicy *aPolicy,
                                    imgIRequest **_retval)
 {
-  VerifyCacheSizes();
+    imgRequestProxy *proxy;
+    nsresult result = LoadImage(aURI,
+                                aInitialDocumentURI,
+                                aReferrerURI,
+                                aLoadingPrincipal,
+                                aLoadGroup,
+                                aObserver,
+                                aCX,
+                                aLoadFlags,
+                                aCacheKey,
+                                aPolicy,
+                                &proxy);
+    *_retval = proxy;
+    return result;
+}
+
+
+
+/* imgIRequest loadImage(in nsIURI aURI, in nsIURI aInitialDocumentURL, in nsIURI aReferrerURI, in nsIPrincipal aLoadingPrincipal, in nsILoadGroup aLoadGroup, in imgINotificationObserver aObserver, in nsISupports aCX, in nsLoadFlags aLoadFlags, in nsISupports cacheKey, in nsIChannelPolicy channelPolicy); */
+
+nsresult imgLoader::LoadImage(nsIURI *aURI,
+			      nsIURI *aInitialDocumentURI,
+			      nsIURI *aReferrerURI,
+			      nsIPrincipal* aLoadingPrincipal,
+			      nsILoadGroup *aLoadGroup,
+			      imgINotificationObserver *aObserver,
+			      nsISupports *aCX,
+			      nsLoadFlags aLoadFlags,
+			      nsISupports *aCacheKey,
+			      nsIChannelPolicy *aPolicy,
+			      imgRequestProxy **_retval)
+{
+	VerifyCacheSizes();
 
   NS_ASSERTION(aURI, "imgLoader::LoadImage -- NULL URI pointer");
 
   if (!aURI)
     return NS_ERROR_NULL_POINTER;
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   aURI->GetSpec(spec);
-  LOG_SCOPE_WITH_PARAM(gImgLog, "imgLoader::LoadImage", "aURI", spec.get());
+  LOG_SCOPE_WITH_PARAM(GetImgLog(), "imgLoader::LoadImage", "aURI", spec.get());
 
   *_retval = nullptr;
 
@@ -1523,6 +1565,20 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
 
   nsresult rv;
   nsLoadFlags requestFlags = nsIRequest::LOAD_NORMAL;
+
+#ifdef DEBUG
+  bool isPrivate = false;
+
+  if (aLoadGroup) {
+    nsCOMPtr<nsIInterfaceRequestor> callbacks;
+    aLoadGroup->GetNotificationCallbacks(getter_AddRefs(callbacks));
+    if (callbacks) {
+      nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(callbacks);
+      isPrivate = loadContext && loadContext->UsePrivateBrowsing();
+    }
+  }
+  MOZ_ASSERT(isPrivate == mRespectPrivacy);
+#endif
 
   // Get the default load flags from the loadgroup (if possible)...
   if (aLoadGroup) {
@@ -1568,18 +1624,18 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
   if (cache.Get(spec, getter_AddRefs(entry)) && entry) {
     if (ValidateEntry(entry, aURI, aInitialDocumentURI, aReferrerURI,
                       aLoadGroup, aObserver, aCX, requestFlags, true,
-                      aRequest, _retval, aPolicy, aLoadingPrincipal, corsmode)) {
+                      _retval, aPolicy, aLoadingPrincipal, corsmode)) {
       request = getter_AddRefs(entry->GetRequest());
 
       // If this entry has no proxies, its request has no reference to the entry.
       if (entry->HasNoProxies()) {
-        LOG_FUNC_WITH_PARAM(gImgLog, "imgLoader::LoadImage() adding proxyless entry", "uri", spec.get());
+        LOG_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::LoadImage() adding proxyless entry", "uri", spec.get());
         NS_ABORT_IF_FALSE(!request->HasCacheEntry(), "Proxyless entry's request has cache entry!");
         request->SetCacheEntry(entry);
 
-        if (gCacheTracker)
-          gCacheTracker->MarkUsed(entry);
-      } 
+        if (mCacheTracker)
+          mCacheTracker->MarkUsed(entry);
+      }
 
       entry->Touch();
 
@@ -1599,7 +1655,7 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
   nsCOMPtr<nsIChannel> newChannel;
   // If we didn't get a cache hit, we need to load from the network.
   if (!request) {
-    LOG_SCOPE(gImgLog, "imgLoader::LoadImage |cache miss|");
+    LOG_SCOPE(GetImgLog(), "imgLoader::LoadImage |cache miss|");
 
     bool forcePrincipalCheck;
     rv = NewImageChannel(getter_AddRefs(newChannel),
@@ -1615,16 +1671,22 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
     if (NS_FAILED(rv))
       return NS_ERROR_FAILURE;
 
-    NewRequestAndEntry(forcePrincipalCheck, getter_AddRefs(request),
-                       getter_AddRefs(entry));
+    MOZ_ASSERT(NS_UsePrivateBrowsing(newChannel) == mRespectPrivacy);
 
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
+    NewRequestAndEntry(forcePrincipalCheck, this, getter_AddRefs(request), getter_AddRefs(entry));
+
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
            ("[this=%p] imgLoader::LoadImage -- Created new imgRequest [request=%p]\n", this, request.get()));
 
     // Create a loadgroup for this new channel.  This way if the channel
     // is redirected, we'll have a way to cancel the resulting channel.
+    // Inform the new loadgroup of the old one so they can still be correlated
+    // together as a logical group.
     nsCOMPtr<nsILoadGroup> loadGroup =
         do_CreateInstance(NS_LOADGROUP_CONTRACTID);
+    nsCOMPtr<nsILoadGroupChild> childLoadGroup = do_QueryInterface(loadGroup);
+    if (childLoadGroup)
+      childLoadGroup->SetParentLoadGroup(aLoadGroup);
     newChannel->SetLoadGroup(loadGroup);
 
     request->Init(aURI, aURI, loadGroup, newChannel, entry, aCX,
@@ -1643,16 +1705,16 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
     // request.
     nsCOMPtr<nsIStreamListener> listener = pl;
     if (corsmode != imgIRequest::CORS_NONE) {
-      PR_LOG(gImgLog, PR_LOG_DEBUG,
+      PR_LOG(GetImgLog(), PR_LOG_DEBUG,
              ("[this=%p] imgLoader::LoadImage -- Setting up a CORS load",
               this));
       bool withCredentials = corsmode == imgIRequest::CORS_USE_CREDENTIALS;
 
-      nsCOMPtr<nsIStreamListener> corsproxy =
-        new nsCORSListenerProxy(pl, aLoadingPrincipal, newChannel,
-                                withCredentials, &rv);
+      nsRefPtr<nsCORSListenerProxy> corsproxy =
+        new nsCORSListenerProxy(pl, aLoadingPrincipal, withCredentials);
+      rv = corsproxy->Init(newChannel);
       if (NS_FAILED(rv)) {
-        PR_LOG(gImgLog, PR_LOG_DEBUG,
+        PR_LOG(GetImgLog(), PR_LOG_DEBUG,
                ("[this=%p] imgLoader::LoadImage -- nsCORSListenerProxy "
                 "creation failed: 0x%x\n", this, rv));
         request->CancelAndAbort(rv);
@@ -1662,13 +1724,13 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
       listener = corsproxy;
     }
 
-    PR_LOG(gImgLog, PR_LOG_DEBUG,
+    PR_LOG(GetImgLog(), PR_LOG_DEBUG,
            ("[this=%p] imgLoader::LoadImage -- Calling channel->AsyncOpen()\n", this));
 
     nsresult openRes = newChannel->AsyncOpen(listener, nullptr);
 
     if (NS_FAILED(openRes)) {
-      PR_LOG(gImgLog, PR_LOG_DEBUG,
+      PR_LOG(GetImgLog(), PR_LOG_DEBUG,
              ("[this=%p] imgLoader::LoadImage -- AsyncOpen() failed: 0x%x\n",
               this, openRes));
       request->CancelAndAbort(openRes);
@@ -1678,7 +1740,7 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
     // Try to add the new request into the cache.
     PutIntoCache(aURI, entry);
   } else {
-    LOG_MSG_WITH_PARAM(gImgLog, 
+    LOG_MSG_WITH_PARAM(GetImgLog(),
                        "imgLoader::LoadImage |cache hit|", "request", request);
   }
 
@@ -1696,14 +1758,14 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
     // that'll cause us to validate over the network.
     request->SetLoadId(aCX);
 
-    LOG_MSG(gImgLog, "imgLoader::LoadImage", "creating proxy request.");
+    LOG_MSG(GetImgLog(), "imgLoader::LoadImage", "creating proxy request.");
     rv = CreateNewProxyForRequest(request, aLoadGroup, aObserver,
-                                  requestFlags, aRequest, _retval);
+                                  requestFlags, _retval);
     if (NS_FAILED(rv)) {
       return rv;
     }
 
-    imgRequestProxy *proxy = static_cast<imgRequestProxy *>(*_retval);
+    imgRequestProxy *proxy = *_retval;
 
     // Make sure that OnStatus/OnProgress calls have the right request set, if
     // we did create a channel here.
@@ -1736,10 +1798,25 @@ NS_IMETHODIMP imgLoader::LoadImage(nsIURI *aURI,
   return NS_OK;
 }
 
-/* imgIRequest loadImageWithChannel(in nsIChannel channel, in imgIDecoderObserver aObserver, in nsISupports cx, out nsIStreamListener); */
-NS_IMETHODIMP imgLoader::LoadImageWithChannel(nsIChannel *channel, imgIDecoderObserver *aObserver, nsISupports *aCX, nsIStreamListener **listener, imgIRequest **_retval)
+/* imgIRequest loadImageWithChannelXPCOM(in nsIChannel channel, in imgINotificationObserver aObserver, in nsISupports cx, out nsIStreamListener); */
+NS_IMETHODIMP imgLoader::LoadImageWithChannelXPCOM(nsIChannel *channel, imgINotificationObserver *aObserver, nsISupports *aCX, nsIStreamListener **listener, imgIRequest **_retval)
+{
+    nsresult result;
+    imgRequestProxy* proxy;
+    result = LoadImageWithChannel(channel,
+                                  aObserver,
+                                  aCX,
+                                  listener,
+                                  &proxy);
+    *_retval = proxy;
+    return result;
+}
+
+nsresult imgLoader::LoadImageWithChannel(nsIChannel *channel, imgINotificationObserver *aObserver, nsISupports *aCX, nsIStreamListener **listener, imgRequestProxy **_retval)
 {
   NS_ASSERTION(channel, "imgLoader::LoadImageWithChannel -- NULL channel pointer");
+
+  MOZ_ASSERT(NS_UsePrivateBrowsing(channel) == mRespectPrivacy);
 
   nsRefPtr<imgRequest> request;
 
@@ -1759,7 +1836,7 @@ NS_IMETHODIMP imgLoader::LoadImageWithChannel(nsIChannel *channel, imgIDecoderOb
     // for correctly dealing with image load requests that are a result
     // of post data.
     imgCacheTable &cache = GetCache(uri);
-    nsCAutoString spec;
+    nsAutoCString spec;
 
     uri->GetSpec(spec);
 
@@ -1773,7 +1850,7 @@ NS_IMETHODIMP imgLoader::LoadImageWithChannel(nsIChannel *channel, imgIDecoderOb
       // code, but seems nonsensical.
       if (ValidateEntry(entry, uri, nullptr, nullptr, nullptr, aObserver, aCX,
                         requestFlags, false, nullptr, nullptr, nullptr,
-                        nullptr, imgIRequest::CORS_NONE)) {
+                        imgIRequest::CORS_NONE)) {
         request = getter_AddRefs(entry->GetRequest());
       } else {
         nsCOMPtr<nsICachingChannel> cacheChan(do_QueryInterface(channel));
@@ -1794,13 +1871,13 @@ NS_IMETHODIMP imgLoader::LoadImageWithChannel(nsIChannel *channel, imgIDecoderOb
       if (request && entry) {
         // If this entry has no proxies, its request has no reference to the entry.
         if (entry->HasNoProxies()) {
-          LOG_FUNC_WITH_PARAM(gImgLog, "imgLoader::LoadImageWithChannel() adding proxyless entry", "uri", spec.get());
+          LOG_FUNC_WITH_PARAM(GetImgLog(), "imgLoader::LoadImageWithChannel() adding proxyless entry", "uri", spec.get());
           NS_ABORT_IF_FALSE(!request->HasCacheEntry(), "Proxyless entry's request has cache entry!");
           request->SetCacheEntry(entry);
 
-          if (gCacheTracker)
-            gCacheTracker->MarkUsed(entry);
-        } 
+          if (mCacheTracker)
+            mCacheTracker->MarkUsed(entry);
+        }
       }
     }
   }
@@ -1820,13 +1897,13 @@ NS_IMETHODIMP imgLoader::LoadImageWithChannel(nsIChannel *channel, imgIDecoderOb
     *listener = nullptr; // give them back a null nsIStreamListener
 
     rv = CreateNewProxyForRequest(request, loadGroup, aObserver,
-                                  requestFlags, nullptr, _retval);
+                                  requestFlags, _retval);
     static_cast<imgRequestProxy*>(*_retval)->NotifyListener();
   } else {
     // Default to doing a principal check because we don't know who
     // started that load and whether their principal ended up being
     // inherited on the channel.
-    NewRequestAndEntry(true, getter_AddRefs(request), getter_AddRefs(entry));
+    NewRequestAndEntry(true, this, getter_AddRefs(request), getter_AddRefs(entry));
 
     // We use originalURI here to fulfil the imgIRequest contract on GetURI.
     nsCOMPtr<nsIURI> originalURI;
@@ -1848,7 +1925,7 @@ NS_IMETHODIMP imgLoader::LoadImageWithChannel(nsIChannel *channel, imgIDecoderOb
     PutIntoCache(originalURI, entry);
 
     rv = CreateNewProxyForRequest(request, loadGroup, aObserver,
-                                  requestFlags, nullptr, _retval);
+                                  requestFlags, _retval);
 
     // Explicitly don't notify our proxy, because we're loading off the
     // network, and necko (or things called from necko, such as
@@ -1861,14 +1938,11 @@ NS_IMETHODIMP imgLoader::LoadImageWithChannel(nsIChannel *channel, imgIDecoderOb
   return rv;
 }
 
-NS_IMETHODIMP imgLoader::SupportImageWithMimeType(const char* aMimeType, bool *_retval)
+bool imgLoader::SupportImageWithMimeType(const char* aMimeType)
 {
-  *_retval = false;
-  nsCAutoString mimeType(aMimeType);
+  nsAutoCString mimeType(aMimeType);
   ToLowerCase(mimeType);
-  *_retval = (Image::GetDecoderType(mimeType.get()) == Image::eDecoderType_unknown)
-    ? false : true;
-  return NS_OK;
+  return Image::GetDecoderType(mimeType.get()) != Image::eDecoderType_unknown;
 }
 
 NS_IMETHODIMP imgLoader::GetMIMETypeFromContent(nsIRequest* aRequest,
@@ -1886,7 +1960,7 @@ nsresult imgLoader::GetMimeTypeFromContent(const char* aContents, uint32_t aLeng
   if (aLength >= 6 && (!nsCRT::strncmp(aContents, "GIF87a", 6) ||
                        !nsCRT::strncmp(aContents, "GIF89a", 6)))
   {
-    aContentType.AssignLiteral("image/gif");
+    aContentType.AssignLiteral(IMAGE_GIF);
   }
 
   /* or a PNG? */
@@ -1898,8 +1972,8 @@ nsresult imgLoader::GetMimeTypeFromContent(const char* aContents, uint32_t aLeng
                    (unsigned char)aContents[5]==0x0A &&
                    (unsigned char)aContents[6]==0x1A &&
                    (unsigned char)aContents[7]==0x0A))
-  { 
-    aContentType.AssignLiteral("image/png");
+  {
+    aContentType.AssignLiteral(IMAGE_PNG);
   }
 
   /* maybe a JPEG (JFIF)? */
@@ -1914,7 +1988,7 @@ nsresult imgLoader::GetMimeTypeFromContent(const char* aContents, uint32_t aLeng
      ((unsigned char)aContents[1])==0xD8 &&
      ((unsigned char)aContents[2])==0xFF)
   {
-    aContentType.AssignLiteral("image/jpeg");
+    aContentType.AssignLiteral(IMAGE_JPEG);
   }
 
   /* or how about ART? */
@@ -1926,18 +2000,18 @@ nsresult imgLoader::GetMimeTypeFromContent(const char* aContents, uint32_t aLeng
    ((unsigned char) aContents[1])==0x47 &&
    ((unsigned char) aContents[4])==0x00 )
   {
-    aContentType.AssignLiteral("image/x-jg");
+    aContentType.AssignLiteral(IMAGE_ART);
   }
 
   else if (aLength >= 2 && !nsCRT::strncmp(aContents, "BM", 2)) {
-    aContentType.AssignLiteral("image/bmp");
+    aContentType.AssignLiteral(IMAGE_BMP);
   }
 
   // ICOs always begin with a 2-byte 0 followed by a 2-byte 1.
   // CURs begin with 2-byte 0 followed by 2-byte 2.
   else if (aLength >= 4 && (!memcmp(aContents, "\000\000\001\000", 4) ||
                             !memcmp(aContents, "\000\000\002\000", 4))) {
-    aContentType.AssignLiteral("image/x-icon");
+    aContentType.AssignLiteral(IMAGE_ICO);
   }
 
   else {
@@ -1980,7 +2054,7 @@ NS_IMETHODIMP ProxyListener::OnStartRequest(nsIRequest *aRequest, nsISupports *c
 
   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
   if (channel) {
-    nsCAutoString contentType;
+    nsAutoCString contentType;
     nsresult rv = channel->GetContentType(contentType);
 
     if (!contentType.IsEmpty()) {
@@ -2021,8 +2095,11 @@ NS_IMETHODIMP ProxyListener::OnStopRequest(nsIRequest *aRequest, nsISupports *ct
 
 /** nsIStreamListener methods **/
 
-/* void onDataAvailable (in nsIRequest request, in nsISupports ctxt, in nsIInputStream inStr, in unsigned long sourceOffset, in unsigned long count); */
-NS_IMETHODIMP ProxyListener::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt, nsIInputStream *inStr, uint32_t sourceOffset, uint32_t count)
+/* void onDataAvailable (in nsIRequest request, in nsISupports ctxt, in nsIInputStream inStr, in unsigned long long sourceOffset, in unsigned long count); */
+NS_IMETHODIMP
+ProxyListener::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
+                               nsIInputStream *inStr, uint64_t sourceOffset,
+                               uint32_t count)
 {
   if (!mDestListener)
     return NS_ERROR_FAILURE;
@@ -2038,17 +2115,16 @@ NS_IMPL_ISUPPORTS5(imgCacheValidator, nsIStreamListener, nsIRequestObserver,
                    nsIChannelEventSink, nsIInterfaceRequestor,
                    nsIAsyncVerifyRedirectCallback)
 
-imgLoader imgCacheValidator::sImgLoader;
-
 imgCacheValidator::imgCacheValidator(nsProgressNotificationProxy* progress,
-                                     imgRequest *request, void *aContext,
-                                     bool forcePrincipalCheckForCacheEntry)
+                                     imgLoader* loader, imgRequest *request,
+                                     void *aContext, bool forcePrincipalCheckForCacheEntry)
  : mProgressProxy(progress),
    mRequest(request),
-   mContext(aContext)
+   mContext(aContext),
+   mImgLoader(loader)
 {
-  NewRequestAndEntry(forcePrincipalCheckForCacheEntry,
-                     getter_AddRefs(mNewRequest), getter_AddRefs(mNewEntry));
+  NewRequestAndEntry(forcePrincipalCheckForCacheEntry, loader, getter_AddRefs(mNewRequest),
+                     getter_AddRefs(mNewEntry));
 }
 
 imgCacheValidator::~imgCacheValidator()
@@ -2077,7 +2153,7 @@ NS_IMETHODIMP imgCacheValidator::OnStartRequest(nsIRequest *aRequest, nsISupport
   // we have to do is tell them to notify their listeners.
   nsCOMPtr<nsICachingChannel> cacheChan(do_QueryInterface(aRequest));
   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
-  if (cacheChan && channel) {
+  if (cacheChan && channel && !mRequest->CacheChanged(aRequest)) {
     bool isFromCache = false;
     cacheChan->IsFromCache(&isFromCache);
 
@@ -2125,9 +2201,9 @@ NS_IMETHODIMP imgCacheValidator::OnStartRequest(nsIRequest *aRequest, nsISupport
   mRequest->GetURI(getter_AddRefs(uri));
 
 #if defined(PR_LOGGING)
-  nsCAutoString spec;
+  nsAutoCString spec;
   uri->GetSpec(spec);
-  LOG_MSG_WITH_PARAM(gImgLog, "imgCacheValidator::OnStartRequest creating new request", "uri", spec.get());
+  LOG_MSG_WITH_PARAM(GetImgLog(), "imgCacheValidator::OnStartRequest creating new request", "uri", spec.get());
 #endif
 
   int32_t corsmode = mRequest->GetCORSMode();
@@ -2151,22 +2227,16 @@ NS_IMETHODIMP imgCacheValidator::OnStartRequest(nsIRequest *aRequest, nsISupport
   // Try to add the new request into the cache. Note that the entry must be in
   // the cache before the proxies' ownership changes, because adding a proxy
   // changes the caching behaviour for imgRequests.
-  sImgLoader.PutIntoCache(originalURI, mNewEntry);
+  mImgLoader->PutIntoCache(originalURI, mNewEntry);
 
   uint32_t count = mProxies.Count();
   for (int32_t i = count-1; i>=0; i--) {
     imgRequestProxy *proxy = static_cast<imgRequestProxy *>(mProxies[i]);
     proxy->ChangeOwner(mNewRequest);
 
-    // Proxies waiting on cache validation should be deferring notifications.
-    // Undefer them.
-    NS_ABORT_IF_FALSE(proxy->NotificationsDeferred(),
-                      "Proxies waiting on cache validation should be "
-                      "deferring notifications!");
-    proxy->SetNotificationsDeferred(false);
-
     // Notify synchronously, because we're already in OnStartRequest, an
     // asynchronously-called function.
+    proxy->SetNotificationsDeferred(false);
     proxy->SyncNotifyListener();
   }
 
@@ -2188,8 +2258,11 @@ NS_IMETHODIMP imgCacheValidator::OnStopRequest(nsIRequest *aRequest, nsISupports
 /** nsIStreamListener methods **/
 
 
-/* void onDataAvailable (in nsIRequest request, in nsISupports ctxt, in nsIInputStream inStr, in unsigned long sourceOffset, in unsigned long count); */
-NS_IMETHODIMP imgCacheValidator::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt, nsIInputStream *inStr, uint32_t sourceOffset, uint32_t count)
+/* void onDataAvailable (in nsIRequest request, in nsISupports ctxt, in nsIInputStream inStr, in unsigned long long sourceOffset, in unsigned long count); */
+NS_IMETHODIMP
+imgCacheValidator::OnDataAvailable(nsIRequest *aRequest, nsISupports *ctxt,
+                                   nsIInputStream *inStr,
+                                   uint64_t sourceOffset, uint32_t count)
 {
   if (!mDestListener) {
     // XXX see bug 113959

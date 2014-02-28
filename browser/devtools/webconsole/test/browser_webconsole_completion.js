@@ -50,13 +50,14 @@ function testCompletion(hud) {
   is(input.selectionEnd, 8, "end selection is alright");
   is(jsterm.completeNode.value.replace(/ /g, ""), "", "'docu' completed");
 
-  // Test typing 'window.O' and press tab.
-  input.value = "window.O";
-  input.setSelectionRange(8, 8);
+  // Test typing 'window.Ob' and press tab.  Just 'window.O' is
+  // ambiguous: could be window.Object, window.Option, etc.
+  input.value = "window.Ob";
+  input.setSelectionRange(9, 9);
   jsterm.complete(jsterm.COMPLETE_FORWARD, testNext);
   yield;
 
-  is(input.value, "window.Object", "'window.O' tab completion");
+  is(input.value, "window.Object", "'window.Ob' tab completion");
 
   // Test typing 'document.getElem'.
   input.value = "document.getElem";
@@ -65,21 +66,21 @@ function testCompletion(hud) {
   yield;
 
   is(input.value, "document.getElem", "'document.getElem' completion");
-  is(jsterm.completeNode.value, "                entById", "'document.getElem' completion");
+  is(jsterm.completeNode.value, "", "'document.getElem' completion");
 
   // Test pressing tab another time.
   jsterm.complete(jsterm.COMPLETE_FORWARD, testNext);
   yield;
 
   is(input.value, "document.getElem", "'document.getElem' completion");
-  is(jsterm.completeNode.value, "                entsByClassName", "'document.getElem' another tab completion");
+  is(jsterm.completeNode.value, "                entsByTagNameNS", "'document.getElem' another tab completion");
 
   // Test pressing shift_tab.
   jsterm.complete(jsterm.COMPLETE_BACKWARD, testNext);
   yield;
 
   is(input.value, "document.getElem", "'document.getElem' untab completion");
-  is(jsterm.completeNode.value, "                entById", "'document.getElem' completion");
+  is(jsterm.completeNode.value, "", "'document.getElem' completion");
 
   jsterm.clearOutput();
 

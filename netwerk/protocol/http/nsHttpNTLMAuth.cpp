@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <stdlib.h>
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttp.h"
 #include "nsHttpNTLMAuth.h"
 #include "nsIComponentManager.h"
@@ -92,7 +94,7 @@ MatchesBaseURI(const nsCSubstring &matchScheme,
 static bool
 IsNonFqdn(nsIURI *uri)
 {
-    nsCAutoString host;
+    nsAutoCString host;
     PRNetAddr addr;
 
     if (NS_FAILED(uri->GetAsciiHost(host)))
@@ -110,7 +112,7 @@ TestPref(nsIURI *uri, const char *pref)
     if (!prefs)
         return false;
 
-    nsCAutoString scheme, host;
+    nsAutoCString scheme, host;
     int32_t port;
 
     if (NS_FAILED(uri->GetScheme(scheme)))
@@ -152,7 +154,7 @@ TestPref(nsIURI *uri, const char *pref)
             break;
         start = end + 1;
     }
-    
+
     nsMemory::Free(hostList);
     return false;
 }
@@ -249,7 +251,7 @@ nsHttpNTLMAuth::ChallengeReceived(nsIHttpAuthenticableChannel *channel,
         // instantiate a native NTLM module the last time, so skip trying again.
         bool forceGeneric = ForceGenericNTLM();
         if (!forceGeneric && !*sessionState) {
-            // Check for approved default credentials hosts and proxies. If 
+            // Check for approved default credentials hosts and proxies. If
             // *continuationState is non-null, the last authentication attempt
             // failed so skip default credential use.
             if (!*continuationState && CanUseDefaultCredentials(channel, isProxyAuth)) {
@@ -296,7 +298,7 @@ nsHttpNTLMAuth::ChallengeReceived(nsIHttpAuthenticableChannel *channel,
             // see bug 520607 for details.
             LOG(("Trying to fall back on internal ntlm auth.\n"));
             module = do_CreateInstance(NS_AUTH_MODULE_CONTRACTID_PREFIX "ntlm");
-	    
+	
             mUseNative = false;
 
             // Prompt user for domain, username, and password.
@@ -336,7 +338,7 @@ nsHttpNTLMAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChannel,
 
     // if user or password is empty, ChallengeReceived returned
     // identityInvalid = false, that means we are using default user
-    // credentials; see  nsAuthSSPI::Init method for explanation of this 
+    // credentials; see  nsAuthSSPI::Init method for explanation of this
     // condition
     if (!user || !pass)
         *aFlags = USING_INTERNAL_IDENTITY;
@@ -355,27 +357,31 @@ nsHttpNTLMAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChannel,
         rv = authChannel->GetURI(getter_AddRefs(uri));
         if (NS_FAILED(rv))
             return rv;
-        nsCAutoString serviceName, host;
+        nsAutoCString serviceName, host;
         rv = uri->GetAsciiHost(host);
         if (NS_FAILED(rv))
             return rv;
         serviceName.AppendLiteral("HTTP@");
         serviceName.Append(host);
         // initialize auth module
-        rv = module->Init(serviceName.get(), nsIAuthModule::REQ_DEFAULT, domain, user, pass);
+        uint32_t reqFlags = nsIAuthModule::REQ_DEFAULT;
+        if (isProxyAuth)
+            reqFlags |= nsIAuthModule::REQ_PROXY_AUTH;
+
+        rv = module->Init(serviceName.get(), reqFlags, domain, user, pass);
         if (NS_FAILED(rv))
             return rv;
 
 // This update enables updated Windows machines (Win7 or patched previous
-// versions) and Linux machines running Samba (updated for Channel 
-// Binding), to perform Channel Binding when authenticating using NTLMv2 
+// versions) and Linux machines running Samba (updated for Channel
+// Binding), to perform Channel Binding when authenticating using NTLMv2
 // and an outer secure channel.
-// 
-// Currently only implemented for Windows, linux support will be landing in 
+//
+// Currently only implemented for Windows, linux support will be landing in
 // a separate patch, update this #ifdef accordingly then.
 #if defined (XP_WIN) /* || defined (LINUX) */
-        // We should retrieve the server certificate and compute the CBT, 
-        // but only when we are using the native NTLM implementation and 
+        // We should retrieve the server certificate and compute the CBT,
+        // but only when we are using the native NTLM implementation and
         // not the internal one.
         // It is a valid case not having the security info object.  This
         // occures when we connect an https site through an ntlm proxy.
@@ -406,13 +412,13 @@ nsHttpNTLMAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChannel,
 
             uint32_t length;
             uint8_t* certArray;
-            cert->GetRawDER(&length, &certArray);						  
+            cert->GetRawDER(&length, &certArray);						
 			
             // If there is a server certificate, we pass it along the
             // first time we call GetNextToken().
             inBufLen = length;
             inBuf = certArray;
-        } else { 
+        } else {
             // If there is no server certificate, we don't pass anything.
             inBufLen = 0;
             inBuf = nullptr;

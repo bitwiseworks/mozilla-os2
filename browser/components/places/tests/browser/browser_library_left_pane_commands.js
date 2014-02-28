@@ -18,53 +18,57 @@ var gLibrary;
 gTests.push({
   desc: "Bug 489351 - Date containers under History in Library cannot be deleted/cut",
   run: function() {
-    var bhist = PlacesUtils.history.QueryInterface(Ci.nsIBrowserHistory);
-    // Add a visit.
-    PlacesUtils.history.addVisit(PlacesUtils._uri(TEST_URI), Date.now() * 1000,
-                                 null, PlacesUtils.history.TRANSITION_TYPED,
-                                 false, 0);
-    ok(bhist.isVisited(PlacesUtils._uri(TEST_URI)), "Visit has been added");
+    function addVisitsCallback() {
+      // Select and open the left pane "History" query.
+      var PO = gLibrary.PlacesOrganizer;
+      PO.selectLeftPaneQuery('History');
+      isnot(PO._places.selectedNode, null, "We correctly selected History");
 
-    // Select and open the left pane "History" query.
-    var PO = gLibrary.PlacesOrganizer;
-    PO.selectLeftPaneQuery('History');
-    isnot(PO._places.selectedNode, null, "We correctly selected History");
+      // Check that both delete and cut commands are disabled.
+      ok(!PO._places.controller.isCommandEnabled("cmd_cut"),
+         "Cut command is disabled");
+      ok(!PO._places.controller.isCommandEnabled("cmd_delete"),
+         "Delete command is disabled");
+      var historyNode = PO._places.selectedNode
+                          .QueryInterface(Ci.nsINavHistoryContainerResultNode);
+      historyNode.containerOpen = true;
 
-    // Check that both delete and cut commands are disabled.
-    ok(!PO._places.controller.isCommandEnabled("cmd_cut"),
-       "Cut command is disabled");
-    ok(!PO._places.controller.isCommandEnabled("cmd_delete"),
-       "Delete command is disabled");
-    var historyNode = PO._places.selectedNode
-                        .QueryInterface(Ci.nsINavHistoryContainerResultNode);
-    historyNode.containerOpen = true;
+      // Check that we have a child container. It is "Today" container.
+      is(historyNode.childCount, 1, "History node has one child");
+      var todayNode = historyNode.getChild(0);
+      var todayNodeExpectedTitle = PlacesUtils.getString("finduri-AgeInDays-is-0");
+      is(todayNode.title, todayNodeExpectedTitle,
+         "History child is the expected container");
 
-    // Check that we have a child container. It is "Today" container.
-    is(historyNode.childCount, 1, "History node has one child");
-    var todayNode = historyNode.getChild(0);
-    var todayNodeExpectedTitle = PlacesUtils.getString("finduri-AgeInDays-is-0");
-    is(todayNode.title, todayNodeExpectedTitle,
-       "History child is the expected container");
+      // Select "Today" container.
+      PO._places.selectNode(todayNode);
+      is(PO._places.selectedNode, todayNode,
+         "We correctly selected Today container");
+      // Check that delete command is enabled but cut command is disabled.
+      ok(!PO._places.controller.isCommandEnabled("cmd_cut"),
+         "Cut command is disabled");
+      ok(PO._places.controller.isCommandEnabled("cmd_delete"),
+         "Delete command is enabled");
 
-    // Select "Today" container.
-    PO._places.selectNode(todayNode);
-    is(PO._places.selectedNode, todayNode,
-       "We correctly selected Today container");
-    // Check that delete command is enabled but cut command is disabled.
-    ok(!PO._places.controller.isCommandEnabled("cmd_cut"),
-       "Cut command is disabled");
-    ok(PO._places.controller.isCommandEnabled("cmd_delete"),
-       "Delete command is enabled");
+      // Execute the delete command and check visit has been removed.
+      PO._places.controller.doCommand("cmd_delete");
 
-    // Execute the delete command and check visit has been removed.
-    PO._places.controller.doCommand("cmd_delete");
-    ok(!bhist.isVisited(PlacesUtils._uri(TEST_URI)), "Visit has been removed");
+      // Test live update of "History" query.
+      is(historyNode.childCount, 0, "History node has no more children");
 
-    // Test live update of "History" query.
-    is(historyNode.childCount, 0, "History node has no more children");
+      historyNode.containerOpen = false;
 
-    historyNode.containerOpen = false;
-    nextTest();
+      let testURI = NetUtil.newURI(TEST_URI);
+      PlacesUtils.asyncHistory.isURIVisited(testURI, function(aURI, aIsVisited) {
+        ok(!aIsVisited, "Visit has been removed");
+        nextTest();
+      });
+    }
+    addVisits(
+      {uri: NetUtil.newURI(TEST_URI), visitDate: Date.now() * 1000,
+        transition: PlacesUtils.history.TRANSITION_TYPED},
+      window,
+      addVisitsCallback);
   }
 });
 
@@ -93,7 +97,7 @@ gTests.push({
 
     // Add an History query to the toolbar.
     PlacesUtils.bookmarks.insertBookmark(PlacesUtils.toolbarFolderId,
-                                         PlacesUtils._uri("place:sort=4"),
+                                         NetUtil.newURI("place:sort=4"),
                                          0, // Insert at start.
                                          "special_query");
     // Get first child and check it is the "Most Visited" smart bookmark.

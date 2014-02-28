@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "VacuumManager.h"
 
 #include "mozilla/Services.h"
@@ -64,11 +66,11 @@ BaseCallback::HandleError(mozIStorageError *aError)
   int32_t result;
   nsresult rv = aError->GetResult(&result);
   NS_ENSURE_SUCCESS(rv, rv);
-  nsCAutoString message;
+  nsAutoCString message;
   rv = aError->GetMessage(message);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString warnMsg;
+  nsAutoCString warnMsg;
   warnMsg.AppendLiteral("An error occured during async execution: ");
   warnMsg.AppendInt(result);
   warnMsg.AppendLiteral(" ");
@@ -143,10 +145,10 @@ Vacuumer::execute()
   // TODO Bug 634374: figure out a strategy to fix page size with WAL.
   int32_t expectedPageSize = 0;
   rv = mParticipant->GetExpectedDatabasePageSize(&expectedPageSize);
-  if (NS_FAILED(rv) || expectedPageSize < 512 || expectedPageSize > 65536) {
+  if (NS_FAILED(rv) || !Service::pageSizeIsValid(expectedPageSize)) {
     NS_WARNING("Invalid page size requested for database, will use default ");
     NS_WARNING(mDBFilename.get());
-    expectedPageSize = mozIStorageConnection::DEFAULT_PAGE_SIZE;
+    expectedPageSize = Service::getDefaultPageSize();
   }
 
   // Get the database filename.  Last vacuum time is stored under this name
@@ -166,7 +168,7 @@ Vacuumer::execute()
   // Check interval from last vacuum.
   int32_t now = static_cast<int32_t>(PR_Now() / PR_USEC_PER_SEC);
   int32_t lastVacuum;
-  nsCAutoString prefName(PREF_VACUUM_BRANCH);
+  nsAutoCString prefName(PREF_VACUUM_BRANCH);
   prefName += mDBFilename;
   rv = Preferences::GetInt(prefName.get(), &lastVacuum);
   if (NS_SUCCEEDED(rv) && (now - lastVacuum) < VACUUM_INTERVAL_SECONDS) {
@@ -196,7 +198,7 @@ Vacuumer::execute()
   // Execute the statements separately, since the pragma may conflict with the
   // vacuum, if they are executed in the same transaction.
   nsCOMPtr<mozIStorageAsyncStatement> pageSizeStmt;
-  nsCAutoString pageSizeQuery(MOZ_STORAGE_UNIQUIFY_QUERY_STR
+  nsAutoCString pageSizeQuery(MOZ_STORAGE_UNIQUIFY_QUERY_STR
                               "PRAGMA page_size = ");
   pageSizeQuery.AppendInt(expectedPageSize);
   rv = mDBConn->CreateAsyncStatement(pageSizeQuery,
@@ -228,11 +230,11 @@ Vacuumer::HandleError(mozIStorageError *aError)
   int32_t result;
   nsresult rv = aError->GetResult(&result);
   NS_ENSURE_SUCCESS(rv, rv);
-  nsCAutoString message;
+  nsAutoCString message;
   rv = aError->GetMessage(message);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString warnMsg;
+  nsAutoCString warnMsg;
   warnMsg.AppendLiteral("Unable to vacuum database: ");
   warnMsg.Append(mDBFilename);
   warnMsg.AppendLiteral(" - ");
@@ -247,7 +249,7 @@ Vacuumer::HandleError(mozIStorageError *aError)
     int32_t result;
     nsresult rv = aError->GetResult(&result);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCAutoString message;
+    nsAutoCString message;
     rv = aError->GetMessage(message);
     NS_ENSURE_SUCCESS(rv, rv);
     PR_LOG(gStorageLog, PR_LOG_ERROR,
@@ -272,7 +274,7 @@ Vacuumer::HandleCompletion(uint16_t aReason)
     // Update last vacuum time.
     int32_t now = static_cast<int32_t>(PR_Now() / PR_USEC_PER_SEC);
     MOZ_ASSERT(!mDBFilename.IsEmpty(), "Database filename cannot be empty");
-    nsCAutoString prefName(PREF_VACUUM_BRANCH);
+    nsAutoCString prefName(PREF_VACUUM_BRANCH);
     prefName += mDBFilename;
     DebugOnly<nsresult> rv = Preferences::SetInt(prefName.get(), now);
     MOZ_ASSERT(NS_SUCCEEDED(rv), "Should be able to set a preference"); 

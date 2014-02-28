@@ -6,35 +6,18 @@ DEPTH = @DEPTH@
 topsrcdir = @top_srcdir@
 srcdir = @srcdir@
 VPATH = @srcdir@
+FAIL_ON_WARNINGS := 1
 
 include $(DEPTH)/config/autoconf.mk
-
-MODULE = necko
 
 LIBRARY_NAME = neckoipc_s
 LIBXUL_LIBRARY = 1
 FORCE_STATIC_LIB = 1
 EXPORT_LIBRARY = 1
-
-EXPORTS_NAMESPACES = mozilla/net
-
-EXPORTS_mozilla/net = \
-  NeckoParent.h       \
-  NeckoChild.h        \
-  NeckoCommon.h       \
-  NeckoMessageUtils.h \
-  ChannelEventQueue.h \
-  $(NULL)
-
-CPPSRCS =               \
-  NeckoChild.cpp        \
-  NeckoParent.cpp       \
-  ChannelEventQueue.cpp \
-  $(NULL)
-
 LOCAL_INCLUDES +=                  \
   -I$(srcdir)/../protocol/http \
   -I$(srcdir)/../base/src          \
+  -I$(topsrcdir)/modules/libjar    \
   $(NULL)
 
 include $(topsrcdir)/config/config.mk

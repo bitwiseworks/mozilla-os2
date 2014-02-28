@@ -4,8 +4,21 @@
 
 #include "nsIDOMEvent.idl"
 
-[scriptable, builtinclass, uuid(1b8ea6e4-8142-4aba-b174-4d580b5bc294)]
+[scriptable, builtinclass, uuid(d26880c8-0468-4abb-94a6-9143defb5545)]
 interface nsIDOMUSSDReceivedEvent : nsIDOMEvent
 {
   readonly attribute DOMString message;
+  [infallible] readonly attribute boolean sessionEnded;
+
+  [noscript] void initUSSDReceivedEvent(in DOMString aType,
+                                        in boolean aCanBubble,
+                                        in boolean aCancelable,
+                                        in DOMString aMessage,
+                                        in boolean aSessionEnded);
+};
+
+dictionary USSDReceivedEventInit : EventInit
+{
+  DOMString? message;
+  boolean sessionEnded;
 };

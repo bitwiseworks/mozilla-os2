@@ -43,6 +43,20 @@ LeafAccessible::ChildAtPoint(int32_t aX, int32_t aY,
   return this;
 }
 
+bool
+LeafAccessible::InsertChildAt(uint32_t aIndex, Accessible* aChild)
+{
+  NS_NOTREACHED("InsertChildAt called on leaf accessible!");
+  return false;
+}
+
+bool
+LeafAccessible::RemoveChild(Accessible* aChild)
+{
+  NS_NOTREACHED("RemoveChild called on leaf accessible!");
+  return false;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // LeafAccessible: Accessible private
 
@@ -236,4 +250,36 @@ role
 EnumRoleAccessible::NativeRole()
 {
   return mRole;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// DummyAccessible
+////////////////////////////////////////////////////////////////////////////////
+
+uint64_t
+DummyAccessible::NativeState()
+{
+  return 0;
+}
+uint64_t
+DummyAccessible::NativeInteractiveState() const
+{
+  return 0;
+}
+
+uint64_t
+DummyAccessible::NativeLinkState() const
+{
+  return 0;
+}
+
+bool
+DummyAccessible::NativelyUnavailable() const
+{
+  return false;
+}
+
+void
+DummyAccessible::ApplyARIAState(uint64_t* aState) const
+{
 }

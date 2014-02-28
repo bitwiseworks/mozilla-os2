@@ -143,7 +143,7 @@
 
             if (aCharset) {
               try {
-                this.docShell.parentCharset = this.mAtomService.getAtom(aCharset);
+                this.docShell.parentCharset = aCharset;
               }
               catch (e) {
               }
@@ -409,6 +409,10 @@
                 onget="return this.contentDocument.title;"
                 readonly="true"/>
 
+      <property name="characterSet"
+                onget="return this.contentDocument.characterSet;"
+                readonly="true"/>
+
       <property name="contentPrincipal"
                 onget="return this.contentDocument.nodePrincipal;"
                 readonly="true"/>
@@ -613,6 +617,10 @@
       <property name="securityUI">
         <getter>
           <![CDATA[
+            // Bug 666809 - SecurityUI support for e10s
+            if (!this.docShell)
+              return null;
+
             if (!this.docShell.securityUI) {
               const SECUREBROWSERUI_CONTRACTID = "@mozilla.org/secure_browser_ui;1";
               if (!this.hasAttribute("disablesecurity") &&
@@ -716,7 +724,7 @@
                                 .createInstance(Components.interfaces.nsISHistory);
               // enable global history if we weren't told otherwise
               if (this.docShell && !this.hasAttribute("disableglobalhistory"))
-                this.docShell.QueryInterface(Components.interfaces.nsIDocShellHistory).useGlobalHistory = true;
+                this.docShell.useGlobalHistory = true;
             }
           }
           catch (e) {

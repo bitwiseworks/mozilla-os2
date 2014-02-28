@@ -26,7 +26,6 @@
 #include "nsReadableUtils.h"            // for EmptyString
 #include "nsString.h"                   // for nsAutoString, nsString, etc
 #include "nsStringFwd.h"                // for nsAFlatString
-#include "prtypes.h"                    // for int32_t
 
 class nsISupports;
 
@@ -636,7 +635,7 @@ nsParagraphStateCommand::GetCurrentState(nsIEditor *aEditor,
   nsresult rv = htmlEditor->GetParagraphState(&outMixed, outStateString);
   if (NS_SUCCEEDED(rv))
   {
-    nsCAutoString tOutStateString;
+    nsAutoCString tOutStateString;
     tOutStateString.AssignWithConversion(outStateString);
     aParams->SetBooleanValue(STATE_MIXED,outMixed);
     aParams->SetCStringValue(STATE_ATTRIBUTE, tOutStateString.get());
@@ -715,7 +714,7 @@ nsFontSizeStateCommand::nsFontSizeStateCommand()
 {
 }
 
-//  nsCAutoString tOutStateString;
+//  nsAutoCString tOutStateString;
 //  tOutStateString.AssignWithConversion(outStateString);
 nsresult
 nsFontSizeStateCommand::GetCurrentState(nsIEditor *aEditor,
@@ -735,7 +734,7 @@ nsFontSizeStateCommand::GetCurrentState(nsIEditor *aEditor,
                                          outStateString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString tOutStateString;
+  nsAutoCString tOutStateString;
   tOutStateString.AssignWithConversion(outStateString);
   aParams->SetBooleanValue(STATE_MIXED, anyHas && !allHas);
   aParams->SetCStringValue(STATE_ATTRIBUTE, tOutStateString.get());
@@ -798,7 +797,7 @@ nsFontColorStateCommand::GetCurrentState(nsIEditor *aEditor,
   nsresult rv = htmlEditor->GetFontColorState(&outMixed, outStateString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString tOutStateString;
+  nsAutoCString tOutStateString;
   tOutStateString.AssignWithConversion(outStateString);
   aParams->SetBooleanValue(STATE_MIXED, outMixed);
   aParams->SetCStringValue(STATE_ATTRIBUTE, tOutStateString.get());
@@ -839,7 +838,7 @@ nsHighlightColorStateCommand::GetCurrentState(nsIEditor *aEditor,
   nsresult rv = htmlEditor->GetHighlightColorState(&outMixed, outStateString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString tOutStateString;
+  nsAutoCString tOutStateString;
   tOutStateString.AssignWithConversion(outStateString);
   aParams->SetBooleanValue(STATE_MIXED, outMixed);
   aParams->SetCStringValue(STATE_ATTRIBUTE, tOutStateString.get());
@@ -896,7 +895,7 @@ nsBackgroundColorStateCommand::GetCurrentState(nsIEditor *aEditor,
   nsresult rv =  htmlEditor->GetBackgroundColorState(&outMixed, outStateString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString tOutStateString;
+  nsAutoCString tOutStateString;
   tOutStateString.AssignWithConversion(outStateString);
   aParams->SetBooleanValue(STATE_MIXED, outMixed);
   aParams->SetCStringValue(STATE_ATTRIBUTE, tOutStateString.get());
@@ -953,7 +952,7 @@ nsAlignCommand::GetCurrentState(nsIEditor *aEditor, nsICommandParams *aParams)
       outStateString.AssignLiteral("justify");
       break;
   }
-  nsCAutoString tOutStateString;
+  nsAutoCString tOutStateString;
   tOutStateString.AssignWithConversion(outStateString);
   aParams->SetBooleanValue(STATE_MIXED,outMixed);
   aParams->SetCStringValue(STATE_ATTRIBUTE, tOutStateString.get());

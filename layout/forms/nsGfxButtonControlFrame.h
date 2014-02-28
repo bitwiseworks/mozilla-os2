@@ -6,14 +6,11 @@
 #ifndef nsGfxButtonControlFrame_h___
 #define nsGfxButtonControlFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsFormControlFrame.h"
 #include "nsHTMLButtonControlFrame.h"
 #include "nsCOMPtr.h"
 #include "nsIAnonymousContentCreator.h"
-
-#ifdef ACCESSIBILITY
-class nsIAccessible;
-#endif
 
 // Class which implements the input[type=button, reset, submit] and
 // browse button for input[type=file].
@@ -28,46 +25,40 @@ public:
 
   nsGfxButtonControlFrame(nsStyleContext* aContext);
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot);
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
   NS_IMETHOD HandleEvent(nsPresContext* aPresContext, 
                          nsGUIEvent* aEvent,
-                         nsEventStatus* aEventStatus);
+                         nsEventStatus* aEventStatus) MOZ_OVERRIDE;
 
-  virtual nsIAtom* GetType() const;
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const;
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   NS_DECL_QUERYFRAME
 
   // nsIAnonymousContentCreator
-  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements);
+  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
   virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
-                                        uint32_t aFilter);
-  virtual nsIFrame* CreateFrameFor(nsIContent* aContent);
-
-  // nsIFormControlFrame
-  virtual nsresult GetFormProperty(nsIAtom* aName, nsAString& aValue) const; 
-
+                                        uint32_t aFilter) MOZ_OVERRIDE;
+  virtual nsIFrame* CreateFrameFor(nsIContent* aContent) MOZ_OVERRIDE;
 
   NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
                               nsIAtom*        aAttribute,
-                              int32_t         aModType);
+                              int32_t         aModType) MOZ_OVERRIDE;
 
-  virtual bool IsLeaf() const;
+  virtual bool IsLeaf() const MOZ_OVERRIDE;
 
-  virtual nsIFrame* GetContentInsertionFrame();
+  virtual nsIFrame* GetContentInsertionFrame() MOZ_OVERRIDE;
 
 protected:
-  nsresult GetDefaultLabel(nsXPIDLString& aLabel);
+  nsresult GetDefaultLabel(nsXPIDLString& aLabel) const;
 
   nsresult GetLabel(nsXPIDLString& aLabel);
 
-  bool IsFileBrowseButton(int32_t type); // Browse button of file input
-
-  virtual bool IsInput() { return true; }
+  virtual bool IsInput() MOZ_OVERRIDE { return true; }
 private:
   nsCOMPtr<nsIContent> mTextContent;
 };

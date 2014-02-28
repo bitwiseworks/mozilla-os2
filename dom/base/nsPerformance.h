@@ -11,23 +11,23 @@
 #include "mozilla/Attributes.h"
 #include "nsWrapperCache.h"
 #include "nsDOMNavigationTiming.h"
+#include "nsContentUtils.h"
 
 class nsIURI;
 class nsITimedChannel;
 class nsIDOMWindow;
 class nsPerformance;
-struct JSObject;
+class JSObject;
 struct JSContext;
 
 // Script "performance.timing" object
-class nsPerformanceTiming MOZ_FINAL : public nsISupports,
-                                      public nsWrapperCache
+class nsPerformanceTiming MOZ_FINAL : public nsWrapperCache
 {
 public:
   nsPerformanceTiming(nsPerformance* aPerformance,
                       nsITimedChannel* aChannel);
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsPerformanceTiming)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsPerformanceTiming)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(nsPerformanceTiming)
 
   nsDOMNavigationTiming* GetDOMTiming() const;
 
@@ -36,53 +36,93 @@ public:
     return mPerformance;
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // PerformanceNavigation WebIDL methods
-  DOMTimeMilliSec GetNavigationStart() const {
+  DOMTimeMilliSec NavigationStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetNavigationStart();
   }
-  DOMTimeMilliSec GetUnloadEventStart() {
+  DOMTimeMilliSec UnloadEventStart() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetUnloadEventStart();
   }
-  DOMTimeMilliSec GetUnloadEventEnd() {
+  DOMTimeMilliSec UnloadEventEnd() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetUnloadEventEnd();
   }
-  DOMTimeMilliSec GetRedirectStart() {
+  DOMTimeMilliSec RedirectStart() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetRedirectStart();
   }
-  DOMTimeMilliSec GetRedirectEnd() {
+  DOMTimeMilliSec RedirectEnd() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetRedirectEnd();
   }
-  DOMTimeMilliSec GetFetchStart() const {
+  DOMTimeMilliSec FetchStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetFetchStart();
   }
-  DOMTimeMilliSec GetDomainLookupStart() const;
-  DOMTimeMilliSec GetDomainLookupEnd() const;
-  DOMTimeMilliSec GetConnectStart() const;
-  DOMTimeMilliSec GetConnectEnd() const;
-  DOMTimeMilliSec GetRequestStart() const;
-  DOMTimeMilliSec GetResponseStart() const;
-  DOMTimeMilliSec GetResponseEnd() const;
-  DOMTimeMilliSec GetDomLoading() const {
+  DOMTimeMilliSec DomainLookupStart() const;
+  DOMTimeMilliSec DomainLookupEnd() const;
+  DOMTimeMilliSec ConnectStart() const;
+  DOMTimeMilliSec ConnectEnd() const;
+  DOMTimeMilliSec RequestStart() const;
+  DOMTimeMilliSec ResponseStart() const;
+  DOMTimeMilliSec ResponseEnd() const;
+  DOMTimeMilliSec DomLoading() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomLoading();
   }
-  DOMTimeMilliSec GetDomInteractive() const {
+  DOMTimeMilliSec DomInteractive() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomInteractive();
   }
-  DOMTimeMilliSec GetDomContentLoadedEventStart() const {
+  DOMTimeMilliSec DomContentLoadedEventStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomContentLoadedEventStart();
   }
-  DOMTimeMilliSec GetDomContentLoadedEventEnd() const {
+  DOMTimeMilliSec DomContentLoadedEventEnd() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomContentLoadedEventEnd();
   }
-  DOMTimeMilliSec GetDomComplete() const {
+  DOMTimeMilliSec DomComplete() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomComplete();
   }
-  DOMTimeMilliSec GetLoadEventStart() const {
+  DOMTimeMilliSec LoadEventStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetLoadEventStart();
   }
-  DOMTimeMilliSec GetLoadEventEnd() const {
+  DOMTimeMilliSec LoadEventEnd() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetLoadEventEnd();
   }
 
@@ -93,13 +133,12 @@ private:
 };
 
 // Script "performance.navigation" object
-class nsPerformanceNavigation MOZ_FINAL : public nsISupports,
-                                          public nsWrapperCache
+class nsPerformanceNavigation MOZ_FINAL : public nsWrapperCache
 {
 public:
   explicit nsPerformanceNavigation(nsPerformance* aPerformance);
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsPerformanceNavigation)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsPerformanceNavigation)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(nsPerformanceNavigation)
 
   nsDOMNavigationTiming* GetDOMTiming() const;
 
@@ -108,13 +147,14 @@ public:
     return mPerformance;
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // PerformanceNavigation WebIDL methods
-  uint16_t GetType() const {
+  uint16_t Type() const {
     return GetDOMTiming()->GetType();
   }
-  uint16_t GetRedirectCount() const {
+  uint16_t RedirectCount() const {
     return GetDOMTiming()->GetRedirectCount();
   }
 
@@ -150,12 +190,13 @@ public:
     return mWindow.get();
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // Performance WebIDL methods
   DOMHighResTimeStamp Now();
-  nsPerformanceTiming* GetTiming();
-  nsPerformanceNavigation* GetNavigation();
+  nsPerformanceTiming* Timing();
+  nsPerformanceNavigation* Navigation();
 
 private:
   ~nsPerformance();

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 50; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,6 +7,8 @@
 #include "nsISupports.idl"
 
 interface nsISimpleEnumerator;
+interface nsIRunnable;
+interface nsICancelableRunnable;
 
 /*
  * Memory reporters measure Firefox's memory usage.  They are mainly used to
@@ -196,7 +199,7 @@ interface nsIMemoryMultiReporterCallback : nsISupports
  * (Compare and contrast this with nsIMemoryReporter, which allows all
  * fields except |amount| to be accessed without triggering computation.)
  */
-[scriptable, uuid(61d498d5-b460-4398-a8ea-7f75208534b4)]
+[scriptable, uuid(24d61ead-237b-4969-a6bd-73fd8fed1d99)]
 interface nsIMemoryMultiReporter : nsISupports
 {
   /*
@@ -211,21 +214,9 @@ interface nsIMemoryMultiReporter : nsISupports
    */
   void collectReports(in nsIMemoryMultiReporterCallback callback,
                       in nsISupports closure);
-
-  /*
-   * Return the sum of all this multi-reporter's measurements that have a
-   * path that starts with "explicit" and are KIND_NONHEAP.
-   *
-   * This is a hack that's required to implement
-   * nsIMemoryReporterManager::explicit efficiently, which is important --
-   * multi-reporters can special-case this operation so it's much faster
-   * than getting all the reports, filtering out the unneeded ones, and
-   * summing the remainder.
-   */
-  readonly attribute int64_t explicitNonHeap;
 };
 
-[scriptable, uuid(4527b1d8-a81f-4af3-9623-80e4120392c7)]
+[scriptable, builtinclass, uuid(70b0e608-8dbf-4dc7-b88f-f1c745c1b48c)]
 interface nsIMemoryReporterManager : nsISupports
 {
   /*
@@ -264,6 +255,14 @@ interface nsIMemoryReporterManager : nsISupports
    */
   void unregisterMultiReporter (in nsIMemoryMultiReporter reporter);
 
+  /**
+   * These functions should only be used for testing purposes.
+   */
+  void blockRegistration();
+  void unblockRegistration();
+  void registerReporterEvenIfBlocked(in nsIMemoryReporter aReporter);
+  void registerMultiReporterEvenIfBlocked(in nsIMemoryMultiReporter aReporter);
+
   /*
    * Initialize.
    */
@@ -290,14 +289,25 @@ interface nsIMemoryReporterManager : nsISupports
   /*
    * This attribute indicates if moz_malloc_usable_size() works.
    */
-  readonly attribute boolean hasMozMallocUsableSize;
+  [infallible] readonly attribute boolean hasMozMallocUsableSize;
+
+  /*
+   * Run a series of GC/CC's in an attempt to minimize the application's memory
+   * usage.  When we're finished, we invoke the given runnable if it's not
+   * null.  Returns a reference to the runnable used for carrying out the task.
+   */
+  nsICancelableRunnable minimizeMemoryUsage(in nsIRunnable callback);
 };
 
 %{C++
 
-/*
- * Note that this defaults 'process' to "", which is usually what's desired.
- */
+#include "nsStringGlue.h"
+
+// The NS_*MEMORY_REPORTER_IMPLEMENT* macros are the deprecated short-cut way
+// of defining memory reporters.   You should instead subclass the
+// MemoryReporterBase class below.
+
+// Note that this defaults 'process' to "", which is usually what's desired.
 #define NS_MEMORY_REPORTER_IMPLEMENT_HELPER(_classname, _path, _kind, _units, _amountFunction, _desc, _ts) \
     class MemoryReporter_##_classname MOZ_FINAL : public nsIMemoryReporter {                  \
     public:                                                                                   \
@@ -311,20 +321,18 @@ interface nsIMemoryReporterManager : nsISupports
     };                                                                                        \
     NS_IMPL##_ts##ISUPPORTS1(MemoryReporter_##_classname, nsIMemoryReporter)
 
-/*
- * The only difference between this and NS_MEMORY_REPORTER_IMPLEMENT_HELPER
- * is that the function used to implement GetAmount is fallible.
- */
+// The only difference between this and NS_MEMORY_REPORTER_IMPLEMENT_HELPER
+// is that the function used to implement GetAmount is fallible.
 #define NS_FALLIBLE_MEMORY_REPORTER_IMPLEMENT_HELPER(_classname, _path, _kind, _units, _amountFunction, _desc, _ts) \
     class MemoryReporter_##_classname MOZ_FINAL : public nsIMemoryReporter {                  \
     public:                                                                                   \
       NS_DECL_ISUPPORTS                                                                       \
       NS_IMETHOD GetProcess(nsACString &process) { process.Truncate(); return NS_OK; }        \
       NS_IMETHOD GetPath(nsACString &memoryPath) { memoryPath.AssignLiteral(_path); return NS_OK; }  \
-      NS_IMETHOD GetKind(int *kind) { *kind = _kind; return NS_OK; }                          \
-      NS_IMETHOD GetUnits(int *units) { *units = _units; return NS_OK; }                      \
+      NS_IMETHOD GetKind(int32_t *kind) { *kind = _kind; return NS_OK; }                      \
+      NS_IMETHOD GetUnits(int32_t *units) { *units = _units; return NS_OK; }                  \
       NS_IMETHOD GetAmount(int64_t *amount) { return _amountFunction(amount); }               \
-      NS_IMETHOD GetDescription(nsACString &desc) { desc.AssignLiteral(_desc); return NS_OK; }       \
+      NS_IMETHOD GetDescription(nsACString &desc) { desc.AssignLiteral(_desc); return NS_OK; }\
     };                                                                                        \
     NS_IMPL##_ts##ISUPPORTS1(MemoryReporter_##_classname, nsIMemoryReporter)
 
@@ -339,72 +347,163 @@ interface nsIMemoryReporterManager : nsISupports
 
 #define NS_MEMORY_REPORTER_NAME(_classname)  MemoryReporter_##_classname
 
-nsresult NS_RegisterMemoryReporter(nsIMemoryReporter *reporter);
-nsresult NS_RegisterMemoryMultiReporter(nsIMemoryMultiReporter *reporter);
+// Note that the memory reporters are held in an nsCOMArray, which means
+// that individual reporters should be referenced with |nsIMemoryReporter *|
+// instead of nsCOMPtr<nsIMemoryReporter>.
 
-nsresult NS_UnregisterMemoryReporter(nsIMemoryReporter *reporter);
-nsresult NS_UnregisterMemoryMultiReporter(nsIMemoryMultiReporter *reporter);
+XPCOM_API(nsresult) NS_RegisterMemoryReporter(nsIMemoryReporter *reporter);
+XPCOM_API(nsresult) NS_RegisterMemoryMultiReporter(nsIMemoryMultiReporter *reporter);
 
-// Because DMD is not a tool that comes with the standard Valgrind
-// distribution, we have to #include our own local copy of dmd.h.  Ugly but
-// unavoidable.
-#ifdef MOZ_DMD
-#if MOZ_MEMORY
-#error "--disable-jemalloc should have been forced when --enable-dmd was specified"
-#endif
-#include "dmd.h"
-#endif
+XPCOM_API(nsresult) NS_UnregisterMemoryReporter(nsIMemoryReporter *reporter);
+XPCOM_API(nsresult) NS_UnregisterMemoryMultiReporter(nsIMemoryMultiReporter *reporter);
 
+#if defined(MOZ_DMD)
 namespace mozilla {
+namespace dmd {
+// This runs all the memory reporters but does nothing with the results;  i.e.
+// it does the minimal amount of work possible for DMD to do its thing.
+void RunReporters();
+}
+}
+#endif  // defined(MOZ_DMD)
 
-/*
- * Functions generated via this macro should be used by all traversal-based
- * memory reporters.  Such functions return |moz_malloc_size_of(ptr)|;  this
- * will always be zero on some obscure platforms.
- *
- * You might be wondering why we have a macro that creates multiple functions
- * distinguished only by |name|, instead of a single MemoryReporterMallocSizeOf
- * function.  It's mostly to help with DMD integration, though it sometimes
- * also helps with debugging and temporary ad hoc profiling.  The |name| chosen
- * doesn't matter greatly, but it's best to make it similar to the path used by
- * the relevant memory reporter(s).
- */
-#define NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(fn, name)                        \
-  static size_t fn(const void *ptr)                                           \
-  {                                                                           \
-      size_t usable = moz_malloc_size_of(ptr);                                \
-      VALGRIND_DMD_REPORT(ptr, usable, name);                                 \
-      return usable;                                                          \
-  }
+#if defined(MOZ_DMD)
 
-/*
- * Like NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN, but the created function sends an
- * "unreport" message to DMD.
- */
-#define NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN_UN(fn)                           \
-  static size_t fn(const void *ptr)                                           \
-  {                                                                           \
-      size_t usable = moz_malloc_size_of(ptr);                                \
-      VALGRIND_DMD_UNREPORT(ptr);                                             \
-      return usable;                                                          \
-  }
+#if !defined(MOZ_MEMORY)
+#error "MOZ_DMD requires MOZ_MEMORY"
+#endif
 
-#ifdef MOZ_DMD
+#include "DMD.h"
 
-/*
- * This runs all the memory reporters but does nothing with the results;  i.e.
- * it does the minimal amount of work possible for DMD to do its thing.  Then
- * it dumps the DMD output to stderr (or somewhere else, if one of
- * DMD/Valgrind's logging options was used).
- */
-void DMDCheckAndDump();
+#define MOZ_REPORT(ptr)          mozilla::dmd::Report(ptr)
+#define MOZ_REPORT_ON_ALLOC(ptr) mozilla::dmd::ReportOnAlloc(ptr)
 
 #else
 
-#define VALGRIND_DMD_REPORT(ptr, usable, name)
-#define VALGRIND_DMD_UNREPORT(ptr)
+#define MOZ_REPORT(ptr)
+#define MOZ_REPORT_ON_ALLOC(ptr)
 
-#endif  /* defined(MOZ_DMD) */
-}
+#endif  // defined(MOZ_DMD)
+
+// Functions generated via this macro should be used by all traversal-based
+// memory reporters.  Such functions return |moz_malloc_size_of(ptr)|;  this
+// will always be zero on some obscure platforms.
+//
+// You might be wondering why we have a macro that creates multiple functions
+// that differ only in their name, instead of a single
+// MemoryReporterMallocSizeOf function.  It's mostly to help with DMD
+// integration, though it sometimes also helps with debugging and temporary ad
+// hoc profiling.  The function name chosen doesn't matter greatly, but it's
+// best to make it similar to the path used by the relevant memory
+// reporter(s).
+#define NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(fn)                              \
+  static size_t fn(const void *ptr)                                           \
+  {                                                                           \
+      MOZ_REPORT(ptr);                                                        \
+      return moz_malloc_size_of(ptr);                                         \
+  }
+
+// Functions generated by the next two macros should be used by wrapping
+// allocators that report heap blocks as soon as they are allocated and
+// unreport them as soon as they are freed.  Such allocators are used in cases
+// where we have third-party code that we cannot modify.  The two functions
+// must always be used in tandem.
+#define NS_MEMORY_REPORTER_MALLOC_SIZEOF_ON_ALLOC_FUN(fn)                     \
+  static size_t fn(const void *ptr)                                           \
+  {                                                                           \
+      MOZ_REPORT_ON_ALLOC(ptr);                                               \
+      return moz_malloc_size_of(ptr);                                         \
+  }
+#define NS_MEMORY_REPORTER_MALLOC_SIZEOF_ON_FREE_FUN(fn)                      \
+  static size_t fn(const void *ptr)                                           \
+  {                                                                           \
+      return moz_malloc_size_of(ptr);                                         \
+  }
+
+namespace mozilla {
+
+// The following base class reduces the amount of boilerplate code required for
+// memory reporters.  You just need to provide the following.
+// - The constant values: path, kind, units, and description.  They are passed
+//   to the MemoryReporterBase constructor.
+// - A (private) Amount() or (public) GetAmount() method.  It can use the 
+//   MallocSizeOf method if necessary.  Use Amount() if the reporter is
+//   infallible, and GetAmount() otherwise.  (If you fail to provide one or the
+//   other, you'll get assertion failures when the memory reporter runs.)
+//
+// The class name of subclasses should match the path, minus the "explicit"
+// (if present), and with "Reporter" at the end.  For example:
+// - "explicit/dom/xyzzy"     --> DOMXyzzyReporter
+// - "js-compartments/system" --> JSCompartmentsSystemReporter
+//
+class MemoryReporterBase : public nsIMemoryReporter
+{
+public:
+  MemoryReporterBase(const char* aPath, int32_t aKind, int32_t aUnits,
+                     const char* aDescription)
+    : mPath(aPath)
+    , mKind(aKind)
+    , mUnits(aUnits)
+    , mDescription(aDescription)
+  {}
+
+  virtual ~MemoryReporterBase() {}
+
+  NS_DECL_ISUPPORTS
+
+  NS_IMETHOD GetProcess(nsACString& aProcess)
+  {
+    aProcess.Truncate();
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetPath(nsACString& aPath)
+  {
+    aPath.Assign(mPath);
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetKind(int32_t* aKind)
+  {
+    *aKind = mKind;
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetUnits(int32_t* aUnits)
+  {
+    *aUnits = mUnits;
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetAmount(int64_t* aAmount)
+  {
+    *aAmount = Amount();
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetDescription(nsACString& aDescription)
+  {
+    aDescription.Assign(mDescription);
+    return NS_OK;
+  }
+
+protected:
+  virtual int64_t Amount()
+  {
+    // We only reach here if neither GetAmount() nor Amount() was overridden.
+    MOZ_ASSERT(false);
+    return 0;
+  }
+
+  NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(MallocSizeOf)
+
+  const nsCString mPath;
+  const int32_t   mKind;
+  const int32_t   mUnits;
+  const nsCString mDescription;
+};
+
+} // namespace mozilla
+
 
 %}

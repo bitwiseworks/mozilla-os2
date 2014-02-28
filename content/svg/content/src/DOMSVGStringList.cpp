@@ -4,34 +4,38 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DOMSVGStringList.h"
-#include "DOMSVGTests.h"
+
+#include "mozilla/dom/SVGStringListBinding.h"
+#include "mozilla/dom/SVGTests.h"
 #include "nsError.h"
 #include "nsCOMPtr.h"
 #include "nsSVGAttrTearoffTable.h"
+#include <algorithm>
 
 // See the architecture comment in this file's header.
 
 namespace mozilla {
 
-static nsSVGAttrTearoffTable<SVGStringList, DOMSVGStringList>
-  sSVGStringListTearoffTable;
+using namespace dom;
 
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(DOMSVGStringList, mElement)
+static inline
+nsSVGAttrTearoffTable<SVGStringList, DOMSVGStringList>&
+SVGStringListTearoffTable()
+{
+  static nsSVGAttrTearoffTable<SVGStringList, DOMSVGStringList>
+    sSVGStringListTearoffTable;
+  return sSVGStringListTearoffTable;
+}
+
+NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(DOMSVGStringList, mElement)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGStringList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGStringList)
 
-} // namespace mozilla
-
-DOMCI_DATA(SVGStringList, mozilla::DOMSVGStringList)
-namespace mozilla {
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGStringList)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGStringList)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGStringList)
 NS_INTERFACE_MAP_END
-
 
 /* static */ already_AddRefed<DOMSVGStringList>
 DOMSVGStringList::GetDOMWrapper(SVGStringList *aList,
@@ -40,12 +44,12 @@ DOMSVGStringList::GetDOMWrapper(SVGStringList *aList,
                                 uint8_t aAttrEnum)
 {
   nsRefPtr<DOMSVGStringList> wrapper =
-    sSVGStringListTearoffTable.GetTearoff(aList);
+    SVGStringListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
     wrapper = new DOMSVGStringList(aElement, 
                                    aIsConditionalProcessingAttribute,
                                    aAttrEnum);
-    sSVGStringListTearoffTable.AddTearoff(aList, wrapper);
+    SVGStringListTearoffTable().AddTearoff(aList, wrapper);
   }
   return wrapper.forget();
 }
@@ -53,26 +57,31 @@ DOMSVGStringList::GetDOMWrapper(SVGStringList *aList,
 DOMSVGStringList::~DOMSVGStringList()
 {
   // Script no longer has any references to us.
-  sSVGStringListTearoffTable.RemoveTearoff(&InternalList());
+  SVGStringListTearoffTable().RemoveTearoff(&InternalList());
+}
+
+/* virtual */ JSObject*
+DOMSVGStringList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return SVGStringListBinding::Wrap(aCx, aScope, this);
 }
 
 // ----------------------------------------------------------------------------
-// nsIDOMSVGStringList implementation:
+// SVGStringList implementation:
 
-NS_IMETHODIMP
-DOMSVGStringList::GetNumberOfItems(uint32_t *aNumberOfItems)
+uint32_t
+DOMSVGStringList::NumberOfItems() const
 {
-  *aNumberOfItems = InternalList().Length();
-  return NS_OK;
+  return InternalList().Length();
 }
 
-NS_IMETHODIMP
-DOMSVGStringList::GetLength(uint32_t *aLength)
+uint32_t
+DOMSVGStringList::Length() const
 {
-  return GetNumberOfItems(aLength);
+  return NumberOfItems();
 }
 
-NS_IMETHODIMP
+void
 DOMSVGStringList::Clear()
 {
   if (InternalList().IsExplicitlySet()) {
@@ -83,108 +92,117 @@ DOMSVGStringList::Clear()
     mElement->DidChangeStringList(mIsConditionalProcessingAttribute,
                                   mAttrEnum, emptyOrOldValue);
   }
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-DOMSVGStringList::Initialize(const nsAString & newItem, nsAString & _retval)
+void
+DOMSVGStringList::Initialize(const nsAString& aNewItem, nsAString& aRetval,
+                             ErrorResult& aRv)
 {
   if (InternalList().IsExplicitlySet()) {
     InternalList().Clear();
   }
-  return InsertItemBefore(newItem, 0, _retval);
+  InsertItemBefore(aNewItem, 0, aRetval, aRv);
 }
 
-NS_IMETHODIMP
-DOMSVGStringList::GetItem(uint32_t index,
-                          nsAString & _retval)
+void
+DOMSVGStringList::GetItem(uint32_t aIndex, nsAString& aRetval, ErrorResult& aRv)
 {
-  if (index >= InternalList().Length()) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+  bool found;
+  IndexedGetter(aIndex, found, aRetval);
+  if (!found) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
   }
-  _retval = InternalList()[index];
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-DOMSVGStringList::InsertItemBefore(const nsAString & newItem,
-                                   uint32_t index,
-                                   nsAString & _retval)
+void
+DOMSVGStringList::IndexedGetter(uint32_t aIndex, bool& aFound,
+                                nsAString& aRetval)
 {
-  if (newItem.IsEmpty()) { // takes care of DOMStringIsNull too
-    return NS_ERROR_DOM_SYNTAX_ERR;
+  aFound = aIndex < InternalList().Length();
+  if (aFound) {
+    aRetval = InternalList()[aIndex];
   }
-  index = NS_MIN(index, InternalList().Length());
+}
+
+void
+DOMSVGStringList::InsertItemBefore(const nsAString& aNewItem, uint32_t aIndex,
+                                   nsAString& aRetval, ErrorResult& aRv)
+{
+  if (aNewItem.IsEmpty()) {
+    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    return;
+  }
+  aIndex = std::min(aIndex, InternalList().Length());
 
   // Ensure we have enough memory so we can avoid complex error handling below:
   if (!InternalList().SetCapacity(InternalList().Length() + 1)) {
-    return NS_ERROR_OUT_OF_MEMORY;
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return;
   }
 
   nsAttrValue emptyOrOldValue =
     mElement->WillChangeStringList(mIsConditionalProcessingAttribute,
                                    mAttrEnum);
-  InternalList().InsertItem(index, newItem);
+  InternalList().InsertItem(aIndex, aNewItem);
 
   mElement->DidChangeStringList(mIsConditionalProcessingAttribute, mAttrEnum,
                                 emptyOrOldValue);
-  _retval = newItem;
-  return NS_OK;
+  aRetval = aNewItem;
 }
 
-NS_IMETHODIMP
-DOMSVGStringList::ReplaceItem(const nsAString & newItem,
-                              uint32_t index,
-                              nsAString & _retval)
+void
+DOMSVGStringList::ReplaceItem(const nsAString& aNewItem, uint32_t aIndex,
+                              nsAString& aRetval, ErrorResult& aRv)
 {
-  if (newItem.IsEmpty()) { // takes care of DOMStringIsNull too
-    return NS_ERROR_DOM_SYNTAX_ERR;
+  if (aNewItem.IsEmpty()) {
+    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    return;
   }
-  if (index >= InternalList().Length()) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+  if (aIndex >= InternalList().Length()) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return;
   }
 
-  _retval = InternalList()[index];
+  aRetval = InternalList()[aIndex];
   nsAttrValue emptyOrOldValue =
     mElement->WillChangeStringList(mIsConditionalProcessingAttribute,
                                    mAttrEnum);
-  InternalList().ReplaceItem(index, newItem);
+  InternalList().ReplaceItem(aIndex, aNewItem);
 
   mElement->DidChangeStringList(mIsConditionalProcessingAttribute, mAttrEnum,
                                 emptyOrOldValue);
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-DOMSVGStringList::RemoveItem(uint32_t index,
-                             nsAString & _retval)
+void
+DOMSVGStringList::RemoveItem(uint32_t aIndex, nsAString& aRetval,
+                             ErrorResult& aRv)
 {
-  if (index >= InternalList().Length()) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+  if (aIndex >= InternalList().Length()) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return;
   }
 
   nsAttrValue emptyOrOldValue =
     mElement->WillChangeStringList(mIsConditionalProcessingAttribute,
                                    mAttrEnum);
-  InternalList().RemoveItem(index);
+  InternalList().RemoveItem(aIndex);
 
   mElement->DidChangeStringList(mIsConditionalProcessingAttribute, mAttrEnum,
                                 emptyOrOldValue);
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-DOMSVGStringList::AppendItem(const nsAString & newItem,
-                             nsAString & _retval)
+void
+DOMSVGStringList::AppendItem(const nsAString& aNewItem, nsAString& aRetval,
+                             ErrorResult& aRv)
 {
-  return InsertItemBefore(newItem, InternalList().Length(), _retval);
+  InsertItemBefore(aNewItem, InternalList().Length(), aRetval, aRv);
 }
 
 SVGStringList &
-DOMSVGStringList::InternalList()
+DOMSVGStringList::InternalList() const
 {
   if (mIsConditionalProcessingAttribute) {
-    nsCOMPtr<DOMSVGTests> tests = do_QueryInterface(mElement);
+    nsCOMPtr<dom::SVGTests> tests = do_QueryObject(mElement.get());
     return tests->mStringListAttributes[mAttrEnum];
   }
   return mElement->GetStringListInfo().mStringLists[mAttrEnum];

@@ -10,17 +10,18 @@
 #include "Layers.h"
 #include "ImageContainer.h"
 #include "ImageTypes.h"
+#include "prmem.h"
+
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "AndroidBridge.h"
 #include "nsISupportsUtils.h"
 #endif
 
-#define WIDTH 320
-#define HEIGHT 240
-#define FPS 10
-#define CHANNELS 1
-#define RATE USECS_PER_S
+#define VIDEO_RATE USECS_PER_S
+#define AUDIO_RATE 16000
 
 namespace mozilla {
 
@@ -30,8 +31,10 @@ NS_IMPL_THREADSAFE_ISUPPORTS1(MediaEngineDefaultVideoSource, nsITimerCallback)
  */
 
 MediaEngineDefaultVideoSource::MediaEngineDefaultVideoSource()
-  : mTimer(nullptr), mState(kReleased)
-{}
+  : mTimer(nullptr)
+{
+  mState = kReleased;
+}
 
 MediaEngineDefaultVideoSource::~MediaEngineDefaultVideoSource()
 {}
@@ -51,12 +54,13 @@ MediaEngineDefaultVideoSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineDefaultVideoSource::Allocate()
+MediaEngineDefaultVideoSource::Allocate(const MediaEnginePrefs &aPrefs)
 {
   if (mState != kReleased) {
     return NS_ERROR_FAILURE;
   }
 
+  mOpts = aPrefs;
   mState = kAllocated;
   return NS_OK;
 }
@@ -71,15 +75,37 @@ MediaEngineDefaultVideoSource::Deallocate()
   return NS_OK;
 }
 
-MediaEngineVideoOptions
-MediaEngineDefaultVideoSource::GetOptions()
+static void AllocateSolidColorFrame(layers::PlanarYCbCrImage::Data& aData,
+                                    int aWidth, int aHeight,
+                                    int aY, int aCb, int aCr)
 {
-  MediaEngineVideoOptions aOpts;
-  aOpts.mWidth = WIDTH;
-  aOpts.mHeight = HEIGHT;
-  aOpts.mMaxFPS = FPS;
-  aOpts.codecType = kVideoCodecI420;
-  return aOpts;
+  MOZ_ASSERT(!(aWidth&1));
+  MOZ_ASSERT(!(aHeight&1));
+  // Allocate a single frame with a solid color
+  int yLen = aWidth*aHeight;
+  int cbLen = yLen>>2;
+  int crLen = cbLen;
+  uint8_t* frame = (uint8_t*) PR_Malloc(yLen+cbLen+crLen);
+  memset(frame, aY, yLen);
+  memset(frame+yLen, aCb, cbLen);
+  memset(frame+yLen+cbLen, aCr, crLen);
+
+  aData.mYChannel = frame;
+  aData.mYSize = gfxIntSize(aWidth, aHeight);
+  aData.mYStride = aWidth;
+  aData.mCbCrStride = aWidth>>1;
+  aData.mCbChannel = frame + yLen;
+  aData.mCrChannel = aData.mCbChannel + cbLen;
+  aData.mCbCrSize = gfxIntSize(aWidth>>1, aHeight>>1);
+  aData.mPicX = 0;
+  aData.mPicY = 0;
+  aData.mPicSize = gfxIntSize(aWidth, aHeight);
+  aData.mStereoMode = STEREO_MODE_MONO;
+}
+
+static void ReleaseFrame(layers::PlanarYCbCrImage::Data& aData)
+{
+  PR_Free(aData.mYChannel);
 }
 
 nsresult
@@ -101,36 +127,22 @@ MediaEngineDefaultVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
   mImageContainer = layers::LayerManager::CreateImageContainer();
 
   nsRefPtr<layers::Image> image = mImageContainer->CreateImage(&format, 1);
-
-  int len = ((WIDTH * HEIGHT) * 3 / 2);
   mImage = static_cast<layers::PlanarYCbCrImage*>(image.get());
-  uint8_t* frame = (uint8_t*) PR_Malloc(len);
-  memset(frame, 0x80, len); // Gray
-
-  const uint8_t lumaBpp = 8;
-  const uint8_t chromaBpp = 4;
 
   layers::PlanarYCbCrImage::Data data;
-  data.mYChannel = frame;
-  data.mYSize = gfxIntSize(WIDTH, HEIGHT);
-  data.mYStride = WIDTH * lumaBpp / 8.0;
-  data.mCbCrStride = WIDTH * chromaBpp / 8.0;
-  data.mCbChannel = frame + HEIGHT * data.mYStride;
-  data.mCrChannel = data.mCbChannel + HEIGHT * data.mCbCrStride / 2;
-  data.mCbCrSize = gfxIntSize(WIDTH / 2, HEIGHT / 2);
-  data.mPicX = 0;
-  data.mPicY = 0;
-  data.mPicSize = gfxIntSize(WIDTH, HEIGHT);
-  data.mStereoMode = STEREO_MODE_MONO;
-
+  // Allocate a single blank Image
+  mCb = 16;
+  mCr = 16;
+  AllocateSolidColorFrame(data, mOpts.mWidth, mOpts.mHeight, 0x80, mCb, mCr);
   // SetData copies data, so we can free the frame
   mImage->SetData(data);
-  PR_Free(frame);
+  ReleaseFrame(data);
 
   // AddTrack takes ownership of segment
   VideoSegment *segment = new VideoSegment();
-  segment->AppendFrame(image.forget(), USECS_PER_S / FPS, gfxIntSize(WIDTH, HEIGHT));
-  mSource->AddTrack(aID, RATE, 0, segment);
+  segment->AppendFrame(image.forget(), USECS_PER_S / mOpts.mFPS,
+                       gfxIntSize(mOpts.mWidth, mOpts.mHeight));
+  mSource->AddTrack(aID, VIDEO_RATE, 0, segment);
 
   // We aren't going to add any more tracks
   mSource->AdvanceKnownTracksTime(STREAM_TIME_MAX);
@@ -139,14 +151,14 @@ MediaEngineDefaultVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
   mTrackID = aID;
 
   // Start timer for subsequent frames
-  mTimer->InitWithCallback(this, 1000 / FPS, nsITimer::TYPE_REPEATING_SLACK);
+  mTimer->InitWithCallback(this, 1000 / mOpts.mFPS, nsITimer::TYPE_REPEATING_SLACK);
   mState = kStarted;
 
   return NS_OK;
 }
 
 nsresult
-MediaEngineDefaultVideoSource::Stop()
+MediaEngineDefaultVideoSource::Stop(SourceMediaStream *aSource, TrackID aID)
 {
   if (mState != kStarted) {
     return NS_ERROR_FAILURE;
@@ -158,8 +170,8 @@ MediaEngineDefaultVideoSource::Stop()
   mTimer->Cancel();
   mTimer = NULL;
 
-  mSource->EndTrack(mTrackID);
-  mSource->Finish();
+  aSource->EndTrack(aID);
+  aSource->Finish();
 
   mState = kStopped;
   return NS_OK;
@@ -192,19 +204,78 @@ MediaEngineDefaultVideoSource::Snapshot(uint32_t aDuration, nsIDOMFile** aFile)
 NS_IMETHODIMP
 MediaEngineDefaultVideoSource::Notify(nsITimer* aTimer)
 {
-  VideoSegment segment;
+  // Update the target color
+  if (mCr <= 16) {
+    if (mCb < 240) {
+      mCb++;
+    } else {
+      mCr++;
+    }
+  } else if (mCb >= 240) {
+    if (mCr < 240) {
+      mCr++;
+    } else {
+      mCb--;
+    }
+  } else if (mCr >= 240) {
+    if (mCb > 16) {
+      mCb--;
+    } else {
+      mCr--;
+    }
+  } else {
+    mCr--;
+  }
 
-  nsRefPtr<layers::PlanarYCbCrImage> image = mImage;
-  segment.AppendFrame(image.forget(), USECS_PER_S / FPS, gfxIntSize(WIDTH, HEIGHT));
+  // Allocate a single solid color image
+  ImageFormat format = PLANAR_YCBCR;
+  nsRefPtr<layers::Image> image = mImageContainer->CreateImage(&format, 1);
+  nsRefPtr<layers::PlanarYCbCrImage> ycbcr_image =
+      static_cast<layers::PlanarYCbCrImage*>(image.get());
+  layers::PlanarYCbCrImage::Data data;
+  AllocateSolidColorFrame(data, mOpts.mWidth, mOpts.mHeight, 0x80, mCb, mCr);
+  ycbcr_image->SetData(data);
+  // SetData copies data, so we can free the frame
+  ReleaseFrame(data);
+
+  // AddTrack takes ownership of segment
+  VideoSegment segment;
+  segment.AppendFrame(ycbcr_image.forget(), USECS_PER_S / mOpts.mFPS,
+                      gfxIntSize(mOpts.mWidth, mOpts.mHeight));
   mSource->AppendToTrack(mTrackID, &segment);
 
   return NS_OK;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(MediaEngineDefaultAudioSource, nsITimerCallback)
+void
+MediaEngineDefaultVideoSource::NotifyPull(MediaStreamGraph* aGraph,
+                                          StreamTime aDesiredTime)
+{
+  // Ignore - we push video data
+}
+
+
 /**
  * Default audio source.
  */
+NS_IMPL_THREADSAFE_ISUPPORTS1(MediaEngineDefaultAudioSource, nsITimerCallback)
+
+MediaEngineDefaultAudioSource::MediaEngineDefaultAudioSource()
+  : mTimer(nullptr)
+{
+  mState = kReleased;
+}
+
+MediaEngineDefaultAudioSource::~MediaEngineDefaultAudioSource()
+{}
+
+void
+MediaEngineDefaultAudioSource::NotifyPull(MediaStreamGraph* aGraph,
+                                          StreamTime aDesiredTime)
+{
+  // Ignore - we push audio data
+}
+
 void
 MediaEngineDefaultAudioSource::GetName(nsAString& aName)
 {
@@ -220,7 +291,7 @@ MediaEngineDefaultAudioSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineDefaultAudioSource::Allocate()
+MediaEngineDefaultAudioSource::Allocate(const MediaEnginePrefs &aPrefs)
 {
   if (mState != kReleased) {
     return NS_ERROR_FAILURE;
@@ -256,8 +327,7 @@ MediaEngineDefaultAudioSource::Start(SourceMediaStream* aStream, TrackID aID)
 
   // AddTrack will take ownership of segment
   AudioSegment* segment = new AudioSegment();
-  segment->Init(CHANNELS);
-  mSource->AddTrack(aID, RATE, 0, segment);
+  mSource->AddTrack(aID, AUDIO_RATE, 0, segment);
 
   // We aren't going to add any more tracks
   mSource->AdvanceKnownTracksTime(STREAM_TIME_MAX);
@@ -266,14 +336,15 @@ MediaEngineDefaultAudioSource::Start(SourceMediaStream* aStream, TrackID aID)
   mTrackID = aID;
 
   // 1 Audio frame per Video frame
-  mTimer->InitWithCallback(this, 1000 / FPS, nsITimer::TYPE_REPEATING_SLACK);
+  mTimer->InitWithCallback(this, MediaEngine::DEFAULT_AUDIO_TIMER_MS,
+                           nsITimer::TYPE_REPEATING_SLACK);
   mState = kStarted;
 
   return NS_OK;
 }
 
 nsresult
-MediaEngineDefaultAudioSource::Stop()
+MediaEngineDefaultAudioSource::Stop(SourceMediaStream *aSource, TrackID aID)
 {
   if (mState != kStarted) {
     return NS_ERROR_FAILURE;
@@ -285,8 +356,8 @@ MediaEngineDefaultAudioSource::Stop()
   mTimer->Cancel();
   mTimer = NULL;
 
-  mSource->EndTrack(mTrackID);
-  mSource->Finish();
+  aSource->EndTrack(aID);
+  aSource->Finish();
 
   mState = kStopped;
   return NS_OK;
@@ -302,8 +373,9 @@ NS_IMETHODIMP
 MediaEngineDefaultAudioSource::Notify(nsITimer* aTimer)
 {
   AudioSegment segment;
-  segment.Init(CHANNELS);
-  segment.InsertNullDataAtStart(1);
+
+  // Notify timer is set every DEFAULT_AUDIO_TIMER_MS milliseconds.
+  segment.InsertNullDataAtStart((AUDIO_RATE * MediaEngine::DEFAULT_AUDIO_TIMER_MS) / 1000);
 
   mSource->AppendToTrack(mTrackID, &segment);
 
@@ -312,13 +384,37 @@ MediaEngineDefaultAudioSource::Notify(nsITimer* aTimer)
 
 void
 MediaEngineDefault::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSource> >* aVSources) {
-  aVSources->AppendElement(mVSource);
+  MutexAutoLock lock(mMutex);
+
+  // We once had code here to find a VideoSource with the same settings and re-use that.
+  // This no longer is possible since the resolution is being set in Allocate().
+
+  nsRefPtr<MediaEngineVideoSource> newSource = new MediaEngineDefaultVideoSource();
+  mVSources.AppendElement(newSource);
+  aVSources->AppendElement(newSource);
+
   return;
 }
 
 void
 MediaEngineDefault::EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSource> >* aASources) {
-  aASources->AppendElement(mASource);
+  MutexAutoLock lock(mMutex);
+  int32_t len = mASources.Length();
+
+  for (int32_t i = 0; i < len; i++) {
+    nsRefPtr<MediaEngineAudioSource> source = mASources.ElementAt(i);
+    if (source->IsAvailable()) {
+      aASources->AppendElement(source);
+    }
+  }
+
+  // All streams are currently busy, just make a new one.
+  if (aASources->Length() == 0) {
+    nsRefPtr<MediaEngineAudioSource> newSource =
+      new MediaEngineDefaultAudioSource();
+    mASources.AppendElement(newSource);
+    aASources->AppendElement(newSource);
+  }
   return;
 }
 

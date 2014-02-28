@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const EXPORTED_SYMBOLS = [
+this.EXPORTED_SYMBOLS = [
   "PlacesUtils"
 , "PlacesAggregatedTransaction"
 , "PlacesCreateFolderTransaction"
@@ -32,27 +32,31 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "Services", function() {
-  Cu.import("resource://gre/modules/Services.jsm");
-  return Services;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "NetUtil", function() {
-  Cu.import("resource://gre/modules/NetUtil.jsm");
-  return NetUtil;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
+                                  "resource://gre/modules/Deprecated.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "BookmarkJSONUtils",
+                                  "resource://gre/modules/BookmarkJSONUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesBackups",
+                                  "resource://gre/modules/PlacesBackups.jsm");
 
 // The minimum amount of transactions before starting a batch. Usually we do
 // do incremental updates, a batch will cause views to completely
 // refresh instead.
 const MIN_TRANSACTIONS_FOR_BATCH = 5;
-
-// The RESTORE_*_NSIOBSERVER_TOPIC constants should match the #defines of the
-// same names in browser/components/places/src/nsPlacesExportService.cpp
-const RESTORE_BEGIN_NSIOBSERVER_TOPIC = "bookmarks-restore-begin";
-const RESTORE_SUCCESS_NSIOBSERVER_TOPIC = "bookmarks-restore-success";
-const RESTORE_FAILED_NSIOBSERVER_TOPIC = "bookmarks-restore-failed";
-const RESTORE_NSIOBSERVER_DATA = "json";
 
 #ifdef XP_MACOSX
 // On Mac OSX, the transferable system converts "\r\n" to "\n\n", where we
@@ -72,12 +76,16 @@ function QI_node(aNode, aIID) {
   }
   return result;
 }
-function asVisit(aNode) QI_node(aNode, Ci.nsINavHistoryVisitResultNode);
-function asFullVisit(aNode) QI_node(aNode, Ci.nsINavHistoryFullVisitResultNode);
+function asVisit(aNode) {
+  Deprecated.warning(
+    "asVisit is deprecated and will be removed in a future version",
+    "https://bugzilla.mozilla.org/show_bug.cgi?id=561450");
+  return aNode;
+};
 function asContainer(aNode) QI_node(aNode, Ci.nsINavHistoryContainerResultNode);
 function asQuery(aNode) QI_node(aNode, Ci.nsINavHistoryQueryResultNode);
 
-var PlacesUtils = {
+this.PlacesUtils = {
   // Place entries that are containers, e.g. bookmark folders or queries.
   TYPE_X_MOZ_PLACE_CONTAINER: "text/x-moz-place-container",
   // Place entries that are bookmark separators.
@@ -98,6 +106,7 @@ var PlacesUtils = {
   LMANNO_SITEURI: "livemark/siteURI",
   POST_DATA_ANNO: "bookmarkProperties/POSTData",
   READ_ONLY_ANNO: "placesInternal/READ_ONLY",
+  CHARSET_ANNO: "URIProperties/characterSet",
 
   TOPIC_SHUTDOWN: "places-shutdown",
   TOPIC_INIT_COMPLETE: "places-init-complete",
@@ -106,9 +115,11 @@ var PlacesUtils = {
   TOPIC_FEEDBACK_UPDATED: "places-autocomplete-feedback-updated",
   TOPIC_FAVICONS_EXPIRED: "places-favicons-expired",
   TOPIC_VACUUM_STARTING: "places-vacuum-starting",
+  TOPIC_BOOKMARKS_RESTORE_BEGIN: "bookmarks-restore-begin",
+  TOPIC_BOOKMARKS_RESTORE_SUCCESS: "bookmarks-restore-success",
+  TOPIC_BOOKMARKS_RESTORE_FAILED: "bookmarks-restore-failed",
 
   asVisit: function(aNode) asVisit(aNode),
-  asFullVisit: function(aNode) asFullVisit(aNode),
   asContainer: function(aNode) asContainer(aNode),
   asQuery: function(aNode) asQuery(aNode),
 
@@ -174,8 +185,7 @@ var PlacesUtils = {
    * @returns true if the node is a Bookmark separator, false otherwise
    */
   nodeIsSeparator: function PU_nodeIsSeparator(aNode) {
-
-    return (aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR);
+    return aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR;
   },
 
   /**
@@ -185,9 +195,13 @@ var PlacesUtils = {
    * @returns true if the node is a visit item, false otherwise
    */
   nodeIsVisit: function PU_nodeIsVisit(aNode) {
-    var type = aNode.type;
-    return type == Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT ||
-           type == Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT;
+    Deprecated.warning(
+      "nodeIsVisit is deprecated ans will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=561450");
+    return this.nodeIsURI(aNode) && aNode.parent &&
+           this.nodeIsQuery(aNode.parent) &&
+           asQuery(aNode.parent).queryOptions.resultType ==
+             Ci.nsINavHistoryQueryOptions.RESULTS_AS_VISIT;
   },
 
   /**
@@ -196,11 +210,14 @@ var PlacesUtils = {
    *          A result node
    * @returns true if the node is a URL item, false otherwise
    */
-  uriTypes: [Ci.nsINavHistoryResultNode.RESULT_TYPE_URI,
-             Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT,
-             Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT],
+  get uriTypes() {
+    Deprecated.warning(
+      "uriTypes is deprecated ans will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=561450");
+    return [Ci.nsINavHistoryResultNode.RESULT_TYPE_URI];
+  },
   nodeIsURI: function PU_nodeIsURI(aNode) {
-    return this.uriTypes.indexOf(aNode.type) != -1;
+    return aNode.type == Ci.nsINavHistoryResultNode.RESULT_TYPE_URI;
   },
 
   /**
@@ -452,49 +469,6 @@ var PlacesUtils = {
   },
 
   /**
-   * Determines if a container item id is a livemark.
-   * @param aItemId
-   *        The id of the potential livemark.
-   * @returns true if the item is a livemark.
-   * @deprecated see the new API in mozIAsyncLivemarks.
-   */
-  itemIsLivemark: function PU_itemIsLivemark(aItemId) {
-    Cu.reportError("Synchronous livemarks methods and PlacesUtils livemarks " +
-                   "utils (itemIsLivemark, nodeIsLivemarkContainer, " +
-                   "nodeIsLivemarkItem) are deprecated and will be removed " +
-                   "in a future release.");
-    // If the Livemark service hasn't yet been initialized then
-    // use the annotations service directly to avoid instanciating
-    // it on startup. (bug 398300)
-    if (Object.getOwnPropertyDescriptor(this, "livemarks").value === undefined)
-      return this.annotations.itemHasAnnotation(aItemId, this.LMANNO_FEEDURI);
-    // If the livemark service has already been instanciated, use it.
-    return this.livemarks.isLivemark(aItemId);
-  },
-
-  /**
-   * Determines whether a result node is a livemark container.
-   * @param aNode
-   *        A result Node
-   * @returns true if the node is a livemark container item
-   * @deprecated see the new API in mozIAsyncLivemarks.
-   */
-  nodeIsLivemarkContainer: function PU_nodeIsLivemarkContainer(aNode) {
-    return this.nodeIsFolder(aNode) && this.itemIsLivemark(aNode.itemId);
-  },
-
- /**
-  * Determines whether a result node is a livemark item
-  * @param aNode
-  *        A result node
-  * @returns true if the node is a livemark container item
-   * @deprecated see the new API in mozIAsyncLivemarks.
-  */
-  nodeIsLivemarkItem: function PU_nodeIsLivemarkItem(aNode) {
-    return aNode.parent && this.nodeIsLivemarkContainer(aNode.parent);
-  },
-
-  /**
    * Determines whether or not a node is a readonly folder.
    * @param   aNode
    *          The node to test.
@@ -585,7 +559,7 @@ var PlacesUtils = {
         };
 
         let [node, shouldClose] = convertNode(aNode);
-        this.serializeNodeAsJSONToOutputStream(node, writer, true, aForceCopy);
+        this._serializeNodeAsJSONToOutputStream(node, writer, true, aForceCopy);
         if (shouldClose)
           node.containerOpen = false;
 
@@ -714,13 +688,7 @@ var PlacesUtils = {
       case this.TYPE_X_MOZ_PLACE:
       case this.TYPE_X_MOZ_PLACE_SEPARATOR:
       case this.TYPE_X_MOZ_PLACE_CONTAINER:
-        var json = Cc["@mozilla.org/dom/json;1"].createInstance(Ci.nsIJSON);
-        // Old profiles (pre-Firefox 4) may contain bookmarks.json files with
-        // trailing commas, which we once accepted but no longer do -- except
-        // when decoded using the legacy decoder.  This can be reverted to
-        // json.decode (better yet, to the ECMA-standard JSON.parse) when we no
-        // longer support upgrades from pre-Firefox 4 profiles.
-        nodes = json.legacyDecode("[" + blob + "]");
+        nodes = JSON.parse("[" + blob + "]");
         break;
       case this.TYPE_X_MOZ_URL:
         var parts = blob.split("\n");
@@ -1192,121 +1160,6 @@ var PlacesUtils = {
   },
 
   /**
-   * Import bookmarks from a JSON string.
-   * Note: any item annotated with "places/excludeFromBackup" won't be removed
-   *       before executing the restore.
-   * 
-   * @param aString
-   *        JSON string of serialized bookmark data.
-   * @param aReplace
-   *        Boolean if true, replace existing bookmarks, else merge.
-   */
-  restoreBookmarksFromJSONString:
-  function PU_restoreBookmarksFromJSONString(aString, aReplace) {
-    // convert string to JSON
-    var nodes = this.unwrapNodes(aString, this.TYPE_X_MOZ_PLACE_CONTAINER);
-
-    if (nodes.length == 0 || !nodes[0].children ||
-        nodes[0].children.length == 0)
-      return; // nothing to restore
-
-    // ensure tag folder gets processed last
-    nodes[0].children.sort(function sortRoots(aNode, bNode) {
-      return (aNode.root && aNode.root == "tagsFolder") ? 1 :
-              (bNode.root && bNode.root == "tagsFolder") ? -1 : 0;
-    });
-
-    var batch = {
-      nodes: nodes[0].children,
-      runBatched: function restore_runBatched() {
-        if (aReplace) {
-          // Get roots excluded from the backup, we will not remove them
-          // before restoring.
-          var excludeItems = PlacesUtils.annotations.getItemsWithAnnotation(
-            PlacesUtils.EXCLUDE_FROM_BACKUP_ANNO
-          );
-          // delete existing children of the root node, excepting:
-          // 1. special folders: delete the child nodes
-          // 2. tags folder: untag via the tagging api
-          var query = PlacesUtils.history.getNewQuery();
-          query.setFolders([PlacesUtils.placesRootId], 1);
-          var options = PlacesUtils.history.getNewQueryOptions();
-          options.expandQueries = false;
-          var root = PlacesUtils.history.executeQuery(query, options).root;
-          root.containerOpen = true;
-          var childIds = [];
-          for (var i = 0; i < root.childCount; i++) {
-            var childId = root.getChild(i).itemId;
-            if (excludeItems.indexOf(childId) == -1 &&
-                childId != PlacesUtils.tagsFolderId)
-              childIds.push(childId);
-          }
-          root.containerOpen = false;
-
-          for (var i = 0; i < childIds.length; i++) {
-            var rootItemId = childIds[i];
-            if (PlacesUtils.isRootItem(rootItemId))
-              PlacesUtils.bookmarks.removeFolderChildren(rootItemId);
-            else
-              PlacesUtils.bookmarks.removeItem(rootItemId);
-          }
-        }
-
-        var searchIds = [];
-        var folderIdMap = [];
-
-        this.nodes.forEach(function(node) {
-          if (!node.children || node.children.length == 0)
-            return; // nothing to restore for this root
-
-          if (node.root) {
-            var container = this.placesRootId; // default to places root
-            switch (node.root) {
-              case "bookmarksMenuFolder":
-                container = this.bookmarksMenuFolderId;
-                break;
-              case "tagsFolder":
-                container = this.tagsFolderId;
-                break;
-              case "unfiledBookmarksFolder":
-                container = this.unfiledBookmarksFolderId;
-                break;
-              case "toolbarFolder":
-                container = this.toolbarFolderId;
-                break;
-            }
- 
-            // insert the data into the db
-            node.children.forEach(function(child) {
-              var index = child.index;
-              var [folders, searches] = this.importJSONNode(child, container, index, 0);
-              for (var i = 0; i < folders.length; i++) {
-                if (folders[i])
-                  folderIdMap[i] = folders[i];
-              }
-              searchIds = searchIds.concat(searches);
-            }, this);
-          }
-          else {
-            this.importJSONNode(node, this.placesRootId, node.index, 0);
-          }
-        }, PlacesUtils);
-
-        // fixup imported place: uris that contain folders
-        searchIds.forEach(function(aId) {
-          var oldURI = this.bookmarks.getBookmarkURI(aId);
-          var uri = this._fixupQuery(this.bookmarks.getBookmarkURI(aId),
-                                     folderIdMap);
-          if (!uri.equals(oldURI))
-            this.bookmarks.changeBookmarkURI(aId, uri);
-        }, PlacesUtils);
-      }
-    };
-
-    this.bookmarks.runInBatchMode(batch, null);
-  },
-
-  /**
    * Takes a JSON-serialized node and inserts it into the db.
    *
    * @param   aData
@@ -1320,6 +1173,10 @@ var PlacesUtils = {
    *          eg: [[[oldFolder1, newFolder1]], [search1]]
    */
   importJSONNode: function PU_importJSONNode(aData, aContainer, aIndex, aGrandParentId) {
+    Deprecated.warning(
+      "importJSONNode is deprecated and will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=855842");
+
     var folderIdMap = [];
     var searchIds = [];
     var id = -1;
@@ -1402,8 +1259,9 @@ var PlacesUtils = {
           if (tags.length)
             this.tagging.tagURI(this._uri(aData.uri), tags);
         }
-        if (aData.charset)
-          this.history.setCharsetForURI(this._uri(aData.uri), aData.charset);
+        if (aData.charset) {
+            this.setCharsetForURI(this._uri(aData.uri), aData.charset);
+        }
         if (aData.uri.substr(0, 6) == "place:")
           searchIds.push(id);
         if (aData.icon) {
@@ -1411,7 +1269,8 @@ var PlacesUtils = {
             // Create a fake faviconURI to use (FIXME: bug 523932)
             let faviconURI = this._uri("fake-favicon-uri:" + aData.uri);
             this.favicons.replaceFaviconDataFromDataURL(faviconURI, aData.icon, 0);
-            this.favicons.setAndFetchFaviconForPage(this._uri(aData.uri), faviconURI, false);
+            this.favicons.setAndFetchFaviconForPage(this._uri(aData.uri), faviconURI, false,
+              this.favicons.FAVICON_LOAD_NON_PRIVATE);
           } catch (ex) {
             Components.utils.reportError("Failed to import favicon data:"  + ex);
           }
@@ -1420,7 +1279,8 @@ var PlacesUtils = {
           try {
             this.favicons.setAndFetchFaviconForPage(this._uri(aData.uri),
                                                     this._uri(aData.iconUri),
-                                                    false);
+                                                    false,
+                                                    this.favicons.FAVICON_LOAD_NON_PRIVATE);
           } catch (ex) {
             Components.utils.reportError("Failed to import favicon URI:"  + ex);
           }
@@ -1449,25 +1309,6 @@ var PlacesUtils = {
   },
 
   /**
-   * Replaces imported folder ids with their local counterparts in a place: URI.
-   *
-   * @param   aURI
-   *          A place: URI with folder ids.
-   * @param   aFolderIdMap
-   *          An array mapping old folder id to new folder ids.
-   * @returns the fixed up URI if all matched. If some matched, it returns
-   *          the URI with only the matching folders included. If none matched it
-   *          returns the input URI unchanged.
-   */
-  _fixupQuery: function PU__fixupQuery(aQueryURI, aFolderIdMap) {
-    function convert(str, p1, offset, s) {
-      return "folder=" + aFolderIdMap[p1];
-    }
-    var stringURI = aQueryURI.spec.replace(/folder=([0-9]+)/g, convert);
-    return this._uri(stringURI);
-  },
-
-  /**
    * Serializes the given node (and all its descendents) as JSON
    * and writes the serialization to the given output stream.
    * 
@@ -1485,8 +1326,8 @@ var PlacesUtils = {
    * @param   aExcludeItems
    *          An array of item ids that should not be written to the backup.
    */
-  serializeNodeAsJSONToOutputStream:
-  function PU_serializeNodeAsJSONToOutputStream(aNode, aStream, aIsUICommand,
+  _serializeNodeAsJSONToOutputStream:
+  function PU__serializeNodeAsJSONToOutputStream(aNode, aStream, aIsUICommand,
                                                 aResolveShortcuts,
                                                 aExcludeItems) {
     function addGenericProperties(aPlacesNode, aJSNode) {
@@ -1542,9 +1383,11 @@ var PlacesUtils = {
 
       // last character-set
       var uri = PlacesUtils._uri(aPlacesNode.uri);
-      var lastCharset = PlacesUtils.history.getCharsetForURI(uri);
-      if (lastCharset)
+      try {
+        var lastCharset = PlacesUtils.annotations.getPageAnnotation(
+                            uri, PlacesUtils.CHARSET_ANNO);
         aJSNode.charset = lastCharset;
+      } catch (e) {}
     }
 
     function addSeparatorProperties(aPlacesNode, aJSNode) {
@@ -1680,10 +1523,33 @@ var PlacesUtils = {
   },
 
   /**
-   * Serialize a JS object to JSON
+   * Serializes the given node (and all its descendents) as JSON
+   * and writes the serialization to the given output stream.
+   *
+   * @param   aNode
+   *          An nsINavHistoryResultNode
+   * @param   aStream
+   *          An nsIOutputStream. NOTE: it only uses the write(str, len)
+   *          method of nsIOutputStream. The caller is responsible for
+   *          closing the stream.
+   * @param   aIsUICommand
+   *          Boolean - If true, modifies serialization so that each node self-contained.
+   *          For Example, tags are serialized inline with each bookmark.
+   * @param   aResolveShortcuts
+   *          Converts folder shortcuts into actual folders.
+   * @param   aExcludeItems
+   *          An array of item ids that should not be written to the backup.
    */
-  toJSONString: function PU_toJSONString(aObj) {
-    return JSON.stringify(aObj);
+  serializeNodeAsJSONToOutputStream:
+  function PU_serializeNodeAsJSONToOutputStream(aNode, aStream, aIsUICommand,
+                                                aResolveShortcuts,
+                                                aExcludeItems) {
+    Deprecated.warning(
+      "serializeNodeAsJSONToOutputStream is deprecated and will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=854761");
+
+    this._serializeNodeAsJSONToOutputStream(aNode, aStream, aIsUICommand,
+                                            aResolveShortcuts, aExcludeItems);
   },
 
   /**
@@ -1696,48 +1562,11 @@ var PlacesUtils = {
    */
   restoreBookmarksFromJSONFile:
   function PU_restoreBookmarksFromJSONFile(aFile) {
-    let failed = false;
-    Services.obs.notifyObservers(null,
-                                 RESTORE_BEGIN_NSIOBSERVER_TOPIC,
-                                 RESTORE_NSIOBSERVER_DATA);
+    Deprecated.warning(
+      "restoreBookmarksFromJSONFile is deprecated and will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=854388");
 
-    try {
-      // open file stream
-      var stream = Cc["@mozilla.org/network/file-input-stream;1"].
-                   createInstance(Ci.nsIFileInputStream);
-      stream.init(aFile, 0x01, 0, 0);
-      var converted = Cc["@mozilla.org/intl/converter-input-stream;1"].
-                      createInstance(Ci.nsIConverterInputStream);
-      converted.init(stream, "UTF-8", 8192,
-                     Ci.nsIConverterInputStream.DEFAULT_REPLACEMENT_CHARACTER);
-
-      // read in contents
-      var str = {};
-      var jsonStr = "";
-      while (converted.readString(8192, str) != 0)
-        jsonStr += str.value;
-      converted.close();
-
-      if (jsonStr.length == 0)
-        return; // empty file
-
-      this.restoreBookmarksFromJSONString(jsonStr, true);
-    }
-    catch (exc) {
-      failed = true;
-      Services.obs.notifyObservers(null,
-                                   RESTORE_FAILED_NSIOBSERVER_TOPIC,
-                                   RESTORE_NSIOBSERVER_DATA);
-      Cu.reportError("Bookmarks JSON restore failed: " + exc);
-      throw exc;
-    }
-    finally {
-      if (!failed) {
-        Services.obs.notifyObservers(null,
-                                     RESTORE_SUCCESS_NSIOBSERVER_TOPIC,
-                                     RESTORE_NSIOBSERVER_DATA);
-      }
-    }
+    BookmarkJSONUtils.importFromFile(aFile, true);
   },
 
   /**
@@ -1746,7 +1575,10 @@ var PlacesUtils = {
    * @see backups.saveBookmarksToJSONFile(aFile)
    */
   backupBookmarksToFile: function PU_backupBookmarksToFile(aFile) {
-    this.backups.saveBookmarksToJSONFile(aFile);
+    Deprecated.warning(
+      "backupBookmarksToFile is deprecated and will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=852041");
+    return PlacesBackups.saveBookmarksToJSONFile(aFile);
   },
 
   /**
@@ -1757,268 +1589,20 @@ var PlacesUtils = {
    */
   archiveBookmarksFile:
   function PU_archiveBookmarksFile(aMaxBackups, aForceBackup) {
-    this.backups.create(aMaxBackups, aForceBackup);
+    Deprecated.warning(
+      "archiveBookmarksFile is deprecated and will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=857429");
+    return PlacesBackups.create(aMaxBackups, aForceBackup);
   },
 
   /**
    * Helper to create and manage backups.
    */
-  backups: {
-
-    get _filenamesRegex() {
-      // Get the localized backup filename, will be used to clear out
-      // old backups with a localized name (bug 445704).
-      let localizedFilename =
-        PlacesUtils.getFormattedString("bookmarksArchiveFilename", [new Date()]);
-      let localizedFilenamePrefix =
-        localizedFilename.substr(0, localizedFilename.indexOf("-"));
-      delete this._filenamesRegex;
-      return this._filenamesRegex =
-        new RegExp("^(bookmarks|" + localizedFilenamePrefix + ")-([0-9-]+)\.(json|html)");
-    },
-
-    get folder() {
-      let bookmarksBackupDir = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
-      bookmarksBackupDir.append(this.profileRelativeFolderPath);
-      if (!bookmarksBackupDir.exists()) {
-        bookmarksBackupDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0700);
-        if (!bookmarksBackupDir.exists())
-          throw("Unable to create bookmarks backup folder");
-      }
-      delete this.folder;
-      return this.folder = bookmarksBackupDir;
-    },
-
-    get profileRelativeFolderPath() "bookmarkbackups",
-
-    /**
-     * Cache current backups in a sorted (by date DESC) array.
-     */
-    get entries() {
-      delete this.entries;
-      this.entries = [];
-      let files = this.folder.directoryEntries;
-      while (files.hasMoreElements()) {
-        let entry = files.getNext().QueryInterface(Ci.nsIFile);
-        // A valid backup is any file that matches either the localized or
-        // not-localized filename (bug 445704).
-        let matches = entry.leafName.match(this._filenamesRegex);
-        if (!entry.isHidden() && matches) {
-          // Remove bogus backups in future dates.
-          if (this.getDateForFile(entry) > new Date()) {
-            entry.remove(false);
-            continue;
-          }
-          this.entries.push(entry);
-        }
-      }
-      this.entries.sort(function compare(a, b) {
-        let aDate = PlacesUtils.backups.getDateForFile(a);
-        let bDate = PlacesUtils.backups.getDateForFile(b);
-        return aDate < bDate ? 1 : aDate > bDate ? -1 : 0;
-      });
-      return this.entries;
-    },
-
-    /**
-     * Creates a filename for bookmarks backup files.
-     *
-     * @param [optional] aDateObj
-     *                   Date object used to build the filename.
-     *                   Will use current date if empty.
-     * @return A bookmarks backup filename.
-     */
-    getFilenameForDate:
-    function PU_B_getFilenameForDate(aDateObj) {
-      let dateObj = aDateObj || new Date();
-      // Use YYYY-MM-DD (ISO 8601) as it doesn't contain illegal characters
-      // and makes the alphabetical order of multiple backup files more useful.
-      return "bookmarks-" + dateObj.toLocaleFormat("%Y-%m-%d") + ".json";
-    },
-
-    /**
-     * Creates a Date object from a backup file.  The date is the backup
-     * creation date.
-     *
-     * @param aBackupFile
-     *        nsIFile of the backup.
-     * @return A Date object for the backup's creation time.
-     */
-    getDateForFile:
-    function PU_B_getDateForFile(aBackupFile) {
-      let filename = aBackupFile.leafName;
-      let matches = filename.match(this._filenamesRegex);
-      if (!matches)
-        do_throw("Invalid backup file name: " + filename);
-      return new Date(matches[2].replace(/-/g, "/"));
-    },
-
-    /**
-     * Get the most recent backup file.
-     *
-     * @param [optional] aFileExt
-     *                   Force file extension.  Either "html" or "json".
-     *                   Will check for both if not defined.
-     * @returns nsIFile backup file
-     */
-    getMostRecent:
-    function PU__B_getMostRecent(aFileExt) {
-      let fileExt = aFileExt || "(json|html)";
-      for (let i = 0; i < this.entries.length; i++) {
-        let rx = new RegExp("\." + fileExt + "$");
-        if (this.entries[i].leafName.match(rx))
-          return this.entries[i];
-      }
-      return null;
-    },
-
-    /**
-     * saveBookmarksToJSONFile()
-     *
-     * Serializes bookmarks using JSON, and writes to the supplied file.
-     * Note: any item that should not be backed up must be annotated with
-     *       "places/excludeFromBackup".
-     *
-     * @param aFile
-     *        nsIFile where to save JSON backup.
-     */
-    saveBookmarksToJSONFile:
-    function PU_B_saveBookmarksToFile(aFile) {
-      if (!aFile.exists())
-        aFile.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0600);
-      if (!aFile.exists() || !aFile.isWritable()) {
-        Cu.reportError("Unable to create bookmarks backup file: " + aFile.leafName);
-        return;
-      }
-
-      this._writeBackupFile(aFile);
-
-      if (aFile.parent.equals(this.folder)) {
-        // Update internal cache.
-        this.entries.push(aFile);
-      }
-      else {
-        // If we are saving to a folder different than our backups folder, then
-        // we also want to copy this new backup to it.
-        // This way we ensure the latest valid backup is the same saved by the
-        // user.  See bug 424389.
-        var latestBackup = this.getMostRecent("json");
-        if (!latestBackup || latestBackup != aFile) {
-          let name = this.getFilenameForDate();
-          let file = this.folder.clone();
-          file.append(name);
-          if (file.exists())
-            file.remove(false);
-          else {
-            // Update internal cache if we are not replacing an existing
-            // backup file.
-            this.entries.push(file);
-          }
-          aFile.copyTo(this.folder, name);
-        }
-      }
-    },
-
-    _writeBackupFile:
-    function PU_B__writeBackupFile(aFile) {
-      // Init stream.
-      let stream = Cc["@mozilla.org/network/file-output-stream;1"].
-                   createInstance(Ci.nsIFileOutputStream);
-      stream.init(aFile, 0x02 | 0x08 | 0x20, 0600, 0);
-
-      // UTF-8 converter stream.
-      let converter = Cc["@mozilla.org/intl/converter-output-stream;1"].
-                   createInstance(Ci.nsIConverterOutputStream);
-      converter.init(stream, "UTF-8", 0, 0x0000);
-
-      // Weep over stream interface variance.
-      let streamProxy = {
-        converter: converter,
-        write: function(aData, aLen) {
-          this.converter.writeString(aData);
-        }
-      };
-
-      // Get list of itemIds that must be excluded from the backup.
-      let excludeItems =
-        PlacesUtils.annotations.getItemsWithAnnotation(PlacesUtils.EXCLUDE_FROM_BACKUP_ANNO);
-
-      // Query the Places root.
-      let options = PlacesUtils.history.getNewQueryOptions();
-      options.expandQueries = false;
-      let query = PlacesUtils.history.getNewQuery();
-      query.setFolders([PlacesUtils.placesRootId], 1);
-      let root = PlacesUtils.history.executeQuery(query, options).root;
-      root.containerOpen = true;
-      // Serialize to JSON and write to stream.
-      PlacesUtils.serializeNodeAsJSONToOutputStream(root, streamProxy,
-                                                    false, false, excludeItems);
-      root.containerOpen = false;
-
-      // Close converter and stream.
-      converter.close();
-      stream.close();
-    },
-
-    /**
-     * create()
-     *
-     * Creates a dated backup in <profile>/bookmarkbackups.
-     * Stores the bookmarks using JSON.
-     * Note: any item that should not be backed up must be annotated with
-     *       "places/excludeFromBackup".
-     *
-     * @param [optional] int aMaxBackups
-     *                       The maximum number of backups to keep.
-     *
-     * @param [optional] bool aForceBackup
-     *                        Forces creating a backup even if one was already
-     *                        created that day (overwrites).
-     */
-    create:
-    function PU_B_create(aMaxBackups, aForceBackup) {
-      // Construct the new leafname.
-      let newBackupFilename = this.getFilenameForDate();
-      let mostRecentBackupFile = this.getMostRecent();
-
-      if (!aForceBackup) {
-        let numberOfBackupsToDelete = 0;
-        if (aMaxBackups !== undefined && aMaxBackups > -1)
-          numberOfBackupsToDelete = this.entries.length - aMaxBackups;
-
-        if (numberOfBackupsToDelete > 0) {
-          // If we don't have today's backup, remove one more so that
-          // the total backups after this operation does not exceed the
-          // number specified in the pref.
-          if (!mostRecentBackupFile ||
-              mostRecentBackupFile.leafName != newBackupFilename)
-            numberOfBackupsToDelete++;
-
-          while (numberOfBackupsToDelete--) {
-            let oldestBackup = this.entries.pop();
-            oldestBackup.remove(false);
-          }
-        }
-
-        // Do nothing if we already have this backup or we don't want backups.
-        if (aMaxBackups === 0 ||
-            (mostRecentBackupFile &&
-             mostRecentBackupFile.leafName == newBackupFilename))
-          return;
-      }
-
-      let newBackupFile = this.folder.clone();
-      newBackupFile.append(newBackupFilename);
-
-      if (aForceBackup && newBackupFile.exists())
-        newBackupFile.remove(false);
-
-      if (newBackupFile.exists())
-        return;
-
-      this.saveBookmarksToJSONFile(newBackupFile);
-    }
-
+  get backups() {
+    Deprecated.warning(
+      "PlacesUtils.backups is deprecated and will be removed in a future version",
+      "https://bugzilla.mozilla.org/show_bug.cgi?id=857429");
+    return PlacesBackups;
   },
 
   /**
@@ -2041,7 +1625,7 @@ var PlacesUtils = {
   asyncGetBookmarkIds: function PU_asyncGetBookmarkIds(aURI, aCallback, aScope)
   {
     if (!this._asyncGetBookmarksStmt) {
-      let db = this.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
+      let db = this.history.DBConnection;
       this._asyncGetBookmarksStmt = db.createAsyncStatement(
         "SELECT b.id "
       + "FROM moz_bookmarks b "
@@ -2122,6 +1706,107 @@ var PlacesUtils = {
     if (index != -1) {
       this._bookmarksServiceObserversQueue.splice(index, 1);
     }
+  },
+
+  /**
+   * Sets the character-set for a URI.
+   *
+   * @param aURI nsIURI
+   * @param aCharset character-set value.
+   * @return {Promise}
+   */
+  setCharsetForURI: function PU_setCharsetForURI(aURI, aCharset) {
+    let deferred = Promise.defer();
+
+    // Delaying to catch issues with asynchronous behavior while waiting
+    // to implement asynchronous annotations in bug 699844.
+    Services.tm.mainThread.dispatch(function() {
+      if (aCharset && aCharset.length > 0) {
+        PlacesUtils.annotations.setPageAnnotation(
+          aURI, PlacesUtils.CHARSET_ANNO, aCharset, 0,
+          Ci.nsIAnnotationService.EXPIRE_NEVER);
+      } else {
+        PlacesUtils.annotations.removePageAnnotation(
+          aURI, PlacesUtils.CHARSET_ANNO);
+      }
+      deferred.resolve();
+    }, Ci.nsIThread.DISPATCH_NORMAL);
+
+    return deferred.promise;
+  },
+
+  /**
+   * Gets the last saved character-set for a URI.
+   *
+   * @param aURI nsIURI
+   * @return {Promise}
+   * @resolve a character-set or null.
+   */
+  getCharsetForURI: function PU_getCharsetForURI(aURI) {
+    let deferred = Promise.defer();
+
+    Services.tm.mainThread.dispatch(function() {
+      let charset = null;
+
+      try {
+        charset = PlacesUtils.annotations.getPageAnnotation(aURI,
+                                                            PlacesUtils.CHARSET_ANNO);
+      } catch (ex) { }
+
+      deferred.resolve(charset);
+    }, Ci.nsIThread.DISPATCH_NORMAL);
+
+    return deferred.promise;
+  },
+
+  /**
+   * Promised wrapper for mozIAsyncHistory::updatePlaces for a single place.
+   *
+   * @param aPlaces
+   *        a single mozIPlaceInfo object
+   * @resolves {Promise}
+   */
+  promiseUpdatePlace: function PU_promiseUpdatePlaces(aPlace) {
+    let deferred = Promise.defer();
+    PlacesUtils.asyncHistory.updatePlaces(aPlace, {
+      _placeInfo: null,
+      handleResult: function handleResult(aPlaceInfo) {
+        this._placeInfo = aPlaceInfo;
+      },
+      handleError: function handleError(aResultCode, aPlaceInfo) {
+        deferred.reject(new Components.Exception("Error", aResultCode));
+      },
+      handleCompletion: function() {
+        deferred.resolve(this._placeInfo);
+      }
+    });
+
+    return deferred.promise;
+  },
+
+  /**
+   * Promised wrapper for mozIAsyncHistory::getPlacesInfo for a single place.
+   *
+   * @param aPlaceIdentifier
+   *        either an nsIURI or a GUID (@see getPlacesInfo)
+   * @resolves to the place info object handed to handleResult.
+   */
+  promisePlaceInfo: function PU_promisePlaceInfo(aPlaceIdentifier) {
+    let deferred = Promise.defer();
+    PlacesUtils.asyncHistory.getPlacesInfo(aPlaceIdentifier, {
+      _placeInfo: null,
+      handleResult: function handleResult(aPlaceInfo) {
+        this._placeInfo = aPlaceInfo;
+      },
+      handleError: function handleError(aResultCode, aPlaceInfo) {
+        deferred.reject(new Components.Exception("Error", aResultCode));
+      },
+      handleCompletion: function() {
+        deferred.resolve(this._placeInfo);
+      }
+    });
+
+    return deferred.promise;
   }
 };
 
@@ -2160,20 +1845,19 @@ AsyncStatementCancelWrapper.prototype = {
   }
 }
 
-XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "history",
-                                   "@mozilla.org/browser/nav-history-service;1",
-                                   "nsINavHistoryService");
+XPCOMUtils.defineLazyGetter(PlacesUtils, "history", function() {
+  return Cc["@mozilla.org/browser/nav-history-service;1"]
+           .getService(Ci.nsINavHistoryService)
+           .QueryInterface(Ci.nsIBrowserHistory)
+           .QueryInterface(Ci.nsPIPlacesDatabase);
+});
 
 XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "asyncHistory",
                                    "@mozilla.org/browser/history;1",
                                    "mozIAsyncHistory");
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "bhistory", function() {
-  return PlacesUtils.history.QueryInterface(Ci.nsIBrowserHistory);
-});
-
-XPCOMUtils.defineLazyGetter(PlacesUtils, "ghistory2", function() {
-  return PlacesUtils.history.QueryInterface(Ci.nsIGlobalHistory2);
+  return PlacesUtils.history;
 });
 
 XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "favicons",
@@ -2194,8 +1878,7 @@ XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "tagging",
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "livemarks", function() {
   return Cc["@mozilla.org/browser/livemark-service;2"].
-         getService(Ci.nsILivemarkService).
-         QueryInterface(Ci.mozIAsyncLivemarks);
+         getService(Ci.mozIAsyncLivemarks);
 });
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "transactionManager", function() {
@@ -2347,7 +2030,8 @@ BaseTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesAggregatedTransaction(aName, aTransactions)
+this.PlacesAggregatedTransaction =
+ function PlacesAggregatedTransaction(aName, aTransactions)
 {
   // Copy the transactions array to decouple it from its prototype, which
   // otherwise keeps alive its associated global object.
@@ -2430,8 +2114,9 @@ PlacesAggregatedTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateFolderTransaction(aTitle, aParentId, aIndex, aAnnotations,
-                                       aChildTransactions)
+this.PlacesCreateFolderTransaction =
+ function PlacesCreateFolderTransaction(aTitle, aParentId, aIndex, aAnnotations,
+                                        aChildTransactions)
 {
   this.item = new TransactionItemCache();
   this.item.title = aTitle;
@@ -2503,9 +2188,10 @@ PlacesCreateFolderTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateBookmarkTransaction(aURI, aParentId, aIndex, aTitle,
-                                         aKeyword, aAnnotations,
-                                         aChildTransactions)
+this.PlacesCreateBookmarkTransaction =
+ function PlacesCreateBookmarkTransaction(aURI, aParentId, aIndex, aTitle,
+                                          aKeyword, aAnnotations,
+                                          aChildTransactions)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;
@@ -2569,7 +2255,8 @@ PlacesCreateBookmarkTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateSeparatorTransaction(aParentId, aIndex)
+this.PlacesCreateSeparatorTransaction =
+ function PlacesCreateSeparatorTransaction(aParentId, aIndex)
 {
   this.item = new TransactionItemCache();
   this.item.parentId = aParentId;
@@ -2612,8 +2299,9 @@ PlacesCreateSeparatorTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesCreateLivemarkTransaction(aFeedURI, aSiteURI, aTitle, aParentId,
-                                         aIndex, aAnnotations)
+this.PlacesCreateLivemarkTransaction =
+ function PlacesCreateLivemarkTransaction(aFeedURI, aSiteURI, aTitle, aParentId,
+                                          aIndex, aAnnotations)
 {
   this.item = new TransactionItemCache();
   this.item.feedURI = aFeedURI;
@@ -2750,7 +2438,8 @@ PlacesRemoveLivemarkTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesMoveItemTransaction(aItemId, aNewParentId, aNewIndex)
+this.PlacesMoveItemTransaction =
+ function PlacesMoveItemTransaction(aItemId, aNewParentId, aNewIndex)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -2796,7 +2485,8 @@ PlacesMoveItemTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesRemoveItemTransaction(aItemId)
+this.PlacesRemoveItemTransaction =
+ function PlacesRemoveItemTransaction(aItemId)
 {
   if (PlacesUtils.isRootItem(aItemId))
     throw Cr.NS_ERROR_INVALID_ARG;
@@ -2929,7 +2619,8 @@ PlacesRemoveItemTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditItemTitleTransaction(aItemId, aNewTitle)
+this.PlacesEditItemTitleTransaction =
+ function PlacesEditItemTitleTransaction(aItemId, aNewTitle)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -2963,7 +2654,8 @@ PlacesEditItemTitleTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditBookmarkURITransaction(aItemId, aNewURI) {
+this.PlacesEditBookmarkURITransaction =
+ function PlacesEditBookmarkURITransaction(aItemId, aNewURI) {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
   this.new = new TransactionItemCache();
@@ -3014,7 +2706,8 @@ PlacesEditBookmarkURITransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesSetItemAnnotationTransaction(aItemId, aAnnotationObject)
+this.PlacesSetItemAnnotationTransaction =
+ function PlacesSetItemAnnotationTransaction(aItemId, aAnnotationObject)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3073,7 +2766,8 @@ PlacesSetItemAnnotationTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesSetPageAnnotationTransaction(aURI, aAnnotationObject)
+this.PlacesSetPageAnnotationTransaction =
+ function PlacesSetPageAnnotationTransaction(aURI, aAnnotationObject)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;
@@ -3129,7 +2823,8 @@ PlacesSetPageAnnotationTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditBookmarkKeywordTransaction(aItemId, aNewKeyword)
+this.PlacesEditBookmarkKeywordTransaction =
+ function PlacesEditBookmarkKeywordTransaction(aItemId, aNewKeyword)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3163,7 +2858,8 @@ PlacesEditBookmarkKeywordTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditBookmarkPostDataTransaction(aItemId, aPostData)
+this.PlacesEditBookmarkPostDataTransaction =
+ function PlacesEditBookmarkPostDataTransaction(aItemId, aPostData)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3197,7 +2893,8 @@ PlacesEditBookmarkPostDataTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditItemDateAddedTransaction(aItemId, aNewDateAdded)
+this.PlacesEditItemDateAddedTransaction =
+ function PlacesEditItemDateAddedTransaction(aItemId, aNewDateAdded)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3235,7 +2932,8 @@ PlacesEditItemDateAddedTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesEditItemLastModifiedTransaction(aItemId, aNewLastModified)
+this.PlacesEditItemLastModifiedTransaction =
+ function PlacesEditItemLastModifiedTransaction(aItemId, aNewLastModified)
 {
   this.item = new TransactionItemCache();
   this.item.id = aItemId;
@@ -3275,7 +2973,8 @@ PlacesEditItemLastModifiedTransaction.prototype = {
  *
  * @return nsITransaction object
  */
-function PlacesSortFolderByNameTransaction(aFolderId)
+this.PlacesSortFolderByNameTransaction =
+ function PlacesSortFolderByNameTransaction(aFolderId)
 {
   this.item = new TransactionItemCache();  
   this.item.id = aFolderId;
@@ -3361,7 +3060,8 @@ PlacesSortFolderByNameTransaction.prototype = {
  * @param aTags
  *        Array of tags to set for the given URL.
  */
-function PlacesTagURITransaction(aURI, aTags)
+this.PlacesTagURITransaction =
+ function PlacesTagURITransaction(aURI, aTags)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;
@@ -3408,7 +3108,8 @@ PlacesTagURITransaction.prototype = {
  *        Array of tags to unset. pass null to remove all tags from the given
  *        url.
  */
-function PlacesUntagURITransaction(aURI, aTags)
+this.PlacesUntagURITransaction =
+ function PlacesUntagURITransaction(aURI, aTags)
 {
   this.item = new TransactionItemCache();
   this.item.uri = aURI;

@@ -72,7 +72,7 @@ convertResultCode(int aSQLiteResultCode)
 
   // generic error
 #ifdef DEBUG
-  nsCAutoString message;
+  nsAutoCString message;
   message.AppendLiteral("SQLite returned error code ");
   message.AppendInt(rc);
   message.AppendLiteral(" , Storage will convert it to NS_ERROR_FAILURE");
@@ -96,7 +96,7 @@ checkAndLogStatementPerformance(sqlite3_stmt *aStatement)
   if (::strstr(sql, "/* do not warn (bug "))
     return;
 
-  nsCAutoString message;
+  nsAutoCString message;
   message.AppendInt(count);
   if (count == 1)
     message.Append(" sort operation has ");
@@ -137,13 +137,12 @@ convertJSValToVariant(
   if (aValue.isObject()) {
     JSObject* obj = &aValue.toObject();
     // We only support Date instances, all others fail.
-    if (!::js_DateIsValid(aCtx, obj))
+    if (!::js_DateIsValid(obj))
       return nullptr;
 
-    double msecd = ::js_DateGetMsecSinceEpoch(aCtx, obj);
+    double msecd = ::js_DateGetMsecSinceEpoch(obj);
     msecd *= 1000.0;
-    int64_t msec;
-    LL_D2L(msec, msecd);
+    int64_t msec = msecd;
 
     return new IntegerVariant(msec);
   }

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2005-2007 Henri Sivonen
- * Copyright (c) 2007-2010 Mozilla Foundation
+ * Copyright (c) 2007-2013 Mozilla Foundation
  * Portions of comments Copyright 2004-2010 Apple Computer, Inc., Mozilla 
  * Foundation, and Opera Software ASA.
  *
@@ -30,7 +30,6 @@
 
 #define nsHtml5Tokenizer_cpp__
 
-#include "prtypes.h"
 #include "nsIAtom.h"
 #include "nsHtml5AtomTable.h"
 #include "nsString.h"
@@ -69,25 +68,25 @@ PRUnichar nsHtml5Tokenizer::OCTYPE[] = { 'o', 'c', 't', 'y', 'p', 'e' };
 PRUnichar nsHtml5Tokenizer::UBLIC[] = { 'u', 'b', 'l', 'i', 'c' };
 PRUnichar nsHtml5Tokenizer::YSTEM[] = { 'y', 's', 't', 'e', 'm' };
 static PRUnichar const TITLE_ARR_DATA[] = { 't', 'i', 't', 'l', 'e' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::TITLE_ARR = { TITLE_ARR_DATA, NS_ARRAY_LENGTH(TITLE_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::TITLE_ARR = { TITLE_ARR_DATA, MOZ_ARRAY_LENGTH(TITLE_ARR_DATA) };
 static PRUnichar const SCRIPT_ARR_DATA[] = { 's', 'c', 'r', 'i', 'p', 't' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::SCRIPT_ARR = { SCRIPT_ARR_DATA, NS_ARRAY_LENGTH(SCRIPT_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::SCRIPT_ARR = { SCRIPT_ARR_DATA, MOZ_ARRAY_LENGTH(SCRIPT_ARR_DATA) };
 static PRUnichar const STYLE_ARR_DATA[] = { 's', 't', 'y', 'l', 'e' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::STYLE_ARR = { STYLE_ARR_DATA, NS_ARRAY_LENGTH(STYLE_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::STYLE_ARR = { STYLE_ARR_DATA, MOZ_ARRAY_LENGTH(STYLE_ARR_DATA) };
 static PRUnichar const PLAINTEXT_ARR_DATA[] = { 'p', 'l', 'a', 'i', 'n', 't', 'e', 'x', 't' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::PLAINTEXT_ARR = { PLAINTEXT_ARR_DATA, NS_ARRAY_LENGTH(PLAINTEXT_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::PLAINTEXT_ARR = { PLAINTEXT_ARR_DATA, MOZ_ARRAY_LENGTH(PLAINTEXT_ARR_DATA) };
 static PRUnichar const XMP_ARR_DATA[] = { 'x', 'm', 'p' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::XMP_ARR = { XMP_ARR_DATA, NS_ARRAY_LENGTH(XMP_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::XMP_ARR = { XMP_ARR_DATA, MOZ_ARRAY_LENGTH(XMP_ARR_DATA) };
 static PRUnichar const TEXTAREA_ARR_DATA[] = { 't', 'e', 'x', 't', 'a', 'r', 'e', 'a' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::TEXTAREA_ARR = { TEXTAREA_ARR_DATA, NS_ARRAY_LENGTH(TEXTAREA_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::TEXTAREA_ARR = { TEXTAREA_ARR_DATA, MOZ_ARRAY_LENGTH(TEXTAREA_ARR_DATA) };
 static PRUnichar const IFRAME_ARR_DATA[] = { 'i', 'f', 'r', 'a', 'm', 'e' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::IFRAME_ARR = { IFRAME_ARR_DATA, NS_ARRAY_LENGTH(IFRAME_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::IFRAME_ARR = { IFRAME_ARR_DATA, MOZ_ARRAY_LENGTH(IFRAME_ARR_DATA) };
 static PRUnichar const NOEMBED_ARR_DATA[] = { 'n', 'o', 'e', 'm', 'b', 'e', 'd' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::NOEMBED_ARR = { NOEMBED_ARR_DATA, NS_ARRAY_LENGTH(NOEMBED_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::NOEMBED_ARR = { NOEMBED_ARR_DATA, MOZ_ARRAY_LENGTH(NOEMBED_ARR_DATA) };
 static PRUnichar const NOSCRIPT_ARR_DATA[] = { 'n', 'o', 's', 'c', 'r', 'i', 'p', 't' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::NOSCRIPT_ARR = { NOSCRIPT_ARR_DATA, NS_ARRAY_LENGTH(NOSCRIPT_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::NOSCRIPT_ARR = { NOSCRIPT_ARR_DATA, MOZ_ARRAY_LENGTH(NOSCRIPT_ARR_DATA) };
 static PRUnichar const NOFRAMES_ARR_DATA[] = { 'n', 'o', 'f', 'r', 'a', 'm', 'e', 's' };
-staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::NOFRAMES_ARR = { NOFRAMES_ARR_DATA, NS_ARRAY_LENGTH(NOFRAMES_ARR_DATA) };
+staticJArray<PRUnichar,int32_t> nsHtml5Tokenizer::NOFRAMES_ARR = { NOFRAMES_ARR_DATA, MOZ_ARRAY_LENGTH(NOFRAMES_ARR_DATA) };
 
 nsHtml5Tokenizer::nsHtml5Tokenizer(nsHtml5TreeBuilder* tokenHandler, bool viewingXmlSource)
   : tokenHandler(tokenHandler),
@@ -189,7 +188,7 @@ nsHtml5Tokenizer::endTagExpectationToArray()
       return;
     }
     default: {
-
+      MOZ_ASSERT(false, "Bad end tag expectation.");
       return;
     }
   }
@@ -281,7 +280,7 @@ nsHtml5Tokenizer::flushChars(PRUnichar* buf, int32_t pos)
   if (pos > cstart) {
     tokenHandler->characters(buf, cstart, pos - cstart);
   }
-  cstart = PR_INT32_MAX;
+  cstart = INT32_MAX;
 }
 
 void 
@@ -398,7 +397,7 @@ nsHtml5Tokenizer::tokenizeBuffer(nsHtml5UTF16Buffer* buffer)
       break;
     }
     default: {
-      cstart = PR_INT32_MAX;
+      cstart = INT32_MAX;
       break;
     }
   }
@@ -1372,24 +1371,31 @@ nsHtml5Tokenizer::stateLoop(int32_t state, PRUnichar c, int32_t pos, PRUnichar* 
         cdatarsqb_end: ;
       }
       case NS_HTML5TOKENIZER_CDATA_RSQB_RSQB: {
-        if (++pos == endPos) {
-          NS_HTML5_BREAK(stateloop);
-        }
-        c = checkChar(buf, pos);
-        switch(c) {
-          case '>': {
-            cstart = pos + 1;
-            state = P::transition(mViewSource, NS_HTML5TOKENIZER_DATA, reconsume, pos);
-            NS_HTML5_CONTINUE(stateloop);
+        for (; ; ) {
+          if (++pos == endPos) {
+            NS_HTML5_BREAK(stateloop);
           }
-          default: {
-            tokenHandler->characters(nsHtml5Tokenizer::RSQB_RSQB, 0, 2);
-            cstart = pos;
-            reconsume = true;
-            state = P::transition(mViewSource, NS_HTML5TOKENIZER_CDATA_SECTION, reconsume, pos);
-            NS_HTML5_CONTINUE(stateloop);
+          c = checkChar(buf, pos);
+          switch(c) {
+            case ']': {
+              tokenHandler->characters(nsHtml5Tokenizer::RSQB_RSQB, 0, 1);
+              continue;
+            }
+            case '>': {
+              cstart = pos + 1;
+              state = P::transition(mViewSource, NS_HTML5TOKENIZER_DATA, reconsume, pos);
+              NS_HTML5_CONTINUE(stateloop);
+            }
+            default: {
+              tokenHandler->characters(nsHtml5Tokenizer::RSQB_RSQB, 0, 2);
+              cstart = pos;
+              reconsume = true;
+              state = P::transition(mViewSource, NS_HTML5TOKENIZER_CDATA_SECTION, reconsume, pos);
+              NS_HTML5_CONTINUE(stateloop);
+            }
           }
         }
+
       }
       case NS_HTML5TOKENIZER_ATTRIBUTE_VALUE_SINGLE_QUOTED: {
         for (; ; ) {
@@ -2401,7 +2407,7 @@ nsHtml5Tokenizer::stateLoop(int32_t state, PRUnichar c, int32_t pos, PRUnichar* 
             NS_HTML5_BREAK(stateloop);
           }
           c = checkChar(buf, pos);
-
+          MOZ_ASSERT(index > 0);
           if (index < 6) {
             PRUnichar folded = c;
             if (c >= 'A' && c <= 'Z') {
@@ -3471,7 +3477,7 @@ nsHtml5Tokenizer::emitCarriageReturn(PRUnichar* buf, int32_t pos)
   silentCarriageReturn();
   flushChars(buf, pos);
   tokenHandler->characters(nsHtml5Tokenizer::LF, 0, 1);
-  cstart = PR_INT32_MAX;
+  cstart = INT32_MAX;
 }
 
 void 
@@ -3906,8 +3912,8 @@ nsHtml5Tokenizer::emitOrAppendOne(const PRUnichar* val, int32_t returnState)
 void 
 nsHtml5Tokenizer::end()
 {
-  strBuf = 0;
-  longStrBuf = 0;
+  strBuf = nullptr;
+  longStrBuf = nullptr;
   doctypeName = nullptr;
   if (systemIdentifier) {
     nsHtml5Portability::releaseString(systemIdentifier);

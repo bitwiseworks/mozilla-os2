@@ -1,4 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,111 +8,40 @@
 /* Call context. */
 
 #include "mozilla/Util.h"
+#include "AccessCheck.h"
 
 #include "xpcprivate.h"
 
 using namespace mozilla;
+using namespace xpc;
+using namespace JS;
+
+#define IS_TEAROFF_CLASS(clazz) ((clazz) == &XPC_WN_Tearoff_JSClass)
 
 XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
-                               JSContext* cx    /* = nullptr    */,
-                               JSObject* obj    /* = nullptr    */,
-                               JSObject* funobj /* = nullptr    */,
-                               jsid name        /* = JSID_VOID */,
-                               unsigned argc       /* = NO_ARGS   */,
-                               jsval *argv      /* = nullptr    */,
-                               jsval *rval      /* = nullptr    */)
-    :   mState(INIT_FAILED),
-        mXPC(nsXPConnect::GetXPConnect()),
+                               JSContext* cx       /* = GetDefaultJSContext() */,
+                               HandleObject obj    /* = nullptr               */,
+                               HandleObject funobj /* = nullptr               */,
+                               HandleId name       /* = JSID_VOID             */,
+                               unsigned argc       /* = NO_ARGS               */,
+                               jsval *argv         /* = nullptr               */,
+                               jsval *rval         /* = nullptr               */)
+    :   mPusher(cx),
+        mState(INIT_FAILED),
+        mXPC(nsXPConnect::XPConnect()),
         mXPCContext(nullptr),
         mJSContext(cx),
-        mContextPopRequired(false),
-        mDestroyJSContextInDestructor(false),
-        mCallerLanguage(callerLanguage)
-{
-    Init(callerLanguage, callerLanguage == NATIVE_CALLER, obj, funobj,
-         INIT_SHOULD_LOOKUP_WRAPPER, name, argc, argv, rval);
-}
-
-XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
-                               JSContext* cx,
-                               JSBool callBeginRequest,
-                               JSObject* obj,
-                               JSObject* flattenedJSObject,
-                               XPCWrappedNative* wrapper,
-                               XPCWrappedNativeTearOff* tearOff)
-    :   mState(INIT_FAILED),
-        mXPC(nsXPConnect::GetXPConnect()),
-        mXPCContext(nullptr),
-        mJSContext(cx),
-        mContextPopRequired(false),
-        mDestroyJSContextInDestructor(false),
         mCallerLanguage(callerLanguage),
-        mFlattenedJSObject(flattenedJSObject),
-        mWrapper(wrapper),
-        mTearOff(tearOff)
+        mFlattenedJSObject(cx),
+        mWrapper(nullptr),
+        mTearOff(nullptr),
+        mName(cx)
 {
-    Init(callerLanguage, callBeginRequest, obj, nullptr,
-         WRAPPER_PASSED_TO_CONSTRUCTOR, JSID_VOID, NO_ARGS,
-         nullptr, nullptr);
-}
+    MOZ_ASSERT(cx);
 
-void
-XPCCallContext::Init(XPCContext::LangType callerLanguage,
-                     JSBool callBeginRequest,
-                     JSObject* obj,
-                     JSObject* funobj,
-                     WrapperInitOptions wrapperInitOptions,
-                     jsid name,
-                     unsigned argc,
-                     jsval *argv,
-                     jsval *rval)
-{
+    NS_ASSERTION(mJSContext, "No JSContext supplied to XPCCallContext");
     if (!mXPC)
         return;
-
-    XPCJSContextStack* stack = XPCJSRuntime::Get()->GetJSContextStack();
-
-    if (!stack) {
-        // If we don't have a stack we're probably in shutdown.
-        mJSContext = nullptr;
-        return;
-    }
-
-    JSContext *topJSContext = stack->Peek();
-
-    if (!mJSContext) {
-        // This is slightly questionable. If called without an explicit
-        // JSContext (generally a call to a wrappedJS) we will use the JSContext
-        // on the top of the JSContext stack - if there is one - *before*
-        // falling back on the safe JSContext.
-        // This is good AND bad because it makes calls from JS -> native -> JS
-        // have JS stack 'continuity' for purposes of stack traces etc.
-        // Note: this *is* what the pre-XPCCallContext xpconnect did too.
-
-        if (topJSContext) {
-            mJSContext = topJSContext;
-        } else {
-            mJSContext = stack->GetSafeJSContext();
-            if (!mJSContext)
-                return;
-        }
-    }
-
-    if (topJSContext != mJSContext) {
-        if (!stack->Push(mJSContext)) {
-            NS_ERROR("bad!");
-            return;
-        }
-        mContextPopRequired = true;
-    }
-
-    // Get into the request as early as we can to avoid problems with scanning
-    // callcontexts on other threads from within the gc callbacks.
-
-    NS_ASSERTION(!callBeginRequest || mCallerLanguage == NATIVE_CALLER,
-                 "Don't call JS_BeginRequest unless the caller is native.");
-    if (callBeginRequest)
-        JS_BeginRequest(mJSContext);
 
     mXPCContext = XPCContext::GetXPCContext(mJSContext);
     mPrevCallerLanguage = mXPCContext->SetCallingLangType(mCallerLanguage);
@@ -119,41 +49,45 @@ XPCCallContext::Init(XPCContext::LangType callerLanguage,
     // hook into call context chain.
     mPrevCallContext = XPCJSRuntime::Get()->SetCallContext(this);
 
-    // We only need to addref xpconnect once so only do it if this is the first
-    // context in the chain.
-    if (!mPrevCallContext)
-        NS_ADDREF(mXPC);
-
     mState = HAVE_CONTEXT;
 
     if (!obj)
         return;
-
-    mScopeForNewJSObjects = obj;
-
-    mState = HAVE_SCOPE;
 
     mMethodIndex = 0xDEAD;
 
     mState = HAVE_OBJECT;
 
     mTearOff = nullptr;
-    if (wrapperInitOptions == INIT_SHOULD_LOOKUP_WRAPPER) {
-        mWrapper = XPCWrappedNative::GetWrappedNativeOfJSObject(mJSContext, obj,
-                                                                funobj,
-                                                                &mFlattenedJSObject,
-                                                                &mTearOff);
-        if (mWrapper) {
-            mFlattenedJSObject = mWrapper->GetFlatJSObject();
 
-            if (mTearOff)
-                mScriptableInfo = nullptr;
-            else
-                mScriptableInfo = mWrapper->GetScriptableInfo();
-        } else {
-            NS_ABORT_IF_FALSE(!mFlattenedJSObject || IS_SLIM_WRAPPER(mFlattenedJSObject),
-                              "should have a slim wrapper");
+    // If the object is a security wrapper, GetWrappedNativeOfJSObject can't
+    // handle it. Do special handling here to make cross-origin Xrays work.
+    JSObject *unwrapped = js::CheckedUnwrap(obj, /* stopAtOuter = */ false);
+    if (!unwrapped) {
+        mWrapper = UnwrapThisIfAllowed(obj, funobj, argc);
+        if (!mWrapper) {
+            JS_ReportError(mJSContext, "Permission denied to call method on |this|");
+            mState = INIT_FAILED;
+            return;
         }
+    } else {
+        js::Class *clasp = js::GetObjectClass(unwrapped);
+        if (IS_WN_CLASS(clasp)) {
+            mWrapper = XPCWrappedNative::Get(unwrapped);
+        } else if (IS_TEAROFF_CLASS(clasp)) {
+            mTearOff = (XPCWrappedNativeTearOff*)js::GetObjectPrivate(unwrapped);
+            mWrapper = XPCWrappedNative::Get(js::GetObjectParent(unwrapped));
+        }
+    }
+    if (mWrapper) {
+        mFlattenedJSObject = mWrapper->GetFlatJSObject();
+
+        if (mTearOff)
+            mScriptableInfo = nullptr;
+        else
+            mScriptableInfo = mWrapper->GetScriptableInfo();
+    } else {
+        NS_ABORT_IF_FALSE(!mFlattenedJSObject, "What object do we have?");
     }
 
     if (!JSID_IS_VOID(name))
@@ -163,6 +97,24 @@ XPCCallContext::Init(XPCContext::LangType callerLanguage,
         SetArgsAndResultPtr(argc, argv, rval);
 
     CHECK_STATE(HAVE_OBJECT);
+}
+
+// static
+JSContext *
+XPCCallContext::GetDefaultJSContext()
+{
+    // This is slightly questionable. If called without an explicit
+    // JSContext (generally a call to a wrappedJS) we will use the JSContext
+    // on the top of the JSContext stack - if there is one - *before*
+    // falling back on the safe JSContext.
+    // This is good AND bad because it makes calls from JS -> native -> JS
+    // have JS stack 'continuity' for purposes of stack traces etc.
+    // Note: this *is* what the pre-XPCCallContext xpconnect did too.
+
+    XPCJSContextStack* stack = XPCJSRuntime::Get()->GetJSContextStack();
+    JSContext *topJSContext = stack->Peek();
+
+    return topJSContext ? topJSContext : stack->GetSafeJSContext();
 }
 
 void
@@ -175,7 +127,7 @@ XPCCallContext::SetName(jsid name)
     if (mTearOff) {
         mSet = nullptr;
         mInterface = mTearOff->GetInterface();
-        mMember = mInterface->FindMember(name);
+        mMember = mInterface->FindMember(mName);
         mStaticMemberIsLocal = true;
         if (mMember && !mMember->IsConstant())
             mMethodIndex = mMember->GetIndex();
@@ -183,7 +135,7 @@ XPCCallContext::SetName(jsid name)
         mSet = mWrapper ? mWrapper->GetSet() : nullptr;
 
         if (mSet &&
-            mSet->FindMember(name, &mMember, &mInterface,
+            mSet->FindMember(mName, &mMember, &mInterface,
                              mWrapper->HasProto() ?
                              mWrapper->GetProto()->GetSet() :
                              nullptr,
@@ -255,7 +207,7 @@ XPCCallContext::CanCallNow()
         return NS_ERROR_UNEXPECTED;
 
     if (!mTearOff) {
-        mTearOff = mWrapper->FindTearOff(*this, mInterface, false, &rv);
+        mTearOff = mWrapper->FindTearOff(mInterface, false, &rv);
         if (!mTearOff || mTearOff->GetInterface() != mInterface) {
             mTearOff = nullptr;
             return NS_FAILED(rv) ? rv : NS_ERROR_UNEXPECTED;
@@ -284,95 +236,12 @@ XPCCallContext::SystemIsBeingShutDown()
 
 XPCCallContext::~XPCCallContext()
 {
-    // do cleanup...
-
-    bool shouldReleaseXPC = false;
-
     if (mXPCContext) {
         mXPCContext->SetCallingLangType(mPrevCallerLanguage);
 
         DebugOnly<XPCCallContext*> old = XPCJSRuntime::Get()->SetCallContext(mPrevCallContext);
         NS_ASSERTION(old == this, "bad pop from per thread data");
-
-        shouldReleaseXPC = mPrevCallContext == nullptr;
     }
-
-    // NB: Needs to happen before the context stack pop.
-    if (mJSContext && mCallerLanguage == NATIVE_CALLER)
-        JS_EndRequest(mJSContext);
-
-    if (mContextPopRequired) {
-        XPCJSContextStack* stack = XPCJSRuntime::Get()->GetJSContextStack();
-        NS_ASSERTION(stack, "bad!");
-        if (stack) {
-            DebugOnly<JSContext*> poppedCX = stack->Pop();
-            NS_ASSERTION(poppedCX == mJSContext, "bad pop");
-        }
-    }
-
-    if (mJSContext) {
-        if (mDestroyJSContextInDestructor) {
-#ifdef DEBUG_xpc_hacker
-            printf("!xpc - doing deferred destruction of JSContext @ %p\n",
-                   mJSContext);
-#endif
-            NS_ASSERTION(!XPCJSRuntime::Get()->GetJSContextStack()->
-                         DEBUG_StackHasJSContext(mJSContext),
-                         "JSContext still in threadjscontextstack!");
-
-            JS_DestroyContext(mJSContext);
-        }
-    }
-
-#ifdef DEBUG
-    for (uint32_t i = 0; i < XPCCCX_STRING_CACHE_SIZE; ++i) {
-        NS_ASSERTION(!mScratchStrings[i].mInUse, "Uh, string wrapper still in use!");
-    }
-#endif
-
-    if (shouldReleaseXPC && mXPC)
-        NS_RELEASE(mXPC);
-}
-
-XPCReadableJSStringWrapper *
-XPCCallContext::NewStringWrapper(const PRUnichar *str, uint32_t len)
-{
-    for (uint32_t i = 0; i < XPCCCX_STRING_CACHE_SIZE; ++i) {
-        StringWrapperEntry& ent = mScratchStrings[i];
-
-        if (!ent.mInUse) {
-            ent.mInUse = true;
-
-            // Construct the string using placement new.
-
-            return new (ent.mString.addr()) XPCReadableJSStringWrapper(str, len);
-        }
-    }
-
-    // All our internal string wrappers are used, allocate a new string.
-
-    return new XPCReadableJSStringWrapper(str, len);
-}
-
-void
-XPCCallContext::DeleteString(nsAString *string)
-{
-    for (uint32_t i = 0; i < XPCCCX_STRING_CACHE_SIZE; ++i) {
-        StringWrapperEntry& ent = mScratchStrings[i];
-        if (string == ent.mString.addr()) {
-            // One of our internal strings is no longer in use, mark
-            // it as such and destroy the string.
-
-            ent.mInUse = false;
-            ent.mString.addr()->~XPCReadableJSStringWrapper();
-
-            return;
-        }
-    }
-
-    // We're done with a string that's not one of our internal
-    // strings, delete it.
-    delete string;
 }
 
 /* readonly attribute nsISupports Callee; */
@@ -464,14 +333,61 @@ XPCCallContext::GetLanguage(uint16_t *aResult)
   return NS_OK;
 }
 
-#ifdef DEBUG
-// static
-void
-XPCLazyCallContext::AssertContextIsTopOfStack(JSContext* cx)
+XPCWrappedNative*
+XPCCallContext::UnwrapThisIfAllowed(HandleObject obj, HandleObject fun, unsigned argc)
 {
-    XPCJSContextStack* stack = XPCJSRuntime::Get()->GetJSContextStack();
+    // We should only get here for objects that aren't safe to unwrap.
+    MOZ_ASSERT(!js::CheckedUnwrap(obj));
+    MOZ_ASSERT(js::IsObjectInContextCompartment(obj, mJSContext));
 
-    JSContext *topJSContext = stack->Peek();
-    NS_ASSERTION(cx == topJSContext, "wrong context on XPCJSContextStack!");
+    // We can't do anything here without a function.
+    if (!fun)
+        return nullptr;
+
+    // Determine if we're allowed to unwrap the security wrapper to invoke the
+    // method.
+    //
+    // We have the Interface and Member that this corresponds to, but
+    // unfortunately our access checks are based on the object class name and
+    // property name. So we cheat a little bit here - we verify that the object
+    // does indeed implement the method's Interface, and then just check that we
+    // can successfully access property with method's name from the object.
+
+    // First, get the XPCWN out of the underlying object. We should have a wrapper
+    // here, potentially an outer window proxy, and then an XPCWN.
+    MOZ_ASSERT(js::IsWrapper(obj));
+    RootedObject unwrapped(mJSContext, js::UncheckedUnwrap(obj, /* stopAtOuter = */ false));
+    MOZ_ASSERT(unwrapped == JS_ObjectToInnerObject(mJSContext, js::Wrapper::wrappedObject(obj)));
+
+    // Make sure we have an XPCWN, and grab it.
+    if (!IS_WN_REFLECTOR(unwrapped))
+        return nullptr;
+    XPCWrappedNative *wn = XPCWrappedNative::Get(unwrapped);
+
+    // Next, get the call info off the function object.
+    XPCNativeInterface *interface;
+    XPCNativeMember *member;
+    XPCNativeMember::GetCallInfo(fun, &interface, &member);
+
+    // To be extra safe, make sure that the underlying native implements the
+    // interface before unwrapping. Even if we didn't check this, we'd still
+    // theoretically fail during tearoff lookup for mismatched methods.
+    if (!wn->HasInterfaceNoQI(*interface->GetIID()))
+        return nullptr;
+
+    // See if the access is permitted.
+    //
+    // NB: This calculation of SET vs GET is a bit wonky, but that's what
+    // XPC_WN_GetterSetter does.
+    bool set = argc && argc != NO_ARGS && member->IsWritableAttribute();
+    js::Wrapper::Action act = set ? js::Wrapper::SET : js::Wrapper::GET;
+    js::Wrapper *handler = js::Wrapper::wrapperHandler(obj);
+    bool ignored;
+    JS::Rooted<jsid> id(mJSContext, member->GetName());
+    if (!handler->enter(mJSContext, obj, id, act, &ignored))
+        return nullptr;
+
+    // Ok, this call is safe.
+    return wn;
 }
-#endif
+

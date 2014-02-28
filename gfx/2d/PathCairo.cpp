@@ -50,7 +50,6 @@ CairoPathContext::DuplicateContextAndPath()
 {
   // Duplicate the path.
   cairo_path_t* path = cairo_copy_path(mContext);
-  cairo_fill_rule_t rule = cairo_get_fill_rule(mContext);
 
   // Duplicate the context.
   cairo_surface_t* surf = cairo_get_target(mContext);
@@ -197,7 +196,7 @@ PathBuilderCairo::CurrentPoint() const
   CairoTempMatrix tempMatrix(*mPathContext, mTransform);
   double x, y;
   cairo_get_current_point(*mPathContext, &x, &y);
-  return Point(x, y);
+  return Point((Float)x, (Float)y);
 }
 
 TemporaryRef<Path>
@@ -264,6 +263,21 @@ PathCairo::ContainsPoint(const Point &aPoint, const Matrix &aTransform) const
   return cairo_in_fill(*mPathContext, transformed.x, transformed.y);
 }
 
+bool
+PathCairo::StrokeContainsPoint(const StrokeOptions &aStrokeOptions,
+                               const Point &aPoint,
+                               const Matrix &aTransform) const
+{
+  CairoTempMatrix(*mPathContext, mTransform);
+
+  Matrix inverse = aTransform;
+  inverse.Invert();
+  Point transformed = inverse * aPoint;
+
+  SetCairoStrokeOptions(*mPathContext, aStrokeOptions);
+  return cairo_in_stroke(*mPathContext, transformed.x, transformed.y);
+}
+
 Rect
 PathCairo::GetBounds(const Matrix &aTransform) const
 {
@@ -272,7 +286,7 @@ PathCairo::GetBounds(const Matrix &aTransform) const
   double x1, y1, x2, y2;
 
   cairo_path_extents(*mPathContext, &x1, &y1, &x2, &y2);
-  Rect bounds(x1, y1, x2 - x1, y2 - y1);
+  Rect bounds(Float(x1), Float(y1), Float(x2 - x1), Float(y2 - y1));
   return aTransform.TransformBounds(bounds);
 }
 
@@ -287,7 +301,7 @@ PathCairo::GetStrokedBounds(const StrokeOptions &aStrokeOptions,
   SetCairoStrokeOptions(*mPathContext, aStrokeOptions);
 
   cairo_stroke_extents(*mPathContext, &x1, &y1, &x2, &y2);
-  Rect bounds(x1, y1, x2 - x1, y2 - y1);
+  Rect bounds((Float)x1, (Float)y1, (Float)(x2 - x1), (Float)(y2 - y1));
   return aTransform.TransformBounds(bounds);
 }
 

@@ -170,8 +170,8 @@ void LogMessageWithContext(FileLocation &aFile,
   if (!console)
     return;
 
-  nsresult rv = error->Init(NS_ConvertUTF8toUTF16(formatted).get(),
-			    NS_ConvertUTF8toUTF16(file).get(), NULL,
+  nsresult rv = error->Init(NS_ConvertUTF8toUTF16(formatted),
+			    NS_ConvertUTF8toUTF16(file), EmptyString(),
 			    aLineNumber, 0, nsIScriptError::warningFlag,
 			    "chrome registration");
   if (NS_FAILED(rv))
@@ -417,7 +417,7 @@ ParseManifest(NSLocationType type, FileLocation &file, char* buf, bool aChromeOn
 
   nsCOMPtr<nsIXULAppInfo> xapp (do_GetService(XULAPPINFO_SERVICE_CONTRACTID));
   if (xapp) {
-    nsCAutoString s;
+    nsAutoCString s;
     rv = xapp->GetID(s);
     if (NS_SUCCEEDED(rv))
       CopyUTF8toUTF16(s, appID);
@@ -464,7 +464,7 @@ ParseManifest(NSLocationType type, FileLocation &file, char* buf, bool aChromeOn
                                          majorVersion,
                                          minorVersion);
   }
-#elif defined(MOZ_WIDGET_GTK2)
+#elif defined(MOZ_WIDGET_GTK)
   nsTextFormatter::ssprintf(osVersion, NS_LITERAL_STRING("%ld.%ld").get(),
                                        gtk_major_version,
                                        gtk_minor_version);

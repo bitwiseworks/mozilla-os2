@@ -7,7 +7,8 @@
 #include "nsStyledElement.h"
 #include "nsGkAtoms.h"
 #include "nsAttrValue.h"
-#include "nsGenericElement.h"
+#include "nsAttrValueInlines.h"
+#include "mozilla/dom/Element.h"
 #include "nsMutationEvent.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsDOMCSSAttrDeclaration.h"
@@ -18,10 +19,11 @@
 #include "mozilla/css/Loader.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsXULElement.h"
-#include "nsIDOMSVGStylable.h"
 #include "nsContentUtils.h"
+#include "nsStyleUtil.h"
 
 namespace css = mozilla::css;
+using namespace mozilla::dom;
 
 //----------------------------------------------------------------------
 // nsIContent methods
@@ -43,7 +45,7 @@ nsStyledElementNotElementCSSInlineStyle::DoGetID() const
 {
   NS_ASSERTION(HasID(), "Unexpected call");
 
-  // The nullcheck here is needed because nsGenericElement::UnsetAttr calls
+  // The nullcheck here is needed because Element::UnsetAttr calls
   // out to various code between removing the attribute and we get a chance to
   // ClearHasID().
 
@@ -106,7 +108,7 @@ nsStyledElementNotElementCSSInlineStyle::UnsetAttr(int32_t aNameSpaceID,
     RemoveFromIdTable();
   }
 
-  return nsGenericElement::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
+  return Element::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
 }
 
 nsresult
@@ -123,8 +125,7 @@ nsStyledElementNotElementCSSInlineStyle::AfterSetAttr(int32_t aNamespaceID,
     ClearHasID();
   }
 
-  return nsGenericElement::AfterSetAttr(aNamespaceID, aAttribute, aValue,
-                                        aNotify);
+  return Element::AfterSetAttr(aNamespaceID, aAttribute, aValue, aNotify);
 }
 
 nsresult
@@ -190,10 +191,10 @@ nsStyledElementNotElementCSSInlineStyle::GetInlineStyleRule()
 // ---------------------------------------------------------------
 // Others and helpers
 
-nsIDOMCSSStyleDeclaration*
-nsStyledElementNotElementCSSInlineStyle::GetStyle(nsresult* retval)
+nsICSSDeclaration*
+nsStyledElementNotElementCSSInlineStyle::Style()
 {
-  nsGenericElement::nsDOMSlots *slots = DOMSlots();
+  Element::nsDOMSlots *slots = DOMSlots();
 
   if (!slots->mStyle) {
     // Just in case...
@@ -203,7 +204,6 @@ nsStyledElementNotElementCSSInlineStyle::GetStyle(nsresult* retval)
     SetMayHaveStyle();
   }
 
-  *retval = NS_OK;
   return slots->mStyle;
 }
 
@@ -236,6 +236,11 @@ nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aV
 {
   nsIDocument* doc = OwnerDoc();
 
+  if (!nsStyleUtil::CSPAllowsInlineStyle(NodePrincipal(),
+                                         doc->GetDocumentURI(), 0, aValue,
+                                         nullptr))
+    return;
+
   if (aForceInDataDoc ||
       !doc->IsLoadedAsData() ||
       doc->IsStaticDocument()) {
@@ -251,21 +256,8 @@ nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aV
       }
     }
 
-    if (isCSS) {
-      css::Loader* cssLoader = doc->CSSLoader();
-      nsCSSParser cssParser(cssLoader);
-
-      nsCOMPtr<nsIURI> baseURI = GetBaseURI();
-
-      nsRefPtr<css::StyleRule> rule;
-      cssParser.ParseStyleAttribute(aValue, doc->GetDocumentURI(),
-                                    baseURI,
-                                    NodePrincipal(),
-                                    getter_AddRefs(rule));
-      if (rule) {
-        aResult.SetTo(rule, &aValue);
-        return;
-      }
+    if (isCSS && aResult.ParseStyleAttribute(aValue, this)) {
+      return;
     }
   }
 

@@ -3,20 +3,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef NotificationController_h_
-#define NotificationController_h_
+#ifndef mozilla_a11y_NotificationController_h_
+#define mozilla_a11y_NotificationController_h_
 
-#include "AccEvent.h"
+#include "EventQueue.h"
+
 #include "nsCycleCollectionParticipant.h"
 #include "nsRefreshDriver.h"
 
-#ifdef DEBUG
+#ifdef A11Y_LOG
 #include "Logging.h"
 #endif
 
+class nsIContent;
+
+namespace mozilla {
+namespace a11y {
+
 class Accessible;
 class DocAccessible;
-class nsIContent;
 
 /**
  * Notification interface.
@@ -24,7 +29,7 @@ class nsIContent;
 class Notification
 {
 public:
-  virtual ~Notification() { };
+  virtual ~Notification() { }
 
   NS_INLINE_DECL_REFCOUNTING(Notification)
 
@@ -74,13 +79,14 @@ private:
 
   Class* mInstance;
   Callback mCallback;
-  nsCOMPtr<Arg> mArg;
+  nsRefPtr<Arg> mArg;
 };
 
 /**
  * Used to process notifications from core for the document accessible.
  */
-class NotificationController : public nsARefreshObserver
+class NotificationController : public EventQueue,
+                               public nsARefreshObserver
 {
 public:
   NotificationController(DocAccessible* aDocument, nsIPresShell* aPresShell);
@@ -99,7 +105,11 @@ public:
   /**
    * Put an accessible event into the queue to process it later.
    */
-  void QueueEvent(AccEvent* aEvent);
+  void QueueEvent(AccEvent* aEvent)
+  {
+    if (PushEvent(aEvent))
+      ScheduleProcessing();
+  }
 
   /**
    * Schedule binding the child document to the tree of this document.
@@ -136,7 +146,7 @@ public:
                                  Arg* aArg)
   {
     if (!IsUpdatePending()) {
-#ifdef DEBUG
+#ifdef A11Y_LOG
       if (mozilla::a11y::logging::IsEnabled(mozilla::a11y::logging::eNotifications))
         mozilla::a11y::logging::Text("sync notification processing");
 #endif
@@ -194,48 +204,6 @@ private:
   // nsARefreshObserver
   virtual void WillRefresh(mozilla::TimeStamp aTime);
 
-  // Event queue processing
-  /**
-   * Coalesce redundant events from the queue.
-   */
-  void CoalesceEvents();
-
-  /**
-   * Apply aEventRule to same type event that from sibling nodes of aDOMNode.
-   * @param aEventsToFire    array of pending events
-   * @param aStart           start index of pending events to be scanned
-   * @param aEnd             end index to be scanned (not included)
-   * @param aEventType       target event type
-   * @param aDOMNode         target are siblings of this node
-   * @param aEventRule       the event rule to be applied
-   *                         (should be eDoNotEmit or eAllowDupes)
-   */
-  void ApplyToSiblings(uint32_t aStart, uint32_t aEnd,
-                       uint32_t aEventType, nsINode* aNode,
-                       AccEvent::EEventRule aEventRule);
-
-  /**
-   * Coalesce two selection change events within the same select control.
-   */
-  void CoalesceSelChangeEvents(AccSelChangeEvent* aTailEvent,
-                               AccSelChangeEvent* aThisEvent,
-                               int32_t aThisIndex);
-
-  /**
-   * Coalesce text change events caused by sibling hide events.
-   */
-  void CoalesceTextChangeEventsFor(AccHideEvent* aTailEvent,
-                                   AccHideEvent* aThisEvent);
-  void CoalesceTextChangeEventsFor(AccShowEvent* aTailEvent,
-                                   AccShowEvent* aThisEvent);
-
-  /**
-   * Create text change event caused by hide or show event. When a node is
-   * hidden/removed or shown/appended, the text in an ancestor hyper text will
-   * lose or get new characters.
-   */
-  void CreateTextChangeEventFor(AccMutationEvent* aEvent);
-
 private:
   /**
    * Indicates whether we're waiting on an event queue processing from our
@@ -244,14 +212,10 @@ private:
   enum eObservingState {
     eNotObservingRefresh,
     eRefreshObserving,
+    eRefreshProcessing,
     eRefreshProcessingForUpdate
   };
   eObservingState mObservingState;
-
-  /**
-   * The document accessible reference owning this queue.
-   */
-  nsRefPtr<DocAccessible> mDocument;
 
   /**
    * The presshell of the document accessible.
@@ -341,12 +305,9 @@ private:
    * use SwapElements() on it.
    */
   nsTArray<nsRefPtr<Notification> > mNotifications;
-
-  /**
-   * Pending events array. Don't make this an nsAutoTArray; we use
-   * SwapElements() on it.
-   */
-  nsTArray<nsRefPtr<AccEvent> > mEvents;
 };
 
-#endif
+} // namespace a11y
+} // namespace mozilla
+
+#endif // mozilla_a11y_NotificationController_h_

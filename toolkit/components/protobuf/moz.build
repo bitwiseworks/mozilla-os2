@@ -1,0 +1,47 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'protobuf'
+
+EXPORTS.protobuf.google.protobuf += [
+    'extension_set.h',
+    'generated_message_util.h',
+    'message_lite.h',
+    'repeated_field.h',
+    'wire_format_lite.h',
+    'wire_format_lite_inl.h',
+]
+
+EXPORTS.protobuf.google.protobuf.stubs += [
+    'common.h',
+    'hash.h',
+    'map-util.h',
+    'once.h',
+    'stl_util-inl.h',
+]
+
+EXPORTS.protobuf.google.protobuf.io += [
+    'coded_stream.h',
+    'coded_stream_inl.h',
+    'package_info.h',
+    'zero_copy_stream.h',
+    'zero_copy_stream_impl.h',
+    'zero_copy_stream_impl_lite.h',
+]
+
+CPP_SOURCES += [
+    'coded_stream.cc',
+    'common.cc',
+    'extension_set.cc',
+    'generated_message_util.cc',
+    'message_lite.cc',
+    'once.cc',
+    'repeated_field.cc',
+    'wire_format_lite.cc',
+    'zero_copy_stream.cc',
+    'zero_copy_stream_impl_lite.cc',
+]
+

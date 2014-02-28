@@ -55,15 +55,38 @@ MOCHITEST_FILES =   imgutils.js \
                 bug671906.sjs \
                 test_bug671906.html \
                 test_bug733553.html \
-                bug733553-iframe.html \
                 bug733553.sjs \
+                bug733553-informant.sjs \
                 animated-gif2.gif \
+                invalid.jpg \
+                bad.jpg \
+                rillybad.jpg \
                 test_bug767779.html \
                 bug767779.sjs \
                 animated-gif_trailing-garbage.gif \
 		test_error_events.html \
 		error-early.png \
 		test_drawDiscardedImage.html \
+		short_header.gif \
+		test_short_gif_header.html \
+                INT32_MIN.bmp \
+                test_bug865919.html \
+                test_animation_operators.html \
+                bug900200.png \
+                bug900200-ref.png \
+                clear.gif \
+                clear.png \
+                clear2.gif \
+                clear2-results.gif \
+                green.png \
+                green-background.html \
+                grey.png \
+                keep.gif \
+                keep.png \
+                restore-previous.gif \
+                restore-previous.png \
+                source.png \
+                over.png \
                 $(NULL)
 
 # Tests disabled due to intermittent orange
@@ -96,6 +119,17 @@ MOCHITEST_CHROME_FILES = imgutils.js \
                 test_net_failedtoprocess.html \
                 invalid.jpg \
                 damon.jpg \
+                test_removal_onload.html \
+                test_removal_ondecode.html \
+                invalid.jpg \
+                bad.jpg \
+                rillybad.jpg \
+                red.png \
+                lime100x100.svg \
+                test_synchronized_animation.html \
+                animated1.gif \
+                animated2.gif \
+                test_staticClone.html \
                 $(NULL)
 
 include $(topsrcdir)/config/rules.mk

@@ -21,13 +21,27 @@
 !define NO_UNINSTALL_SURVEY
 
 !define CERTIFICATE_NAME      "Mozilla Corporation"
-!define CERTIFICATE_ISSUER    "Thawte Code Signing CA - G2"
+!define CERTIFICATE_ISSUER    "DigiCert Assured ID Code Signing CA-1"
 
 # LSP_CATEGORIES is the permitted LSP categories for the application. Each LSP
 # category value is ANDed together to set multiple permitted categories.
 # See http://msdn.microsoft.com/en-us/library/ms742253%28VS.85%29.aspx
 # The value below removes all LSP categories previously set.
 !define LSP_CATEGORIES "0x00000000"
+
+!if "@MOZ_UPDATE_CHANNEL@" == ""
+!define UpdateChannel "Unknown"
+!else
+!define UpdateChannel "@MOZ_UPDATE_CHANNEL@"
+!endif
+
+# Due to official and beta using the same branding this is needed to
+# differentiante between the url used by the stub for downloading.
+!if "@MOZ_UPDATE_CHANNEL@" == "beta"
+!define BETA_UPDATE_CHANNEL
+!endif
+
+!define BaseURLStubPing "http://download-stats.mozilla.org/stub"
 
 # NO_INSTDIR_FROM_REG is defined for pre-releases which have a PreReleaseSuffix
 # (e.g. Alpha X, Beta X, etc.) to prevent finding a non-default installation
@@ -69,3 +83,17 @@ VIAddVersionKey "FileVersion"     "${AppVersion}"
 VIAddVersionKey "ProductVersion"  "${AppVersion}"
 # Comments is not used but left below commented out for future reference
 # VIAddVersionKey "Comments"        "Comments"
+
+# It isn't possible to get the size of the installation prior to downloading
+# so the stub installer uses an estimate.
+!define APPROXIMATE_REQUIRED_SPACE_MB "42.2"
+
+# Control positions in Dialog Units so they are placed correctly with
+# non-default DPI settings
+!define OPTIONS_ITEM_EDGE_DU 90u
+!define OPTIONS_ITEM_WIDTH_DU 356u
+!define OPTIONS_SUBITEM_EDGE_DU 119u
+!define OPTIONS_SUBITEM_WIDTH_DU 327u
+!define INSTALL_BLURB_TOP_DU 78u
+!define APPNAME_BMP_EDGE_DU 19u
+!define APPNAME_BMP_TOP_DU 12u

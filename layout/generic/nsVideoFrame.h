@@ -9,6 +9,7 @@
 #ifndef nsVideoFrame_h___
 #define nsVideoFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsContainerFrame.h"
 #include "nsString.h"
 #include "nsAString.h"
@@ -16,6 +17,7 @@
 #include "nsITimer.h"
 #include "nsTArray.h"
 #include "nsIAnonymousContentCreator.h"
+#include "FrameLayerBuilder.h"
 
 namespace mozilla {
 namespace layers {
@@ -34,51 +36,53 @@ class nsVideoFrame : public nsContainerFrame, public nsIAnonymousContentCreator
 public:
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
+  typedef mozilla::FrameLayerBuilder::ContainerParameters ContainerParameters;
 
   nsVideoFrame(nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
+  NS_DECL_QUERYFRAME_TARGET(nsVideoFrame)
   NS_DECL_FRAMEARENA_HELPERS
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   NS_IMETHOD AttributeChanged(int32_t aNameSpaceID,
                               nsIAtom* aAttribute,
-                              int32_t aModType);
+                              int32_t aModType) MOZ_OVERRIDE;
 
   /* get the size of the video's display */
   nsSize GetVideoIntrinsicSize(nsRenderingContext *aRenderingContext);
-  virtual nsSize GetIntrinsicRatio();
+  virtual nsSize GetIntrinsicRatio() MOZ_OVERRIDE;
   virtual nsSize ComputeSize(nsRenderingContext *aRenderingContext,
                              nsSize aCBSize, nscoord aAvailableWidth,
                              nsSize aMargin, nsSize aBorder, nsSize aPadding,
                              uint32_t aFlags) MOZ_OVERRIDE;
-  virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext);
-  virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext);
-  virtual void DestroyFrom(nsIFrame* aDestructRoot);
-  virtual bool IsLeaf() const;
+  virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
+  virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
+  virtual bool IsLeaf() const MOZ_OVERRIDE;
 
   NS_IMETHOD Reflow(nsPresContext*          aPresContext,
                     nsHTMLReflowMetrics&     aDesiredSize,
                     const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus);
+                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
 #ifdef ACCESSIBILITY
-  virtual already_AddRefed<Accessible> CreateAccessible();
+  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
-  virtual nsIAtom* GetType() const;
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsSplittableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eReplaced));
   }
   
-  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements);
+  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
   virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
-                                        uint32_t aFilters);
+                                        uint32_t aFilters) MOZ_OVERRIDE;
 
   nsIContent* GetPosterImage() { return mPosterImage; }
 
@@ -86,13 +90,16 @@ public:
   // a video frame, the poster will never be displayed again.
   bool ShouldDisplayPoster();
 
+  nsIContent *GetCaptionOverlay() { return mCaptionDiv; }
+
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const;
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                      LayerManager* aManager,
-                                     nsDisplayItem* aItem);
+                                     nsDisplayItem* aItem,
+                                     const ContainerParameters& aContainerParameters);
 
 protected:
 
@@ -119,6 +126,10 @@ protected:
 
   // Anonymous child which is the image element of the poster frame.
   nsCOMPtr<nsIContent> mPosterImage;
+
+  // Anonymous child which is the text track caption display div.
+  nsCOMPtr<nsIContent> mCaptionDiv;
+
 };
 
 #endif /* nsVideoFrame_h___ */

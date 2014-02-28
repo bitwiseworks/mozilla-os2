@@ -15,10 +15,12 @@
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsNSSCertHelper.h"
-#include "nsNSSCleaner.h"
 #include "nsIProgrammingLanguage.h"
 #include "nsIArray.h"
+#include "nsComponentManagerUtils.h"
+#include "nsServiceManagerUtils.h"
 #include "PSMRunnable.h"
+#include "ScopedNSSTypes.h"
 
 #include "secerr.h"
 
@@ -34,8 +36,6 @@
 
 namespace {
 
-NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
-
 static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
 } // unnamed namespace
@@ -45,8 +45,6 @@ namespace mozilla { namespace psm {
 TransportSecurityInfo::TransportSecurityInfo()
   : mMutex("TransportSecurityInfo::mMutex"),
     mSecurityState(nsIWebProgressListener::STATE_IS_INSECURE),
-    mSubRequestsHighSecurity(0),
-    mSubRequestsLowSecurity(0),
     mSubRequestsBrokenSecurity(0),
     mSubRequestsNoSecurity(0),
     mErrorCode(0),
@@ -139,40 +137,6 @@ TransportSecurityInfo::SetSecurityState(uint32_t aState)
   return NS_OK;
 }
 
-/* attribute unsigned long countSubRequestsHighSecurity; */
-NS_IMETHODIMP
-TransportSecurityInfo::GetCountSubRequestsHighSecurity(
-  int32_t *aSubRequestsHighSecurity)
-{
-  *aSubRequestsHighSecurity = mSubRequestsHighSecurity;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TransportSecurityInfo::SetCountSubRequestsHighSecurity(
-  int32_t aSubRequestsHighSecurity)
-{
-  mSubRequestsHighSecurity = aSubRequestsHighSecurity;
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-/* attribute unsigned long countSubRequestsLowSecurity; */
-NS_IMETHODIMP
-TransportSecurityInfo::GetCountSubRequestsLowSecurity(
-  int32_t *aSubRequestsLowSecurity)
-{
-  *aSubRequestsLowSecurity = mSubRequestsLowSecurity;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TransportSecurityInfo::SetCountSubRequestsLowSecurity(
-  int32_t aSubRequestsLowSecurity)
-{
-  mSubRequestsLowSecurity = aSubRequestsLowSecurity;
-  return NS_OK;
-}
-
 /* attribute unsigned long countSubRequestsBrokenSecurity; */
 NS_IMETHODIMP
 TransportSecurityInfo::GetCountSubRequestsBrokenSecurity(
@@ -214,25 +178,6 @@ TransportSecurityInfo::Flush()
 }
 
 NS_IMETHODIMP
-TransportSecurityInfo::GetShortSecurityDescription(PRUnichar** aText)
-{
-  if (mShortDesc.IsEmpty())
-    *aText = nullptr;
-  else {
-    *aText = ToNewUnicode(mShortDesc);
-    NS_ENSURE_TRUE(*aText, NS_ERROR_OUT_OF_MEMORY);
-  }
-  return NS_OK;
-}
-
-nsresult
-TransportSecurityInfo::SetShortSecurityDescription(const PRUnichar* aText)
-{
-  mShortDesc.Assign(aText);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 TransportSecurityInfo::GetErrorMessage(PRUnichar** aText)
 {
   NS_ENSURE_ARG_POINTER(aText);
@@ -253,7 +198,7 @@ TransportSecurityInfo::GetErrorMessage(PRUnichar** aText)
   }
 
   *aText = ToNewUnicode(mErrorMessageCached);
-  return *aText != nullptr ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+  return *aText ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
 void
@@ -338,9 +283,6 @@ TransportSecurityInfo::GetInterface(const nsIID & uuid, void * *result)
   nsresult rv;
   if (!mCallbacks) {
     nsCOMPtr<nsIInterfaceRequestor> ir = new PipUIContext();
-    if (!ir)
-      return NS_ERROR_OUT_OF_MEMORY;
-
     rv = ir->GetInterface(uuid, result);
   } else {
     rv = mCallbacks->GetInterface(uuid, result);
@@ -360,7 +302,7 @@ TransportSecurityInfo::Write(nsIObjectOutputStream* stream)
 
   MutexAutoLock lock(mMutex);
 
-  nsRefPtr<nsSSLStatus> status = mSSLStatus;
+  RefPtr<nsSSLStatus> status(mSSLStatus);
   nsCOMPtr<nsISerializable> certSerializable;
 
   // Write a redundant copy of the certificate for backward compatibility
@@ -399,7 +341,7 @@ TransportSecurityInfo::Write(nsIObjectOutputStream* stream)
   uint32_t version = 3;
   stream->Write32(version | 0xFFFF0000);
   stream->Write32(mSecurityState);
-  stream->WriteWStringZ(mShortDesc.get());
+  stream->WriteWStringZ(EmptyString().get()); 
 
   // XXX: uses nsNSSComponent string bundles off the main thread
   nsresult rv = formatErrorMessage(lock, 
@@ -411,8 +353,8 @@ TransportSecurityInfo::Write(nsIObjectOutputStream* stream)
   stream->WriteCompoundObject(NS_ISUPPORTS_CAST(nsISSLStatus*, status),
                               NS_GET_IID(nsISupports), true);
 
-  stream->Write32((uint32_t)mSubRequestsHighSecurity);
-  stream->Write32((uint32_t)mSubRequestsLowSecurity);
+  stream->Write32((uint32_t)0);
+  stream->Write32((uint32_t)0);
   stream->Write32((uint32_t)mSubRequestsBrokenSecurity);
   stream->Write32((uint32_t)mSubRequestsNoSecurity);
   return NS_OK;
@@ -500,7 +442,8 @@ TransportSecurityInfo::Read(nsIObjectInputStream* stream)
     mSecurityState = version;
     version = 1;
   }
-  stream->ReadString(mShortDesc);
+  nsAutoString dummyShortDesc;
+  stream->ReadString(dummyShortDesc);
   stream->ReadString(mErrorMessageCached);
   mErrorCode = 0;
 
@@ -514,14 +457,13 @@ TransportSecurityInfo::Read(nsIObjectInputStream* stream)
   }
 
   if (version >= 2) {
-    stream->Read32((uint32_t*)&mSubRequestsHighSecurity);
-    stream->Read32((uint32_t*)&mSubRequestsLowSecurity);
+    uint32_t dummySubRequests;
+    stream->Read32((uint32_t*)&dummySubRequests);
+    stream->Read32((uint32_t*)&dummySubRequests);
     stream->Read32((uint32_t*)&mSubRequestsBrokenSecurity);
     stream->Read32((uint32_t*)&mSubRequestsNoSecurity);
   }
   else {
-    mSubRequestsHighSecurity = 0;
-    mSubRequestsLowSecurity = 0;
     mSubRequestsBrokenSecurity = 0;
     mSubRequestsNoSecurity = 0;
   }
@@ -741,8 +683,8 @@ GetSubjectAltNames(CERTCertificate *nssCert,
   allNames.Truncate();
   nameCount = 0;
 
-  PRArenaPool *san_arena = nullptr;
-  SECItem altNameExtension = {siBuffer, NULL, 0 };
+  PLArenaPool *san_arena = nullptr;
+  SECItem altNameExtension = {siBuffer, nullptr, 0 };
   CERTGeneralName *sanNameList = nullptr;
 
   SECStatus rv = CERT_FindCertExtension(nssCert, SEC_OID_X509_SUBJECT_ALT_NAME,
@@ -820,8 +762,7 @@ AppendErrorTextMismatch(const nsString &host,
   const PRUnichar *params[1];
   nsresult rv;
 
-  CERTCertificate *nssCert = NULL;
-  CERTCertificateCleaner nssCertCleaner(nssCert);
+  ScopedCERTCertificate nssCert;
 
   nsCOMPtr<nsIX509Cert2> cert2 = do_QueryInterface(ix509, &rv);
   if (cert2)
@@ -875,20 +816,19 @@ AppendErrorTextMismatch(const nsString &host,
     }
   }
   else if (nameCount == 1) {
-    nsString formattedString;
+    const PRUnichar *params[1];
+    params[0] = allNames.get();
     
-    if (wantsHtml) {
-      const PRUnichar *params[1];
-      params[0] = allNames.get();
-      rv = component->PIPBundleFormatStringFromName("certErrorMismatchSingle2",
-                                                    params, 1, 
-                                                    formattedString);
-    }
-    else {
-      formattedString.Append(NS_LITERAL_STRING("The certificate is only valid for "));
-      formattedString.Append(allNames.get());
-    }
-        
+    const char *stringID;
+    if (wantsHtml)
+      stringID = "certErrorMismatchSingle2";
+    else
+      stringID = "certErrorMismatchSinglePlain";
+
+    nsString formattedString;
+    rv = component->PIPBundleFormatStringFromName(stringID, 
+                                                  params, 1, 
+                                                  formattedString);
     if (NS_SUCCEEDED(rv)) {
       returnedMessage.Append(formattedString);
       returnedMessage.Append(NS_LITERAL_STRING("\n"));
@@ -931,7 +871,7 @@ GetDateBoundary(nsIX509Cert* ix509,
     return;
 
   PRTime now = PR_Now();
-  if (LL_CMP(now, >, notAfter)) {
+  if (now > notAfter) {
     timeToUse = notAfter;
   } else {
     timeToUse = notBefore;
@@ -1056,8 +996,8 @@ formatOverridableCertErrorMessage(nsISSLStatus & sslStatus,
 
   returnedMessage.Append(NS_LITERAL_STRING("\n\n"));
 
-  nsRefPtr<nsIX509Cert> ix509;
-  rv = sslStatus.GetServerCert(getter_AddRefs(ix509));
+  RefPtr<nsIX509Cert> ix509;
+  rv = sslStatus.GetServerCert(byRef(ix509));
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool isUntrusted;
@@ -1099,7 +1039,7 @@ RememberCertErrorsTable::RememberCertErrorsTable()
 }
 
 static nsresult
-GetHostPortKey(TransportSecurityInfo* infoObject, nsCAutoString &result)
+GetHostPortKey(TransportSecurityInfo* infoObject, nsAutoCString &result)
 {
   nsresult rv;
 
@@ -1127,7 +1067,7 @@ RememberCertErrorsTable::RememberCertHasError(TransportSecurityInfo* infoObject,
 {
   nsresult rv;
 
-  nsCAutoString hostPortKey;
+  nsAutoCString hostPortKey;
   rv = GetHostPortKey(infoObject, hostPortKey);
   if (NS_FAILED(rv))
     return;
@@ -1165,7 +1105,7 @@ RememberCertErrorsTable::LookupCertErrorBits(TransportSecurityInfo* infoObject,
 
   nsresult rv;
 
-  nsCAutoString hostPortKey;
+  nsAutoCString hostPortKey;
   rv = GetHostPortKey(infoObject, hostPortKey);
   if (NS_FAILED(rv))
     return;

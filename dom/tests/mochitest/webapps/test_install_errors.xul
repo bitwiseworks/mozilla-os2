@@ -1,94 +1,176 @@
 <?xml version="1.0"?>
+
+<!-- Any copyright is dedicated to the Public Domain.
+   - http://creativecommons.org/publicdomain/zero/1.0/ -->
+
 <?xml-stylesheet type="text/css" href="chrome://global/skin"?>
 <?xml-stylesheet type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"?>
 
-<!-- Any copyright is dedicated to the Public Domain.
-   - http://creativecommons.org/publicdomain/zero/1.0/
-   - https://bugzilla.mozilla.org/show_bug.cgi?id=741549
--->
-
-<window title="Mozilla Bug 741549"
-        xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        title="Mozilla Bug 741549">
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"/>
-  <script type="application/javascript" src="apphelper.js"/>
-  <script type="application/javascript" src="jshelper.js"/>
+  <script type="application/javascript" src="head.js"/>
   <!-- test results are displayed in the html:body -->
   <body xmlns="http://www.w3.org/1999/xhtml">
   <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=741549"
      target="_blank">Mozilla Bug 741549</a>
-  <iframe id="no_delegated_install" onload="go();" src="http://sub2.test2.example.org:80/chrome/dom/tests/mochitest/webapps/apps/include.html"/>
   </body>
 
-<script> 
+<script>
 
-function go() {
-  runAll(steps);
-}
+var steps = [
+  noArgs,
+  parseError,
+  invalidManifest,
+  permissionDenied,
+  invalidContent,
+  installPackageNotImplemented,
+  invalidLaunchPath,
+  invalidLaunchPath2,
+  invalidEntryPoint,
+  invalidLocaleEntryPoint,
+  invalidActivityHref,
+  invalidActivityHref2,
+  invalidMessage,
+  fileURL,
+  originNotAllowed,
+  originAllowed,
+];
 
-steps = [no_args, parse_error, invalid_manifest, permission_denied, invalid_content,
-         install_package_not_implemented, mgmt_api_errors, mgmt_api_add_listener,
-         uninstall_apps, fileURL, tearDown];
+runAll(steps);
 
-function no_args(next)  {
-  debug("in " + arguments.callee.name);
-  try { 
+function noArgs(next) {
+  try {
     navigator.mozApps.install();
   } catch (e) {
-    ok(e.message == "Not enough arguments \[mozIDOMApplicationRegistry.install\]", "install returned " + e.message);
+    is(e.message, "Not enough arguments \[mozIDOMApplicationRegistry.install\]",
+       "install without arguments throws exception");
     next();
   }
 }
 
-function parse_error(next)  {
-  debug("in " + arguments.callee.name);  
-  mozAppscb(navigator.mozApps.install(SERVERS['json_syntax_error'], null), 
-          [{ name: "== \"MANIFEST_PARSE_ERROR\"" }], "error", ok, next);
+function parseError(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/json_syntax_error.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "MANIFEST_PARSE_ERROR", "manifest with syntax error");
+    next();
+  };
 }
 
-function invalid_manifest(next) {
-  debug("in " + arguments.callee.name);
-  mozAppscb(navigator.mozApps.install(SERVERS['missing_required_field'], null),
-          [{ name: "== \"INVALID_MANIFEST\"" }], "error", ok, next);
+function invalidManifest(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/missing_required_field.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "manifest missing required field");
+    next();
+  };
 }
 
-function permission_denied(next) {
-  debug("in " + arguments.callee.name);
-  mozAppscb(navigator.mozApps.install(SERVERS['no_delegated_install'], null),
-          [{ name: "== \"DENIED\"" }], "error", todo, next);
+function permissionDenied(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/no_delegated_install.webapp";
+
+  confirmNextInstall();
+  var request = navigator.mozApps.install(url, null);
+
+  request.onerror = function onInstallError() {
+    is(this.error.name, "DENIED", "manifest without installs_allowed_from");
+    next();
+  };
+
+  request.onsuccess = function onInstall() {
+    todo(false, "manifest without installs_allowed_from fails");
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
+      next();
+    };
+  };
 }
 
-function invalid_content(next) {
-  debug("in " + arguments.callee.name);
-  mozAppscb(navigator.mozApps.install(SERVERS['bad_content_type'], null),
-          [{ name: "== \"INVALID_MANIFEST\"" }], "error", todo, next);
+function invalidContent(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/bad_content_type.webapp";
+
+  var request = navigator.mozApps.install(url, null);
+
+  request.onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "manifest with bad content type");
+    next();
+  };
+
+  request.onsuccess = function onInstall() {
+    ok(false, "manifest with bad content type should fail");
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
+      next();
+    };
+  };
 }
 
-function install_package_not_implemented(next) {
+function invalidLaunchPath(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_launch_path.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Invalid Manifest");
+    next();
+  };
+}
+
+function invalidLaunchPath2(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_launch_path2.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Invalid Manifest");
+    next();
+  };
+}
+
+function invalidEntryPoint(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_entry_point.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "manifest missing required field");
+    next();
+  };
+}
+
+function invalidLocaleEntryPoint(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_locale_entry_point.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "manifest missing required field");
+    next();
+  };
+}
+
+function invalidActivityHref(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_activity_href.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Manifest has non-relative URI for activity href");
+    next();
+  };
+}
+
+function invalidActivityHref2(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_activity_href2.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Manifest has data: URI for activity href");
+    next();
+  };
+}
+
+function invalidMessage(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_message.webapp";
+
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Manifest has absolute message href");
+    next();
+  };
+}
+
+function installPackageNotImplemented(next) {
   ok(!("installPackage" in navigator.mozApps),
      "installPackage not in navigator.mozApps");
   next();
-}
-
-function mgmt_api_errors(next) {
-  debug("in " + arguments.callee.name);
-  onIframeLoad("no_delegated_install", ok, next);
-  document.getElementById("no_delegated_install").contentWindow.postMessage("mgmt.getAll", '*');
-}
-
-function mgmt_api_add_listener(next) {
-  debug("in " + arguments.callee.name);
-  onIframeLoad("no_delegated_install", todo, next);
-  document.getElementById("no_delegated_install").contentWindow.postMessage("mgmt.event_error", '*');
-}
-
-function uninstall_apps(next) {
-  debug("in " + arguments.callee.name);
-  var appURL = SERVERS['bad_content_type'];
-  uninstall(appURL, ok, function() {
-    appURL = SERVERS['no_delegated_install'];
-    uninstall(appURL, ok, function() { next(); });
-  });
 }
 
 function fileURL(next) {
@@ -112,6 +194,42 @@ function fileURL(next) {
   next();
 }
 
-</script> 
+function originNotAllowed(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/installs_allowed_from_example.com.webapp";
 
+  var request = navigator.mozApps.install(url, null);
+
+  request.onerror = function onInstallError() {
+    is(this.error.name, "INSTALL_FROM_DENIED", "origin is not in installs_allowed_from");
+    next();
+  };
+
+  request.onsuccess = function onInstall() {
+    ok(false, "test should fail because of installs_allowed_from");
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
+      next();
+    };
+  };
+}
+
+function originAllowed(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/installs_allowed_from_chrome_mochitests.webapp";
+
+  confirmNextInstall();
+  var request = navigator.mozApps.install(url, null);
+
+  request.onerror = function onInstallError() {
+    ok(false, "installation error: " + this.error.name);
+    next();
+  };
+
+  request.onsuccess = function onInstall() {
+    ok(true, "test origin is in installs_allowed_from");
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
+      next();
+    };
+  };
+}
+
+</script>
 </window>

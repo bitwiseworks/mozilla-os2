@@ -6,6 +6,7 @@
 #ifndef nsMathMLmsubsupFrame_h___
 #define nsMathMLmsubsupFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
@@ -20,12 +21,12 @@ public:
   friend nsIFrame* NS_NewMathMLmsubsupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   NS_IMETHOD
-  TransmitAutomaticData();
+  TransmitAutomaticData() MOZ_OVERRIDE;
 
   virtual nsresult
   Place(nsRenderingContext& aRenderingContext,
         bool                 aPlaceOrigin,
-        nsHTMLReflowMetrics& aDesiredSize);
+        nsHTMLReflowMetrics& aDesiredSize) MOZ_OVERRIDE;
 
   static nsresult
   PlaceSubSupScript(nsPresContext*      aPresContext,
@@ -40,8 +41,6 @@ public:
 protected:
   nsMathMLmsubsupFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}
   virtual ~nsMathMLmsubsupFrame();
-  
-  virtual int GetSkipSides() const { return 0; }
 };
 
 #endif /* nsMathMLmsubsupFrame_h___ */

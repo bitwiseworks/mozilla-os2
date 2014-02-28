@@ -12,7 +12,7 @@
    * nsScannerBufferList
    */
 
-#define MAX_CAPACITY ((PR_UINT32_MAX / sizeof(PRUnichar)) - \
+#define MAX_CAPACITY ((UINT32_MAX / sizeof(PRUnichar)) - \
                       (sizeof(Buffer) + sizeof(PRUnichar)))
 
 nsScannerBufferList::Buffer*
@@ -485,7 +485,7 @@ CopyUnicodeTo( const nsScannerIterator& aSrcStart,
                nsAString& aDest )
   {
     nsAString::iterator writer;
-    if (!EnsureStringLength(aDest, Distance(aSrcStart, aSrcEnd))) {
+    if (!aDest.SetLength(Distance(aSrcStart, aSrcEnd), mozilla::fallible_t())) {
       aDest.Truncate();
       return; // out of memory
     }
@@ -518,7 +518,7 @@ AppendUnicodeTo( const nsScannerIterator& aSrcStart,
   {
     nsAString::iterator writer;
     uint32_t oldLength = aDest.Length();
-    if (!EnsureStringLength(aDest, oldLength + Distance(aSrcStart, aSrcEnd)))
+    if (!aDest.SetLength(oldLength + Distance(aSrcStart, aSrcEnd), mozilla::fallible_t()))
       return; // out of memory
     aDest.BeginWriting(writer).advance(oldLength);
     nsScannerIterator fromBegin(aSrcStart);

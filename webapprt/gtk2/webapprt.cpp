@@ -124,10 +124,13 @@ bool CopyFile(const char* inputFile, const char* outputFile)
   return (bytesRead >= 0);
 }
 
-bool GRELoadAndLaunch(const char* firefoxDir)
+bool GRELoadAndLaunch(const char* firefoxDir, bool silentFail)
 {
   char xpcomDllPath[MAXPATHLEN];
   snprintf(xpcomDllPath, MAXPATHLEN, "%s/%s", firefoxDir, XPCOM_DLL);
+
+  if (silentFail && access(xpcomDllPath, F_OK) != 0)
+    return false;
 
   if (NS_FAILED(XPCOMGlueStartup(xpcomDllPath))) {
     ErrorDialog("Couldn't load the XPCOM library");
@@ -272,9 +275,9 @@ void RemoveApplication(nsINIParser& parser, const char* curExeDir, const char* p
      * four in libnotify.so.1.
      * Passing the fourth argument as NULL is binary compatible.
      */
-    typedef void  (*notify_init_t)(char*);
-    typedef void* (*notify_notification_new_t)(char*, char*, char*, char*);
-    typedef void  (*notify_notification_show_t)(void*, char*);
+    typedef void  (*notify_init_t)(const char*);
+    typedef void* (*notify_notification_new_t)(const char*, const char*, const char*, const char*);
+    typedef void  (*notify_notification_show_t)(void*, void**);
 
     void *handle = dlopen("libnotify.so.4", RTLD_LAZY);
     if (!handle) {
@@ -283,9 +286,9 @@ void RemoveApplication(nsINIParser& parser, const char* curExeDir, const char* p
         return;
     }
 
-    notify_init_t nn_init = (notify_init_t)dlsym(handle, "notify_init");
-    notify_notification_new_t nn_new = (notify_notification_new_t)dlsym(handle, "notify_notification_new");
-    notify_notification_show_t nn_show = (notify_notification_show_t)dlsym(handle, "notify_notification_show");
+    notify_init_t nn_init = (notify_init_t)(uintptr_t)dlsym(handle, "notify_init");
+    notify_notification_new_t nn_new = (notify_notification_new_t)(uintptr_t)dlsym(handle, "notify_notification_new");
+    notify_notification_show_t nn_show = (notify_notification_show_t)(uintptr_t)dlsym(handle, "notify_notification_show");
     if (!nn_init || !nn_new || !nn_show) {
       dlclose(handle);
       return;
@@ -327,14 +330,10 @@ int main(int argc, char *argv[])
 
   char firefoxDir[MAXPATHLEN];
 
-  // Check if Firefox is in the ../../dist/bin directory (relative to the webapp runtime)
+  // Check if Firefox is in the same directory as the webapp runtime.
   // This is the case for webapprt chrome and content tests.
-  snprintf(firefoxDir, MAXPATHLEN, "%s/../../dist/bin", curExeDir);
-  if (access(firefoxDir, F_OK) != -1) {
-    if (GRELoadAndLaunch(firefoxDir))
-      return 0;
-
-    return 255;
+  if (GRELoadAndLaunch(curExeDir, true)) {
+    return 0;
   }
 
   // Set up webAppIniPath with path to webapp.ini
@@ -391,7 +390,7 @@ int main(int argc, char *argv[])
 
   // If WebAppRT version == Firefox version, load XUL and execute the application
   if (!strcmp(buildid, NS_STRINGIFY(GRE_BUILDID))) {
-    if (GRELoadAndLaunch(firefoxDir))
+    if (GRELoadAndLaunch(firefoxDir, false))
       return 0;
   }
   // Else, copy WebAppRT from Firefox installation and re-execute the process

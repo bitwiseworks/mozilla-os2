@@ -8,6 +8,9 @@ srcdir    = @srcdir@
 VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
+
+STANDALONE_MAKEFILE := 1
+
 include $(topsrcdir)/config/rules.mk
 
 MOZ_PKG_REMOVALS = $(srcdir)/removed-files.in
@@ -20,7 +23,7 @@ MOZ_NONLOCALIZED_PKG_LIST = \
 	b2g \
 	$(NULL)
 
-MOZ_LOCALIZED_PKG_LIST = $(AB_CD)
+MOZ_LOCALIZED_PKG_LIST = $(AB_CD) multilocale
 
 DEFINES += \
 	-DAB_CD=$(AB_CD) \
@@ -28,15 +31,14 @@ DEFINES += \
 	-DPREF_DIR=$(PREF_DIR) \
 	$(NULL)
 
-ifeq ($(MOZ_CHROME_FILE_FORMAT),jar)
-JAREXT=.jar
-else
-JAREXT=
-endif
-DEFINES += -DJAREXT=$(JAREXT)
+DEFINES += -DJAREXT=
 
-include $(topsrcdir)/ipc/app/defs.mk
 DEFINES += -DMOZ_CHILD_PROCESS_NAME=$(MOZ_CHILD_PROCESS_NAME)
+
+# Set MSVC dlls version to package, if any.
+ifdef WIN32_REDIST_DIR
+DEFINES += -DMOZ_MSVC_REDIST=$(_MSC_VER)
+endif
 
 ifdef ENABLE_MARIONETTE
 DEFINES += -DENABLE_MARIONETTE=1
@@ -46,7 +48,7 @@ ifdef MOZ_PKG_MANIFEST_P
 MOZ_PKG_MANIFEST = package-manifest
 endif
 
-MOZ_POST_STAGING_CMD = find chrome -type f -name *.properties -exec sed -i '/^\#/d' {} \;
+MOZ_PACKAGER_MINIFY=1
 
 include $(topsrcdir)/toolkit/mozapps/installer/packager.mk
 
@@ -66,35 +68,14 @@ endif
 ifdef MOZ_PKG_MANIFEST_P
 $(MOZ_PKG_MANIFEST): $(MOZ_PKG_MANIFEST_P) FORCE
 	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(DEFINES) $(ACDEFINES) $< > $@
+ifdef MOZ_CHROME_MULTILOCALE
+	printf "\n[multilocale]\n" >> $@
+	for LOCALE in $(MOZ_CHROME_MULTILOCALE) ;\
+	do \
+	  printf "$(BINPATH)/chrome/$$LOCALE$(JAREXT)\n" >> $@; \
+	  printf "$(BINPATH)/chrome/$$LOCALE.manifest\n" >> $@; \
+	done
+endif
 
 GARBAGE += $(MOZ_PKG_MANIFEST)
 endif
-
-ifneq (,$(filter mac cocoa,$(MOZ_WIDGET_TOOLKIT)))
-PACKAGE_XULRUNNER =
-UNPACKAGE =
-else
-PACKAGE_XULRUNNER = package-xulrunner
-UNPACKAGE = $(LIBXUL_DIST)/xulrunner*$(PKG_SUFFIX)
-endif
-
-ifdef LIBXUL_SDK
-MOZ_GRE_PKG_DIR=$(MOZ_PKG_DIR)/xulrunner
-else
-MOZ_GRE_PKG_DIR=$(MOZ_PKG_DIR)
-endif
-
-package-xulrunner:
-ifdef LIBXUL_SDK
-ifndef SYSTEM_LIBXUL
-	@echo "Packaging xulrunner..."
-	@rm -rf $(LIBXUL_DIST)/xulrunner*
-	@$(MAKE) -C $(LIBXUL_DIST)/.. package || echo "Perhaps you're trying to package a prebuilt SDK. See 'https://wiki.mozilla.org/B2G' for more information."
-	@cd $(DIST)/$(MOZ_PKG_DIR); $(UNMAKE_PACKAGE)
-	@echo "Removing unpackaged files... (the ones xulrunner/installer keeps)"
-	@cd $(DIST)/$(MOZ_PKG_DIR)/xulrunner; rm -rf $(NO_PKG_FILES)
-else
-	@echo "Using system xulrunner..."
-endif
-endif
-

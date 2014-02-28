@@ -4,12 +4,12 @@
  * This program is made available under an ISC-style license.  See the
  * accompanying file LICENSE for details.
  */
-#ifndef   CUBEB_c2f983e9_c96f_e71c_72c3_bbf62992a382
-#define   CUBEB_c2f983e9_c96f_e71c_72c3_bbf62992a382
+#if !defined(CUBEB_c2f983e9_c96f_e71c_72c3_bbf62992a382)
+#define CUBEB_c2f983e9_c96f_e71c_72c3_bbf62992a382
 
 #include <cubeb/cubeb-stdint.h>
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -101,12 +101,33 @@ typedef enum {
 #endif
 } cubeb_sample_format;
 
+#if defined(__ANDROID__)
+typedef enum {
+    CUBEB_STREAM_TYPE_VOICE_CALL = 0,
+    CUBEB_STREAM_TYPE_SYSTEM = 1,
+    CUBEB_STREAM_TYPE_RING = 2,
+    CUBEB_STREAM_TYPE_MUSIC = 3,
+    CUBEB_STREAM_TYPE_ALARM = 4,
+    CUBEB_STREAM_TYPE_NOTIFICATION = 5,
+    CUBEB_STREAM_TYPE_BLUETOOTH_SCO = 6,
+    CUBEB_STREAM_TYPE_ENFORCED_AUDIBLE = 7,
+    CUBEB_STREAM_TYPE_DTMF = 8,
+    CUBEB_STREAM_TYPE_TTS = 9,
+    CUBEB_STREAM_TYPE_FM = 10,
+
+    CUBEB_STREAM_TYPE_MAX
+} cubeb_stream_type;
+#endif
+
 /** Stream format initialization parameters. */
 typedef struct {
   cubeb_sample_format format; /**< Requested sample format.  One of
                                    #cubeb_sample_format. */
   unsigned int rate;          /**< Requested sample rate.  Valid range is [1, 192000]. */
   unsigned int channels;      /**< Requested channel count.  Valid range is [1, 32]. */
+#if defined(__ANDROID__)
+  cubeb_stream_type stream_type; /**< Used to map Android audio stream types */
+#endif
 } cubeb_stream_params;
 
 /** Stream states signaled via state_callback. */
@@ -119,9 +140,10 @@ typedef enum {
 
 /** Result code enumeration. */
 enum {
-  CUBEB_OK = 0,                   /**< Success. */
-  CUBEB_ERROR = -1,               /**< Unclassified error. */
-  CUBEB_ERROR_INVALID_FORMAT = -2 /**< Unsupported #cubeb_stream_params requested. */
+  CUBEB_OK = 0,                       /**< Success. */
+  CUBEB_ERROR = -1,                   /**< Unclassified error. */
+  CUBEB_ERROR_INVALID_FORMAT = -2,    /**< Unsupported #cubeb_stream_params requested. */
+  CUBEB_ERROR_INVALID_PARAMETER = -3  /**< Invalid parameter specified. */
 };
 
 /** User supplied data callback.
@@ -157,6 +179,14 @@ int cubeb_init(cubeb ** context, char const * context_name);
     @param context
     @retval Read-only string identifying current backend. */
 char const * cubeb_get_backend_id(cubeb * context);
+
+/** Get the maximum possible number of channels.
+    @param context
+    @param max_channels The maximum number of channels.
+    @retval CUBEB_OK
+    @retval CUBEB_ERROR_INVALID_PARAMETER
+    @retval CUBEB_ERROR */
+int cubeb_get_max_channel_count(cubeb * context, uint32_t * max_channels);
 
 /** Destroy an application context.
     @param context */
@@ -204,7 +234,7 @@ int cubeb_stream_stop(cubeb_stream * stream);
     @retval CUBEB_ERROR */
 int cubeb_stream_get_position(cubeb_stream * stream, uint64_t * position);
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 }
 #endif
 

@@ -7,28 +7,15 @@ DEPTH		= @DEPTH@
 topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
-FAIL_ON_WARNINGS = 1
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= editor
-LIBRARY_NAME	= composer
 EXPORT_LIBRARY = 1
 IS_COMPONENT	= 1
 MODULE_NAME	= nsComposerModule
 LIBXUL_LIBRARY	= 1
+FAIL_ON_WARNINGS = 1
 
-
-CPPSRCS  = \
-           nsComposeTxtSrvFilter.cpp            \
-           nsComposerController.cpp       \
-           nsComposerCommands.cpp         \
-           nsComposerDocumentCommands.cpp \
-           nsComposerRegistration.cpp     \
-           nsEditingSession.cpp	          \
-           nsComposerCommandsUpdater.cpp  \
-           nsEditorSpellCheck.cpp         \
-           $(NULL)
 
 include $(topsrcdir)/config/rules.mk
 

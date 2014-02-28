@@ -9,9 +9,12 @@ include protocol PNecko;
 include InputStreamParams;
 include URIParams;
 
+//FIXME: bug #792908 (NeckoChannelParams already included by PNecko)
+include NeckoChannelParams;
+include protocol PBlob; //FIXME: bug #792908
+
 include "SerializedLoadContext.h";
 
-using IPC::SerializedLoadContext;
 using PRTime;
 
 namespace mozilla {
@@ -22,23 +25,19 @@ async protocol PFTPChannel
   manager PNecko;
 
 parent:
+  // Note: channels are opened during construction, so no open method here:
+  // see PNecko.ipdl
+
   __delete__();
 
-  AsyncOpen(URIParams uri,
-            uint64_t startPos,
-            nsCString entityID,
-            OptionalInputStreamParams uploadStream,
-            SerializedLoadContext loadContext);
-
-  ConnectChannel(uint32_t channelId);
   Cancel(nsresult status);
   Suspend();
   Resume();
 
 child:
-  OnStartRequest(int32_t aContentLength, nsCString aContentType,
+  OnStartRequest(int64_t aContentLength, nsCString aContentType,
                  PRTime aLastModified, nsCString aEntityID, URIParams aURI);
-  OnDataAvailable(nsCString data, uint32_t offset, uint32_t count);
+  OnDataAvailable(nsCString data, uint64_t offset, uint32_t count);
   OnStopRequest(nsresult statusCode);
   FailedAsyncOpen(nsresult statusCode);
   DeleteSelf();

@@ -6,20 +6,17 @@ package org.mozilla.gecko.sync.stage;
 
 import java.net.URISyntaxException;
 
-import org.mozilla.gecko.sync.GlobalSession;
+import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.InfoCollections;
-import org.mozilla.gecko.sync.delegates.InfoCollectionsDelegate;
+import org.mozilla.gecko.sync.delegates.JSONRecordFetchDelegate;
 import org.mozilla.gecko.sync.net.SyncStorageResponse;
 
 public class FetchInfoCollectionsStage extends AbstractNonRepositorySyncStage {
-  public FetchInfoCollectionsStage(GlobalSession session) {
-    super(session);
-  }
-
-  public class StageInfoCollectionsDelegate implements InfoCollectionsDelegate {
+  public class StageInfoCollectionsDelegate implements JSONRecordFetchDelegate {
 
     @Override
-    public void handleSuccess(InfoCollections global) {
+    public void handleSuccess(ExtendedJSONObject global) {
+      session.config.infoCollections = new InfoCollections(global);
       session.advance();
     }
 

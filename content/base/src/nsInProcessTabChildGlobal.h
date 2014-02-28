@@ -7,6 +7,7 @@
 #ifndef nsInProcessTabChildGlobal_h
 #define nsInProcessTabChildGlobal_h
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsFrameMessageManager.h"
 #include "nsIScriptContext.h"
@@ -19,12 +20,15 @@
 #include "nsIDOMElement.h"
 #include "nsCOMArray.h"
 #include "nsThreadUtils.h"
+#include "nsIGlobalObject.h"
+#include "nsWeakReference.h"
 
 class nsInProcessTabChildGlobal : public nsDOMEventTargetHelper,
                                   public nsFrameScriptExecutor,
                                   public nsIInProcessContentFrameMessageManager,
-                                  public nsIScriptObjectPrincipal,
-                                  public nsIScriptContextPrincipal
+                                  public nsIGlobalObject,
+                                  public nsSupportsWeakReference,
+                                  public mozilla::dom::ipc::MessageManagerCallback
 {
 public:
   nsInProcessTabChildGlobal(nsIDocShell* aShell, nsIContent* aOwner,
@@ -36,30 +40,39 @@ public:
   NS_FORWARD_SAFE_NSIMESSAGELISTENERMANAGER(mMessageManager)
   NS_FORWARD_SAFE_NSIMESSAGESENDER(mMessageManager)
   NS_IMETHOD SendSyncMessage(const nsAString& aMessageName,
-                             const jsval& aObject,
+                             const JS::Value& aObject,
                              JSContext* aCx,
                              uint8_t aArgc,
-                             jsval* aRetval)
+                             JS::Value* aRetval)
   {
     return mMessageManager
       ? mMessageManager->SendSyncMessage(aMessageName, aObject, aCx, aArgc, aRetval)
       : NS_ERROR_NULL_POINTER;
   }
-  NS_IMETHOD GetContent(nsIDOMWindow** aContent);
-  NS_IMETHOD GetDocShell(nsIDocShell** aDocShell);
-  NS_IMETHOD Dump(const nsAString& aStr)
+  NS_IMETHOD GetContent(nsIDOMWindow** aContent) MOZ_OVERRIDE;
+  NS_IMETHOD GetDocShell(nsIDocShell** aDocShell) MOZ_OVERRIDE;
+  NS_IMETHOD Dump(const nsAString& aStr) MOZ_OVERRIDE
   {
     return mMessageManager ? mMessageManager->Dump(aStr) : NS_OK;
   }
-  NS_IMETHOD PrivateNoteIntentionalCrash();
+  NS_IMETHOD PrivateNoteIntentionalCrash() MOZ_OVERRIDE;
   NS_IMETHOD Btoa(const nsAString& aBinaryData,
-                  nsAString& aAsciiBase64String);
+                  nsAString& aAsciiBase64String) MOZ_OVERRIDE;
   NS_IMETHOD Atob(const nsAString& aAsciiString,
-                  nsAString& aBinaryData);
+                  nsAString& aBinaryData) MOZ_OVERRIDE;
 
   NS_DECL_NSIINPROCESSCONTENTFRAMEMESSAGEMANAGER
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
+  /**
+   * MessageManagerCallback methods that we override.
+   */
+  virtual bool DoSendSyncMessage(const nsAString& aMessage,
+                                 const mozilla::dom::StructuredCloneData& aData,
+                                 InfallibleTArray<nsString>* aJSONRetVal) MOZ_OVERRIDE;
+  virtual bool DoSendAsyncMessage(const nsAString& aMessage,
+                                  const mozilla::dom::StructuredCloneData& aData) MOZ_OVERRIDE;
+
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
   NS_IMETHOD AddEventListener(const nsAString& aType,
                               nsIDOMEventListener* aListener,
                               bool aUseCapture)
@@ -71,17 +84,17 @@ public:
   NS_IMETHOD AddEventListener(const nsAString& aType,
                               nsIDOMEventListener* aListener,
                               bool aUseCapture, bool aWantsUntrusted,
-                              uint8_t optional_argc)
+                              uint8_t optional_argc) MOZ_OVERRIDE
   {
     return nsDOMEventTargetHelper::AddEventListener(aType, aListener,
                                                     aUseCapture,
                                                     aWantsUntrusted,
                                                     optional_argc);
   }
+  using nsDOMEventTargetHelper::AddEventListener;
 
-  virtual nsIScriptObjectPrincipal* GetObjectPrincipal() { return this; }
-  virtual JSContext* GetJSContextForEventHandlers() { return mCx; }
-  virtual nsIPrincipal* GetPrincipal() { return mPrincipal; }
+  virtual JSContext* GetJSContextForEventHandlers() MOZ_OVERRIDE { return nsContentUtils::GetSafeJSContext(); }
+  virtual nsIPrincipal* GetPrincipal() MOZ_OVERRIDE { return mPrincipal; }
   void LoadFrameScript(const nsAString& aURL);
   void Disconnect();
   void SendMessageToParent(const nsString& aMessage, bool aSync,
@@ -103,6 +116,14 @@ public:
   }
 
   void DelayedDisconnect();
+
+  virtual JSObject* GetGlobalJSObject() MOZ_OVERRIDE {
+    if (!mGlobal) {
+      return nullptr;
+    }
+
+    return mGlobal->GetJSObject();
+  }
 protected:
   nsresult Init();
   nsresult InitTabChildGlobal();
@@ -112,9 +133,10 @@ protected:
   bool mLoadingScript;
   bool mDelayedDisconnect;
 
-  // Is this the message manager for an in-process <iframe mozbrowser>?  This
-  // affects where events get sent, so it affects PreHandleEvent.
-  bool mIsBrowserFrame;
+  // Is this the message manager for an in-process <iframe mozbrowser> or
+  // <iframe mozapp>?  This affects where events get sent, so it affects
+  // PreHandleEvent.
+  bool mIsBrowserOrAppFrame;
 public:
   nsIContent* mOwner;
   nsFrameMessageManager* mChromeMessageManager;

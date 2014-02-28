@@ -162,6 +162,47 @@ try {
 ok(ex, "Should have thrown an exception!");
 ex = false;
 
+// BlobEvent
+
+try {
+  e = new BlobEvent();
+} catch(exp) {
+  ex = true;
+}
+ok(ex, "First parameter is required!");
+ex = false;
+
+e = new BlobEvent("hello");
+ok(e.type, "hello", "Wrong event type!");
+ok(!e.isTrusted, "Event shouldn't be trusted!");
+ok(!e.bubbles, "Event shouldn't bubble!");
+ok(!e.cancelable, "Event shouldn't be cancelable!");
+document.dispatchEvent(e);
+is(receivedEvent, e, "Wrong event!");
+
+var blob = Blob();
+e = new BlobEvent("hello", { bubbles: true, cancelable: true, data: blob });
+ok(e.type, "hello", "Wrong event type!");
+ok(!e.isTrusted, "Event shouldn't be trusted!");
+ok(e.bubbles, "Event should bubble!");
+ok(e.cancelable, "Event should be cancelable!");
+is(e.data, blob , "Wrong event.data!");
+document.dispatchEvent(e);
+is(receivedEvent, e, "Wrong event!");
+
+
+e = new BlobEvent("hello", {data: blob});
+ok(e.type, "hello", "Wrong event type!");
+ok(!e.isTrusted, "Event shouldn't be trusted!");
+ok(!e.bubbles, "Event shouldn't bubble!");
+ok(!e.cancelable, "Event should be cancelable1!");
+is(e.data, blob , "Wrong event.data!");
+
+e = new BlobEvent("hello", { data: null });
+is(e.data, null, "Wrong event.data!");
+ok(!e.bubbles, "Event shouldn't bubble!");
+ok(!e.cancelable, "Event shouldn't be cancelable!");
+blob = null;
 // CloseEvent
 
 try {
@@ -337,6 +378,24 @@ try {
 ok(ex, "First parameter is required!");
 ex = false;
 
+try {
+  e = new UIEvent("foo", { view: {} });
+  e.view.onunload;
+} catch(exp) {
+  ex = true;
+}
+ok(ex, "{} isn't a valid value.");
+ex = false;
+
+try {
+  e = new UIEvent("foo", { view: null });
+} catch(exp) {
+  ex = true;
+}
+ok(!ex, "null is a valid value.");
+is(e.view, null);
+ex = false;
+
 e = new UIEvent("hello");
 ok(e.type, "hello", "Wrong event type!");
 ok(!e.isTrusted, "Event shouldn't be trusted!");
@@ -408,6 +467,10 @@ is(e.min, 0, "min should be 0");
 is(e.max, 2, "max should be 2");
 document.dispatchEvent(e);
 is(receivedEvent, e, "Wrong event!");
+e = new DeviceProximityEvent("hello");
+is(e.value, Infinity, "Uninitialized value should be infinity");
+is(e.min, -Infinity, "Uninitialized min should be -infinity");
+is(e.max, Infinity, "Uninitialized max should be infinity");
 
 // UserProximityEvent
 e = new UserProximityEvent("hello", {near: true});
@@ -538,6 +601,29 @@ e = new PopupBlockedEvent("hello",
 is(e.requestingWindow, window);
 is(e.popupWindowFeatures, "features");
 is(e.popupWindowName, "name");
+
+
+// SmartCardEvent
+
+try {
+  e = new SmartCardEvent();
+} catch(exp) {
+  ex = true;
+}
+ok(ex, "SmartCardEvent: First parameter is required!");
+ex = false;
+
+e = new SmartCardEvent("hello");
+ok(e.type, "hello", "SmartCardEvent: Wrong event type!");
+ok(!e.isTrusted, "SmartCardEvent: Event shouldn't be trusted!");
+ok(!e.bubbles, "SmartCardEvent: Event shouldn't bubble!");
+ok(!e.cancelable, "SmartCardEvent: Event shouldn't be cancelable!");
+is(e.tokenName, "");
+document.dispatchEvent(e);
+is(receivedEvent, e, "SmartCardEvent: Wrong event!");
+
+e = new SmartCardEvent("hello", { tokenName: "foo" });
+is(e.tokenName, "foo");
 
 // WheelEvent
 

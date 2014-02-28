@@ -9,21 +9,7 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
-LIBRARY_NAME	= gkconmediaplugins_s
 LIBXUL_LIBRARY 	= 1
-
-EXPORTS		+= \
-		MPAPI.h \
-		nsMediaPluginHost.h \
-		nsMediaPluginDecoder.h \
-		$(NULL)
-
-CPPSRCS		= \
-		nsMediaPluginHost.cpp \
-		nsMediaPluginDecoder.cpp \
-		nsMediaPluginReader.cpp \
-		$(NULL)
 
 FORCE_STATIC_LIB = 1
 

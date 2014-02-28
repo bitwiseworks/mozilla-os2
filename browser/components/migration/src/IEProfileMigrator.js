@@ -253,7 +253,7 @@ Bookmarks.prototype = {
       else {
         // Strip the .url extension, to both check this is a valid link file,
         // and get the associated title.
-        let matches = entry.leafName.match(/(.+)\.url$/);
+        let matches = entry.leafName.match(/(.+)\.url$/i);
         if (matches) {
           let fileHandler = Cc["@mozilla.org/network/protocol;1?name=file"].
                             getService(Ci.nsIFileProtocolHandler);
@@ -675,4 +675,4 @@ IEProfileMigrator.prototype.classDescription = "IE Profile Migrator";
 IEProfileMigrator.prototype.contractID = "@mozilla.org/profile/migrator;1?app=browser&type=ie";
 IEProfileMigrator.prototype.classID = Components.ID("{3d2532e3-4932-4774-b7ba-968f5899d3a4}");
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([IEProfileMigrator]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([IEProfileMigrator]);

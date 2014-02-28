@@ -160,6 +160,9 @@ protected:
     virtual bool
     RecvProcessNativeEventsInRPCCall() MOZ_OVERRIDE;
 
+    virtual bool
+    AnswerGeckoGetProfile(nsCString* aProfile);
+
 public:
     PluginModuleChild();
     virtual ~PluginModuleChild();
@@ -287,6 +290,11 @@ public:
         // Mac: Allow the plugin to use offline renderer mode.
         // Use this only if the plugin is certified the support the offline renderer.
         QUIRK_ALLOW_OFFLINE_RENDERER                    = 1 << 9,
+        // Mac: Work around a Flash bug that can cause plugin process crashes
+        // in CoreGraphics mode:  The Flash plugin sometimes accesses the
+        // CGContextRef we pass to it in NPP_HandleEvent(NPCocoaEventDrawRect)
+        // outside of that call.  See bug 804606.
+        QUIRK_FLASH_AVOID_CGMODE_CRASHES                = 1 << 10,
     };
 
     int GetQuirks() { return mQuirks; }
@@ -320,7 +328,7 @@ private:
 
     // we get this from the plugin
     NP_PLUGINSHUTDOWN mShutdownFunc;
-#ifdef OS_LINUX
+#if defined(OS_LINUX) || defined(OS_BSD)
     NP_PLUGINUNIXINIT mInitializeFunc;
 #elif defined(OS_WIN) || defined(OS_MACOSX)
     NP_PLUGININIT mInitializeFunc;

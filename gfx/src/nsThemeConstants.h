@@ -157,6 +157,9 @@
 #define NS_THEME_SCROLLBAR_THUMB_HORIZONTAL                88
 #define NS_THEME_SCROLLBAR_THUMB_VERTICAL                  89
 
+// A non-disappearing scrollbar.
+#define NS_THEME_SCROLLBAR_NON_DISAPPEARING                90
+
 // A textfield or text area
 #define NS_THEME_TEXTFIELD                                 95
 
@@ -196,6 +199,10 @@
 
 // The ticks for a slider.
 #define NS_THEME_SCALE_TICK                               117
+
+// nsRangeFrame and its subparts
+#define NS_THEME_RANGE                                    120
+#define NS_THEME_RANGE_THUMB                              121
 
 // A groupbox
 #define NS_THEME_GROUPBOX                                  149

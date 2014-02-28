@@ -11,15 +11,7 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = test_downloads
-
-XPCSHELL_TESTS = \
-  unit \
-  $(NULL)
-
-DIRS += chrome
-
 include $(topsrcdir)/config/rules.mk
 
 libs:: 
-	$(INSTALL) $(topsrcdir)/testing/mochitest/MockFilePicker.jsm $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit
+	$(INSTALL) $(topsrcdir)/testing/specialpowers/content/MockFilePicker.jsm $(DEPTH)/_tests/xpcshell/$(relativesrcdir)/unit

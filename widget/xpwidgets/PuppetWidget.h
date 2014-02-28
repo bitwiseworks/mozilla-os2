@@ -52,6 +52,8 @@ public:
                     nsDeviceContext*  aContext,
                     nsWidgetInitData* aInitData = nullptr);
 
+  void InitIMEState();
+
   virtual already_AddRefed<nsIWidget>
   CreateChild(const nsIntRect  &aRect,
               nsDeviceContext  *aContext,
@@ -71,17 +73,17 @@ public:
   { *aX = kMaxDimension;  *aY = kMaxDimension;  return NS_OK; }
 
   // We're always at <0, 0>, and so ignore move requests.
-  NS_IMETHOD Move(int32_t aX, int32_t aY)
+  NS_IMETHOD Move(double aX, double aY)
   { return NS_OK; }
 
-  NS_IMETHOD Resize(int32_t aWidth,
-                    int32_t aHeight,
-                    bool    aRepaint);
-  NS_IMETHOD Resize(int32_t aX,
-                    int32_t aY,
-                    int32_t aWidth,
-                    int32_t aHeight,
-                    bool    aRepaint)
+  NS_IMETHOD Resize(double aWidth,
+                    double aHeight,
+                    bool   aRepaint);
+  NS_IMETHOD Resize(double aX,
+                    double aY,
+                    double aWidth,
+                    double aHeight,
+                    bool   aRepaint)
   // (we're always at <0, 0>)
   { return Resize(aWidth, aHeight, aRepaint); }
 
@@ -124,31 +126,36 @@ public:
   NS_IMETHOD DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus);
 
   NS_IMETHOD CaptureRollupEvents(nsIRollupListener* aListener,
-                                 bool aDoCapture, bool aConsumeRollupEvent)
+                                 bool aDoCapture)
   { return NS_ERROR_UNEXPECTED; }
 
   //
   // nsBaseWidget methods we override
   //
 
-//NS_IMETHOD              CaptureMouse(bool aCapture);
+  // Documents loaded in child processes are always subdocuments of
+  // other docs in an ancestor process.  To ensure that the
+  // backgrounds of those documents are painted like those of
+  // same-process subdocuments, we force the widget here to be
+  // transparent, which in turn will cause layout to use a transparent
+  // backstop background color.
+  virtual nsTransparencyMode GetTransparencyMode() MOZ_OVERRIDE
+  { return eTransparencyTransparent; }
+
   virtual LayerManager*
-  GetLayerManager(PLayersChild* aShadowManager = nullptr,
+  GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                   LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                   LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                   bool* aAllowRetaining = nullptr);
-//  virtual nsDeviceContext* GetDeviceContext();
   virtual gfxASurface*      GetThebesSurface();
 
-  NS_IMETHOD ResetInputState();
+  NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
-  NS_IMETHOD CancelComposition();
-  NS_IMETHOD OnIMEFocusChange(bool aFocus);
-  NS_IMETHOD OnIMETextChange(uint32_t aOffset, uint32_t aEnd,
-                             uint32_t aNewEnd);
-  NS_IMETHOD OnIMESelectionChange(void);
+  NS_IMETHOD NotifyIMEOfTextChange(uint32_t aOffset, uint32_t aEnd,
+                                   uint32_t aNewEnd) MOZ_OVERRIDE;
+  virtual nsIMEUpdatePreference GetIMEUpdatePreference();
 
   NS_IMETHOD SetCursor(nsCursor aCursor);
   NS_IMETHOD SetCursor(imgIContainer* aCursor,
@@ -162,6 +169,11 @@ public:
   // proper widget there. TODO: Handle DPI changes that happen
   // later on.
   virtual float GetDPI();
+  virtual double GetDefaultScaleInternal();
+
+  virtual bool NeedsPaint() MOZ_OVERRIDE;
+
+  virtual TabChild* GetOwningTabChild() MOZ_OVERRIDE { return mTabChild; }
 
 private:
   nsresult Paint();
@@ -169,6 +181,8 @@ private:
   void SetChild(PuppetWidget* aChild);
 
   nsresult IMEEndComposition(bool aCancel);
+  nsresult NotifyIMEOfFocusChange(bool aFocus);
+  nsresult NotifyIMEOfSelectionChange();
 
   class PaintTask : public nsRunnable {
   public:
@@ -206,9 +220,11 @@ private:
   // Note that if seqno overflows (~50 days at 1 ms increment rate),
   // events will be discarded until new focus/blur occurs
   uint32_t mIMELastBlurSeqno;
+  bool mNeedIMEStateInit;
 
   // The DPI of the screen corresponding to this widget
   float mDPI;
+  double mDefaultScale;
 };
 
 class PuppetScreen : public nsBaseScreen

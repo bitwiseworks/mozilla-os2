@@ -45,6 +45,16 @@ html|applet:not([height]), html|applet[height=""] {
   overflow: hidden;
   direction: ltr;
   unicode-bidi: embed;
+  /* used to block inherited properties */
+  text-transform: none;
+  text-indent: 0;
+  cursor: initial;
+  white-space: initial;
+  word-spacing: initial;
+  letter-spacing: initial;
+  line-height: initial;
+  z-index: 2147483647;
+  position: relative;
 }
 
 .mainBox[chromedir="rtl"] {
@@ -92,8 +102,15 @@ html|applet:not([height]), html|applet[height=""] {
   display: block;
 }
 
-.installStatus[status="ready"] .msgInstallPlugin {
+.installStatus[installable] .msgInstallPlugin {
   display: block;
+}
+
+.submitStatus[status] {
+  display: -moz-box;
+  -moz-box-align: center;
+  -moz-box-pack: center;
+  height: 160px;
 }
 
 .submitStatus[status="noReport"]   .msgNoCrashReport,
@@ -101,16 +118,6 @@ html|applet:not([height]), html|applet[height=""] {
 .submitStatus[status="noSubmit"]   .msgNotSubmitted,
 .submitStatus[status="submitting"] .msgSubmitting,
 .submitStatus[status="success"]    .msgSubmitted,
-.submitStatus[status="failed"]     .msgSubmitFailed,
-.submitStatus[status]:not([status="please"]) .msgReload {
+.submitStatus[status="failed"]     .msgSubmitFailed {
   display: block;
-}
-.submitStatus[status="please"] .msgReload {
-  /* Take up space when invisible, so stuff doesn't shift upon reveal. */
-  display: block;
-  visibility: hidden;
-}
-
-.helpIcon {
-  cursor: pointer;
 }

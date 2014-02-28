@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
 #include "mozilla/Util.h"
 
 #include "nsCOMPtr.h"
@@ -15,7 +16,6 @@
 
 #include "nsISimpleEnumerator.h"
 #include "nsIComponentManager.h"
-#include "prtypes.h"
 #include "prio.h"
 #include "private/pprio.h"  // To get PR_ImportFile
 #include "prprf.h"
@@ -114,7 +114,7 @@ public:
     }
 
     NS_IMETHOD Run() {
-        NS_ASSERTION(!NS_IsMainThread(),
+        MOZ_ASSERT(!NS_IsMainThread(),
             "AsyncLocalFileWinOperation should not be run on the main thread!");
 
         CoInitialize(NULL);
@@ -591,43 +591,51 @@ static nsresult
 OpenFile(const nsAFlatString &name, int osflags, int mode,
          PRFileDesc **fd)
 {
-    // XXX : 'mode' is not translated !!!
     int32_t access = 0;
-    int32_t flags = 0;
-    int32_t flag6 = 0;
 
-    if (osflags & PR_SYNC) flag6 = FILE_FLAG_WRITE_THROUGH;
- 
+    int32_t disposition = 0;
+    int32_t attributes = 0;
+
+    if (osflags & PR_SYNC) 
+        attributes = FILE_FLAG_WRITE_THROUGH;
     if (osflags & PR_RDONLY || osflags & PR_RDWR)
         access |= GENERIC_READ;
     if (osflags & PR_WRONLY || osflags & PR_RDWR)
         access |= GENERIC_WRITE;
 
     if ( osflags & PR_CREATE_FILE && osflags & PR_EXCL )
-        flags = CREATE_NEW;
+        disposition = CREATE_NEW;
     else if (osflags & PR_CREATE_FILE) {
         if (osflags & PR_TRUNCATE)
-            flags = CREATE_ALWAYS;
+            disposition = CREATE_ALWAYS;
         else
-            flags = OPEN_ALWAYS;
+            disposition = OPEN_ALWAYS;
     } else {
         if (osflags & PR_TRUNCATE)
-            flags = TRUNCATE_EXISTING;
+            disposition = TRUNCATE_EXISTING;
         else
-            flags = OPEN_EXISTING;
+            disposition = OPEN_EXISTING;
     }
 
     if (osflags & nsIFile::DELETE_ON_CLOSE) {
-      flag6 |= FILE_FLAG_DELETE_ON_CLOSE;
+        attributes |= FILE_FLAG_DELETE_ON_CLOSE;
     }
 
     if (osflags & nsIFile::OS_READAHEAD) {
-      flag6 |= FILE_FLAG_SEQUENTIAL_SCAN;
+        attributes |= FILE_FLAG_SEQUENTIAL_SCAN;
+    }
+
+    // If no write permissions are requested, and if we are possibly creating
+    // the file, then set the new file as read only.
+    // The flag has no effect if we happen to open the file.
+    if (!(mode & (PR_IWUSR | PR_IWGRP | PR_IWOTH)) &&
+        disposition != OPEN_EXISTING) {
+        attributes |= FILE_ATTRIBUTE_READONLY;
     }
 
     HANDLE file = ::CreateFileW(name.get(), access,
                                 FILE_SHARE_READ|FILE_SHARE_WRITE,
-                                NULL, flags, flag6, NULL);
+                                NULL, disposition, attributes, NULL);
 
     if (file == INVALID_HANDLE_VALUE) { 
         *fd = nullptr;
@@ -728,9 +736,9 @@ OpenDir(const nsAFlatString &name, nsDir * *dir)
      //If 'name' ends in a slash or backslash, do not append
      //another backslash.
     if (filename.Last() == L'/' || filename.Last() == L'\\')
-        filename.AppendASCII("*");
+        filename.Append('*');
     else 
-        filename.AppendASCII("\\*");
+        filename.AppendLiteral("\\*");
 
     filename.ReplaceChar(L'/', L'\\');
 
@@ -1033,7 +1041,7 @@ nsLocalFile::ResolveAndStat()
     // slutty hack designed to work around bug 134796 until it is fixed
     nsAutoString nsprPath(mWorkingPath.get());
     if (mWorkingPath.Length() == 2 && mWorkingPath.CharAt(1) == L':') 
-        nsprPath.AppendASCII("\\");
+        nsprPath.Append('\\');
 
     // first we will see if the working path exists. If it doesn't then
     // there is nothing more that can be done
@@ -1779,7 +1787,7 @@ nsLocalFile::CopySingleFile(nsIFile *sourceFile, nsIFile *destParent,
     nsAutoString destPath;
     destParent->GetTarget(destPath);
 
-    destPath.AppendASCII("\\");
+    destPath.Append('\\');
 
     if (newName.IsEmpty())
     {
@@ -1818,43 +1826,32 @@ nsLocalFile::CopySingleFile(nsIFile *sourceFile, nsIFile *destParent,
     int copyOK;
     DWORD dwVersion = GetVersion();
     DWORD dwMajorVersion = (DWORD)(LOBYTE(LOWORD(dwVersion)));
-    DWORD dwCopyFlags = 0;
+    DWORD dwCopyFlags = COPY_FILE_ALLOW_DECRYPTED_DESTINATION;
     if (dwMajorVersion > 5) {
         bool path1Remote, path2Remote;
         if (!IsRemoteFilePath(filePath.get(), path1Remote) || 
             !IsRemoteFilePath(destPath.get(), path2Remote) ||
             path1Remote || path2Remote) {
-            dwCopyFlags = COPY_FILE_NO_BUFFERING;
+            dwCopyFlags |= COPY_FILE_NO_BUFFERING;
         }
     }
     
     if (!move)
+    {
         copyOK = ::CopyFileExW(filePath.get(), destPath.get(), NULL, NULL, NULL, dwCopyFlags);
-    else {
-        DWORD status;
-        if (FileEncryptionStatusW(filePath.get(), &status)
-            && status == FILE_IS_ENCRYPTED)
+    }
+    else
+    {
+        copyOK = ::MoveFileExW(filePath.get(), destPath.get(), MOVEFILE_REPLACE_EXISTING);
+
+        // Check if copying the source file to a different volume,
+        // as this could be an SMBV2 mapped drive.
+        if (!copyOK && GetLastError() == ERROR_NOT_SAME_DEVICE)
         {
-            dwCopyFlags |= COPY_FILE_ALLOW_DECRYPTED_DESTINATION;
             copyOK = CopyFileExW(filePath.get(), destPath.get(), NULL, NULL, NULL, dwCopyFlags);
 
             if (copyOK)
                 DeleteFileW(filePath.get());
-        }
-        else
-        {
-            copyOK = ::MoveFileExW(filePath.get(), destPath.get(),
-                                   MOVEFILE_REPLACE_EXISTING);
-            
-            // Check if copying the source file to a different volume,
-            // as this could be an SMBV2 mapped drive.
-            if (!copyOK && GetLastError() == ERROR_NOT_SAME_DEVICE)
-            {
-                copyOK = CopyFileExW(filePath.get(), destPath.get(), NULL, NULL, NULL, dwCopyFlags);
-            
-                if (copyOK)
-                    DeleteFile(filePath.get());
-            }
         }
     }
 
@@ -2267,9 +2264,7 @@ nsLocalFile::GetLastModifiedTime(PRTime *aLastModifiedTime)
         return rv;
 
     // microseconds -> milliseconds
-    int64_t usecPerMsec;
-    LL_I2L(usecPerMsec, PR_USEC_PER_MSEC);
-    LL_DIV(*aLastModifiedTime, mFileInfo64.modifyTime, usecPerMsec);
+    *aLastModifiedTime = mFileInfo64.modifyTime / PR_USEC_PER_MSEC;
     return NS_OK;
 }
 
@@ -2291,9 +2286,7 @@ nsLocalFile::GetLastModifiedTimeOfLink(PRTime *aLastModifiedTime)
         return rv;
 
     // microseconds -> milliseconds
-    int64_t usecPerMsec;
-    LL_I2L(usecPerMsec, PR_USEC_PER_MSEC);
-    LL_DIV(*aLastModifiedTime, info.modifyTime, usecPerMsec);
+    *aLastModifiedTime = info.modifyTime / PR_USEC_PER_MSEC;
     return NS_OK;
 }
 
@@ -3396,7 +3389,7 @@ nsLocalFile::GetHashCode(uint32_t *aResult)
 void
 nsLocalFile::GlobalInit()
 {
-    nsresult rv = NS_CreateShortcutResolver();
+    DebugOnly<nsresult> rv = NS_CreateShortcutResolver();
     NS_ASSERTION(NS_SUCCEEDED(rv), "Shortcut resolver could not be created");
 }
 
@@ -3423,7 +3416,7 @@ nsresult nsDriveEnumerator::Init()
      * the length required for the string. */
     DWORD length = GetLogicalDriveStringsW(0, 0);
     /* The string is null terminated */
-    if (!EnsureStringLength(mDrives, length+1))
+    if (!mDrives.SetLength(length+1, fallible_t()))
         return NS_ERROR_OUT_OF_MEMORY;
     if (!GetLogicalDriveStringsW(length, mDrives.BeginWriting()))
         return NS_ERROR_FAILURE;

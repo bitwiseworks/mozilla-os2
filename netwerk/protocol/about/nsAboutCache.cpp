@@ -13,7 +13,6 @@
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
 #include "nsNetUtil.h"
-#include "prtime.h"
 #include "nsEscape.h"
 
 #include "nsICacheService.h"
@@ -21,10 +20,9 @@
 static PRTime SecondsToPRTime(uint32_t t_sec)
 {
     PRTime t_usec, usec_per_sec;
-    LL_I2L(t_usec, t_sec);
-    LL_I2L(usec_per_sec, PR_USEC_PER_SEC);
-    LL_MUL(t_usec, t_usec, usec_per_sec);
-    return t_usec;
+    t_usec = t_sec;
+    usec_per_sec = PR_USEC_PER_SEC;
+    return t_usec *= usec_per_sec;
 }
 static void PrintTimeString(char *buf, uint32_t bufsize, uint32_t t_sec)
 {
@@ -106,13 +104,13 @@ nsAboutCache::NewChannel(nsIURI *aURI, nsIChannel **result)
     rv = storageStream->NewInputStream(0, getter_AddRefs(inStr));
     if (NS_FAILED(rv)) return rv;
 
-    nsIChannel* channel;
-    rv = NS_NewInputStreamChannel(&channel, aURI, inStr,
+    nsCOMPtr<nsIChannel> channel;
+    rv = NS_NewInputStreamChannel(getter_AddRefs(channel), aURI, inStr,
                                   NS_LITERAL_CSTRING("text/html"),
                                   NS_LITERAL_CSTRING("utf-8"));
     if (NS_FAILED(rv)) return rv;
 
-    *result = channel;
+    channel.forget(result);
     return rv;
 }
 
@@ -234,7 +232,7 @@ nsAboutCache::VisitEntry(const char *deviceID,
 
     nsresult        rv;
     uint32_t        bytesWritten;
-    nsCAutoString   key;
+    nsAutoCString   key;
     nsXPIDLCString  clientID;
     bool            streamBased;
     
@@ -248,7 +246,7 @@ nsAboutCache::VisitEntry(const char *deviceID,
     if (NS_FAILED(rv)) return rv;
 
     // Generate a about:cache-entry URL for this entry...
-    nsCAutoString url;
+    nsAutoCString url;
     url.AssignLiteral("about:cache-entry?client=");
     url += clientID;
     url.AppendLiteral("&amp;sb=");
@@ -327,7 +325,7 @@ nsAboutCache::ParseURI(nsIURI * uri, nsCString &deviceID)
 
     deviceID.Truncate();
 
-    nsCAutoString path;
+    nsAutoCString path;
     rv = uri->GetPath(path);
     if (NS_FAILED(rv)) return rv;
 

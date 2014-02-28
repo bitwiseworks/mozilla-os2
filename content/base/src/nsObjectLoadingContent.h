@@ -13,34 +13,33 @@
 #ifndef NSOBJECTLOADINGCONTENT_H_
 #define NSOBJECTLOADINGCONTENT_H_
 
+#include "mozilla/Attributes.h"
 #include "nsImageLoadingContent.h"
 #include "nsIStreamListener.h"
-#include "nsFrameLoader.h"
-#include "nsIInterfaceRequestor.h"
 #include "nsIChannelEventSink.h"
 #include "nsIObjectLoadingContent.h"
 #include "nsIRunnable.h"
 #include "nsPluginInstanceOwner.h"
 #include "nsIThreadInternal.h"
 #include "nsIFrame.h"
+#include "nsIFrameLoader.h"
 
 class nsAsyncInstantiateEvent;
 class nsStopPluginRunnable;
-class AutoNotifier;
-class AutoFallback;
 class AutoSetInstantiatingToFalse;
 class nsObjectFrame;
+class nsFrameLoader;
+class nsXULElement;
 
 class nsObjectLoadingContent : public nsImageLoadingContent
                              , public nsIStreamListener
                              , public nsIFrameLoaderOwner
                              , public nsIObjectLoadingContent
-                             , public nsIInterfaceRequestor
                              , public nsIChannelEventSink
 {
   friend class AutoSetInstantiatingToFalse;
   friend class AutoSetLoadingToFalse;
-  friend class InDocCheckEvent;
+  friend class CheckPluginStopEvent;
   friend class nsStopPluginRunnable;
   friend class nsAsyncInstantiateEvent;
 
@@ -77,8 +76,10 @@ class nsObjectLoadingContent : public nsImageLoadingContent
       eFallbackSuppressed = nsIObjectLoadingContent::PLUGIN_SUPPRESSED,
       // Blocked by content policy
       eFallbackUserDisabled = nsIObjectLoadingContent::PLUGIN_USER_DISABLED,
-      /// ** All values >= eFallbackClickToPlay and
-      //     <= eFallbackVulnerableNoUpdate are click-to-play types.
+      /// ** All values >= eFallbackClickToPlay are plugin placeholder types
+      ///    that would be replaced by a real plugin if activated (PlayPlugin())
+      /// ** Furthermore, values >= eFallbackClickToPlay and
+      ///    <= eFallbackVulnerableNoUpdate are click-to-play types.
       // The plugin is disabled until the user clicks on it
       eFallbackClickToPlay = nsIObjectLoadingContent::PLUGIN_CLICK_TO_PLAY,
       // The plugin is vulnerable (update available)
@@ -97,15 +98,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     NS_DECL_NSISTREAMLISTENER
     NS_DECL_NSIFRAMELOADEROWNER
     NS_DECL_NSIOBJECTLOADINGCONTENT
-    NS_DECL_NSIINTERFACEREQUESTOR
     NS_DECL_NSICHANNELEVENTSINK
-
-#ifdef HAVE_CPP_AMBIGUITY_RESOLVING_USING
-    // Fix gcc compile warnings
-    using nsImageLoadingContent::OnStartRequest;
-    using nsImageLoadingContent::OnDataAvailable;
-    using nsImageLoadingContent::OnStopRequest;
-#endif
 
     /**
      * Object state. This is a bitmask of NS_EVENT_STATEs epresenting the
@@ -113,7 +106,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      */
     nsEventStates ObjectState() const;
 
-    ObjectType Type() { return mType; }
+    ObjectType Type() const { return mType; }
 
     void SetIsNetworkCreated(bool aNetworkCreated)
     {
@@ -121,10 +114,13 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     }
 
     /**
-     * Immediately instantiate a plugin instance. This is a no-op if
-     * mType != eType_Plugin or a plugin is already running.
+     * Immediately instantiate a plugin instance. This is a no-op if mType !=
+     * eType_Plugin or a plugin is already running.
+     *
+     * aIsLoading indicates that we are in the loading code, and we can bypass
+     * the mIsLoading check.
      */
-    nsresult InstantiatePluginInstance();
+    nsresult InstantiatePluginInstance(bool aIsLoading = false);
 
     /**
      * Notify this class the document state has changed
@@ -133,23 +129,80 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     void NotifyOwnerDocumentActivityChanged();
 
     /**
-     * Used by pluginHost to know if we're loading with a channel, so it
-     * will not open its own.
+     * When a plug-in is instantiated, it can create a scriptable
+     * object that the page wants to interact with.  We expose this
+     * object by placing it on the prototype chain of our element,
+     * between the element itself and its most-derived DOM prototype.
+     *
+     * SetupProtoChain handles actually inserting the plug-in
+     * scriptable object into the proto chain if needed.
+     *
+     * DoNewResolve is a hook that allows us to find out when the web
+     * page is looking up a property name on our object and make sure
+     * that our plug-in, if any, is instantiated.
      */
-    bool SrcStreamLoading() { return mSrcStreamLoading; };
+    // Helper for WebIDL node wrapping
+    void SetupProtoChain(JSContext* aCx, JS::Handle<JSObject*> aObject);
 
+    // Remove plugin from protochain
+    void TeardownProtoChain();
+
+    // Helper for WebIDL newResolve
+    bool DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject, JS::Handle<jsid> aId,
+                      unsigned aFlags, JS::MutableHandle<JSObject*> aObjp);
+
+    // WebIDL API
+    nsIDocument* GetContentDocument();
+    void GetActualType(nsAString& aType) const
+    {
+      CopyUTF8toUTF16(mContentType, aType);
+    }
+    uint32_t DisplayedType() const
+    {
+      return mType;
+    }
+    uint32_t GetContentTypeForMIMEType(const nsAString& aMIMEType)
+    {
+      return GetTypeOfContent(NS_ConvertUTF16toUTF8(aMIMEType));
+    }
+    void PlayPlugin(mozilla::ErrorResult& aRv)
+    {
+      aRv = PlayPlugin();
+    }
+    bool Activated() const
+    {
+      return mActivated;
+    }
+    nsIURI* GetSrcURI() const
+    {
+      return mURI;
+    }
+  
     /**
-     * Requests the plugin instance for scripting, attempting to spawn it if
-     * appropriate.
-     *
-     * The first time content js tries to access a pre-empted plugin
-     * (click-to-play or play preview), an event is dispatched.
-     *
-     * Bug 810082 - This method will be moving to the nsIObjectLoadingContent in
-     *              20+
+     * The default state that this plugin would be without manual activation.
+     * @returns PLUGIN_ACTIVE if the default state would be active.
      */
-    nsresult ScriptRequestPluginInstance(bool callerIsContentJS,
-                                         nsNPAPIPluginInstance **aResult);
+    uint32_t DefaultFallbackType();
+
+    uint32_t PluginFallbackType() const
+    {
+      return mFallbackType;
+    }
+    bool HasRunningPlugin() const
+    {
+      return !!mInstanceOwner;
+    }
+    void CancelPlayPreview(mozilla::ErrorResult& aRv)
+    {
+      aRv = CancelPlayPreview();
+    }
+    void SwapFrameLoaders(nsXULElement& aOtherOwner, mozilla::ErrorResult& aRv)
+    {
+      aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+    }
+    JS::Value LegacyCall(JSContext* aCx, JS::Handle<JS::Value> aThisVal,
+                         const mozilla::dom::Sequence<JS::Value>& aArguments,
+                         mozilla::ErrorResult& aRv);
 
   protected:
     /**
@@ -190,21 +243,20 @@ class nsObjectLoadingContent : public nsImageLoadingContent
                         bool aForceLoad = false);
 
     enum Capabilities {
-      eSupportImages       = PR_BIT(0), // Images are supported (imgILoader)
-      eSupportPlugins      = PR_BIT(1), // Plugins are supported (nsIPluginHost)
-      eSupportDocuments    = PR_BIT(2), // Documents are supported
+      eSupportImages       = 1u << 0, // Images are supported (imgILoader)
+      eSupportPlugins      = 1u << 1, // Plugins are supported (nsIPluginHost)
+      eSupportDocuments    = 1u << 2, // Documents are supported
                                         // (nsIDocumentLoaderFactory)
                                         // This flag always includes SVG
-      eSupportSVG          = PR_BIT(3), // SVG is supported (image/svg+xml)
-      eSupportClassID      = PR_BIT(4), // The classid attribute is supported
+      eSupportSVG          = 1u << 3, // SVG is supported (image/svg+xml)
+      eSupportClassID      = 1u << 4, // The classid attribute is supported
 
-      // Allows us to load a plugin if it matches a MIME type or file extension
-      // registered to a plugin without opening its specified URI first. Can
-      // result in launching plugins for URIs that return differing content
-      // types. Plugins without URIs may instantiate regardless.
-      // XXX(johns) this is our legacy behavior on <embed> tags, whereas object
-      // will always open a channel and check its MIME if a URI is present.
-      eAllowPluginSkipChannel  = PR_BIT(5)
+      // If possible to get a *plugin* type from the type attribute *or* file
+      // extension, we can use that type and begin loading the plugin before
+      // opening a channel.
+      // A side effect of this is if the channel fails, the plugin is still
+      // running.
+      eAllowPluginSkipChannel  = 1u << 5
     };
 
     /**
@@ -236,15 +288,23 @@ class nsObjectLoadingContent : public nsImageLoadingContent
                         bool aNullParent = true);
 
   private:
+
     // Object parameter changes returned by UpdateObjectParameters
     enum ParameterUpdateFlags {
       eParamNoChange           = 0,
       // Parameters that potentially affect the channel changed
       // - mOriginalURI, mOriginalContentType
-      eParamChannelChanged     = PR_BIT(0),
+      eParamChannelChanged     = 1u << 0,
       // Parameters that affect displayed content changed
       // - mURI, mContentType, mType, mBaseURI
-      eParamStateChanged       = PR_BIT(1)
+      eParamStateChanged       = 1u << 1,
+      // The effective content type changed, independant of object type. This
+      // can happen when changing from Loading -> Final type, but doesn't
+      // necessarily happen when changing between object types. E.g., if a PDF
+      // handler was installed between the last load of this object and now, we
+      // might change from eType_Document -> eType_Plugin without changing
+      // ContentType
+      eParamContentTypeChanged = 1u << 2
     };
 
     /**
@@ -284,10 +344,19 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      * 
      * NOTE This function does not perform security checks, only determining the
      *      requested type and parameters of the object.
-     * 
+     *
+     * @param aJavaURI Specify that the URI will be consumed by java, which
+     *                 changes codebase parsing and URI construction. Used
+     *                 internally.
+     *
      * @return Returns a bitmask of ParameterUpdateFlags values
      */
-    ParameterUpdateFlags UpdateObjectParameters();
+    ParameterUpdateFlags UpdateObjectParameters(bool aJavaURI = false);
+
+    /**
+     * Queue a CheckPluginStopEvent and track it in mPendingCheckPluginStopEvent
+     */
+    void QueueCheckPluginStopEvent();
 
     void NotifyContentObjectWrapper();
 
@@ -305,13 +374,14 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      * If this object is allowed to play plugin content, or if it would display
      * click-to-play instead.
      * NOTE that this does not actually check if the object is a loadable plugin
+     * NOTE This ignores the current activated state. The caller should check this if appropriate.
      */
-    bool ShouldPlay(FallbackType &aReason);
+    bool ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentType);
 
-    /**
-     * If the object should display preview content for the current mContentType
+    /*
+     * Helper to check if mBaseURI can be used by java as a codebase
      */
-    bool ShouldPreview();
+    bool CheckJavaCodebase();
 
     /**
      * Helper to check if our current URI passes policy
@@ -338,6 +408,12 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      * NOTE Does not take content policy or capabilities into account
      */
     bool IsSupportedDocument(const nsCString& aType);
+
+    /**
+     * Gets the plugin instance and creates a plugin stream listener, assigning
+     * it to mFinalListener
+     */
+    bool MakePluginListener();
 
     /**
      * Unloads all content and resets the object to a completely unloaded state
@@ -378,14 +454,46 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      */
     nsObjectFrame* GetExistingFrame();
 
+    // Helper class for SetupProtoChain
+    class SetupProtoChainRunner MOZ_FINAL : public nsIRunnable
+    {
+    public:
+      NS_DECL_ISUPPORTS
+
+      SetupProtoChainRunner(nsIScriptContext* scriptContext,
+                            nsObjectLoadingContent* aContent);
+
+      NS_IMETHOD Run() MOZ_OVERRIDE;
+
+    private:
+      nsCOMPtr<nsIScriptContext> mContext;
+      // We store an nsIObjectLoadingContent because we can
+      // unambiguously refcount that.
+      nsRefPtr<nsIObjectLoadingContent> mContent;
+    };
+
+    // Utility getter for getting our nsNPAPIPluginInstance in a safe way.
+    nsresult ScriptRequestPluginInstance(JSContext* aCx,
+                                         nsNPAPIPluginInstance** aResult);
+
+    // Utility method for getting our plugin JSObject
+    static nsresult GetPluginJSObject(JSContext *cx,
+                                      JS::Handle<JSObject*> obj,
+                                      nsNPAPIPluginInstance *plugin_inst,
+                                      JSObject **plugin_obj,
+                                      JSObject **plugin_proto);
+
     // The final listener for mChannel (uriloader, pluginstreamlistener, etc.)
     nsCOMPtr<nsIStreamListener> mFinalListener;
 
     // Frame loader, for content documents we load.
     nsRefPtr<nsFrameLoader>     mFrameLoader;
 
-    // A pending nsAsyncInstantiateEvent (may be null).  This is a weak ref.
-    nsIRunnable                *mPendingInstantiateEvent;
+    // Track if we have a pending AsyncInstantiateEvent
+    nsCOMPtr<nsIRunnable>       mPendingInstantiateEvent;
+
+    // Tracks if we have a pending CheckPluginStopEvent
+    nsCOMPtr<nsIRunnable>       mPendingCheckPluginStopEvent;
 
     // The content type of our current load target, updated by
     // UpdateObjectParameters(). Takes the channel's type into account once
@@ -422,8 +530,9 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     // The type of fallback content we're showing (see ObjectState())
     FallbackType                mFallbackType : 8;
 
-    // If true, the current load has finished opening a channel. Does not imply
-    // mChannel -- mChannelLoaded && !mChannel may occur for a load that failed
+    // If true, we have opened a channel as the listener and it has reached
+    // OnStartRequest. Does not get set for channels that are passed directly to
+    // the plugin listener.
     bool                        mChannelLoaded    : 1;
 
     // Whether we are about to call instantiate on our frame. If we aren't,
@@ -451,14 +560,6 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     // For plugin stand-in types (click-to-play, play preview, ...) tracks
     // whether content js has tried to access the plugin script object.
     bool                        mScriptRequested : 1;
-
-    // Used to track when we might try to instantiate a plugin instance based on
-    // a src data stream being delivered to this object. When this is true we
-    // don't want plugin instance instantiation code to attempt to load src data
-    // again or we'll deliver duplicate streams. Should be cleared when we are
-    // not loading src data.
-    bool                        mSrcStreamLoading : 1;
-
 
     nsWeakFrame                 mPrintFrame;
 

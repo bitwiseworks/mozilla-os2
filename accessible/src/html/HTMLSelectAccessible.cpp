@@ -16,17 +16,13 @@
 #include "States.h"
 
 #include "nsCOMPtr.h"
-#include "nsIFrame.h"
+#include "mozilla/dom/HTMLOptionElement.h"
 #include "nsIComboboxControlFrame.h"
-#include "nsIDocument.h"
-#include "nsIDOMHTMLInputElement.h"
-#include "nsIDOMHTMLOptGroupElement.h"
-#include "nsIDOMHTMLSelectElement.h"
+#include "nsIFrame.h"
 #include "nsIListControlFrame.h"
-#include "nsIServiceManager.h"
-#include "nsIMutableArray.h"
 
 using namespace mozilla::a11y;
+using namespace mozilla::dom;
 
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLSelectListAccessible
@@ -36,7 +32,7 @@ HTMLSelectListAccessible::
   HTMLSelectListAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
-  mFlags |= eListControlAccessible;
+  mGenericTypes |= eListControl | eSelect;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -60,12 +56,6 @@ HTMLSelectListAccessible::NativeRole()
 
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLSelectListAccessible: SelectAccessible
-
-bool
-HTMLSelectListAccessible::IsSelect()
-{
-  return true;
-}
 
 bool
 HTMLSelectListAccessible::SelectAll()
@@ -135,16 +125,7 @@ HTMLSelectListAccessible::CacheChildren()
   // as well as the accessibles for them. Avoid whitespace text nodes. We want
   // to count all the <optgroup>s and <option>s as children because we want
   // a flat tree under the Select List.
-  CacheOptSiblings(mContent);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// HTMLSelectListAccessible protected
-
-void
-HTMLSelectListAccessible::CacheOptSiblings(nsIContent* aParentContent)
-{
-  for (nsIContent* childContent = aParentContent->GetFirstChild(); childContent;
+  for (nsIContent* childContent = mContent->GetFirstChild(); childContent;
        childContent = childContent->GetNextSibling()) {
     if (!childContent->IsHTML()) {
       continue;
@@ -156,13 +137,9 @@ HTMLSelectListAccessible::CacheOptSiblings(nsIContent* aParentContent)
 
       // Get an accessible for option or optgroup and cache it.
       nsRefPtr<Accessible> accessible =
-        GetAccService()->GetOrCreateAccessible(childContent, mDoc);
+        GetAccService()->GetOrCreateAccessible(childContent, this);
       if (accessible)
         AppendChild(accessible);
-
-      // Deep down into optgroup element.
-      if (tag == nsGkAtoms::optgroup)
-        CacheOptSiblings(childContent);
     }
   }
 }
@@ -184,40 +161,31 @@ HTMLSelectOptionAccessible::
 role
 HTMLSelectOptionAccessible::NativeRole()
 {
-  if (mParent && mParent->Role() == roles::COMBOBOX_LIST)
+  if (GetCombobox())
     return roles::COMBOBOX_OPTION;
 
   return roles::OPTION;
 }
 
-nsresult
-HTMLSelectOptionAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLSelectOptionAccessible::NativeName(nsString& aName)
 {
   // CASE #1 -- great majority of the cases
   // find the label attribute - this is what the W3C says we should use
   mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
   if (!aName.IsEmpty())
-    return NS_OK;
+    return eNameOK;
 
   // CASE #2 -- no label parameter, get the first child, 
   // use it if it is a text node
   nsIContent* text = mContent->GetFirstChild();
-  if (!text)
-    return NS_OK;
-
-  if (text->IsNodeOfType(nsINode::eTEXT)) {
-    nsAutoString txtValue;
-    nsresult rv = nsTextEquivUtils::
-      AppendTextEquivFromTextContent(text, &txtValue);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    // Temp var (txtValue) needed until CompressWhitespace built for nsAString
-    txtValue.CompressWhitespace();
-    aName.Assign(txtValue);
-    return NS_OK;
+  if (text && text->IsNodeOfType(nsINode::eTEXT)) {
+    nsTextEquivUtils::AppendTextEquivFromTextContent(text, &aName);
+    aName.CompressWhitespace();
+    return aName.IsEmpty() ? eNameOK : eNameFromSubtree;
   }
 
-  return NS_OK;
+  return eNameOK;
 }
 
 uint64_t
@@ -238,30 +206,24 @@ HTMLSelectOptionAccessible::NativeState()
     return state;
 
   // Are we selected?
-  bool isSelected = false;
-  nsCOMPtr<nsIDOMHTMLOptionElement> option(do_QueryInterface(mContent));
-  if (option) {
-    option->GetSelected(&isSelected);
-    if (isSelected)
-      state |= states::SELECTED;
-  }
+  HTMLOptionElement* option = HTMLOptionElement::FromContent(mContent);
+  bool selected = option && option->Selected();
+  if (selected)
+    state |= states::SELECTED;
 
   if (selectState & states::OFFSCREEN) {
     state |= states::OFFSCREEN;
-  }
-  else if (selectState & states::COLLAPSED) {
+  } else if (selectState & states::COLLAPSED) {
     // <select> is COLLAPSED: add OFFSCREEN, if not the currently
     // visible option
-    if (!isSelected) {
+    if (!selected) {
       state |= states::OFFSCREEN;
-    }
-    else {
+    } else {
       // Clear offscreen and invisible for currently showing option
       state &= ~(states::OFFSCREEN | states::INVISIBLE);
       state |= selectState & states::OPAQUE1;
     }
-  }
-  else {
+  } else {
     // XXX list frames are weird, don't rely on Accessible's general
     // visibility implementation unless they get reimplemented in layout
     state &= ~states::OFFSCREEN;
@@ -291,7 +253,7 @@ HTMLSelectOptionAccessible::NativeInteractiveState() const
 int32_t
 HTMLSelectOptionAccessible::GetLevelInternal()
 {
-  nsIContent *parentContent = mContent->GetParent();
+  nsIContent* parentContent = mContent->GetParent();
 
   int32_t level =
     parentContent->NodeInfo()->Equals(nsGkAtoms::optgroup) ? 2 : 1;
@@ -348,8 +310,8 @@ HTMLSelectOptionAccessible::SetSelected(bool aSelect)
   if (IsDefunct())
     return NS_ERROR_FAILURE;
 
-  nsCOMPtr<nsIDOMHTMLOptionElement> optionElm(do_QueryInterface(mContent));
-  return optionElm->SetSelected(aSelect);
+  HTMLOptionElement* option = HTMLOptionElement::FromContent(mContent);
+  return option ? option->SetSelected(aSelect) : NS_ERROR_FAILURE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -358,23 +320,21 @@ HTMLSelectOptionAccessible::SetSelected(bool aSelect)
 Accessible*
 HTMLSelectOptionAccessible::ContainerWidget() const
 {
-  return mParent && mParent->IsListControl() ? mParent : nullptr;
+  Accessible* parent = Parent();
+  if (parent && parent->IsHTMLOptGroup())
+    parent = parent->Parent();
+
+  return parent && parent->IsListControl() ? parent : nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLSelectOptGroupAccessible
 ////////////////////////////////////////////////////////////////////////////////
 
-HTMLSelectOptGroupAccessible::
-  HTMLSelectOptGroupAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-  HTMLSelectOptionAccessible(aContent, aDoc)
-{
-}
-
 role
 HTMLSelectOptGroupAccessible::NativeRole()
 {
-  return roles::HEADING;
+  return roles::GROUPING;
 }
 
 uint64_t
@@ -402,20 +362,6 @@ HTMLSelectOptGroupAccessible::ActionCount()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HTMLSelectOptGroupAccessible: Accessible protected
-
-void
-HTMLSelectOptGroupAccessible::CacheChildren()
-{
-  // XXX To do (bug 378612) - create text child for the anonymous attribute
-  // content, so that nsIAccessibleText is supported for the <optgroup> as it is
-  // for an <option>. Attribute content is what layout creates for
-  // the label="foo" on the <optgroup>. See eStyleContentType_Attr and
-  // CreateAttributeContent() in nsCSSFrameConstructor
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
 // HTMLComboboxAccessible
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -423,7 +369,7 @@ HTMLComboboxAccessible::
   HTMLComboboxAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
-  mFlags |= eComboboxAccessible;
+  mGenericTypes |= eCombobox;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -451,11 +397,11 @@ HTMLComboboxAccessible::CacheChildren()
   if (!frame)
     return;
 
-  nsIComboboxControlFrame *comboFrame = do_QueryFrame(frame);
+  nsIComboboxControlFrame* comboFrame = do_QueryFrame(frame);
   if (!comboFrame)
     return;
 
-  nsIFrame *listFrame = comboFrame->GetDropDown();
+  nsIFrame* listFrame = comboFrame->GetDropDown();
   if (!listFrame)
     return;
 
@@ -560,11 +506,11 @@ HTMLComboboxAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
   if (aIndex != HTMLComboboxAccessible::eAction_Click) {
     return NS_ERROR_INVALID_ARG;
   }
-  nsIFrame *frame = GetFrame();
+  nsIFrame* frame = GetFrame();
   if (!frame) {
     return NS_ERROR_FAILURE;
   }
-  nsIComboboxControlFrame *comboFrame = do_QueryFrame(frame);
+  nsIComboboxControlFrame* comboFrame = do_QueryFrame(frame);
   if (!comboFrame) {
     return NS_ERROR_FAILURE;
   }
@@ -646,6 +592,7 @@ HTMLComboboxListAccessible::
                              DocAccessible* aDoc) :
   HTMLSelectListAccessible(aContent, aDoc)
 {
+  mStateFlags |= eSharedNode;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -664,12 +611,6 @@ HTMLComboboxListAccessible::GetFrame() const
   }
 
   return nullptr;
-}
-
-bool
-HTMLComboboxListAccessible::IsPrimaryForNode() const
-{
-  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

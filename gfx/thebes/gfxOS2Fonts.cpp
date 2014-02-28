@@ -14,6 +14,7 @@
 #include "nsIPlatformCharset.h"
 
 #include "mozilla/Preferences.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -91,7 +92,7 @@ static void FillMetricsDefaults(gfxFont::Metrics *aMetrics)
 // line as close to the original position as possible.
 static void SnapLineToPixels(gfxFloat& aOffset, gfxFloat& aSize)
 {
-    gfxFloat snappedSize = NS_MAX(floor(aSize + 0.5), 1.0);
+    gfxFloat snappedSize = std::max(floor(aSize + 0.5), 1.0);
     // Correct offset for change in size
     gfxFloat offset = aOffset - 0.5 * (aSize - snappedSize);
     // Snap offset
@@ -201,12 +202,12 @@ const gfxFont::Metrics& gfxOS2Font::GetMetrics()
     TT_OS2 *os2 = (TT_OS2 *)FT_Get_Sfnt_Table(face, ft_sfnt_os2);
     if (os2 && os2->version != 0xFFFF) { // should be there if not old Mac font
         // if we are here we can improve the avgCharWidth
-        mMetrics->aveCharWidth = NS_MAX(mMetrics->aveCharWidth,
+        mMetrics->aveCharWidth = std::max(mMetrics->aveCharWidth,
                                         os2->xAvgCharWidth * xScale);
 
-        mMetrics->superscriptOffset = NS_MAX(os2->ySuperscriptYOffset * yScale, 1.0);
+        mMetrics->superscriptOffset = std::max(os2->ySuperscriptYOffset * yScale, 1.0);
         // some fonts have the incorrect sign (from gfxPangoFonts)
-        mMetrics->subscriptOffset   = NS_MAX(fabs(os2->ySubscriptYOffset * yScale),
+        mMetrics->subscriptOffset   = std::max(fabs(os2->ySubscriptYOffset * yScale),
                                              1.0);
         mMetrics->strikeoutOffset   = os2->yStrikeoutPosition * yScale;
         mMetrics->strikeoutSize     = os2->yStrikeoutSize * yScale;
@@ -228,11 +229,11 @@ const gfxFont::Metrics& gfxOS2Font::GetMetrics()
     mMetrics->emDescent       = -face->descender * yScale;
     mMetrics->maxHeight       = face->height * yScale;
     // the max units determine frame heights, better be generous
-    mMetrics->maxAscent       = NS_MAX(face->bbox.yMax * yScale,
+    mMetrics->maxAscent       = std::max(face->bbox.yMax * yScale,
                                        mMetrics->emAscent);
-    mMetrics->maxDescent      = NS_MAX(-face->bbox.yMin * yScale,
+    mMetrics->maxDescent      = std::max(-face->bbox.yMin * yScale,
                                        mMetrics->emDescent);
-    mMetrics->maxAdvance      = NS_MAX(face->max_advance_width * xScale,
+    mMetrics->maxAdvance      = std::max(face->max_advance_width * xScale,
                                        mMetrics->aveCharWidth);
 
     // leadings are not available directly (only for WinFNTs);
@@ -565,7 +566,7 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const PRUnichar* aString, uint32_t aLen
 
     mEnableKerning = !(aFlags & gfxTextRunFactory::TEXT_OPTIMIZE_SPEED);
 
-    nsCAutoString utf8;
+    nsAutoCString utf8;
     int32_t headerLen = AppendDirectionalIndicatorUTF8(textRun->IsRightToLeft(), utf8);
     AppendUTF16toUTF8(Substring(aString, aString + aLength), utf8);
 
@@ -610,7 +611,7 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const uint8_t* aString, uint32_t aLengt
         // bytes of any UCS-2 characters < 256), NS_ConvertASCIItoUTF16 seems
         // to DTRT.
         NS_ConvertASCIItoUTF16 unicodeString(chars, aLength);
-        nsCAutoString utf8;
+        nsAutoCString utf8;
         int32_t headerLen = AppendDirectionalIndicatorUTF8(isRTL, utf8);
         AppendUTF16toUTF8(unicodeString, utf8);
         InitTextRun(textRun, (uint8_t *)utf8.get(), utf8.Length(), headerLen);

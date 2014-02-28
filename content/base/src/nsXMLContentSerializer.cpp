@@ -785,17 +785,7 @@ nsXMLContentSerializer::IsJavaScript(nsIContent * aContent, nsIAtom* aAttrNameAt
       return false;
   }
 
-  if (isHtml) {
-    return nsContentUtils::IsEventAttributeName(aAttrNameAtom, EventNameType_HTML);
-  }
-  else if (isXul) {
-    return nsContentUtils::IsEventAttributeName(aAttrNameAtom, EventNameType_XUL);
-  }
-  else if (isSvg) {
-    return nsContentUtils::IsEventAttributeName(aAttrNameAtom,
-                                                EventNameType_SVGGraphic | EventNameType_SVGSVG);
-  }
-  return false;
+  return aContent->IsEventAttributeName(aAttrNameAtom);
 }
 
 
@@ -1214,7 +1204,7 @@ nsXMLContentSerializer::MaybeAddNewlineForRootNode(nsAString& aStr)
 void
 nsXMLContentSerializer::MaybeFlagNewlineForRootNode(nsINode* aNode)
 {
-  nsINode* parent = aNode->GetNodeParent();
+  nsINode* parent = aNode->GetParentNode();
   if (parent) {
     mAddNewlineForRootNode = parent->IsNodeOfType(nsINode::eDOCUMENT);
   }
@@ -1695,7 +1685,7 @@ nsXMLContentSerializer::AppendToStringWrapped(const nsASingleFragmentString& aSt
   mMayIgnoreLineBreakSequence = false;
 
   bool sequenceStartAfterAWhitespace = false;
-  if (pos < end) {
+  if (pos < end && !aOutputStr.IsEmpty()) {
     nsAString::const_char_iterator end2;
     aOutputStr.EndReading(end2);
     --end2;

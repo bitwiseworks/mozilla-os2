@@ -9,18 +9,15 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= imgicoe
-LIBRARY_NAME	= imgicoe_s
 FORCE_STATIC_LIB = 1
 MODULE_NAME	= imgEncoderICOModule
 LIBXUL_LIBRARY = 1
+FAIL_ON_WARNINGS = 1
 
 # Decoders need RasterImage.h
 LOCAL_INCLUDES += -I$(topsrcdir)/image/src/
 LOCAL_INCLUDES += -I$(topsrcdir)/image/encoders/bmp/
 LOCAL_INCLUDES += -I$(topsrcdir)/image/encoders/png/
-
-CPPSRCS		= nsICOEncoder.cpp
 
 include $(topsrcdir)/config/rules.mk
 

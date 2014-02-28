@@ -1,0 +1,111 @@
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = \
+  @srcdir@ \
+  @srcdir@/srtp \
+  @srcdir@/crypto \
+  @srcdir@/crypto/cipher \
+  @srcdir@/crypto/hash \
+  @srcdir@/crypto/kernel \
+  @srcdir@/crypto/math \
+  @srcdir@/crypto/replay \
+  @srcdir@/crypto/rng \
+  $(NULL)
+
+include $(DEPTH)/config/autoconf.mk
+
+LIBRARY_NAME = nksrtp_s
+LIBXUL_LIBRARY = 1
+FORCE_STATIC_LIB = 1
+
+DISABLED_CSRCS := \
+  ekt.c \
+  srtp.c \
+  aes.c \
+  aes_cbc.c \
+  aes_icm.c \
+  cipher.c \
+  null_cipher.c \
+  auth.c \
+  hmac.c \
+  null_auth.c \
+  sha1.c \
+  alloc.c \
+  crypto_kernel.c \
+  err.c \
+  key.c \
+  datatypes.c \
+  gf2_8.c \
+  stat.c \
+  rdb.c \
+  rdbx.c \
+  ut_sim.c \
+  ctr_prng.c \
+  prng.c \
+  rand_source.c \
+  $(NULL)
+
+LOCAL_INCLUDES = \
+  -I$(srcdir)/include \
+  -I$(srcdir)/crypto/include \
+  $(NULL)
+
+DEFINES += \
+  -DHAVE_STDLIB_H=1 \
+  -DINTEGER_TYPES_H="\"mozilla/StandardInteger.h\"" \
+  -DHAVE_UINT8_T=1 \
+  -DHAVE_UINT16_T=1 \
+  -DHAVE_UINT32_T=1 \
+  -DHAVE_UINT64_T=1 \
+  $(NULL)
+
+# We know StandardInteger.h will define uint8/16/32/64_t, so we don't need
+# to define SIZEOF_UNSIGNED_LONG/SIZEOF_UNSIGNED_LONG_LONG
+
+ifeq ($(CPU_ARCH),arm)
+
+# XXX while arm is not a CISC architecture, the code guarded by CPU_RISC makes
+# (at least) the AES ciphers fail their self-tests on ARM, so for now we're
+# falling back to the (presumably) slower-on-this-architecture but working
+# code path.  https://bugzilla.mozilla.org/show_bug.cgi?id=822380 has been filed
+# to make the right and more performant fix and push it back upstream.
+
+DEFINES += -DCPU_CISC=1
+
+else ifeq ($(CPU_ARCH),x86)
+DEFINES += \
+  -DCPU_CISC=1 \
+  -DHAVE_X86 \
+  $(NULL)
+else ifeq ($(CPU_ARCH),x86_64)
+DEFINES += \
+  -DCPU_CISC=1 \
+  -DHAVE_X86 \
+  $(NULL)
+else
+# best guess
+DEFINES += -DCPU_RISC=1
+endif
+
+ifeq ($(OS_TARGET),WINNT)
+DEFINES += \
+  -DHAVE_WINSOCK2_H=1 \
+  -Dinline=__inline \
+  $(NULL)
+endif
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk
+
+ifdef GNU_CC
+CFLAGS += -std=gnu99
+endif
+
+DEFINES += -DIMPL_NS_NET

@@ -76,22 +76,30 @@
               <hbox id="noUpdatesFound" align="center">
                 <label>&update.noUpdatesFound;</label>
               </hbox>
+              <hbox id="otherInstanceHandlingUpdates" align="center">
+                <label>&update.otherInstanceHandlingUpdates;</label>
+              </hbox>
               <hbox id="manualUpdate" align="center">
                 <label>&update.manual.start;</label><label id="manualLink" class="text-link"/><label>&update.manual.end;</label>
+              </hbox>
+              <hbox id="unsupportedSystem" align="center">
+                <label>&update.unsupported.start;</label><label id="unsupportedLink" class="text-link">&update.unsupported.linkText;</label><label>&update.unsupported.end;</label>
               </hbox>
             </deck>
 #endif
           </vbox>
 
+#if MOZ_UPDATE_CHANNEL != release
 #ifdef MOZ_UPDATER
           <description class="text-blurb" id="currentChannelText">
             &channel.description.start;<label id="currentChannel"/>&channel.description.end;
           </description>
 #endif
+#endif
           <vbox id="experimental" hidden="true">
             <description class="text-blurb" id="warningDesc">
               &warningDesc.version;
-#ifdef MOZ_TELEMETRY_REPORTING
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
               &warningDesc.telemetryDesc;
 #endif
             </description>
@@ -112,7 +120,7 @@
       <hbox pack="center">
         <label class="text-link bottom-link" href="about:license">&bottomLinks.license;</label>
         <label class="text-link bottom-link" href="about:rights">&bottomLinks.rights;</label>
-        <label class="text-link bottom-link" href="http://www.mozilla.com/legal/privacy/">&bottomLinks.privacy;</label>
+        <label class="text-link bottom-link" href="https://www.mozilla.org/legal/privacy/">&bottomLinks.privacy;</label>
       </hbox>
       <description id="trademark">&trademarkInfo.part1;</description>
     </vbox>

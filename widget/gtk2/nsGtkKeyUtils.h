@@ -36,6 +36,11 @@ public:
     static uint32_t ComputeDOMKeyCode(const GdkEventKey* aGdkKeyEvent);
 
     /**
+     * Compute a DOM key name index from aGdkKeyEvent.
+     */
+    KeyNameIndex ComputeDOMKeyNameIndex(const GdkEventKey* aGdkKeyEvent);
+
+    /**
      * Returns a GDK keyval which is related to the aDOMKeyCode.  However,
      * it may not be same as original value since there are some lost
      * information.
@@ -56,7 +61,8 @@ public:
         META               = 0x0040,
         SUPER              = 0x0080,
         HYPER              = 0x0100,
-        ALTGR              = 0x0200
+        LEVEL3             = 0x0200,
+        LEVEL5             = 0x0400
     };
 
     /**
@@ -173,7 +179,8 @@ protected:
         INDEX_META,
         INDEX_SUPER,
         INDEX_HYPER,
-        INDEX_ALTGR,
+        INDEX_LEVEL3,
+        INDEX_LEVEL5,
         COUNT_OF_MODIFIER_INDEX
     };
     guint mModifierMasks[COUNT_OF_MODIFIER_INDEX];

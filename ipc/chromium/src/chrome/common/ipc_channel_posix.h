@@ -12,6 +12,7 @@
 #include <queue>
 #include <string>
 #include <vector>
+#include <list>
 
 #include "base/message_loop.h"
 #include "chrome/common/file_descriptor_set_posix.h"
@@ -52,6 +53,10 @@ class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
   virtual void OnFileCanReadWithoutBlocking(int fd);
   virtual void OnFileCanWriteWithoutBlocking(int fd);
 
+#if defined(OS_MACOSX)
+  void CloseDescriptors(uint32_t pending_fd_id);
+#endif
+
   Mode mode_;
 
   // After accepting one client connection on our server socket we want to
@@ -91,11 +96,11 @@ class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
     // We assume a worst case: kReadBufferSize bytes of messages, where each
     // message has no payload and a full complement of descriptors.
     MAX_READ_FDS = (Channel::kReadBufferSize / sizeof(IPC::Message::Header)) *
-                   FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE,
+                   FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE
   };
 
   // This is a control message buffer large enough to hold kMaxReadFDs
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_NETBSD)
   // TODO(agl): OSX appears to have non-constant CMSG macros!
   char input_cmsg_buf_[1024];
 #else
@@ -116,6 +121,27 @@ class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
   // avoid recursing through ProcessIncomingMessages, which could cause
   // problems.  TODO(darin): make this unnecessary
   bool processing_incoming_;
+
+  // This flag is set after we've closed the channel.
+  bool closed_;
+
+#if defined(OS_MACOSX)
+  struct PendingDescriptors {
+    uint32_t id;
+    scoped_refptr<FileDescriptorSet> fds;
+
+    PendingDescriptors() : id(0) { }
+    PendingDescriptors(uint32_t id, FileDescriptorSet *fds)
+      : id(id),
+        fds(fds)
+    { }
+  };
+
+  std::list<PendingDescriptors> pending_fds_;
+
+  // A generation ID for RECEIVED_FD messages.
+  uint32_t last_pending_fd_id_;
+#endif
 
   ScopedRunnableMethodFactory<ChannelImpl> factory_;
 

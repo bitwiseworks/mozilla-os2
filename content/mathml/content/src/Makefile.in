@@ -10,30 +10,21 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkcontentmathml_s
 LIBXUL_LIBRARY	= 1
 FAIL_ON_WARNINGS = 1
 
-CPPSRCS		= \
-		nsMathMLElement.cpp               \
-		nsMathMLElementFactory.cpp        \
-		$(NULL)
-
 include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 # we don't want the shared lib, but we want to force the creation of a static 
 # lib.
 FORCE_STATIC_LIB = 1
 
-EXPORTS = \
-	$(NULL)
-
-
 include $(topsrcdir)/config/rules.mk
 
-INCLUDES += 	\
-		-I$(srcdir)/../../../base/src \
-		$(NULL)
+INCLUDES += \
+  -I$(srcdir)/../../../base/src \
+  $(NULL)
 
 DEFINES += -D_IMPL_NS_LAYOUT

@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = ['AppsEngine', 'AppRec'];
+this.EXPORTED_SYMBOLS = ['AppsEngine', 'AppRec'];
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
@@ -15,7 +15,7 @@ Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Webapps.jsm");
 
-function AppRec(collection, id) {
+this.AppRec = function AppRec(collection, id) {
   CryptoWrapper.call(this, collection, id);
 }
 
@@ -26,8 +26,8 @@ AppRec.prototype = {
 
 Utils.deferGetSet(AppRec, "cleartext", ["value"]);
 
-function AppStore(name) {
-  Store.call(this, name);
+function AppStore(name, engine) {
+  Store.call(this, name, engine);
 }
 
 AppStore.prototype = {
@@ -81,8 +81,8 @@ AppStore.prototype = {
 }
 
 
-function AppTracker(name) {
-  Tracker.call(this, name);
+function AppTracker(name, engine) {
+  Tracker.call(this, name, engine);
   Svc.Obs.add("weave:engine:start-tracking", this);
   Svc.Obs.add("weave:engine:stop-tracking", this);
 }
@@ -123,8 +123,8 @@ AppTracker.prototype = {
   }
 }
 
-function AppsEngine() {
-  SyncEngine.call(this, "Apps");
+this.AppsEngine = function AppsEngine(service) {
+  SyncEngine.call(this, "Apps", service);
 }
 
 AppsEngine.prototype = {

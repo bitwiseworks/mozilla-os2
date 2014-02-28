@@ -23,62 +23,6 @@ function nsSidebar()
 
 nsSidebar.prototype.classID = SIDEBAR_CID;
 
-nsSidebar.prototype.nc = "http://home.netscape.com/NC-rdf#";
-
-function sidebarURLSecurityCheck(url)
-{
-    if (!/^(https?:|ftp:)/i.test(url)) {
-        Components.utils.reportError("Invalid argument passed to window.sidebar.addPanel: Unsupported panel URL." );
-        return false;
-    }
-    return true;
-}
-
-/* decorate prototype to provide ``class'' methods and property accessors */
-nsSidebar.prototype.addPanel =
-function (aTitle, aContentURL, aCustomizeURL)
-{
-    debug("addPanel(" + aTitle + ", " + aContentURL + ", " +
-          aCustomizeURL + ")");
-
-    return this.addPanelInternal(aTitle, aContentURL, aCustomizeURL, false);
-}
-
-nsSidebar.prototype.addPersistentPanel =
-function(aTitle, aContentURL, aCustomizeURL)
-{
-    debug("addPersistentPanel(" + aTitle + ", " + aContentURL + ", " +
-           aCustomizeURL + ")\n");
-
-    return this.addPanelInternal(aTitle, aContentURL, aCustomizeURL, true);
-}
-
-nsSidebar.prototype.addPanelInternal =
-function (aTitle, aContentURL, aCustomizeURL, aPersist)
-{
-    // XXX Bug 620418: We shouldn't do this anymore. Instead, we should find the
-    // global object for our caller and use it.
-    var win = Services.wm.getMostRecentWindow("navigator:browser");
-    if (!sidebarURLSecurityCheck(aContentURL))
-      return;
-
-    var uri = null;
-    try {
-      uri = Services.io.newURI(aContentURL, null, null);
-    }
-    catch(ex) { return; }
-
-    win.PlacesUIUtils.showBookmarkDialog({ action: "add"
-                                         , type: "bookmark"
-                                         , hiddenRows: [ "description"
-                                                       , "keyword"
-                                                       , "location" ]
-                                         , uri: uri
-                                         , title: aTitle
-                                         , loadBookmarkInSidebar: true
-                                         }, win);
-}
-
 nsSidebar.prototype.validateSearchEngine =
 function (engineURL, iconURL)
 {
@@ -183,7 +127,7 @@ nsSidebar.prototype.classInfo = XPCOMUtils.generateCI({classID: SIDEBAR_CID,
 
 nsSidebar.prototype.QueryInterface = XPCOMUtils.generateQI([nsISidebar, nsISidebarExternal]);
 
-var NSGetFactory = XPCOMUtils.generateNSGetFactory([nsSidebar]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([nsSidebar]);
 
 /* static functions */
 if (DEBUG)

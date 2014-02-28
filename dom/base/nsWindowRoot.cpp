@@ -15,6 +15,7 @@
 #include "nsGUIEvent.h"
 #include "nsGlobalWindow.h"
 #include "nsFocusManager.h"
+#include "nsIContent.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsIControllers.h"
@@ -24,6 +25,9 @@
 #ifdef MOZ_XUL
 #include "nsIDOMXULElement.h"
 #endif
+
+using namespace mozilla;
+using namespace mozilla::dom;
 
 static NS_DEFINE_CID(kEventListenerManagerCID,    NS_EVENTLISTENERMANAGER_CID);
 
@@ -39,25 +43,18 @@ nsWindowRoot::~nsWindowRoot()
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsWindowRoot)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsWindowRoot)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_MEMBER(mListenerManager,
-                                                  nsEventListenerManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mPopupNode)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mParent)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsWindowRoot)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mListenerManager)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mPopupNode)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mParent)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(nsWindowRoot,
+                                        mWindow,
+                                        mListenerManager,
+                                        mPopupNode,
+                                        mParent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsWindowRoot)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMEventTarget)
   NS_INTERFACE_MAP_ENTRY(nsPIWindowRoot)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
+  NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsWindowRoot)
@@ -82,7 +79,7 @@ nsWindowRoot::DispatchEvent(nsIDOMEvent* aEvt, bool *aRetVal)
 {
   nsEventStatus status = nsEventStatus_eIgnore;
   nsresult rv =  nsEventDispatcher::DispatchDOMEvent(
-    static_cast<nsIDOMEventTarget*>(this), nullptr, aEvt, nullptr, &status);
+    static_cast<EventTarget*>(this), nullptr, aEvt, nullptr, &status);
   *aRetVal = (status != nsEventStatus_eConsumeNoDefault);
   return rv;
 }
@@ -93,7 +90,7 @@ nsWindowRoot::DispatchDOMEvent(nsEvent* aEvent,
                                nsPresContext* aPresContext,
                                nsEventStatus* aEventStatus)
 {
-  return nsEventDispatcher::DispatchDOMEvent(static_cast<nsIDOMEventTarget*>(this),
+  return nsEventDispatcher::DispatchDOMEvent(static_cast<EventTarget*>(this),
                                              aEvent, aDOMEvent,
                                              aPresContext, aEventStatus);
 }
@@ -114,6 +111,23 @@ nsWindowRoot::AddEventListener(const nsAString& aType,
   elm->AddEventListener(aType, aListener, aUseCapture, aWantsUntrusted);
   return NS_OK;
 }
+
+void
+nsWindowRoot::AddEventListener(const nsAString& aType,
+                                nsIDOMEventListener* aListener,
+                                bool aUseCapture,
+                                const Nullable<bool>& aWantsUntrusted,
+                                ErrorResult& aRv)
+{
+  bool wantsUntrusted = !aWantsUntrusted.IsNull() && aWantsUntrusted.Value();
+  nsEventListenerManager* elm = GetListenerManager(true);
+  if (!elm) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return;
+  }
+  elm->AddEventListener(aType, aListener, aUseCapture, wantsUntrusted);
+}
+
 
 NS_IMETHODIMP
 nsWindowRoot::AddSystemEventListener(const nsAString& aType,
@@ -136,7 +150,7 @@ nsWindowRoot::GetListenerManager(bool aCreateIfNotFound)
 {
   if (!mListenerManager && aCreateIfNotFound) {
     mListenerManager =
-      new nsEventListenerManager(static_cast<nsIDOMEventTarget*>(this));
+      new nsEventListenerManager(static_cast<EventTarget*>(this));
   }
 
   return mListenerManager;
@@ -164,6 +178,12 @@ nsresult
 nsWindowRoot::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
 {
   return NS_OK;
+}
+
+nsIDOMWindow*
+nsWindowRoot::GetOwnerGlobal()
+{
+  return GetWindow();
 }
 
 nsPIDOMWindow*
@@ -270,10 +290,9 @@ nsWindowRoot::SetPopupNode(nsIDOMNode* aNode)
 
 ///////////////////////////////////////////////////////////////////////////////////
 
-nsresult
-NS_NewWindowRoot(nsPIDOMWindow* aWindow, nsIDOMEventTarget** aResult)
+already_AddRefed<EventTarget>
+NS_NewWindowRoot(nsPIDOMWindow* aWindow)
 {
-  *aResult = new nsWindowRoot(aWindow);
-  NS_ADDREF(*aResult);
-  return NS_OK;
+  nsCOMPtr<EventTarget> result = new nsWindowRoot(aWindow);
+  return result.forget();
 }

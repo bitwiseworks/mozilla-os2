@@ -8,6 +8,7 @@
 
 #include "nsWrapperCache.h"
 #include "xpcpublic.h"
+#include "jsapi.h"
 
 inline JSObject*
 nsWrapperCache::GetWrapper() const
@@ -22,6 +23,34 @@ nsWrapperCache::IsBlack()
 {
   JSObject* o = GetWrapperPreserveColor();
   return o && !xpc_IsGrayGCThing(o);
+}
+
+static void
+SearchGray(void* aGCThing, const char* aName, void* aClosure)
+{
+  bool* hasGrayObjects = static_cast<bool*>(aClosure);
+  if (!*hasGrayObjects && aGCThing && xpc_IsGrayGCThing(aGCThing)) {
+    *hasGrayObjects = true;
+  }
+}
+
+inline bool
+nsWrapperCache::IsBlackAndDoesNotNeedTracing(nsISupports* aThis)
+{
+  if (IsBlack()) {
+    nsXPCOMCycleCollectionParticipant* participant = nullptr;
+    CallQueryInterface(aThis, &participant);
+    bool hasGrayObjects = false;
+    participant->Trace(aThis, TraceCallbackFunc(SearchGray), &hasGrayObjects);
+    return !hasGrayObjects;
+  }
+  return false;
+}
+
+inline void
+nsWrapperCache::TraceWrapperJSObject(JSTracer* aTrc, const char* aName)
+{
+  JS_CallHeapObjectTracer(aTrc, &mWrapper, aName);
 }
 
 #endif /* nsWrapperCache_h___ */

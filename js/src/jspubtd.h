@@ -1,24 +1,33 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jspubtd_h___
-#define jspubtd_h___
+#ifndef jspubtd_h
+#define jspubtd_h
 
 /*
  * JS public API typedefs.
  */
+
+#include "jsprototypes.h"
 #include "jstypes.h"
+
+namespace JS {
 
 /*
  * Allow headers to reference JS::Value without #including the whole jsapi.h.
  * Unfortunately, typedefs (hence jsval) cannot be declared.
  */
-#ifdef __cplusplus
-namespace JS { class Value; }
-#endif
+class Value;
+
+template <typename T>
+class Rooted;
+
+struct Zone;
+
+} /* namespace JS */
 
 /*
  * In release builds, jsid is defined to be an integral type. This
@@ -35,8 +44,6 @@ namespace JS { class Value; }
  * oblivious to the change. This feature can be explicitly disabled in debug
  * builds by defining JS_NO_JSVAL_JSID_STRUCT_TYPES.
  */
-#ifdef __cplusplus
-
 # if defined(DEBUG) && !defined(JS_NO_JSVAL_JSID_STRUCT_TYPES)
 #  define JS_USE_JSID_STRUCT_TYPES
 # endif
@@ -53,12 +60,6 @@ struct jsid
 typedef ptrdiff_t jsid;
 #  define JSID_BITS(id) (id)
 # endif  /* defined(JS_USE_JSID_STRUCT_TYPES) */
-#else  /* defined(__cplusplus) */
-typedef ptrdiff_t jsid;
-# define JSID_BITS(id) (id)
-#endif
-
-JS_BEGIN_EXTERN_C
 
 #ifdef WIN32
 typedef wchar_t   jschar;
@@ -67,18 +68,12 @@ typedef uint16_t  jschar;
 #endif
 
 /*
- * Run-time version enumeration.  See jsversion.h for compile-time counterparts
- * to these values that may be selected by the JS_VERSION macro, and tested by
- * #if expressions.
+ * Run-time version enumeration.  For compile-time version checking, please use
+ * the JS_HAS_* macros in jsversion.h, or use MOZJS_MAJOR_VERSION,
+ * MOZJS_MINOR_VERSION, MOZJS_PATCH_VERSION, and MOZJS_ALPHA definitions.
  */
 typedef enum JSVersion {
-    JSVERSION_1_0     = 100,
-    JSVERSION_1_1     = 110,
-    JSVERSION_1_2     = 120,
-    JSVERSION_1_3     = 130,
-    JSVERSION_1_4     = 140,
     JSVERSION_ECMA_3  = 148,
-    JSVERSION_1_5     = 150,
     JSVERSION_1_6     = 160,
     JSVERSION_1_7     = 170,
     JSVERSION_1_8     = 180,
@@ -87,9 +82,6 @@ typedef enum JSVersion {
     JSVERSION_UNKNOWN = -1,
     JSVERSION_LATEST  = JSVERSION_ECMA_5
 } JSVersion;
-
-#define JSVERSION_IS_ECMA(version) \
-    ((version) == JSVERSION_DEFAULT || (version) >= JSVERSION_1_3)
 
 /* Result of typeof operator enumeration. */
 typedef enum JSType {
@@ -100,14 +92,13 @@ typedef enum JSType {
     JSTYPE_NUMBER,              /* number */
     JSTYPE_BOOLEAN,             /* boolean */
     JSTYPE_NULL,                /* null */
-    JSTYPE_XML,                 /* xml object */
     JSTYPE_LIMIT
 } JSType;
 
 /* Dense index into cached prototypes and class atoms for standard objects. */
 typedef enum JSProtoKey {
-#define JS_PROTO(name,code,init) JSProto_##name = code,
-#include "jsproto.tbl"
+#define PROTOKEY_AND_INITIALIZER(name,code,init) JSProto_##name = code,
+    JS_FOR_EACH_PROTOTYPE(PROTOKEY_AND_INITIALIZER)
 #undef JS_PROTO
     JSProto_LIMIT
 } JSProtoKey;
@@ -159,19 +150,18 @@ typedef enum {
     JSTRACE_SCRIPT,
 
     /*
-     * Trace kinds internal to the engine. The embedding can only them if it
-     * implements JSTraceCallback.
+     * Trace kinds internal to the engine. The embedding can only see them if
+     * it implements JSTraceCallback.
      */
-#if JS_HAS_XML_SUPPORT
-    JSTRACE_XML,
-#endif
+    JSTRACE_LAZY_SCRIPT,
+    JSTRACE_IONCODE,
     JSTRACE_SHAPE,
     JSTRACE_BASE_SHAPE,
     JSTRACE_TYPE_OBJECT,
     JSTRACE_LAST = JSTRACE_TYPE_OBJECT
 } JSGCTraceKind;
 
-/* Struct typedefs. */
+/* Struct typedefs and class forward declarations. */
 typedef struct JSClass                      JSClass;
 typedef struct JSCompartment                JSCompartment;
 typedef struct JSConstDoubleSpec            JSConstDoubleSpec;
@@ -179,11 +169,9 @@ typedef struct JSContext                    JSContext;
 typedef struct JSCrossCompartmentCall       JSCrossCompartmentCall;
 typedef struct JSErrorReport                JSErrorReport;
 typedef struct JSExceptionState             JSExceptionState;
-typedef struct JSFunction                   JSFunction;
 typedef struct JSFunctionSpec               JSFunctionSpec;
 typedef struct JSIdArray                    JSIdArray;
 typedef struct JSLocaleCallbacks            JSLocaleCallbacks;
-typedef struct JSObject                     JSObject;
 typedef struct JSObjectMap                  JSObjectMap;
 typedef struct JSPrincipals                 JSPrincipals;
 typedef struct JSPropertyDescriptor         JSPropertyDescriptor;
@@ -191,21 +179,17 @@ typedef struct JSPropertyName               JSPropertyName;
 typedef struct JSPropertySpec               JSPropertySpec;
 typedef struct JSRuntime                    JSRuntime;
 typedef struct JSSecurityCallbacks          JSSecurityCallbacks;
-typedef struct JSStackFrame                 JSStackFrame;
-typedef struct JSScript          JSScript;
 typedef struct JSStructuredCloneCallbacks   JSStructuredCloneCallbacks;
 typedef struct JSStructuredCloneReader      JSStructuredCloneReader;
 typedef struct JSStructuredCloneWriter      JSStructuredCloneWriter;
 typedef struct JSTracer                     JSTracer;
 
-#ifdef __cplusplus
 class                                       JSFlatString;
+class                                       JSFunction;
+class                                       JSObject;
+class                                       JSScript;
 class                                       JSStableString;  // long story
 class                                       JSString;
-#else
-typedef struct JSFlatString                 JSFlatString;
-typedef struct JSString                     JSString;
-#endif /* !__cplusplus */
 
 #ifdef JS_THREADSAFE
 typedef struct PRCallOnceType    JSCallOnceType;
@@ -214,14 +198,37 @@ typedef JSBool                   JSCallOnceType;
 #endif
 typedef JSBool                 (*JSInitCallback)(void);
 
-JS_END_EXTERN_C
-
-#ifdef __cplusplus
-
 namespace JS {
+namespace shadow {
 
-template <typename T>
-class Rooted;
+struct Runtime
+{
+    /* Restrict zone access during Minor GC. */
+    bool needsBarrier_;
+
+#ifdef JSGC_GENERATIONAL
+    /* Allow inlining of Nursery::isInside. */
+    uintptr_t gcNurseryStart_;
+    uintptr_t gcNurseryEnd_;
+#endif
+
+    Runtime()
+      : needsBarrier_(false)
+#ifdef JSGC_GENERATIONAL
+      , gcNurseryStart_(0)
+      , gcNurseryEnd_(0)
+#endif
+    {}
+};
+
+} /* namespace shadow */
+} /* namespace JS */
+
+namespace js {
+
+struct ThreadSafeContext;
+
+class Allocator;
 
 class SkipRoot;
 
@@ -232,12 +239,14 @@ enum ThingRootKind
     THING_ROOT_BASE_SHAPE,
     THING_ROOT_TYPE_OBJECT,
     THING_ROOT_STRING,
+    THING_ROOT_ION_CODE,
     THING_ROOT_SCRIPT,
-    THING_ROOT_XML,
     THING_ROOT_ID,
     THING_ROOT_PROPERTY_ID,
     THING_ROOT_VALUE,
     THING_ROOT_TYPE,
+    THING_ROOT_BINDINGS,
+    THING_ROOT_PROPERTY_DESCRIPTOR,
     THING_ROOT_LIMIT
 };
 
@@ -249,18 +258,35 @@ struct RootKind;
  * JSAPI users may use JSRooted... types without having the class definition
  * available.
  */
-template <> struct RootKind<JSObject *> { static ThingRootKind rootKind() { return THING_ROOT_OBJECT; }; };
-template <> struct RootKind<JSFunction *> { static ThingRootKind rootKind() { return THING_ROOT_OBJECT; }; };
-template <> struct RootKind<JSString *> { static ThingRootKind rootKind() { return THING_ROOT_STRING; }; };
-template <> struct RootKind<JSScript *> { static ThingRootKind rootKind() { return THING_ROOT_SCRIPT; }; };
-template <> struct RootKind<jsid> { static ThingRootKind rootKind() { return THING_ROOT_ID; }; };
-template <> struct RootKind<Value> { static ThingRootKind rootKind() { return THING_ROOT_VALUE; }; };
+template<typename T, ThingRootKind Kind>
+struct SpecificRootKind
+{
+    static ThingRootKind rootKind() { return Kind; }
+};
 
-struct ContextFriendFields {
-    JSRuntime *const    runtime;
+template <> struct RootKind<JSObject *> : SpecificRootKind<JSObject *, THING_ROOT_OBJECT> {};
+template <> struct RootKind<JSFlatString *> : SpecificRootKind<JSFlatString *, THING_ROOT_STRING> {};
+template <> struct RootKind<JSFunction *> : SpecificRootKind<JSFunction *, THING_ROOT_OBJECT> {};
+template <> struct RootKind<JSString *> : SpecificRootKind<JSString *, THING_ROOT_STRING> {};
+template <> struct RootKind<JSScript *> : SpecificRootKind<JSScript *, THING_ROOT_SCRIPT> {};
+template <> struct RootKind<jsid> : SpecificRootKind<jsid, THING_ROOT_ID> {};
+template <> struct RootKind<JS::Value> : SpecificRootKind<JS::Value, THING_ROOT_VALUE> {};
 
-    ContextFriendFields(JSRuntime *rt)
-      : runtime(rt) { }
+struct ContextFriendFields
+{
+  protected:
+    JSRuntime *const     runtime_;
+
+    /* The current compartment. */
+    JSCompartment       *compartment_;
+
+    /* The current zone. */
+    JS::Zone            *zone_;
+
+  public:
+    explicit ContextFriendFields(JSRuntime *rt)
+      : runtime_(rt), compartment_(NULL), zone_(NULL)
+    { }
 
     static const ContextFriendFields *get(const JSContext *cx) {
         return reinterpret_cast<const ContextFriendFields *>(cx);
@@ -275,7 +301,7 @@ struct ContextFriendFields {
      * Stack allocated GC roots for stack GC heap pointers, which may be
      * overwritten if moved during a GC.
      */
-    Rooted<void*> *thingGCRooters[THING_ROOT_LIMIT];
+    JS::Rooted<void*> *thingGCRooters[THING_ROOT_LIMIT];
 #endif
 
 #if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
@@ -289,10 +315,79 @@ struct ContextFriendFields {
      */
     SkipRoot *skipGCRooters;
 #endif
+
+    friend JSRuntime *GetRuntime(const JSContext *cx);
+    friend JSCompartment *GetContextCompartment(const JSContext *cx);
+    friend JS::Zone *GetContextZone(const JSContext *cx);
 };
 
-} /* namespace JS */
+class PerThreadData;
 
-#endif /* __cplusplus */
+struct PerThreadDataFriendFields
+{
+  private:
+    // Note: this type only exists to permit us to derive the offset of
+    // the perThread data within the real JSRuntime* type in a portable
+    // way.
+    struct RuntimeDummy : JS::shadow::Runtime
+    {
+        struct PerThreadDummy {
+            void *field1;
+            uintptr_t field2;
+#ifdef DEBUG
+            uint64_t field3;
+#endif
+        } mainThread;
+    };
 
-#endif /* jspubtd_h___ */
+  public:
+
+    PerThreadDataFriendFields();
+
+#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
+    /*
+     * Stack allocated GC roots for stack GC heap pointers, which may be
+     * overwritten if moved during a GC.
+     */
+    JS::Rooted<void*> *thingGCRooters[THING_ROOT_LIMIT];
+#endif
+
+#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
+    /*
+     * Stack allocated list of stack locations which hold non-relocatable
+     * GC heap pointers (where the target is rooted somewhere else) or integer
+     * values which may be confused for GC heap pointers. These are used to
+     * suppress false positives which occur when a rooting analysis treats the
+     * location as holding a relocatable pointer, but have no other effect on
+     * GC behavior.
+     */
+    SkipRoot *skipGCRooters;
+#endif
+
+    /* Limit pointer for checking native stack consumption. */
+    uintptr_t nativeStackLimit;
+
+    static const size_t RuntimeMainThreadOffset = offsetof(RuntimeDummy, mainThread);
+
+    static inline PerThreadDataFriendFields *get(js::PerThreadData *pt) {
+        return reinterpret_cast<PerThreadDataFriendFields *>(pt);
+    }
+
+    static inline PerThreadDataFriendFields *getMainThread(JSRuntime *rt) {
+        // mainThread must always appear directly after |JS::shadow::Runtime|.
+        // Tested by a JS_STATIC_ASSERT in |jsfriendapi.cpp|
+        return reinterpret_cast<PerThreadDataFriendFields *>(
+            reinterpret_cast<char*>(rt) + RuntimeMainThreadOffset);
+    }
+
+    static inline const PerThreadDataFriendFields *getMainThread(const JSRuntime *rt) {
+        // mainThread must always appear directly after |JS::shadow::Runtime|.
+        // Tested by a JS_STATIC_ASSERT in |jsfriendapi.cpp|
+        return reinterpret_cast<const PerThreadDataFriendFields *>(
+            reinterpret_cast<const char*>(rt) + RuntimeMainThreadOffset);
+    }
+};
+
+} /* namespace js */
+
+#endif /* jspubtd_h */

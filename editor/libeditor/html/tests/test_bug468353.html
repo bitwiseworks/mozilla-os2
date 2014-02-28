@@ -41,8 +41,7 @@ function checkStylesheets() {
 }
 
 function runTest() {
-  const Ci = Components.interfaces;
-  const Cc = Components.classes;
+  const Ci = SpecialPowers.Ci;
 
   /** Found while fixing bug 440614 **/
   var editframe = window.frames[0];

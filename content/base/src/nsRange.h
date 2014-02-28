@@ -12,17 +12,33 @@
 
 #include "nsIDOMRange.h"
 #include "nsCOMPtr.h"
-#include "nsIDOMDocumentFragment.h"
 #include "nsINode.h"
+#include "nsIDocument.h"
 #include "nsIDOMNode.h"
 #include "prmon.h"
 #include "nsStubMutationObserver.h"
+#include "nsWrapperCache.h"
+#include "mozilla/Attributes.h"
 
-class nsRange : public nsIDOMRange,
-                public nsStubMutationObserver
+class nsClientRect;
+class nsClientRectList;
+class nsIDOMDocumentFragment;
+
+namespace mozilla {
+class ErrorResult;
+namespace dom {
+class DocumentFragment;
+}
+}
+
+class nsRange MOZ_FINAL : public nsIDOMRange,
+                          public nsStubMutationObserver,
+                          public nsWrapperCache
 {
+  typedef mozilla::ErrorResult ErrorResult;
+
 public:
-  nsRange()
+  nsRange(nsINode* aNode)
     : mRoot(nullptr)
     , mStartOffset(0)
     , mEndOffset(0)
@@ -30,7 +46,18 @@ public:
     , mIsDetached(false)
     , mMaySpanAnonymousSubtrees(false)
     , mInSelection(false)
-  {}
+    , mStartOffsetWasIncremented(false)
+    , mEndOffsetWasIncremented(false)
+    , mEnableGravitationOnElementRemoval(true)
+#ifdef DEBUG
+    , mAssertNextInsertOrAppendIndex(-1)
+    , mAssertNextInsertOrAppendNode(nullptr)
+#endif
+  {
+    SetIsDOMBinding();
+    MOZ_ASSERT(aNode, "range isn't in a document!");
+    mOwner = aNode->OwnerDoc();
+  }
   virtual ~nsRange();
 
   static nsresult CreateRange(nsIDOMNode* aStartParent, int32_t aStartOffset,
@@ -39,9 +66,26 @@ public:
   static nsresult CreateRange(nsIDOMNode* aStartParent, int32_t aStartOffset,
                               nsIDOMNode* aEndParent, int32_t aEndOffset,
                               nsIDOMRange** aRange);
+  static nsresult CreateRange(nsINode* aStartParent, int32_t aStartOffset,
+                              nsINode* aEndParent, int32_t aEndOffset,
+                              nsRange** aRange);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsRange, nsIDOMRange)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsRange, nsIDOMRange)
+
+  /**
+   * The DOM Range spec requires that when a node is removed from its parent,
+   * and the node's subtree contains the start or end point of a range, that
+   * start or end point is moved up to where the node was removed from its
+   * parent.
+   * For some internal uses of Ranges it's useful to disable that behavior,
+   * so that a range of children within a single parent is preserved even if
+   * that parent is removed from the document tree.
+   */
+  void SetEnableGravitationOnElementRemoval(bool aEnable)
+  {
+    mEnableGravitationOnElementRemoval = aEnable;
+  }
 
   // nsIDOMRange interface
   NS_DECL_NSIDOMRANGE
@@ -74,12 +118,6 @@ public:
   bool IsPositioned() const
   {
     return mIsPositioned;
-  }
-
-  bool Collapsed() const
-  {
-    return mIsPositioned && mStartParent == mEndParent &&
-           mStartOffset == mEndOffset;
   }
 
   void SetMaySpanAnonymousSubtrees(bool aMaySpanAnonymousSubtrees)
@@ -140,6 +178,50 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_PARENTCHAINCHANGED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
 
+  // WebIDL
+  static already_AddRefed<nsRange>
+  Constructor(const mozilla::dom::GlobalObject& global,
+              mozilla::ErrorResult& aRv);
+
+  bool Collapsed() const
+  {
+    return mIsPositioned && mStartParent == mEndParent &&
+           mStartOffset == mEndOffset;
+  }
+  already_AddRefed<mozilla::dom::DocumentFragment>
+  CreateContextualFragment(const nsAString& aString, ErrorResult& aError);
+  already_AddRefed<mozilla::dom::DocumentFragment>
+  CloneContents(ErrorResult& aErr);
+  int16_t CompareBoundaryPoints(uint16_t aHow, nsRange& aOther,
+                                ErrorResult& aErr);
+  int16_t ComparePoint(nsINode& aParent, uint32_t aOffset, ErrorResult& aErr);
+  void DeleteContents(ErrorResult& aRv);
+  already_AddRefed<mozilla::dom::DocumentFragment>
+    ExtractContents(ErrorResult& aErr);
+  nsINode* GetCommonAncestorContainer(ErrorResult& aRv) const;
+  nsINode* GetStartContainer(ErrorResult& aRv) const;
+  uint32_t GetStartOffset(ErrorResult& aRv) const;
+  nsINode* GetEndContainer(ErrorResult& aRv) const;
+  uint32_t GetEndOffset(ErrorResult& aRv) const;
+  void InsertNode(nsINode& aNode, ErrorResult& aErr);
+  bool IntersectsNode(nsINode& aNode, ErrorResult& aRv);
+  bool IsPointInRange(nsINode& aParent, uint32_t aOffset, ErrorResult& aErr);
+  void SelectNode(nsINode& aNode, ErrorResult& aErr);
+  void SelectNodeContents(nsINode& aNode, ErrorResult& aErr);
+  void SetEnd(nsINode& aNode, uint32_t aOffset, ErrorResult& aErr);
+  void SetEndAfter(nsINode& aNode, ErrorResult& aErr);
+  void SetEndBefore(nsINode& aNode, ErrorResult& aErr);
+  void SetStart(nsINode& aNode, uint32_t aOffset, ErrorResult& aErr);
+  void SetStartAfter(nsINode& aNode, ErrorResult& aErr);
+  void SetStartBefore(nsINode& aNode, ErrorResult& aErr);
+  void SurroundContents(nsINode& aNode, ErrorResult& aErr);
+  already_AddRefed<nsClientRect> GetBoundingClientRect();
+  already_AddRefed<nsClientRectList> GetClientRects();
+
+  nsINode* GetParentObject() const { return mOwner; }
+  virtual JSObject* WrapObject(JSContext* cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE MOZ_FINAL;
+
 private:
   // no copy's or assigns
   nsRange(const nsRange&);
@@ -151,7 +233,7 @@ private:
    * @param aFragment nsIDOMDocumentFragment containing the nodes.
    *                  May be null to indicate the caller doesn't want a fragment.
    */
-  nsresult CutContents(nsIDOMDocumentFragment** frag);
+  nsresult CutContents(mozilla::dom::DocumentFragment** frag);
 
   static nsresult CloneParentsBetween(nsIDOMNode *aAncestor,
                                       nsIDOMNode *aNode,
@@ -197,7 +279,7 @@ protected:
    */
   nsINode* GetRegisteredCommonAncestor();
 
-  struct NS_STACK_CLASS AutoInvalidateSelection
+  struct MOZ_STACK_CLASS AutoInvalidateSelection
   {
     AutoInvalidateSelection(nsRange* aRange) : mRange(aRange)
     {
@@ -218,7 +300,8 @@ protected:
 #endif
     static bool mIsNested;
   };
-  
+
+  nsCOMPtr<nsIDocument> mOwner;
   nsCOMPtr<nsINode> mRoot;
   nsCOMPtr<nsINode> mStartParent;
   nsCOMPtr<nsINode> mEndParent;
@@ -229,6 +312,25 @@ protected:
   bool mIsDetached;
   bool mMaySpanAnonymousSubtrees;
   bool mInSelection;
+  bool mStartOffsetWasIncremented;
+  bool mEndOffsetWasIncremented;
+  bool mEnableGravitationOnElementRemoval;
+#ifdef DEBUG
+  int32_t  mAssertNextInsertOrAppendIndex;
+  nsINode* mAssertNextInsertOrAppendNode;
+#endif
 };
+
+inline nsISupports*
+ToCanonicalSupports(nsRange* aRange)
+{
+  return static_cast<nsIDOMRange*>(aRange);
+}
+
+inline nsISupports*
+ToSupports(nsRange* aRange)
+{
+  return static_cast<nsIDOMRange*>(aRange);
+}
 
 #endif /* nsRange_h___ */

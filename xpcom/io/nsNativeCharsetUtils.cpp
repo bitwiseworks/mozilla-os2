@@ -296,6 +296,12 @@ bool    nsNativeCharsetConverter::gIsNativeUTF8    = false;
 void
 nsNativeCharsetConverter::LazyInit()
 {
+    // LazyInit may be called before NS_StartupNativeCharsetUtils, but
+    // the setlocale it does has to be called before nl_langinfo. Like in
+    // NS_StartupNativeCharsetUtils, assume we are called early enough that
+    // we are the first to care about the locale's charset.
+    if (!gLock)
+      setlocale(LC_CTYPE, "");
     const char  *blank_list[] = { "", NULL };
     const char **native_charset_list = blank_list;
     const char  *native_charset = nl_langinfo(CODESET);
@@ -782,7 +788,7 @@ NS_CopyNativeToUnicode(const nsACString &input, nsAString &output)
     // this will generally result in a larger allocation, but that seems
     // better than an extra buffer copy.
     //
-    if (!EnsureStringLength(output, inputLen))
+    if (!output.SetLength(inputLen, fallible_t()))
         return NS_ERROR_OUT_OF_MEMORY;
     nsAString::iterator out_iter;
     output.BeginWriting(out_iter);
@@ -868,6 +874,8 @@ NS_ShutdownNativeCharsetUtils()
 #include "nsAString.h"
 #include "nsReadableUtils.h"
 
+using namespace mozilla;
+
 nsresult
 NS_CopyNativeToUnicode(const nsACString &input, nsAString &output)
 {
@@ -885,7 +893,7 @@ NS_CopyNativeToUnicode(const nsACString &input, nsAString &output)
         resultLen += n;
 
     // allocate sufficient space
-    if (!EnsureStringLength(output, resultLen))
+    if (!output.SetLength(resultLen, fallible_t()))
         return NS_ERROR_OUT_OF_MEMORY;
     if (resultLen > 0) {
         nsAString::iterator out_iter;
@@ -916,7 +924,7 @@ NS_CopyUnicodeToNative(const nsAString  &input, nsACString &output)
         resultLen += n;
 
     // allocate sufficient space
-    if (!EnsureStringLength(output, resultLen))
+    if (!output.SetLength(resultLen, fallible_t()))
         return NS_ERROR_OUT_OF_MEMORY;
     if (resultLen > 0) {
         nsACString::iterator out_iter;
@@ -983,6 +991,8 @@ NS_ConvertWtoA(const PRUnichar *aStrInW, int aBufferSizeOut,
 #include <ulserrno.h>
 #include "nsNativeCharsetUtils.h"
 
+using namespace mozilla;
+
 static UconvObject UnicodeConverter = NULL;
 
 nsresult
@@ -996,7 +1006,7 @@ NS_CopyNativeToUnicode(const nsACString &input, nsAString  &output)
 
     // determine length of result
     uint32_t resultLen = inputLen;
-    if (!EnsureStringLength(output, resultLen))
+    if (!output.SetLength(resultLen, fallible_t()))
         return NS_ERROR_OUT_OF_MEMORY;
 
     nsAString::iterator out_iter;
@@ -1037,7 +1047,7 @@ NS_CopyUnicodeToNative(const nsAString &input, nsACString &output)
     // maximum length of unicode string of length x converted to native
     // codepage is x*2
     size_t resultLen = inputLen * 2;
-    if (!EnsureStringLength(output, resultLen))
+    if (!output.SetLength(resultLen, fallible_t()))
         return NS_ERROR_OUT_OF_MEMORY;
 
     nsACString::iterator out_iter;

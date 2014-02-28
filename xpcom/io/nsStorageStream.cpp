@@ -22,6 +22,7 @@
 #include "nsISeekableStream.h"
 #include "prlog.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Likely.h"
 
 #if defined(PR_LOGGING)
 //
@@ -35,9 +36,16 @@
 // this enables PR_LOG_DEBUG level information and places all output in
 // the file nspr.log
 //
-static PRLogModuleInfo* sLog = PR_NewLogModule("nsStorageStream");
+static PRLogModuleInfo*
+GetStorageStreamLog()
+{
+    static PRLogModuleInfo *sLog;
+    if (!sLog)
+        sLog = PR_NewLogModule("nsStorageStream");
+    return sLog;
+}
 #endif
-#define LOG(args) PR_LOG(sLog, PR_LOG_DEBUG, args)
+#define LOG(args) PR_LOG(GetStorageStreamLog(), PR_LOG_DEBUG, args)
 
 nsStorageStream::nsStorageStream()
     : mSegmentedBuffer(0), mSegmentSize(0), mWriteInProgress(false),
@@ -155,7 +163,7 @@ nsStorageStream::Write(const char *aBuffer, uint32_t aCount, uint32_t *aNumWritt
     // even for N=0 (with the caveat that we require .write("", 0) be called to
     // initialize internal buffers).
     bool firstTime = mSegmentedBuffer->GetSegmentCount() == 0;
-    while (remaining || NS_UNLIKELY(firstTime)) {
+    while (remaining || MOZ_UNLIKELY(firstTime)) {
         firstTime = false;
         availableInSegment = mSegmentEnd - mWriteCursor;
         if (!availableInSegment) {
@@ -172,7 +180,7 @@ nsStorageStream::Write(const char *aBuffer, uint32_t aCount, uint32_t *aNumWritt
                 this, mWriteCursor, mSegmentEnd));
         }
 	
-        count = NS_MIN(availableInSegment, remaining);
+        count = XPCOM_MIN(availableInSegment, remaining);
         memcpy(mWriteCursor, readCursor, count);
         remaining -= count;
         readCursor += count;
@@ -410,12 +418,12 @@ nsStorageInputStream::ReadSegments(nsWriteSegmentFun writer, void * closure, uin
 
             mSegmentNum++;
             mReadCursor = 0;
-            mSegmentEnd = NS_MIN(mSegmentSize, available);
+            mSegmentEnd = XPCOM_MIN(mSegmentSize, available);
             availableInSegment = mSegmentEnd;
         }
         const char *cur = mStorageStream->mSegmentedBuffer->GetSegment(mSegmentNum);
 	
-        count = NS_MIN(availableInSegment, remainingCapacity);
+        count = XPCOM_MIN(availableInSegment, remainingCapacity);
         rv = writer(this, closure, cur + mReadCursor, aCount - remainingCapacity,
                     count, &bytesConsumed);
         if (NS_FAILED(rv) || (bytesConsumed == 0))
@@ -481,7 +489,7 @@ nsStorageInputStream::Tell(int64_t *aResult)
     if (NS_FAILED(mStatus))
         return mStatus;
 
-    LL_UI2L(*aResult, mLogicalCursor);
+    *aResult = mLogicalCursor;
     return NS_OK;
 }
 
@@ -505,7 +513,7 @@ nsStorageInputStream::Seek(uint32_t aPosition)
     mSegmentNum = SegNum(aPosition);
     mReadCursor = SegOffset(aPosition);
     uint32_t available = length - aPosition;
-    mSegmentEnd = mReadCursor + NS_MIN(mSegmentSize - mReadCursor, available);
+    mSegmentEnd = mReadCursor + XPCOM_MIN(mSegmentSize - mReadCursor, available);
     mLogicalCursor = aPosition;
     return NS_OK;
 }

@@ -22,7 +22,7 @@ namespace {
 class Navigator
 {
   static JSClass sClass;
-  static JSPropertySpec sProperties[];
+  static const JSPropertySpec sProperties[];
 
   enum SLOT {
     SLOT_appName = 0,
@@ -50,7 +50,7 @@ public:
     const RuntimeService::NavigatorStrings& strings =
       rts->GetNavigatorStrings();
 
-    JSString* appName, *version, *platform, *userAgent;
+    JS::Rooted<JSString*> appName(aCx), version(aCx), platform(aCx), userAgent(aCx);
 
 #define COPY_STRING(_jsstr, _str)                                              \
   if (strings. _str .IsEmpty()) {                                              \
@@ -117,7 +117,8 @@ private:
   }
 
   static JSBool
-  GetProperty(JSContext* aCx, JSHandleObject aObj, JSHandleId aIdval, JSMutableHandleValue aVp)
+  GetProperty(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
+              JS::MutableHandle<JS::Value> aVp)
   {
     JSClass* classPtr = JS_GetClass(aObj);
     if (classPtr != &sClass) {
@@ -138,11 +139,11 @@ private:
 JSClass Navigator::sClass = {
   "WorkerNavigator",
   JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(SLOT_COUNT),
-  JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Finalize
 };
 
-JSPropertySpec Navigator::sProperties[] = {
+const JSPropertySpec Navigator::sProperties[] = {
   { "appName", SLOT_appName, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),
     JSOP_WRAPPER(js_GetterOnlyPropertyStub) },
   { "appVersion", SLOT_appVersion, PROPERTY_FLAGS, JSOP_WRAPPER(GetProperty),

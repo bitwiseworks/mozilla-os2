@@ -1,0 +1,57 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+DIRS += ['standalone', 'nomozalloc']
+
+# On win we build two glue libs - glue linked to crt dlls here and in staticruntime we build
+# a statically linked glue lib.
+if CONFIG['OS_ARCH'] == 'WINNT':
+    DIRS += ['staticruntime']
+
+MODULE = 'xpcom'
+
+EXPORTS += [
+    'nsCycleCollectionNoteChild.h',
+    'nsCycleCollectionNoteRootCallback.h',
+    'nsCycleCollectionTraversalCallback.h',
+    'nsCycleCollectorUtils.h',
+    'nsProxyRelease.h',
+    'nsTPriorityQueue.h',
+    'nsThreadUtils.h',
+    'nsXPTCUtils.h',
+]
+
+EXPORTS.mozilla += [
+    'AppData.h',
+    'AutoRestore.h',
+    'BlockingResourceBase.h',
+    'CondVar.h',
+    'DeadlockDetector.h',
+    'FileUtils.h',
+    'GenericFactory.h',
+    'IntentionalCrash.h',
+    'Monitor.h',
+    'Mutex.h',
+    'Observer.h',
+    'ReentrantMonitor.h',
+    'SSE.h',
+    'arm.h',
+    'unused.h',
+]
+
+EXPORTS.mozilla.threads += [
+    'nsThreadIDs.h',
+]
+
+CPP_SOURCES += [
+    '$(XPCOM_GLUENS_SRC_LCPPSRCS)',
+    '$(XPCOM_GLUE_SRC_LCPPSRCS)',
+    'GenericModule.cpp',
+    'nsStringAPI.cpp',
+]
+
+LIBRARY_NAME = 'xpcomglue_s'
+

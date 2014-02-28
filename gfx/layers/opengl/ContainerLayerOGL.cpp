@@ -5,6 +5,8 @@
 
 #include "ContainerLayerOGL.h"
 #include "gfxUtils.h"
+#include "gfxPlatform.h"
+#include "GLContext.h"
 
 namespace mozilla {
 namespace layers {
@@ -192,8 +194,19 @@ ContainerRender(Container* aContainer,
   const gfx3DMatrix& transform = aContainer->GetEffectiveTransform();
   bool needsFramebuffer = aContainer->UseIntermediateSurface();
   if (needsFramebuffer) {
-    LayerManagerOGL::InitMode mode = LayerManagerOGL::InitModeClear;
     nsIntRect framebufferRect = visibleRect;
+    // we're about to create a framebuffer backed by textures to use as an intermediate
+    // surface. What to do if its size (as given by framebufferRect) would exceed the
+    // maximum texture size supported by the GL? The present code chooses the compromise
+    // of just clamping the framebuffer's size to the max supported size.
+    // This gives us a lower resolution rendering of the intermediate surface (children layers).
+    // See bug 827170 for a discussion.
+    GLint maxTexSize;
+    aContainer->gl()->fGetIntegerv(LOCAL_GL_MAX_TEXTURE_SIZE, &maxTexSize);
+    framebufferRect.width = std::min(framebufferRect.width, maxTexSize);
+    framebufferRect.height = std::min(framebufferRect.height, maxTexSize);
+
+    LayerManagerOGL::InitMode mode = LayerManagerOGL::InitModeClear;
     if (aContainer->GetEffectiveVisibleRegion().GetNumRects() == 1 && 
         (aContainer->GetContentFlags() & Layer::CONTENT_OPAQUE))
     {
@@ -209,21 +222,28 @@ ContainerRender(Container* aContainer,
       // not safe.
       if (HasOpaqueAncestorLayer(aContainer) &&
           transform3D.Is2D(&transform) && !transform.HasNonIntegerTranslation()) {
-        mode = LayerManagerOGL::InitModeCopy;
+        mode = gfxPlatform::GetPlatform()->UsesSubpixelAATextRendering() ?
+          LayerManagerOGL::InitModeCopy :
+          LayerManagerOGL::InitModeClear;
         framebufferRect.x += transform.x0;
         framebufferRect.y += transform.y0;
-        aContainer->mSupportsComponentAlphaChildren = true;
+        aContainer->mSupportsComponentAlphaChildren = gfxPlatform::GetPlatform()->UsesSubpixelAATextRendering();
       }
     }
 
     aContainer->gl()->PushViewportRect();
     framebufferRect -= childOffset;
     if (!aManager->CompositingDisabled()) {
-      aManager->CreateFBOWithTexture(framebufferRect,
-                                     mode,
-                                     aPreviousFrameBuffer,
-                                     &frameBuffer,
-                                     &containerSurface);
+      if (!aManager->CreateFBOWithTexture(framebufferRect,
+                                          mode,
+                                          aPreviousFrameBuffer,
+                                          &frameBuffer,
+                                          &containerSurface)) {
+        aContainer->gl()->PopViewportRect();
+        aContainer->gl()->PopScissorRect();
+        aContainer->gl()->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, aPreviousFrameBuffer);
+        return;
+      }
     }
     childOffset.x = visibleRect.x;
     childOffset.y = visibleRect.y;
@@ -279,9 +299,9 @@ ContainerRender(Container* aContainer,
     aManager->SetupPipeline(viewport.width, viewport.height,
                             LayerManagerOGL::ApplyWorldTransform);
     aContainer->gl()->PopScissorRect();
-    aContainer->gl()->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, aPreviousFrameBuffer);
 
     if (!aManager->CompositingDisabled()) {
+      aContainer->gl()->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, aPreviousFrameBuffer);
       aContainer->gl()->fDeleteFramebuffers(1, &frameBuffer);
 
       aContainer->gl()->fActiveTexture(LOCAL_GL_TEXTURE0);
@@ -381,115 +401,6 @@ void
 ContainerLayerOGL::CleanupResources()
 {
   ContainerCleanupResources(this);
-}
-
-ShadowContainerLayerOGL::ShadowContainerLayerOGL(LayerManagerOGL *aManager)
-  : ShadowContainerLayer(aManager, NULL)
-  , LayerOGL(aManager)
-{
-  mImplData = static_cast<LayerOGL*>(this);
-}
- 
-ShadowContainerLayerOGL::~ShadowContainerLayerOGL()
-{
-  // We don't Destroy() on destruction here because this destructor
-  // can be called after remote content has crashed, and it may not be
-  // safe to free the IPC resources of our children.  Those resources
-  // are automatically cleaned up by IPDL-generated code.
-  //
-  // In the common case of normal shutdown, either
-  // LayerManagerOGL::Destroy(), a parent
-  // *ContainerLayerOGL::Destroy(), or Disconnect() will trigger
-  // cleanup of our resources.
-  while (mFirstChild) {
-    ContainerRemoveChild(this, mFirstChild);
-  }
-}
-
-void
-ShadowContainerLayerOGL::InsertAfter(Layer* aChild, Layer* aAfter)
-{
-  ContainerInsertAfter(this, aChild, aAfter);
-}
-
-void
-ShadowContainerLayerOGL::RemoveChild(Layer *aChild)
-{
-  ContainerRemoveChild(this, aChild);
-}
-
-void
-ShadowContainerLayerOGL::RepositionChild(Layer* aChild, Layer* aAfter)
-{
-  ContainerRepositionChild(this, aChild, aAfter);
-}
-
-void
-ShadowContainerLayerOGL::Destroy()
-{
-  ContainerDestroy(this);
-}
-
-LayerOGL*
-ShadowContainerLayerOGL::GetFirstChildOGL()
-{
-  if (!mFirstChild) {
-    return nullptr;
-   }
-  return static_cast<LayerOGL*>(mFirstChild->ImplData());
-}
- 
-void
-ShadowContainerLayerOGL::RenderLayer(int aPreviousFrameBuffer,
-                                     const nsIntPoint& aOffset)
-{
-  ContainerRender(this, aPreviousFrameBuffer, aOffset, mOGLManager);
-}
-
-void
-ShadowContainerLayerOGL::CleanupResources()
-{
-  ContainerCleanupResources(this);
-}
-
-ShadowRefLayerOGL::ShadowRefLayerOGL(LayerManagerOGL* aManager)
-  : ShadowRefLayer(aManager, NULL)
-  , LayerOGL(aManager)
-{
-  mImplData = static_cast<LayerOGL*>(this);
-}
-
-ShadowRefLayerOGL::~ShadowRefLayerOGL()
-{
-  Destroy();
-}
-
-void
-ShadowRefLayerOGL::Destroy()
-{
-  MOZ_ASSERT(!mFirstChild);
-  mDestroyed = true;
-}
-
-LayerOGL*
-ShadowRefLayerOGL::GetFirstChildOGL()
-{
-  if (!mFirstChild) {
-    return nullptr;
-   }
-  return static_cast<LayerOGL*>(mFirstChild->ImplData());
-}
-
-void
-ShadowRefLayerOGL::RenderLayer(int aPreviousFrameBuffer,
-                               const nsIntPoint& aOffset)
-{
-  ContainerRender(this, aPreviousFrameBuffer, aOffset, mOGLManager);
-}
-
-void
-ShadowRefLayerOGL::CleanupResources()
-{
 }
 
 } /* layers */

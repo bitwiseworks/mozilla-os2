@@ -96,6 +96,10 @@ public:
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
+  virtual void MaskSurface(const Pattern &aSource,
+                           SourceSurface *aMask,
+                           Point aOffset,
+                           const DrawOptions &aOptions = DrawOptions());
 
   virtual void FillRect(const Rect &aRect,
                         const Pattern &aPattern,
@@ -150,8 +154,6 @@ private:
   IntSize mSize;
   CGColorSpaceRef mColorSpace;
   CGContextRef mCg;
-
-  GLuint mIOSurfaceTexture;
 
   /**
    * A pointer to the image buffer if the buffer is owned by this class (set to

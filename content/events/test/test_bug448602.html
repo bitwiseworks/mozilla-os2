@@ -19,20 +19,20 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=448602
 
 /** Test for Bug 448602 **/
 
+var els, root, l2, l3;
 
 function runTests() {
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
 /*
   Disabled due to lack of present support for JSD in JM
-  var jsdIDebuggerService = Components.interfaces.jsdIDebuggerService;
-  var jsd = Components.classes['@mozilla.org/js/jsd/debugger-service;1']
+  var jsdIDebuggerService = SpecialPowers.Ci.jsdIDebuggerService;
+  var jsd = SpecialPowers.Components.classes['@mozilla.org/js/jsd/debugger-service;1']
                       .getService(jsdIDebuggerService);
 */
-  var els = Components.classes["@mozilla.org/eventlistenerservice;1"]
-                      .getService(Components.interfaces.nsIEventListenerService);
+  els = SpecialPowers.Cc["@mozilla.org/eventlistenerservice;1"]
+                     .getService(SpecialPowers.Ci.nsIEventListenerService);
 
   // Event listener info tests
-  var root = document.getElementById("testroot");
+  root = document.getElementById("testroot");
   var infos = els.getListenerInfoFor(root, {});
   is(infos.length, 0, "Element shouldn't have listeners (1)");
 
@@ -45,6 +45,8 @@ function runTests() {
   is(infos[0].type, "click", "Wrong type (1)");
   is(infos[0].capturing, false, "Wrong phase (1)");
   is(infos[0].allowsUntrusted, true, "Should allow untrusted events (1)");
+  is(SpecialPowers.unwrap(infos[0].listenerObject), root.onclick,
+     "Should have the right listener object (1)");
 
 /*
   var jsdOn = jsd.isOn;
@@ -54,7 +56,7 @@ function runTests() {
     jsd.on();
     ok(jsd.isOn, "JSD should be running.");
   }
-  var jsdvalue = infos[0].getDebugObject().QueryInterface(Components.interfaces.jsdIValue);
+  var jsdvalue = infos[0].getDebugObject().QueryInterface(SpecialPowers.Ci.jsdIValue);
   is(jsdvalue.jsType, 3, "Event listener should be a function! (1)");
 */
 
@@ -72,8 +74,10 @@ function runTests() {
   is(infos[0].type, "foo", "Wrong type (2)");
   is(infos[0].capturing, true, "Wrong phase (2)");
   is(infos[0].allowsUntrusted, true, "Should allow untrusted events (2)");
+  is(SpecialPowers.unwrap(infos[0].listenerObject), l,
+     "Should have the right listener object (2)");
 /*
-  jsdvalue = infos[0].getDebugObject().QueryInterface(Components.interfaces.jsdIValue);
+  jsdvalue = infos[0].getDebugObject().QueryInterface(SpecialPowers.Ci.jsdIValue);
   is(jsdvalue.jsType, 3, "Event listener should be a function!(2)");
   is(jsdvalue.getWrappedValue(), l, "Wrong JS value! (1)");
 */
@@ -83,9 +87,11 @@ function runTests() {
   is(infos[1].type, "foo", "Wrong type (3)");
   is(infos[1].capturing, false, "Wrong phase (3)");
   is(infos[1].allowsUntrusted, false, "Shouldn't allow untrusted events (1)");
+  is(SpecialPowers.unwrap(infos[1].listenerObject), l,
+     "Should have the right listener object (3)");
 
 /*
-  jsdvalue2 = infos[1].getDebugObject().QueryInterface(Components.interfaces.jsdIValue);
+  jsdvalue2 = infos[1].getDebugObject().QueryInterface(SpecialPowers.Ci.jsdIValue);
   is(jsdvalue2.jsType, 3, "Event listener should be a function! (3)");
   is(jsdvalue2.getWrappedValue(), l, "Wrong JS value! (2)");
 */
@@ -102,24 +108,26 @@ function runTests() {
   is(infos[0].type, "click", "Wrong type (4)");
   is(infos[0].capturing, false, "Wrong phase (4)");
   is(infos[0].allowsUntrusted, true, "Should allow untrusted events (3)");
+  is(SpecialPowers.unwrap(infos[0].listenerObject), l,
+     "Should have the right listener object (4)");
 
   // Event target chain tests
-  var l2 = document.getElementById("testlevel2");
-  var l3 = document.getElementById("testlevel3");
+  l2 = document.getElementById("testlevel2");
+  l3 = document.getElementById("testlevel3");
   var textnode = l3.firstChild;
   var chain = els.getEventTargetChainFor(textnode, {});
   ok(chain.length > 3, "Too short event target chain.");
-  is(chain[0], textnode, "Wrong chain item (1)");
-  is(chain[1], l3, "Wrong chain item (2)");
-  is(chain[2], l2, "Wrong chain item (3)");
-  is(chain[3], root, "Wrong chain item (4)");
+  ok(SpecialPowers.compare(chain[0], textnode), "Wrong chain item (1)");
+  ok(SpecialPowers.compare(chain[1], l3), "Wrong chain item (2)");
+  ok(SpecialPowers.compare(chain[2], l2), "Wrong chain item (3)");
+  ok(SpecialPowers.compare(chain[3], root), "Wrong chain item (4)");
 
   var hasDocumentInChain = false;
   var hasWindowInChain = false;
   for (var i = 0; i < chain.length; ++i) {
-    if (chain[i] == document) {
+    if (SpecialPowers.compare(chain[i], document)) {
       hasDocumentInChain = true;
-    } else if (chain[i] == window) {
+    } else if (SpecialPowers.compare(chain[i], window)) {
       hasWindowInChain = true;
     }
   }
@@ -139,10 +147,91 @@ function runTests() {
   } catch (ex) {
     ok(true, "We should be still running.");
   }
-  
-  SimpleTest.finish();
+  setTimeout(testAllListener, 0);
 }
 
+function dispatchTrusted(t, o) {
+  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+  t.dispatchEvent(new Event("testevent", o));
+}
+
+function testAllListener() {
+  els = SpecialPowers.wrap(els);
+  var results = [];
+  var expectedResults =
+    [ { target: "testlevel3", phase: 3, trusted: false },
+      { target: "testlevel3", phase: 3, trusted: false },
+      { target: "testlevel3", phase: 3, trusted: true },
+      { target: "testlevel3", phase: 3, trusted: true },
+      { target: "testlevel3", phase: 3, trusted: true }
+    ];
+
+  function allListener(e) {
+    results.push({
+                   target: e.target.id,
+                   phase: e.eventPhase,
+                   trusted: e.isTrusted
+                  });
+    e.stopPropagation();
+  }
+  function allListenerTrustedOnly(e) {
+    results.push({
+                   target: e.target.id,
+                   phase: e.eventPhase,
+                   trusted: e.isTrusted
+                  });
+    e.stopPropagation();
+  }
+
+  els.addListenerForAllEvents(root, allListener, false, true);
+  var infos = els.getListenerInfoFor(root);
+  var nullTypes = 0;
+  for (var i = 0; i < infos.length; ++i) {
+    if (infos[i].type == null) {
+      ++nullTypes;
+    }
+  }
+  is(nullTypes, 1, "Should have one all-event-listener!");
+
+  els.addListenerForAllEvents(root, allListener, false, true, true);
+  els.addListenerForAllEvents(root, allListenerTrustedOnly, false, false, true);
+  l3.dispatchEvent(new Event("testevent", { bubbles: true }));
+  dispatchTrusted(l3, { bubbles: true });
+  els.removeListenerForAllEvents(root, allListener, false);
+  els.removeListenerForAllEvents(root, allListener, false, true);
+  els.removeListenerForAllEvents(root, allListenerTrustedOnly, false, true);
+  // make sure removeListenerForAllEvents works.
+  l3.dispatchEvent(new Event("testevent", { bubbles: true }));
+  dispatchTrusted(l3, { bubbles: true });
+
+  // Test the order of event listeners.
+  var clickListenerCalled = false;
+  var allListenerCalled = false;
+  function clickListener() {
+    clickListenerCalled = true;
+    ok(allListenerCalled, "Should have called '*' listener before normal listener!");
+  }
+  function allListener2() {
+    allListenerCalled = true;
+    notok(clickListenerCalled, "Shouldn't have called click listener before '*' listener!");
+  }
+  root.onclick = null; // Remove the listener added in earlier tests.
+  root.addEventListener("click", clickListener);
+  els.addListenerForAllEvents(root, allListener2, false, true);
+  l3.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  root.removeEventListener("click", clickListener);
+  els.removeListenerForAllEvents(root, allListener2, false);
+  ok(allListenerCalled, "Should have called '*' listener");
+  ok(clickListenerCalled, "Should have called click listener");
+
+  is(results.length, expectedResults.length, "count");
+  for (var i = 0; i < expectedResults.length; ++i) {
+    for (var p in expectedResults[i]) {
+      is(results[i][p], expectedResults[i][p], p);
+    }
+  }
+  SimpleTest.finish();
+}
 
 SimpleTest.waitForExplicitFinish();
 addLoadEvent(runTests);

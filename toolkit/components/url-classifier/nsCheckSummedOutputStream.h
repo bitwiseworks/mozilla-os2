@@ -32,7 +32,7 @@ public:
 
 protected:
   nsCOMPtr<nsICryptoHash> mHash;
-  nsCAutoString mCheckSum;
+  nsAutoCString mCheckSum;
 };
 
 // returns a file output stream which can be QI'ed to nsIFileOutputStream.

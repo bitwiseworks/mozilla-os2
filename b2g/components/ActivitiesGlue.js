@@ -24,7 +24,7 @@ ActivitiesDialog.prototype = {
 
     let choices = [];
     activity.list.forEach(function(item) {
-      choices.push({ title: item.title, icon: item.icon });
+      choices.push({ manifest: item.manifest, icon: item.icon });
     });
 
 
@@ -67,5 +67,5 @@ ActivitiesDialog.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIActivityUIGlue, Ci.nsIRunnable])
 }
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([ActivitiesDialog]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([ActivitiesDialog]);
 

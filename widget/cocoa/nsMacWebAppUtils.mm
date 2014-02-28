@@ -5,10 +5,12 @@
 #import <Cocoa/Cocoa.h>
 
 #include "nsMacWebAppUtils.h"
-#include "nsObjCExceptions.h"
 #include "nsCOMPtr.h"
 #include "nsCocoaUtils.h"
 #include "nsString.h"
+
+// This must be included last:
+#include "nsObjCExceptions.h"
 
 // Find the path to the app with the given bundleIdentifier, if any.
 // Note that the OS will return the path to the newest binary, if there is more than one.
@@ -46,7 +48,7 @@ NS_IMETHODIMP nsMacWebAppUtils::LaunchAppWithIdentifier(const nsAString& bundleI
   // Note this might return false, meaning the app wasnt launched for some reason. 
   BOOL success = [[NSWorkspace sharedWorkspace] launchAppWithBundleIdentifier:
                         [NSString stringWithCharacters:((nsString)bundleIdentifier).get() length:((nsString)bundleIdentifier).Length()]
-                        options: nil
+                        options: (NSWorkspaceLaunchOptions)0
                         additionalEventParamDescriptor: nil
                         launchIdentifier: NULL];
 

@@ -11,6 +11,8 @@
 <script>
 <![CDATA[
 
+SimpleTest.expectAssertions(6);
+
 SimpleTest.waitForExplicitFinish();
 
 var captureRetargetMode = false;

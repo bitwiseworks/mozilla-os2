@@ -78,7 +78,7 @@ nsEntityConverter::LoadVersionPropertyFile()
 already_AddRefed<nsIStringBundle>
 nsEntityConverter::LoadEntityBundle(uint32_t version)
 {
-  nsCAutoString url(NS_LITERAL_CSTRING("resource://gre/res/entityTables/"));
+  nsAutoCString url(NS_LITERAL_CSTRING("resource://gre/res/entityTables/"));
   nsresult rv;
 
   nsCOMPtr<nsIStringBundleService> bundleService =
@@ -92,12 +92,11 @@ nsEntityConverter::LoadEntityBundle(uint32_t version)
   LossyAppendUTF16toASCII(versionName, url);
   url.Append(".properties");
 
-  nsIStringBundle* bundle;
-  rv = bundleService->CreateBundle(url.get(), &bundle);
+  nsCOMPtr<nsIStringBundle> bundle;
+  rv = bundleService->CreateBundle(url.get(), getter_AddRefs(bundle));
   NS_ENSURE_SUCCESS(rv, nullptr);
   
-  // does this addref right?
-  return bundle;
+  return bundle.forget();
 }
 
 const PRUnichar*

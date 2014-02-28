@@ -1,8 +1,6 @@
 #filter substitution
 package @ANDROID_PACKAGE_NAME@.tests;
 
-import @ANDROID_PACKAGE_NAME@.*;
-
 /**
  * A panning performance test.
  * Drags the page a bunch of times and measures the frames per second
@@ -17,7 +15,7 @@ public class testPan extends PixelTest {
     public void testPan() {
         String url = getAbsoluteUrl("/startup_test/fennecmark/wikipedia.html");
 
-        mActions.expectGeckoEvent("Gecko:Ready").blockForEvent();
+        blockForGeckoReady();
 
         loadAndPaint(url);
 
@@ -47,5 +45,5 @@ public class testPan extends PixelTest {
         mAsserter.dumpLog("__start_report" + Integer.toString(frames) + "__end_report");
         long msecs = System.currentTimeMillis();
         mAsserter.dumpLog("__startTimestamp" + msecs + "__endTimestamp");
-    }	
+    }
 }

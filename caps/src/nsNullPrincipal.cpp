@@ -25,7 +25,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_CLASSINFO(nsNullPrincipal, NULL, nsIClassInfo::MAIN_THREAD_ONLY,
+NS_IMPL_CLASSINFO(nsNullPrincipal, nullptr, nsIClassInfo::MAIN_THREAD_ONLY,
                   NS_NULLPRINCIPAL_CID)
 NS_IMPL_QUERY_INTERFACE2_CI(nsNullPrincipal,
                             nsIPrincipal,
@@ -113,7 +113,7 @@ nsNullPrincipal::GetScriptLocation(nsACString &aStr)
 #ifdef DEBUG
 void nsNullPrincipal::dumpImpl()
 {
-  nsCAutoString str;
+  nsAutoCString str;
   mURI->GetSpec(str);
   fprintf(stderr, "nsNullPrincipal (%p) = %s\n", this, str.get());
 }
@@ -122,23 +122,6 @@ void nsNullPrincipal::dumpImpl()
 /**
  * nsIPrincipal implementation
  */
-
-NS_IMETHODIMP
-nsNullPrincipal::GetPreferences(char** aPrefName, char** aID,
-                                char** aSubjectName,
-                                char** aGrantedList, char** aDeniedList,
-                                bool* aIsTrusted)
-{
-  // The null principal should never be written to preferences.
-  *aPrefName = nullptr;
-  *aID = nullptr;
-  *aSubjectName = nullptr;
-  *aGrantedList = nullptr;
-  *aDeniedList = nullptr;
-  *aIsTrusted = false;
-
-  return NS_ERROR_FAILURE; 
-}
 
 NS_IMETHODIMP
 nsNullPrincipal::Equals(nsIPrincipal *aOther, bool *aResult)
@@ -176,33 +159,6 @@ nsNullPrincipal::SetSecurityPolicy(void* aSecurityPolicy)
 {
   // We don't actually do security policy caching.  And it's not like anyone
   // can set a security policy for us anyway.
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsNullPrincipal::CanEnableCapability(const char *aCapability, 
-                                     int16_t *aResult)
-{
-  // Null principal can enable no capabilities.
-  *aResult = nsIPrincipal::ENABLE_DENIED;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsNullPrincipal::IsCapabilityEnabled(const char *aCapability, 
-                                     void *aAnnotation, 
-                                     bool *aResult)
-{
-  // Nope.  No capabilities, I say!
-  *aResult = false;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsNullPrincipal::EnableCapability(const char *aCapability, void **aAnnotation)
-{
-  NS_NOTREACHED("Didn't I say it?  NO CAPABILITIES!");
-  *aAnnotation = nullptr;
   return NS_OK;
 }
 
@@ -246,7 +202,7 @@ nsNullPrincipal::GetOrigin(char** aOrigin)
 {
   *aOrigin = nullptr;
   
-  nsCAutoString str;
+  nsAutoCString str;
   nsresult rv = mURI->GetSpec(str);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -254,25 +210,6 @@ nsNullPrincipal::GetOrigin(char** aOrigin)
   NS_ENSURE_TRUE(*aOrigin, NS_ERROR_OUT_OF_MEMORY);
 
   return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsNullPrincipal::GetHasCertificate(bool* aResult)
-{
-  *aResult = false;
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
-nsNullPrincipal::GetFingerprint(nsACString& aID)
-{
-    return NS_ERROR_NOT_AVAILABLE;
-}
-
-NS_IMETHODIMP 
-nsNullPrincipal::GetPrettyName(nsACString& aName)
-{
-    return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
@@ -320,19 +257,6 @@ nsNullPrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsP
   return NS_ERROR_DOM_BAD_URI;
 }
 
-NS_IMETHODIMP 
-nsNullPrincipal::GetSubjectName(nsACString& aName)
-{
-    return NS_ERROR_NOT_AVAILABLE;
-}
-
-NS_IMETHODIMP
-nsNullPrincipal::GetCertificate(nsISupports** aCertificate)
-{
-    *aCertificate = nullptr;
-    return NS_OK;
-}
-
 NS_IMETHODIMP
 nsNullPrincipal::GetExtendedOrigin(nsACString& aExtendedOrigin)
 {
@@ -358,6 +282,27 @@ nsNullPrincipal::GetIsInBrowserElement(bool* aIsInBrowserElement)
 {
   *aIsInBrowserElement = false;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNullPrincipal::GetUnknownAppId(bool* aUnknownAppId)
+{
+  *aUnknownAppId = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNullPrincipal::GetIsNullPrincipal(bool* aIsNullPrincipal)
+{
+  *aIsNullPrincipal = true;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNullPrincipal::GetBaseDomain(nsACString& aBaseDomain)
+{
+  // For a null principal, we use our unique uuid as the base domain.
+  return mURI->GetPath(aBaseDomain);
 }
 
 /**

@@ -27,13 +27,13 @@ interface nsIDOMLocation;
  * http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html
  */
 
-[scriptable, uuid(FDB92F4F-C6B4-4509-A29D-A309981E28AC)]
+[scriptable, uuid(75996de6-6b0f-43e5-ae79-c98fa669da9a)]
 interface nsIDOMDocument : nsIDOMNode
 {
   readonly attribute nsIDOMDocumentType         doctype;
   readonly attribute nsIDOMDOMImplementation    implementation;
   readonly attribute nsIDOMElement              documentElement;
-  nsIDOMElement                 createElement(in DOMString tagName)
+  nsIDOMElement                 createElement([Null(Stringify)] in DOMString tagName)
                                   raises(DOMException);
   nsIDOMDocumentFragment        createDocumentFragment();
   nsIDOMText                    createTextNode(in DOMString data);
@@ -53,7 +53,7 @@ interface nsIDOMDocument : nsIDOMNode
                                   raises(DOMException);
   // Introduced in DOM Level 2:
   nsIDOMElement                 createElementNS(in DOMString namespaceURI,
-                                                in DOMString qualifiedName)
+                                                [Null(Stringify)] in DOMString qualifiedName)
                                   raises(DOMException);
   // Introduced in DOM Level 2:
   nsIDOMAttr                    createAttributeNS(in DOMString namespaceURI,
@@ -68,6 +68,8 @@ interface nsIDOMDocument : nsIDOMNode
   readonly attribute DOMString       inputEncoding;
   // Introduced in DOM Level 3:
   readonly attribute DOMString       documentURI;
+  // Alias introduced for all documents in recent DOM standards
+  readonly attribute DOMString       URL;
   // Introduced in DOM Level 3:
   nsIDOMNode         adoptNode(in nsIDOMNode source)
                                         raises(DOMException);
@@ -199,6 +201,7 @@ interface nsIDOMDocument : nsIDOMNode
    *
    * @see <http://dev.w3.org/csswg/cssom/#dom-document-selectedStyleSheetSet>
    */
+  [binaryname(MozSelectedStyleSheetSet)]
   attribute DOMString selectedStyleSheetSet;
 
   /*
@@ -239,6 +242,7 @@ interface nsIDOMDocument : nsIDOMNode
    *
    * @see <http://dev.w3.org/csswg/cssom/#dom-document-enableStyleSheetsForSet>
    */
+  [binaryname(MozEnableStyleSheetsForSet)]
   void enableStyleSheetsForSet(in DOMString name);
 
 
@@ -323,7 +327,7 @@ interface nsIDOMDocument : nsIDOMNode
    */
   void mozSetImageElement(in DOMString aImageElementId,
                           in nsIDOMElement aImageElement);
-  
+
   /**
    * Element which is currently the full-screen element as per the DOM
    * full-screen api.
@@ -351,7 +355,7 @@ interface nsIDOMDocument : nsIDOMNode
   /**
    * Denotes whether the full-screen-api.enabled is true, no windowed
    * plugins are present, and all ancestor documents have the
-   * mozallowfullscreen attribute set.
+   * allowfullscreen attribute set.
    *
    * @see <https://wiki.mozilla.org/index.php?title=Gecko:FullScreenAPI>
    */
@@ -364,6 +368,17 @@ interface nsIDOMDocument : nsIDOMNode
    * @see <http://dvcs.w3.org/hg/pointerlock/raw-file/default/index.html>
    */
   readonly attribute nsIDOMElement mozPointerLockElement;
+
+  /**
+   * Retrieve the location of the caret position (DOM node and character
+   * offset within that node), given a point.
+   *
+   * @param x Horizontal point at which to determine the caret position, in
+   *          page coordinates.
+   * @param y Vertical point at which to determine the caret position, in
+   *          page coordinates.
+   */
+  nsISupports /* CaretPosition */ caretPositionFromPoint(in float x, in float y);
 
   /**
    * Exit pointer is lock if locked, as per the DOM pointer lock api.
@@ -383,6 +398,14 @@ interface nsIDOMDocument : nsIDOMNode
   /**
    * Visibility API implementation.
    */
+  readonly attribute boolean hidden;
   readonly attribute boolean mozHidden;
+  readonly attribute DOMString visibilityState;
   readonly attribute DOMString mozVisibilityState;
+
+  /**
+   * Returns "BackCompat" if we're in quirks mode or "CSS1Compat" if we're in
+   * strict mode.  (XML documents are always in strict mode.)
+   */
+  readonly attribute DOMString compatMode;
 };

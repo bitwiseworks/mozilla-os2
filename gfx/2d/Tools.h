@@ -7,6 +7,8 @@
 #define MOZILLA_GFX_TOOLS_H_
 
 #include "Types.h"
+#include "Point.h"
+#include <math.h>
 #if defined(_MSC_VER) && (_MSC_VER < 1600)
 #define hypotf _hypotf
 #endif
@@ -40,10 +42,24 @@ struct ClassStorage
 static inline bool
 FuzzyEqual(Float aA, Float aB, Float aErr)
 {
-  if ((aA + aErr > aB) && (aA - aErr < aB)) {
+  if ((aA + aErr >= aB) && (aA - aErr <= aB)) {
     return true;
   }
   return false;
+}
+
+static inline void
+NudgeToInteger(float *aVal)
+{
+  float r = floorf(*aVal + 0.5f);
+  // The error threshold should be proportional to the rounded value. This
+  // bounds the relative error introduced by the nudge operation. However,
+  // when the rounded value is 0, the error threshold can't be proportional
+  // to the rounded value (we'd never round), so we just choose the same
+  // threshold as for a rounded value of 1.
+  if (FuzzyEqual(r, *aVal, r == 0.0f ? 1e-6f : fabs(r*1e-6f))) {
+    *aVal = r;
+  }
 }
 
 static inline Float
@@ -63,6 +79,64 @@ BytesPerPixel(SurfaceFormat aFormat)
   default:
     return 4;
   }
+}
+
+template<typename T, int alignment = 16>
+struct AlignedArray
+{
+  AlignedArray()
+    : mStorage(nullptr)
+    , mPtr(nullptr)
+  {
+  }
+
+  MOZ_ALWAYS_INLINE AlignedArray(size_t aSize)
+    : mStorage(nullptr)
+  {
+    Realloc(aSize);
+  }
+
+  MOZ_ALWAYS_INLINE ~AlignedArray()
+  {
+    delete [] mStorage;
+  }
+
+  void Dealloc()
+  {
+    delete [] mStorage;
+    mStorage = mPtr = nullptr;
+  }
+
+  MOZ_ALWAYS_INLINE void Realloc(size_t aSize)
+  {
+    delete [] mStorage;
+    mStorage = new (std::nothrow) T[aSize + (alignment - 1)];
+    if (uintptr_t(mStorage) % alignment) {
+      // Our storage does not start at a <alignment>-byte boundary. Make sure mData does!
+      mPtr = (uint32_t*)(uintptr_t(mStorage) +
+        (alignment - (uintptr_t(mStorage) % alignment)));
+    } else {
+      mPtr = mStorage;
+    }
+  }
+
+  MOZ_ALWAYS_INLINE operator T*()
+  {
+    return mPtr;
+  }
+
+  T *mStorage;
+  T *mPtr;
+};
+
+template<int alignment>
+int32_t GetAlignedStride(int32_t aStride)
+{
+  if (aStride % alignment) {
+    return aStride + (alignment - (aStride % alignment));
+  }
+
+  return aStride;
 }
 
 }

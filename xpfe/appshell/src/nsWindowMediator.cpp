@@ -18,6 +18,7 @@
 #include "nsWindowMediator.h"
 #include "nsIWindowMediatorListener.h"
 #include "nsXPIDLString.h"
+#include "nsGlobalWindow.h"
 
 #include "nsIDocShell.h"
 #include "nsIInterfaceRequestor.h"
@@ -29,9 +30,9 @@ using namespace mozilla;
 static nsresult GetDOMWindow(nsIXULWindow* inWindow,
                              nsCOMPtr< nsIDOMWindow>& outDOMWindow);
 
-static bool notifyOpenWindow(nsISupports *aElement, void* aData);
-static bool notifyCloseWindow(nsISupports *aElement, void* aData);
-static bool notifyWindowTitleChange(nsISupports *aElement, void* aData);
+static bool notifyOpenWindow(nsIWindowMediatorListener *aElement, void* aData);
+static bool notifyCloseWindow(nsIWindowMediatorListener *aElement, void* aData);
+static bool notifyWindowTitleChange(nsIWindowMediatorListener *aElement, void* aData);
 
 // for notifyWindowTitleChange
 struct WindowTitleData {
@@ -91,10 +92,8 @@ NS_IMETHODIMP nsWindowMediator::RegisterWindow(nsIXULWindow* inWindow)
   if (!windowInfo)
     return NS_ERROR_OUT_OF_MEMORY;
 
-  if (mListeners) {
-    WindowTitleData winData = { inWindow, nullptr };
-    mListeners->EnumerateForwards(notifyOpenWindow, (void*)&winData);
-  }
+  WindowTitleData winData = { inWindow, nullptr };
+  mListeners.EnumerateForwards(notifyOpenWindow, &winData);
   
   MutexAutoLock lock(mListLock);
   if (mOldestWindow)
@@ -126,10 +125,8 @@ nsWindowMediator::UnregisterWindow(nsWindowInfo *inInfo)
     index++;
   }
   
-  if (mListeners) {
-    WindowTitleData winData = { inInfo->mWindow.get(), nullptr };
-    mListeners->EnumerateForwards(notifyCloseWindow, (void*)&winData);
-  }
+  WindowTitleData winData = { inInfo->mWindow.get(), nullptr };
+  mListeners.EnumerateForwards(notifyCloseWindow, &winData);
 
   // Remove from the lists and free up 
   if (inInfo == mOldestWindow)
@@ -325,6 +322,37 @@ nsWindowMediator::MostRecentWindowInfo(const PRUnichar* inType)
 }
 
 NS_IMETHODIMP
+nsWindowMediator::GetOuterWindowWithId(uint64_t aWindowID,
+                                       nsIDOMWindow** aWindow)
+{
+  *aWindow = nsGlobalWindow::GetOuterWindowWithId(aWindowID);
+  NS_IF_ADDREF(*aWindow);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWindowMediator::GetCurrentInnerWindowWithId(uint64_t aWindowID,
+                                              nsIDOMWindow** aWindow)
+{
+  nsCOMPtr<nsPIDOMWindow> inner = nsGlobalWindow::GetInnerWindowWithId(aWindowID);
+
+  // not found
+  if (!inner)
+    return NS_OK;
+
+  nsCOMPtr<nsPIDOMWindow> outer = inner->GetOuterWindow();
+  NS_ENSURE_TRUE(outer, NS_ERROR_UNEXPECTED);
+
+  // outer is already using another inner, so it's same as not found
+  if (outer->GetCurrentInnerWindow() != inner)
+    return NS_OK;
+
+  nsCOMPtr<nsIDOMWindow> ret = do_QueryInterface(outer);
+  ret.forget(aWindow);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsWindowMediator::UpdateWindowTimeStamp(nsIXULWindow* inWindow)
 {
   NS_ENSURE_STATE(mReady);
@@ -344,9 +372,9 @@ nsWindowMediator::UpdateWindowTitle(nsIXULWindow* inWindow,
 {
   NS_ENSURE_STATE(mReady);
   MutexAutoLock lock(mListLock);
-  if (mListeners && GetInfoFor(inWindow)) {
+  if (GetInfoFor(inWindow)) {
     WindowTitleData winData = { inWindow, inTitle };
-    mListeners->EnumerateForwards(notifyWindowTitleChange, (void*)&winData);
+    mListeners.EnumerateForwards(notifyWindowTitleChange, &winData);
   }
 
   return NS_OK;
@@ -727,13 +755,7 @@ nsWindowMediator::AddListener(nsIWindowMediatorListener* aListener)
 {
   NS_ENSURE_ARG_POINTER(aListener);
   
-  nsresult rv;
-  if (!mListeners) {
-    rv = NS_NewISupportsArray(getter_AddRefs(mListeners));
-    if (NS_FAILED(rv)) return rv;
-  }
-
-  mListeners->AppendElement(aListener);
+  mListeners.AppendObject(aListener);
   
   return NS_OK;
 }
@@ -743,10 +765,7 @@ nsWindowMediator::RemoveListener(nsIWindowMediatorListener* aListener)
 {
   NS_ENSURE_ARG_POINTER(aListener);
 
-  if (!mListeners)
-    return NS_OK;
-
-  mListeners->RemoveElement(aListener);
+  mListeners.RemoveObject(aListener);
   
   return NS_OK;
 }
@@ -776,34 +795,28 @@ nsWindowMediator::Observe(nsISupports* aSubject,
 }
 
 bool
-notifyOpenWindow(nsISupports *aElement, void* aData)
+notifyOpenWindow(nsIWindowMediatorListener *aListener, void* aData)
 {
-  nsIWindowMediatorListener* listener =
-    reinterpret_cast<nsIWindowMediatorListener*>(aElement);
   WindowTitleData* winData = static_cast<WindowTitleData*>(aData);
-  listener->OnOpenWindow(winData->mWindow);
+  aListener->OnOpenWindow(winData->mWindow);
 
   return true;
 }
 
 bool
-notifyCloseWindow(nsISupports *aElement, void* aData)
+notifyCloseWindow(nsIWindowMediatorListener *aListener, void* aData)
 {
-  nsIWindowMediatorListener* listener =
-    reinterpret_cast<nsIWindowMediatorListener*>(aElement);
   WindowTitleData* winData = static_cast<WindowTitleData*>(aData);
-  listener->OnCloseWindow(winData->mWindow);
+  aListener->OnCloseWindow(winData->mWindow);
 
   return true;
 }
 
 bool 
-notifyWindowTitleChange(nsISupports *aElement, void* aData)
+notifyWindowTitleChange(nsIWindowMediatorListener *aListener, void* aData)
 {
-  nsIWindowMediatorListener* listener =
-    reinterpret_cast<nsIWindowMediatorListener*>(aElement);
   WindowTitleData* titleData = reinterpret_cast<WindowTitleData*>(aData);
-  listener->OnWindowTitleChange(titleData->mWindow, titleData->mTitle);
+  aListener->OnWindowTitleChange(titleData->mWindow, titleData->mTitle);
 
   return true;
 }

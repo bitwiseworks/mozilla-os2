@@ -621,7 +621,7 @@ main(int32_t argc, char *argv[])
                                            false,                             // is secure
                                            false,                             // is httponly
                                            true,                              // is session
-                                           LL_MAXINT));                          // expiry time
+                                           INT64_MAX));                          // expiry time
       rv[2] = NS_SUCCEEDED(cookieMgr2->Add(NS_LITERAL_CSTRING("cookiemgr.test"), // domain
                                            NS_LITERAL_CSTRING("/foo"),           // path
                                            NS_LITERAL_CSTRING("test2"),          // name
@@ -637,7 +637,7 @@ main(int32_t argc, char *argv[])
                                            false,                             // is secure
                                            false,                             // is httponly
                                            true,                              // is session
-                                           LL_MAXINT));                          // expiry time
+                                           INT64_MAX));                          // expiry time
       // confirm using enumerator
       nsCOMPtr<nsISimpleEnumerator> enumerator;
       rv[4] = NS_SUCCEEDED(cookieMgr->GetEnumerator(getter_AddRefs(enumerator)));
@@ -652,7 +652,7 @@ main(int32_t argc, char *argv[])
         // keep tabs on the second and third cookies, so we can check them later
         nsCOMPtr<nsICookie2> cookie2(do_QueryInterface(cookie));
         if (!cookie2) break;
-        nsCAutoString name;
+        nsAutoCString name;
         cookie2->GetName(name);
         if (name == NS_LITERAL_CSTRING("test2"))
           expiredCookie = cookie2;
@@ -685,7 +685,7 @@ main(int32_t argc, char *argv[])
                                             false,                             // is secure
                                             false,                             // is httponly
                                             true,                              // is session
-                                            LL_MININT));                          // expiry time
+                                            INT64_MIN));                          // expiry time
       rv[13] = NS_SUCCEEDED(cookieMgr2->CookieExists(newDomainCookie, &found)) && !found;
       // sleep four seconds, to make sure the second cookie has expired
       PR_Sleep(4 * PR_TicksPerSecond());
@@ -709,8 +709,8 @@ main(int32_t argc, char *argv[])
       // test that cookies are
       // a) returned by order of creation time (oldest first, newest last)
       // b) evicted by order of lastAccessed time, if the limit on cookies per host (50) is reached
-      nsCAutoString name;
-      nsCAutoString expected;
+      nsAutoCString name;
+      nsAutoCString expected;
       for (int32_t i = 0; i < 60; ++i) {
         name = NS_LITERAL_CSTRING("test");
         name.AppendInt(i);

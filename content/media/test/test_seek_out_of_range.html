@@ -10,6 +10,10 @@
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
+if (navigator.platform.startsWith("Win")) {
+  SimpleTest.expectAssertions(0, 10);
+}
+
 var manager = new MediaTestManager;
 
 // Test if the ended event works correctly.
@@ -51,7 +55,7 @@ function playing(e) {
 }
 
 function initTest(test, token) {
-  var type = /^video/.test(test.type) ? "video" : "audio";
+  var type = getMajorMimeType(test.type);
   var v = document.createElement(type);
   v.token = token;
   manager.started(token);

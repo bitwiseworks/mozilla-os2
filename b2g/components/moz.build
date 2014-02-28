@@ -1,0 +1,37 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+TEST_DIRS += ['test']
+
+XPIDL_SOURCES += [
+    'b2g.idl',
+]
+
+MODULE = 'B2GComponents'
+
+EXTRA_PP_COMPONENTS += [
+    'ActivitiesGlue.js',
+    'AlertsService.js',
+    'B2GAboutRedirector.js',
+    'B2GComponents.manifest',
+    'ContentHandler.js',
+    'ContentPermissionPrompt.js',
+    'DirectoryProvider.js',
+    'FilePicker.js',
+    'MailtoProtocolHandler.js',
+    'MozKeyboard.js',
+    'PaymentGlue.js',
+    'ProcessGlobal.js',
+    'RecoveryService.js',
+    'SmsProtocolHandler.js',
+    'TelProtocolHandler.js',
+    'YoutubeProtocolHandler.js',
+]
+
+if CONFIG['MOZ_UPDATER']:
+    EXTRA_PP_COMPONENTS += [
+        'UpdatePrompt.js',
+    ]

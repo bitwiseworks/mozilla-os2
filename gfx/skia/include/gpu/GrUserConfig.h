@@ -22,8 +22,8 @@
 #endif
 
 /*
- *  To diagnose texture cache performance, define this to 1 if you want to see
- *  a log statement everytime we upload an image to create a texture.
+ * To diagnose texture cache performance, define this to 1 if you want to see
+ * a log statement everytime we upload an image to create a texture.
  */
 //#define GR_DUMP_TEXTURE_UPLOAD    1
 
@@ -34,6 +34,12 @@
  * updates. Defaults to 0.
  */
 //#define GR_STATIC_RECT_VB 1
+
+/*
+ * This causes the GrContext to execute all draws immediately in the 3D API
+ * rather than internally queuing draws.
+ */
+//#define GR_DISABLE_DRAW_BUFFERING 1
 
 /*
  * This causes more aggressive shader optimization. May hurt performance if
@@ -57,6 +63,12 @@
 #define GR_TEXT_SCALAR_IS_USHORT    0
 #define GR_TEXT_SCALAR_IS_FIXED     0
 #define GR_TEXT_SCALAR_IS_FLOAT     1
+
+/*
+ * This allows us to set a callback to be called before each GL call to ensure
+ * that our context is set correctly
+ */
+#define GR_GL_PER_GL_FUNC_CALLBACK  1
 
 #endif
 

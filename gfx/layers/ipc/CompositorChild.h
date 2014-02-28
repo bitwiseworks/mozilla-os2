@@ -15,6 +15,7 @@ namespace layers {
 
 class LayerManager;
 class CompositorParent;
+struct TextureFactoryIdentifier;
 
 class CompositorChild : public PCompositorChild
 {
@@ -37,16 +38,18 @@ public:
 
   static bool ChildProcessHasCompositor() { return sCompositor != nullptr; }
 protected:
-  virtual PLayersChild* AllocPLayers(const LayersBackend& aBackendHint,
-                                     const uint64_t& aId,
-                                     LayersBackend* aBackend,
-                                     int* aMaxTextureSize);
-  virtual bool DeallocPLayers(PLayersChild *aChild);
+  virtual PLayerTransactionChild*
+    AllocPLayerTransaction(const LayersBackend& aBackendHint,
+                           const uint64_t& aId,
+                           TextureFactoryIdentifier* aTextureFactoryIdentifier) MOZ_OVERRIDE;
+
+  virtual bool DeallocPLayerTransaction(PLayerTransactionChild *aChild) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
 private:
   nsRefPtr<LayerManager> mLayerManager;
+  nsCOMPtr<nsIObserver> mMemoryPressureObserver;
 
   // When we're in a child process, this is the process-global
   // compositor that we use to forward transactions directly to the

@@ -20,6 +20,20 @@ nsBaseScreen::nsBaseScreen()
 nsBaseScreen::~nsBaseScreen() { }
 
 NS_IMETHODIMP
+nsBaseScreen::GetRectDisplayPix(int32_t *outLeft,  int32_t *outTop,
+                                int32_t *outWidth, int32_t *outHeight)
+{
+  return GetRect(outLeft, outTop, outWidth, outHeight);
+}
+
+NS_IMETHODIMP
+nsBaseScreen::GetAvailRectDisplayPix(int32_t *outLeft,  int32_t *outTop,
+                                     int32_t *outWidth, int32_t *outHeight)
+{
+  return GetAvailRect(outLeft, outTop, outWidth, outHeight);
+}
+
+NS_IMETHODIMP
 nsBaseScreen::LockMinimumBrightness(uint32_t aBrightness)
 {
   NS_ABORT_IF_FALSE(
@@ -58,4 +72,11 @@ nsBaseScreen::CheckMinimumBrightness()
       brightness = i;
 
   ApplyMinimumBrightness(brightness);
+}
+
+NS_IMETHODIMP
+nsBaseScreen::GetContentsScaleFactor(double* aContentsScaleFactor)
+{
+  *aContentsScaleFactor = 1.0;
+  return NS_OK;
 }

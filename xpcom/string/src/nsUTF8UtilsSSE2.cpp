@@ -16,7 +16,7 @@ LossyConvertEncoding16to8::write_sse2(const PRUnichar* aSource,
   // Align source to a 16-byte boundary.
   uint32_t i = 0;
   uint32_t alignLen =
-    NS_MIN<uint32_t>(aSourceLength, uint32_t(-NS_PTR_TO_INT32(aSource) & 0xf) / sizeof(PRUnichar));
+    XPCOM_MIN<uint32_t>(aSourceLength, uint32_t(-NS_PTR_TO_INT32(aSource) & 0xf) / sizeof(PRUnichar));
   for (; i < alignLen; i++) {
     dest[i] = static_cast<unsigned char>(aSource[i]);
   }
@@ -37,9 +37,9 @@ LossyConvertEncoding16to8::write_sse2(const PRUnichar* aSource,
     source4 = _mm_and_si128(source4, vectmask);
 
 
-    // Pack the source data.  SSE2 views this as a saturating uint16 to
-    // uint8 conversion, but since we masked off the high-order byte of every
-    // uint16, we're really just grabbing the low-order bytes of source1 and
+    // Pack the source data.  SSE2 views this as a saturating uint16_t to
+    // uint8_t conversion, but since we masked off the high-order byte of every
+    // uint16_t, we're really just grabbing the low-order bytes of source1 and
     // source2.
     __m128i packed1 = _mm_packus_epi16(source1, source2);
     __m128i packed2 = _mm_packus_epi16(source3, source4);
@@ -69,7 +69,7 @@ LossyConvertEncoding8to16::write_sse2(const char* aSource,
   // to wait for a load to complete, but you can keep on moving after issuing a
   // store.
   uint32_t i = 0;
-  uint32_t alignLen = NS_MIN(aSourceLength, uint32_t(-NS_PTR_TO_INT32(aSource) & 0xf));
+  uint32_t alignLen = XPCOM_MIN(aSourceLength, uint32_t(-NS_PTR_TO_INT32(aSource) & 0xf));
   for (; i < alignLen; i++) {
     dest[i] = static_cast<unsigned char>(aSource[i]);
   }

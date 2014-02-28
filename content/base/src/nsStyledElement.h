@@ -13,8 +13,9 @@
 #ifndef __NS_STYLEDELEMENT_H_
 #define __NS_STYLEDELEMENT_H_
 
+#include "mozilla/Attributes.h"
 #include "nsString.h"
-#include "nsGenericElement.h"
+#include "mozilla/dom/Element.h"
 
 namespace mozilla {
 namespace css {
@@ -22,7 +23,7 @@ class StyleRule;
 }
 }
 
-typedef nsGenericElement nsStyledElementBase;
+typedef mozilla::dom::Element nsStyledElementBase;
 
 class nsStyledElementNotElementCSSInlineStyle : public nsStyledElementBase
 {
@@ -35,22 +36,22 @@ protected:
 
 public:
   // nsIContent interface methods
-  virtual nsIAtom* GetClassAttributeName() const;
-  virtual nsIAtom* GetIDAttributeName() const;
-  virtual nsIAtom* DoGetID() const;
-  virtual const nsAttrValue* DoGetClasses() const;
+  virtual nsIAtom* GetClassAttributeName() const MOZ_OVERRIDE;
+  virtual nsIAtom* GetIDAttributeName() const MOZ_OVERRIDE;
+  virtual nsIAtom* DoGetID() const MOZ_OVERRIDE;
+  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
 
   virtual mozilla::css::StyleRule* GetInlineStyleRule();
   virtual nsresult SetInlineStyleRule(mozilla::css::StyleRule* aStyleRule,
                                       const nsAString* aSerialized,
-                                      bool aNotify);
+                                      bool aNotify) MOZ_OVERRIDE;
 
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify);
+                             bool aNotify) MOZ_OVERRIDE;
   virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                                const nsAttrValue* aValue, bool aNotify);
+                                const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
 
-  nsIDOMCSSStyleDeclaration* GetStyle(nsresult* retval);
+  nsICSSDeclaration* Style();
 
 protected:
 
@@ -66,9 +67,9 @@ protected:
                            bool aForceInDataDoc);
 
   virtual bool ParseAttribute(int32_t aNamespaceID, nsIAtom* aAttribute,
-                                const nsAString& aValue, nsAttrValue& aResult);
+                                const nsAString& aValue, nsAttrValue& aResult) MOZ_OVERRIDE;
 
-  friend class nsGenericElement;
+  friend class mozilla::dom::Element;
 
   /**
    * Create the style struct from the style attr.  Used when an element is

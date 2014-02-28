@@ -16,10 +16,12 @@
  * http://www.whatwg.org/specs/web-apps/current-work/
  */
 
-[scriptable, uuid(830D9170-F8EB-4749-B721-16D60D6B0F1B)]
+[scriptable, uuid(e81273e1-d440-4dd3-9073-8199f7a9525e)]
 interface nsIDOMHTMLStyleElement : nsIDOMHTMLElement
 {
+           [binaryname(MozDisabled)]
            attribute boolean          disabled;
            attribute DOMString        media;
            attribute DOMString        type;
+           attribute boolean          scoped;
 };

@@ -10,33 +10,11 @@ VPATH            = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME     = dom_power_s
-XPIDL_MODULE     = dom_power
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/dom/dom-config.mk
-
-EXPORTS_NAMESPACES = mozilla/dom/power
-
-EXPORTS_mozilla/dom/power = \
-  PowerManagerService.h \
-  Types.h \
-  $(NULL)
-
-CPPSRCS = \
-  PowerManager.cpp \
-  PowerManagerService.cpp \
-  WakeLock.cpp \
-  $(NULL)
-
-XPIDLSRCS = \
-  nsIDOMPowerManager.idl \
-  nsIDOMWakeLock.idl \
-  nsIDOMWakeLockListener.idl \
-  nsIPowerManagerService.idl \
-  $(NULL)
-
-TEST_DIRS += test
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

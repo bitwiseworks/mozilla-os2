@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * ***** BEGIN LICENSE BLOCK *****
  * Copyright (C) 2008 Apple Inc. All rights reserved.
@@ -27,8 +27,8 @@
  * 
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef AbstractMacroAssembler_h
-#define AbstractMacroAssembler_h
+#ifndef assembler_assembler_AbstractMacroAssembler_h
+#define assembler_assembler_AbstractMacroAssembler_h
 
 #include "assembler/wtf/Platform.h"
 #include "assembler/assembler/MacroAssemblerCodeRef.h"
@@ -157,12 +157,12 @@ public:
     // Describes an memory operand given by a pointer.  For regular load & store
     // operations an unwrapped void* will be used, rather than using this.
     struct AbsoluteAddress {
-        explicit AbsoluteAddress(void* ptr)
+        explicit AbsoluteAddress(const void* ptr)
             : m_ptr(ptr)
         {
         }
 
-        void* m_ptr;
+        const void* m_ptr;
     };
 
     // TrustedImmPtr:
@@ -408,15 +408,17 @@ public:
         {
         }
         
-        void link(AbstractMacroAssembler<AssemblerType>* masm)
+        void link(AbstractMacroAssembler<AssemblerType>* masm) const
         {
             masm->m_assembler.linkJump(m_jmp, masm->m_assembler.label());
         }
         
-        void linkTo(Label label, AbstractMacroAssembler<AssemblerType>* masm)
+        void linkTo(Label label, AbstractMacroAssembler<AssemblerType>* masm) const
         {
             masm->m_assembler.linkJump(m_jmp, label.m_label);
         }
+
+        bool isSet() const { return m_jmp.isSet(); }
 
     private:
         JmpSrc m_jmp;
@@ -654,4 +656,4 @@ protected:
 
 #endif // ENABLE(ASSEMBLER)
 
-#endif // AbstractMacroAssembler_h
+#endif /* assembler_assembler_AbstractMacroAssembler_h */

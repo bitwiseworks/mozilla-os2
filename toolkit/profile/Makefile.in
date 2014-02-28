@@ -10,22 +10,8 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = xulapp
-XPIDL_MODULE = toolkitprofile
-LIBRARY_NAME = profile_s
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
-
-XPIDLSRCS = \
-  nsIProfileMigrator.idl \
-  nsIToolkitProfile.idl \
-  nsIToolkitProfileService.idl \
-  $(NULL)
-
-CPPSRCS = \
-  nsProfileLock.cpp \
-  nsToolkitProfileService.cpp \
-  $(NULL)
 
 LOCAL_INCLUDES = \
   -I$(srcdir)/../xre \
@@ -35,8 +21,6 @@ LOCAL_INCLUDES = \
 DEFINES += -DIMPL_XREAPI
 
 GARBAGE += nsProfileLock.cpp
-
-TEST_DIRS += test
 
 include $(topsrcdir)/config/rules.mk
 

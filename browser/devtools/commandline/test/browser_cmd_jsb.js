@@ -6,52 +6,81 @@
 const TEST_URI = "http://example.com/browser/browser/devtools/commandline/" +
                  "test/browser_cmd_jsb_script.jsi";
 
+let scratchpadWin = null;
+let scratchpad = null;
+let tests = {};
+
 function test() {
-  DeveloperToolbarTest.test("about:blank", [ /*GJT_test*/ ]);
+  helpers.addTabWithToolbar("about:blank", function(options) {
+    return helpers.runTests(options, tests);
+  }).then(finish);
 }
 
-function GJT_test() {
-  helpers.setInput('jsb');
-  helpers.check({
-    input:  'jsb',
-    hints:     ' <url> [indentSize] [indentChar] [preserveNewlines] [preserveMaxNewlines] [jslintHappy] [braceStyle] [spaceBeforeConditional] [unescapeStrings]',
-    markup: 'VVV',
-    status: 'ERROR'
-  });
+tests.jsbTest = function(options) {
+  let deferred = Promise.defer();
 
-  gBrowser.addTabsProgressListener({
-    onProgressChange: DeveloperToolbarTest.checkCalled(function GJT_onProgressChange(aBrowser) {
-      gBrowser.removeTabsProgressListener(this);
+  let observer = {
+    onReady: function() {
+      scratchpad.removeObserver(observer);
 
-      let win = aBrowser._contentWindow;
-      let uri = win.document.location.href;
-      let result = win.atob(uri.replace(/.*,/, ""));
-
-      result = result.replace(/[\r\n]]/g, "\n");
-
+      let result = scratchpad.getText();
+      result = result.replace(/[\r\n]]*/g, "\n");
       let correct = "function somefunc() {\n" +
-                    "    for (let n = 0; n < 500; n++) {\n" +
-                    "        if (n % 2 == 1) {\n" +
-                    "            console.log(n);\n" +
-                    "            console.log(n + 1);\n" +
-                    "        }\n" +
-                    "    }\n" +
-                    "}";
+                "  if (true) // Some comment\n" +
+                "  doSomething();\n" +
+                "  for (let n = 0; n < 500; n++) {\n" +
+                "    if (n % 2 == 1) {\n" +
+                "      console.log(n);\n" +
+                "      console.log(n + 1);\n" +
+                "    }\n" +
+                "  }\n" +
+                "}";
       is(result, correct, "JS has been correctly prettified");
-    })
-  });
 
-  info("Checking beautification");
+      if (scratchpadWin) {
+        scratchpadWin.close();
+        scratchpadWin = null;
+      }
+      deferred.resolve();
+    },
+  };
 
-  helpers.setInput('jsb ' + TEST_URI);
-  /*
-  helpers.check({
-    input:  'jsb',
-    hints:     ' [options]',
-    markup: 'VVV',
-    status: 'VALID'
-  });
-  */
+  let onLoad = function GDT_onLoad() {
+    scratchpadWin.removeEventListener("load", onLoad, false);
+    scratchpad = scratchpadWin.Scratchpad;
 
-  DeveloperToolbarTest.exec({ completed: false });
-}
+    scratchpad.addObserver(observer);
+  };
+
+  let onNotify = function(subject, topic, data) {
+    if (topic == "domwindowopened") {
+      Services.ww.unregisterNotification(onNotify);
+
+      scratchpadWin = subject.QueryInterface(Ci.nsIDOMWindow);
+      scratchpadWin.addEventListener("load", onLoad, false);
+    }
+  };
+
+  Services.ww.registerNotification(onNotify);
+
+  helpers.audit(options, [
+    {
+      setup: 'jsb',
+      check: {
+        input:  'jsb',
+        hints:     ' <url> [options]',
+        markup: 'VVV',
+        status: 'ERROR'
+      }
+    },
+    {
+      setup: 'jsb ' + TEST_URI,
+      // Should result in a new window, which should fire onReady (eventually)
+      exec: {
+        completed: false
+      }
+    }
+  ]);
+
+  return deferred.promise;
+};

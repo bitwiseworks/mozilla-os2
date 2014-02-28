@@ -16,8 +16,6 @@ ifdef _MSC_VER
 STL_FLAGS	= -D_HAS_EXCEPTIONS=0
 endif
 
-MODULE		= mozalloc
-LIBRARY_NAME	= mozalloc
 DIST_INSTALL 	= 1
 
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
@@ -35,54 +33,6 @@ ifeq (,$(filter-out OS2,$(OS_ARCH)))
 # The strndup declaration in string.h is in an ifdef __USE_GNU section
 DEFINES		+= -D_GNU_SOURCE
 endif
-
-EXPORTS_NAMESPACES 	= mozilla
-EXPORTS_mozilla 	=			\
-	fallible.h				\
-	mozalloc.h		 		\
-	mozalloc_abort.h			\
-	mozalloc_macro_wrappers.h 		\
-	mozalloc_oom.h				\
-	mozalloc_undef_macro_wrappers.h		\
-	$(NULL)
-
-CPPSRCS 		=			\
-	mozalloc.cpp				\
-	mozalloc_abort.cpp			\
-	mozalloc_oom.cpp			\
-	$(NULL)
-
-ifdef WRAP_STL_INCLUDES #{
-ifdef GNU_CXX #{
-EXPORTS_mozilla	+= throw_gcc.h
-else
-ifdef _MSC_VER #{
-
-ifeq ($(MOZ_MSVC_STL_WRAP__RAISE),1) #{
-BUILD_MSVC_WRAPPERS = 1
-else
-ifeq ($(MOZ_MSVC_STL_WRAP__Throw),1) #{
-BUILD_MSVC_WRAPPERS = 1
-endif #}
-endif #}
-
-ifdef BUILD_MSVC_WRAPPERS #{
-EXPORTS_mozilla		+=			\
-	msvc_raise_wrappers.h			\
-	msvc_throw_wrapper.h			\
-	throw_msvc.h				\
-	$(NULL)
-
-CPPSRCS			+= 			\
-	msvc_raise_wrappers.cpp			\
-	msvc_throw_wrapper.cpp			\
-	$(NULL)
-endif #}
-
-endif #}
-endif #}
-
-endif #}
 
 ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
 SDK_LIBRARY = $(IMPORT_LIBRARY)

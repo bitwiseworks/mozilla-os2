@@ -8,7 +8,6 @@
 #ifndef nsStyleAnimation_h_
 #define nsStyleAnimation_h_
 
-#include "prtypes.h"
 #include "nsAString.h"
 #include "nsCRTGlue.h"
 #include "nsStringBuffer.h"
@@ -17,9 +16,7 @@
 #include "nsColor.h"
 #include "nsCSSValue.h"
 
-class nsPresContext;
 class nsStyleContext;
-struct nsCSSRect;
 class gfx3DMatrix;
 
 namespace mozilla {
@@ -163,20 +160,16 @@ public:
    * must keep |aComputedValue| alive longer than |aSpecifiedValue|.
    *
    * @param aProperty      The property whose value we're uncomputing.
-   * @param aPresContext   The presentation context for the document in
-   *                       which we're working.
    * @param aComputedValue The computed value to be converted.
    * @param [out] aSpecifiedValue The resulting specified value.
    * @return true on success, false on failure.
    */
   static bool UncomputeValue(nsCSSProperty aProperty,
-                               nsPresContext* aPresContext,
-                               const Value& aComputedValue,
-                               nsCSSValue& aSpecifiedValue);
+                             const Value& aComputedValue,
+                             nsCSSValue& aSpecifiedValue);
   static bool UncomputeValue(nsCSSProperty aProperty,
-                               nsPresContext* aPresContext,
-                               const Value& aComputedValue,
-                               nsAString& aSpecifiedValue);
+                             const Value& aComputedValue,
+                             nsAString& aSpecifiedValue);
 
   /**
    * Gets the computed value for the given property from the given style

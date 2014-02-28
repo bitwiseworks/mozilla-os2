@@ -17,7 +17,6 @@
 #include "mozilla/StandardInteger.h"
 
 class nsStyleContext;
-struct PLDHashTable;
 struct nsRuleData;
 class nsIStyleRule;
 struct nsCSSValueList;
@@ -57,11 +56,11 @@ struct nsInheritedStyleData
   }
 
   void DestroyStructs(uint32_t aBits, nsPresContext* aContext) {
-#define STYLE_STRUCT_INHERITED(name, checkdata_cb, ctor_args) \
+#define STYLE_STRUCT_INHERITED(name, checkdata_cb) \
     void *name##Data = mStyleStructs[eStyleStruct_##name]; \
     if (name##Data && !(aBits & NS_STYLE_INHERIT_BIT(name))) \
       static_cast<nsStyle##name*>(name##Data)->Destroy(aContext);
-#define STYLE_STRUCT_RESET(name, checkdata_cb, ctor_args)
+#define STYLE_STRUCT_RESET(name, checkdata_cb)
 
 #include "nsStyleStructList.h"
 
@@ -102,11 +101,11 @@ struct nsResetStyleData
   }
 
   void Destroy(uint32_t aBits, nsPresContext* aContext) {
-#define STYLE_STRUCT_RESET(name, checkdata_cb, ctor_args) \
+#define STYLE_STRUCT_RESET(name, checkdata_cb) \
     void *name##Data = mStyleStructs[eStyleStruct_##name]; \
     if (name##Data && !(aBits & NS_STYLE_INHERIT_BIT(name))) \
       static_cast<nsStyle##name*>(name##Data)->Destroy(aContext);
-#define STYLE_STRUCT_INHERITED(name, checkdata_cb, ctor_args)
+#define STYLE_STRUCT_INHERITED(name, checkdata_cb)
 
 #include "nsStyleStructList.h"
 
@@ -145,16 +144,31 @@ struct nsCachedStyleData
     return nullptr;
   }
 
+  void NS_FASTCALL SetStyleData(const nsStyleStructID aSID,
+                                nsPresContext *aPresContext, void *aData) {
+    if (IsReset(aSID)) {
+      if (!mResetData) {
+        mResetData = new (aPresContext) nsResetStyleData;
+      }
+      mResetData->mStyleStructs[aSID] = aData;
+    } else {
+      if (!mInheritedData) {
+        mInheritedData = new (aPresContext) nsInheritedStyleData;
+      }
+      mInheritedData->mStyleStructs[aSID] = aData;
+    }
+  }
+
   // Typesafe and faster versions of the above
-  #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_, ctor_args_)       \
+  #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_)                   \
     nsStyle##name_ * NS_FASTCALL GetStyle##name_ () {                    \
       return mInheritedData ? static_cast<nsStyle##name_*>(              \
-        mInheritedData->mStyleStructs[eStyleStruct_##name_]) : nullptr;   \
+        mInheritedData->mStyleStructs[eStyleStruct_##name_]) : nullptr;  \
     }
-  #define STYLE_STRUCT_RESET(name_, checkdata_cb_, ctor_args_)           \
+  #define STYLE_STRUCT_RESET(name_, checkdata_cb_)                       \
     nsStyle##name_ * NS_FASTCALL GetStyle##name_ () {                    \
       return mResetData ? static_cast<nsStyle##name_*>(                  \
-        mResetData->mStyleStructs[eStyleStruct_##name_]) : nullptr;       \
+        mResetData->mStyleStructs[eStyleStruct_##name_]) : nullptr;      \
     }
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT_RESET
@@ -245,14 +259,14 @@ public:
   };
 
 private:
-  nsPresContext* mPresContext; // Our pres context.
+  nsPresContext* const mPresContext; // Our pres context.
 
-  nsRuleNode* mParent; // A pointer to the parent node in the tree.
-                       // This enables us to walk backwards from the
-                       // most specific rule matched to the least
-                       // specific rule (which is the optimal order to
-                       // use for lookups of style properties.
-  nsIStyleRule* mRule; // [STRONG] A pointer to our specific rule.
+  nsRuleNode* const mParent; // A pointer to the parent node in the tree.
+                             // This enables us to walk backwards from the
+                             // most specific rule matched to the least
+                             // specific rule (which is the optimal order to
+                             // use for lookups of style properties.
+  nsIStyleRule* const mRule; // [STRONG] A pointer to our specific rule.
 
   nsRuleNode* mNextSibling; // This value should be used only by the
                             // parent, since the parent may store
@@ -398,7 +412,8 @@ public:
 
 protected:
   void DestroyInternal(nsRuleNode ***aDestroyQueueTail);
-  void PropagateDependentBit(uint32_t aBit, nsRuleNode* aHighestNode);
+  void PropagateDependentBit(nsStyleStructID aSID, nsRuleNode* aHighestNode,
+                             void* aStruct);
   void PropagateNoneBit(uint32_t aBit, nsRuleNode* aHighestNode);
 
   const void* SetDefaultOnRoot(const nsStyleStructID aSID,
@@ -608,12 +623,6 @@ protected:
   inline RuleDetail CheckSpecifiedProperties(const nsStyleStructID aSID,
                                              const nsRuleData* aRuleData);
 
-  const void* GetParentData(const nsStyleStructID aSID);
-  #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)  \
-    const nsStyle##name_* GetParent##name_();
-  #include "nsStyleStructList.h"
-  #undef STYLE_STRUCT
-
   already_AddRefed<nsCSSShadowArray>
               GetShadowData(const nsCSSValueList* aList,
                             nsStyleContext* aContext,
@@ -627,6 +636,7 @@ private:
 
 public:
   static nsRuleNode* CreateRootNode(nsPresContext* aPresContext);
+  static void EnsureBlockDisplay(uint8_t& display);
 
   // Transition never returns null; on out of memory it'll just return |this|.
   nsRuleNode* Transition(nsIStyleRule* aRule, uint8_t aLevel,
@@ -634,7 +644,7 @@ public:
   nsRuleNode* GetParent() const { return mParent; }
   bool IsRoot() const { return mParent == nullptr; }
 
-  // These PRUint8s are really nsStyleSet::sheetType values.
+  // These uint8_ts are really nsStyleSet::sheetType values.
   uint8_t GetLevel() const {
     NS_ASSERTION(!IsRoot(), "can't call on root");
     return (mDependentBits & NS_RULE_NODE_LEVEL_MASK) >>
@@ -645,16 +655,26 @@ public:
     return (mDependentBits & NS_RULE_NODE_IS_IMPORTANT) != 0;
   }
 
-  // NOTE:  Does not |AddRef|.
+  /**
+   * Has this rule node at some time in its lifetime been the mRuleNode
+   * of some style context (as opposed to only being the ancestor of
+   * some style context's mRuleNode)?
+   */
+  void SetUsedDirectly();
+  bool IsUsedDirectly() const {
+    return (mDependentBits & NS_RULE_NODE_USED_DIRECTLY) != 0;
+  }
+
+  // NOTE:  Does not |AddRef|.  Null only for the root.
   nsIStyleRule* GetRule() const { return mRule; }
-  // NOTE: Does not |AddRef|.
-  nsPresContext* GetPresContext() const { return mPresContext; }
+  // NOTE: Does not |AddRef|.  Never null.
+  nsPresContext* PresContext() const { return mPresContext; }
 
   const void* GetStyleData(nsStyleStructID aSID,
                            nsStyleContext* aContext,
                            bool aComputeData);
 
-  #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)                      \
+  #define STYLE_STRUCT(name_, checkdata_cb_)                                  \
     const nsStyle##name_* GetStyle##name_(nsStyleContext* aContext,           \
                                           bool aComputeData);
   #include "nsStyleStructList.h"

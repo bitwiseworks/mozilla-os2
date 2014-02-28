@@ -55,6 +55,11 @@ xhtml|link {
   -moz-binding: url("chrome://mozapps/content/extensions/extensions.xml#detail-row");
 }
 
+.text-list {
+  white-space: pre-line;
+  -moz-user-select: element;
+}
+
 setting, row[unsupported="true"] {
   display: none;
 }
@@ -200,4 +205,8 @@ richlistitem:not([selected]) * {
 
 #header-search {
   width: 22em;
+}
+
+.discover-button[disabled="true"] {
+  display: none;
 }

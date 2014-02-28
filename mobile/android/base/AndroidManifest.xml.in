@@ -9,16 +9,12 @@
       android:sharedUserId="@MOZ_ANDROID_SHARED_ID@"
 #endif
       >
-
-#ifdef ARMV7_ONLY
-    <supports-screens android:smallScreens="false" />
-#endif
-
-    <supports-screens android:smallScreens="false" />
     <uses-sdk android:minSdkVersion="8"
               android:targetSdkVersion="14"/>
 
-#include ../sync/manifests/SyncAndroidManifest_permissions.xml.in
+#include ../services/manifests/AnnouncementsAndroidManifest_permissions.xml.in
+#include ../services/manifests/HealthReportAndroidManifest_permissions.xml.in
+#include ../services/manifests/SyncAndroidManifest_permissions.xml.in
 
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
@@ -30,6 +26,9 @@
 
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+#ifdef MOZ_ANDROID_WALLPAPER
+    <uses-permission android:name="android.permission.SET_WALLPAPER"/>
+#endif
     <uses-permission android:name="@ANDROID_PACKAGE_NAME@.permissions.PASSWORD_PROVIDER"/>
     <uses-permission android:name="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"/>
     <uses-permission android:name="@ANDROID_PACKAGE_NAME@.permissions.FORMHISTORY_PROVIDER"/>
@@ -46,6 +45,18 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen"/>
 
+#ifdef MOZ_ANDROID_BEAM
+    <!-- Android Beam support -->
+    <uses-permission android:name="android.permission.NFC"/>
+    <uses-feature android:name="android.hardware.nfc" android:required="false"/>
+#endif
+
+#ifdef MOZ_WEBRTC
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-feature android:name="android.hardware.audio.low_latency" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.any" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+#endif
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
@@ -63,7 +74,7 @@
 		 android:debuggable="true">
 #endif
 
-        <activity android:name="App"
+        <activity android:name=".App"
                   android:label="@MOZ_APP_DISPLAYNAME@"
                   android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize"
                   android:windowSoftInputMode="stateUnspecified|adjustResize"
@@ -113,10 +124,43 @@
                 <data android:scheme="https" />
             </intent-filter>
 
+            <intent-filter>
+                <action android:name="android.intent.action.SEARCH" />
+            </intent-filter>
+
+#ifdef MOZ_ANDROID_BEAM
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED"/>
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+#endif
+
+            <meta-data android:name="android.app.searchable"
+                       android:resource="@xml/searchable" />
+
             <!-- For debugging -->
             <intent-filter>
                 <action android:name="org.mozilla.gecko.DEBUG" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".WebApp"
+                  android:label="@string/webapp_generic_name"
+                  android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize"
+                  android:windowSoftInputMode="stateUnspecified|adjustResize"
+                  android:launchMode="singleTask"
+                  android:taskAffinity="org.mozilla.gecko.WEBAPP"
+                  android:process=":@ANDROID_PACKAGE_NAME@.WebApp"
+                  android:excludeFromRecents="true"
+                  android:theme="@style/Gecko.App">
+            <intent-filter>
+                <action android:name="org.mozilla.gecko.WEBAPP" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="org.mozilla.gecko.ACTION_ALERT_CALLBACK" />
             </intent-filter>
         </activity>
 
@@ -127,13 +171,6 @@
             android:name="com.android.internal.app.ResolverActivity"
             android:targetActivity=".App"
             android:exported="true" />
-
-        <receiver android:name="NotificationHandler">
-            <intent-filter>
-                <action android:name="org.mozilla.gecko.ACTION_ALERT_CLICK" />
-                <action android:name="org.mozilla.gecko.ACTION_ALERT_CLEAR" />
-            </intent-filter>
-        </receiver>
 
         <receiver android:name="org.mozilla.gecko.GeckoUpdateReceiver">
             <intent-filter>
@@ -154,7 +191,7 @@
             </intent-filter>
         </receiver>
 
-        <activity android:name="Restarter"
+        <activity android:name="org.mozilla.gecko.Restarter"
                   android:process="@ANDROID_PACKAGE_NAME@Restarter"
                   android:theme="@style/Gecko">
           <intent-filter>
@@ -163,10 +200,12 @@
           </intent-filter>
         </activity>
 
-#include ../sync/manifests/SyncAndroidManifest_activities.xml.in
+#include ../services/manifests/AnnouncementsAndroidManifest_activities.xml.in
+#include ../services/manifests/SyncAndroidManifest_activities.xml.in
+#include ../services/manifests/HealthReportAndroidManifest_activities.xml.in
 
 #if MOZ_CRASHREPORTER
-  <activity android:name="CrashReporter"
+  <activity android:name="org.mozilla.gecko.CrashReporter"
             android:label="@string/crash_reporter_title"
             android:icon="@drawable/crash_reporter"
             android:theme="@style/Gecko"
@@ -177,31 +216,33 @@
 	</activity>
 #endif
 
-        <!-- Bug 715260: Hiding Webapps support
-        <activity android:name="LauncherShortcuts"
-                  android:label="@string/launcher_shortcuts_title"
-                  android:theme="@style/Gecko.Translucent">
+        <activity android:name="org.mozilla.gecko.VideoPlayer"
+                  android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation"
+                  android:theme="@android:style/Theme.NoTitleBar">
             <intent-filter>
-                <action android:name="android.intent.action.CREATE_SHORTCUT" />
-                <category android:name="android.intent.category.DEFAULT" />
+                <action android:name="org.mozilla.gecko.PLAY_VIDEO" />
             </intent-filter>
         </activity>
-        -->
 
         <activity android:name="org.mozilla.gecko.AwesomeBar"
-                  android:theme="@style/Gecko.Light.AwesomeBar"
+                  android:theme="@style/Gecko.AwesomeBar"
                   android:configChanges="orientation|screenSize"
-                  android:windowSoftInputMode="stateAlwaysVisible|adjustResize"/>
+                  android:windowSoftInputMode="stateUnspecified|adjustResize"/>
 
         <activity android:name="org.mozilla.gecko.GeckoPreferences"
-                  android:theme="@style/Gecko.TitleBar.Preferences"
+                  android:theme="@style/Gecko.Preferences"
                   android:label="@string/settings_title"
                   android:configChanges="orientation|screenSize"
                   android:excludeFromRecents="true"/>
 
-        <provider android:name="@ANDROID_PACKAGE_NAME@.db.BrowserProvider"
+        <provider android:name="org.mozilla.gecko.db.BrowserProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.browser"
-                  android:permission="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"/>
+                  android:permission="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER">
+
+            <path-permission android:pathPrefix="/search_suggest_query"
+                             android:readPermission="android.permission.GLOBAL_SEARCH" />
+
+        </provider>
 
         <!--
           Ensure that passwords provider runs in its own process. (Bug 718760.)
@@ -209,17 +250,17 @@
           Fennec versions into the same process. (Bug 749727.)
           Process name is a mangled version to avoid a Talos bug. (Bug 750548.)
           -->
-        <provider android:name="@ANDROID_PACKAGE_NAME@.db.PasswordsProvider"
+        <provider android:name="org.mozilla.gecko.db.PasswordsProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.passwords"
                   android:permission="@ANDROID_PACKAGE_NAME@.permissions.PASSWORD_PROVIDER"
                   android:process="@MANGLED_ANDROID_PACKAGE_NAME@.PasswordsProvider"/>
 
-        <provider android:name="@ANDROID_PACKAGE_NAME@.db.FormHistoryProvider"
+        <provider android:name="org.mozilla.gecko.db.FormHistoryProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.formhistory"
                   android:permission="@ANDROID_PACKAGE_NAME@.permissions.FORMHISTORY_PROVIDER"
                   android:protectionLevel="signature"/>
 
-        <provider android:name="@ANDROID_PACKAGE_NAME@.db.TabsProvider"
+        <provider android:name="org.mozilla.gecko.db.TabsProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.tabs"
                   android:permission="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"/>
 
@@ -229,8 +270,16 @@
             android:process="@MANGLED_ANDROID_PACKAGE_NAME@.UpdateService">
         </service>
 
+        <service
+            android:exported="false"
+            android:name="org.mozilla.gecko.NotificationService">
+        </service>
 
-#include ../sync/manifests/SyncAndroidManifest_services.xml.in
+
+#include ../services/manifests/AnnouncementsAndroidManifest_services.xml.in
+#include ../services/manifests/HealthReportAndroidManifest_services.xml.in
+#include ../services/manifests/SyncAndroidManifest_services.xml.in
+
     </application>
 
     <permission android:name="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"

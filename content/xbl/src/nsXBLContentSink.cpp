@@ -150,7 +150,7 @@ nsXBLContentSink::FlushText(bool aReleaseTextNode)
         const PRUnichar* end = mText + mTextLength;
         while (cp < end) {
           PRUnichar ch = *cp++;
-          if (!XP_IS_SPACE(ch)) {
+          if (!dom::IsSpaceCharacter(ch)) {
             isWS = false;
             break;
           }
@@ -487,7 +487,7 @@ nsXBLContentSink::OnOpenContainer(const PRUnichar **aAtts,
                      mSecondaryState == eXBL_None);
     NS_ASSERTION(mBinding, "Must have binding here");
     mSecondaryState = eXBL_InProperty;
-    ConstructProperty(aAtts);
+    ConstructProperty(aAtts, aLineNumber);
   }
   else if (aTagName == nsGkAtoms::getter) {
     ENSURE_XBL_STATE(mSecondaryState == eXBL_InProperty && mProperty);
@@ -723,19 +723,8 @@ nsXBLContentSink::ConstructImplementation(const PRUnichar **aAtts)
     }
     else if (localName == nsGkAtoms::implements) {
       // Only allow implementation of interfaces via XBL if the principal of
-      // our XBL document has UniversalXPConnect privileges.  No principal
-      // means no privs!
-      
-      // XXX this api is so badly tied to JS it's not even funny.  We don't
-      // have a concept of enabling capabilities on a per-principal basis,
-      // but only on a per-principal-and-JS-stackframe basis!  So for now
-      // this is basically equivalent to testing that we have the system
-      // principal, since there is no JS stackframe in sight here...
-      bool hasUniversalXPConnect;
-      nsresult rv = mDocument->NodePrincipal()->
-        IsCapabilityEnabled("UniversalXPConnect", nullptr,
-                            &hasUniversalXPConnect);
-      if (NS_SUCCEEDED(rv) && hasUniversalXPConnect) {
+      // our XBL document is the system principal.
+      if (nsContentUtils::IsSystemPrincipal(mDocument->NodePrincipal())) {
         mBinding->ConstructInterfaceTable(nsDependentString(aAtts[1]));
       }
     }
@@ -781,12 +770,13 @@ nsXBLContentSink::ConstructField(const PRUnichar **aAtts, uint32_t aLineNumber)
 }
 
 void
-nsXBLContentSink::ConstructProperty(const PRUnichar **aAtts)
+nsXBLContentSink::ConstructProperty(const PRUnichar **aAtts, uint32_t aLineNumber)
 {
   const PRUnichar* name     = nullptr;
   const PRUnichar* readonly = nullptr;
   const PRUnichar* onget    = nullptr;
   const PRUnichar* onset    = nullptr;
+  bool exposeToUntrustedContent = false;
 
   nsCOMPtr<nsIAtom> prefix, localName;
   for (; *aAtts; aAtts += 2) {
@@ -811,15 +801,21 @@ nsXBLContentSink::ConstructProperty(const PRUnichar **aAtts)
     else if (localName == nsGkAtoms::onset) {
       onset = aAtts[1];
     }
+    else if (localName == nsGkAtoms::exposeToUntrustedContent &&
+             nsDependentString(aAtts[1]).EqualsLiteral("true"))
+    {
+      exposeToUntrustedContent = true;
+    }
   }
 
   if (name) {
     // All of our pointers are now filled in. Construct our property with all of
     // these parameters.
-    mProperty = new nsXBLProtoImplProperty(name, onget, onset, readonly);
-    if (mProperty) {
-      AddMember(mProperty);
+    mProperty = new nsXBLProtoImplProperty(name, onget, onset, readonly, aLineNumber);
+    if (exposeToUntrustedContent) {
+      mProperty->SetExposeToUntrustedContent(true);
     }
+    AddMember(mProperty);
   }
 }
 
@@ -829,8 +825,14 @@ nsXBLContentSink::ConstructMethod(const PRUnichar **aAtts)
   mMethod = nullptr;
 
   const PRUnichar* name = nullptr;
+  const PRUnichar* expose = nullptr;
   if (FindValue(aAtts, nsGkAtoms::name, &name)) {
     mMethod = new nsXBLProtoImplMethod(name);
+    if (FindValue(aAtts, nsGkAtoms::exposeToUntrustedContent, &expose) &&
+        nsDependentString(expose).EqualsLiteral("true"))
+    {
+      mMethod->SetExposeToUntrustedContent(true);
+    }
   }
 
   if (mMethod) {
@@ -877,7 +879,7 @@ nsXBLContentSink::CreateElement(const PRUnichar** aAtts, uint32_t aAttsCount,
   AddAttributesToXULPrototype(aAtts, aAttsCount, prototype);
 
   Element* result;
-  nsresult rv = nsXULElement::Create(prototype, mDocument, false, &result);
+  nsresult rv = nsXULElement::Create(prototype, mDocument, false, false, &result);
   *aResult = result;
   return rv;
 #endif

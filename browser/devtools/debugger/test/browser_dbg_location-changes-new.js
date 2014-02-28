@@ -13,62 +13,80 @@ var gDebugger = null;
 
 function test()
 {
+  let scriptShown = false;
+  let framesAdded = false;
+
   debug_tab_pane(STACK_URL, function(aTab, aDebuggee, aPane) {
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
 
-    testSimpleCall();
+    gDebugger.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
+      let url = aEvent.detail.url;
+      if (url.indexOf("browser_dbg_stack") != -1) {
+        scriptShown = true;
+        gDebugger.removeEventListener(aEvent.type, _onEvent);
+        runTest();
+      }
+    });
+
+    gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
+      framesAdded = true;
+      runTest();
+    });
+
+    gDebuggee.simpleCall();
   });
+
+  function runTest()
+  {
+    if (scriptShown && framesAdded) {
+      Services.tm.currentThread.dispatch({ run: testSimpleCall }, 0);
+    }
+  }
 }
 
 function testSimpleCall() {
-  gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
-    Services.tm.currentThread.dispatch({
-      run: function() {
-        var frames = gDebugger.DebuggerView.StackFrames._frames,
-            childNodes = frames.childNodes;
+  var frames = gDebugger.DebuggerView.StackFrames.widget._list,
+      childNodes = frames.childNodes;
 
-        is(gDebugger.DebuggerController.activeThread.state, "paused",
-          "Should only be getting stack frames while paused.");
+  is(gDebugger.DebuggerController.activeThread.state, "paused",
+    "Should only be getting stack frames while paused.");
 
-        is(frames.querySelectorAll(".dbg-stackframe").length, 1,
-          "Should have only one frame.");
+  is(frames.querySelectorAll(".dbg-stackframe").length, 1,
+    "Should have only one frame.");
 
-        is(childNodes.length, frames.querySelectorAll(".dbg-stackframe").length,
-          "All children should be frames.");
+  is(childNodes.length, frames.querySelectorAll(".dbg-stackframe").length,
+    "All children should be frames.");
 
-        isnot(gDebugger.DebuggerView.Scripts.selected, null,
-          "There should be a selected script.");
-        isnot(gDebugger.editor.getText().length, 0,
-          "The source editor should have some text displayed.");
+  isnot(gDebugger.DebuggerView.Sources.selectedValue, null,
+    "There should be a selected script.");
+  isnot(gDebugger.editor.getText().length, 0,
+    "The source editor should have some text displayed.");
+  isnot(gDebugger.editor.getText(), gDebugger.L10N.getStr("loadingText"),
+    "The source editor text should not be 'Loading...'");
 
-        testLocationChange();
-      }
-    }, 0);
-  });
-
-  gDebuggee.simpleCall();
+  testLocationChange();
 }
 
 function testLocationChange()
 {
   gDebugger.DebuggerController.activeThread.resume(function() {
-    gDebugger.DebuggerController.client.addOneTimeListener("tabNavigated", function(aEvent, aPacket) {
+    gDebugger.DebuggerController._target.once("navigate", function onTabNavigated(aEvent, aPacket) {
       ok(true, "tabNavigated event was fired.");
       info("Still attached to the tab.");
 
-      gDebugger.addEventListener("Debugger:AfterNewScript", function _onEvent(aEvent) {
+      gDebugger.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
         gDebugger.removeEventListener(aEvent.type, _onEvent);
 
-        isnot(gDebugger.DebuggerView.Scripts.selected, null,
+        isnot(gDebugger.DebuggerView.Sources.selectedValue, null,
           "There should be a selected script.");
         isnot(gDebugger.editor.getText().length, 0,
           "The source editor should have some text displayed.");
 
-        let menulist = gDebugger.DebuggerView.Scripts._scripts;
-        let noScripts = gDebugger.L10N.getStr("noScriptsText");
+        let menulist = gDebugger.DebuggerView.Sources.widget;
+        let noScripts = gDebugger.L10N.getStr("noSourcesText");
         isnot(menulist.getAttribute("label"), noScripts,
           "The menulist should not display a notice that there are no scripts availalble.");
         isnot(menulist.getAttribute("tooltiptext"), "",

@@ -15,8 +15,17 @@
 
 #include "nsDOMEventTargetHelper.h"
 
+#include "mozilla/Attributes.h"
+#include "mozilla/dom/FileModeBinding.h"
+
 class nsIDOMFile;
 class nsIFileStorage;
+
+namespace mozilla {
+namespace dom {
+class DOMRequest;
+} // namespace dom
+} // namespace mozilla
 
 BEGIN_FILE_NAMESPACE
 
@@ -43,6 +52,26 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMFILEHANDLE
 
+  nsPIDOMWindow* GetParentObject() const
+  {
+    return GetOwner();
+  }
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+  void GetName(nsString& aName) const
+  {
+    aName = mName;
+  }
+  void GetType(nsString& aType) const
+  {
+    aType = mType;
+  }
+  already_AddRefed<nsIDOMLockedFile> Open(FileMode aMode, ErrorResult& aError);
+  already_AddRefed<DOMRequest> GetFile(ErrorResult& aError);
+  IMPL_EVENT_HANDLER(abort)
+  IMPL_EVENT_HANDLER(error)
+
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(FileHandle, nsDOMEventTargetHelper)
 
   const nsAString&
@@ -65,7 +94,9 @@ public:
 
 protected:
   FileHandle()
-  { }
+  {
+    SetIsDOMBinding();
+  }
 
   ~FileHandle()
   { }
@@ -77,9 +108,6 @@ protected:
 
   nsCOMPtr<nsIFile> mFile;
   nsString mFileName;
-
-  NS_DECL_EVENT_HANDLER(abort)
-  NS_DECL_EVENT_HANDLER(error)
 };
 
 END_FILE_NAMESPACE

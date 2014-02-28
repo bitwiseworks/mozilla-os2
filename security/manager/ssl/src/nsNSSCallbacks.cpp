@@ -3,8 +3,12 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "nsNSSComponent.h"
+
 #include "nsNSSCallbacks.h"
+
+#include "mozilla/Telemetry.h"
+#include "mozilla/TimeStamp.h"
+#include "nsNSSComponent.h"
 #include "nsNSSIOLayer.h"
 #include "nsIWebProgressListener.h"
 #include "nsProtectedAuthThread.h"
@@ -15,11 +19,15 @@
 #include "nsIPrompt.h"
 #include "nsProxyRelease.h"
 #include "PSMRunnable.h"
+#include "ScopedNSSTypes.h"
 #include "nsIConsoleService.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsCRT.h"
+#include "nsNetUtil.h"
+#include "SharedSSLState.h"
 
 #include "ssl.h"
+#include "sslproto.h"
 #include "ocsp.h"
 #include "nssb64.h"
 
@@ -43,6 +51,7 @@ public:
   
   nsCOMPtr<nsHTTPListener> mListener;
   bool mResponsibleForDoneSignal;
+  TimeStamp mStartTime;
 };
 
 nsHTTPDownloadEvent::nsHTTPDownloadEvent()
@@ -73,9 +82,7 @@ nsHTTPDownloadEvent::Run()
   ios->NewChannel(mRequestSession->mURL, nullptr, nullptr, getter_AddRefs(chan));
   NS_ENSURE_STATE(chan);
 
-  // Disabled because it breaks authentication with a proxy, when such proxy
-  // had been setup, and brings blue UI for EV certs.
-  // chan->SetLoadFlags(nsIRequest::LOAD_ANONYMOUS);
+  chan->SetLoadFlags(nsIRequest::LOAD_ANONYMOUS);
 
   // Create a loadgroup for this new channel.  This way if the channel
   // is redirected, we'll have a way to cancel the resulting channel.
@@ -87,8 +94,7 @@ nsHTTPDownloadEvent::Run()
     nsCOMPtr<nsIInputStream> uploadStream;
     rv = NS_NewPostDataStream(getter_AddRefs(uploadStream),
                               false,
-                              mRequestSession->mPostData,
-                              0, ios);
+                              mRequestSession->mPostData);
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIUploadChannel> uploadChannel(do_QueryInterface(chan));
@@ -126,8 +132,10 @@ nsHTTPDownloadEvent::Run()
   rv = NS_NewStreamLoader(getter_AddRefs(mListener->mLoader), 
                           mListener);
 
-  if (NS_SUCCEEDED(rv))
+  if (NS_SUCCEEDED(rv)) {
+    mStartTime = TimeStamp::Now();
     rv = hchan->AsyncOpen(mListener->mLoader, nullptr);
+  }
 
   if (NS_FAILED(rv)) {
     mListener->mResponsibleForDoneSignal = false;
@@ -339,7 +347,7 @@ nsNSSHttpRequestSession::internal_send_receive_attempt(bool &retryable_error,
   volatile bool &waitFlag = mListener->mWaitFlag;
   waitFlag = true;
 
-  nsRefPtr<nsHTTPDownloadEvent> event = new nsHTTPDownloadEvent;
+  RefPtr<nsHTTPDownloadEvent> event(new nsHTTPDownloadEvent);
   if (!event)
     return SECFailure;
 
@@ -365,6 +373,13 @@ nsNSSHttpRequestSession::internal_send_receive_attempt(bool &retryable_error,
     bool running_on_main_thread = NS_IsMainThread();
     if (running_on_main_thread)
     {
+      // The result of running this on the main thread
+      // is a series of small timeouts mixed with spinning the
+      // event loop - this is always dangerous as there is so much main
+      // thread code that does not expect to be called re-entrantly. Your
+      // app really shouldn't do that.
+      NS_WARNING("Security network blocking I/O on Main Thread");
+
       // let's process events quickly
       wait_interval = PR_MicrosecondsToInterval(50);
     }
@@ -403,7 +418,8 @@ nsNSSHttpRequestSession::internal_send_receive_attempt(bool &retryable_error,
         {
           request_canceled = true;
 
-          nsRefPtr<nsCancelHTTPDownloadEvent> cancelevent = new nsCancelHTTPDownloadEvent;
+          RefPtr<nsCancelHTTPDownloadEvent> cancelevent(
+            new nsCancelHTTPDownloadEvent);
           cancelevent->mListener = mListener;
           rv = NS_DispatchToMainThread(cancelevent);
           if (NS_FAILED(rv)) {
@@ -413,6 +429,31 @@ nsNSSHttpRequestSession::internal_send_receive_attempt(bool &retryable_error,
         }
       }
     }
+  }
+
+  if (!event->mStartTime.IsNull()) {
+    if (request_canceled) {
+      Telemetry::Accumulate(Telemetry::CERT_VALIDATION_HTTP_REQUEST_RESULT, 0);
+      Telemetry::AccumulateTimeDelta(
+        Telemetry::CERT_VALIDATION_HTTP_REQUEST_CANCELED_TIME,
+        event->mStartTime, TimeStamp::Now());
+    }
+    else if (NS_SUCCEEDED(mListener->mResultCode) &&
+             mListener->mHttpResponseCode == 200) {
+      Telemetry::Accumulate(Telemetry::CERT_VALIDATION_HTTP_REQUEST_RESULT, 1);
+      Telemetry::AccumulateTimeDelta(
+        Telemetry::CERT_VALIDATION_HTTP_REQUEST_SUCCEEDED_TIME,
+        event->mStartTime, TimeStamp::Now());
+    }
+    else {
+      Telemetry::Accumulate(Telemetry::CERT_VALIDATION_HTTP_REQUEST_RESULT, 2);
+      Telemetry::AccumulateTimeDelta(
+        Telemetry::CERT_VALIDATION_HTTP_REQUEST_FAILED_TIME,
+        event->mStartTime, TimeStamp::Now());
+    }
+  }
+  else {
+    Telemetry::Accumulate(Telemetry::CERT_VALIDATION_HTTP_REQUEST_RESULT, 3);
   }
 
   if (request_canceled)
@@ -725,7 +766,7 @@ void PK11PasswordPromptRunnable::RunOnTargetThread()
   else
   {
     prompt = do_GetInterface(mIR);
-    NS_ASSERTION(prompt != nullptr, "callbacks does not implement nsIPrompt");
+    NS_ASSERTION(prompt, "callbacks does not implement nsIPrompt");
   }
 
   if (!prompt)
@@ -773,56 +814,54 @@ void PK11PasswordPromptRunnable::RunOnTargetThread()
   }
 }
 
-char* PR_CALLBACK
+char*
 PK11PasswordPrompt(PK11SlotInfo* slot, PRBool retry, void* arg)
 {
-  nsRefPtr<PK11PasswordPromptRunnable> runnable = 
+  RefPtr<PK11PasswordPromptRunnable> runnable(
     new PK11PasswordPromptRunnable(slot,
-                                   static_cast<nsIInterfaceRequestor*>(arg));
+                                   static_cast<nsIInterfaceRequestor*>(arg)));
   runnable->DispatchToMainThreadAndWait();
   return runnable->mResult;
 }
 
-void PR_CALLBACK HandshakeCallback(PRFileDesc* fd, void* client_data) {
+void HandshakeCallback(PRFileDesc* fd, void* client_data) {
   nsNSSShutDownPreventionLock locker;
   int32_t sslStatus;
-  char* signer = nullptr;
   char* cipherName = nullptr;
   int32_t keyLength;
-  nsresult rv;
   int32_t encryptBits;
 
   nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
 
-  if (infoObject) {
-    // This is the first callback on resumption handshakes
-    infoObject->SetFirstServerHelloReceived();
-  }
+  // certificate validation sets FirstServerHelloReceived, so if that flag
+  // is absent at handshake time we have a resumed session.
+  bool isResumedSession = !(infoObject->GetFirstServerHelloReceived());
+
+  // This is the first callback on resumption handshakes
+  infoObject->SetFirstServerHelloReceived();
 
   // If the handshake completed, then we know the site is TLS tolerant (if this
   // was a TLS connection).
-  nsSSLIOLayerHelpers::rememberTolerantSite(infoObject);
+  nsSSLIOLayerHelpers& ioLayerHelpers = infoObject->SharedState().IOLayerHelpers();
+  ioLayerHelpers.rememberTolerantSite(infoObject);
 
   if (SECSuccess != SSL_SecurityStatus(fd, &sslStatus, &cipherName, &keyLength,
-                                       &encryptBits, &signer, nullptr)) {
+                                       &encryptBits, nullptr, nullptr)) {
     return;
   }
 
   int32_t secStatus;
   if (sslStatus == SSL_SECURITY_STATUS_OFF)
     secStatus = nsIWebProgressListener::STATE_IS_BROKEN;
-  else if (encryptBits >= 90)
-    secStatus = (nsIWebProgressListener::STATE_IS_SECURE |
-                 nsIWebProgressListener::STATE_SECURE_HIGH);
   else
-    secStatus = (nsIWebProgressListener::STATE_IS_SECURE |
-                 nsIWebProgressListener::STATE_SECURE_LOW);
+    secStatus = nsIWebProgressListener::STATE_IS_SECURE
+              | nsIWebProgressListener::STATE_SECURE_HIGH;
 
   PRBool siteSupportsSafeRenego;
   if (SSL_HandshakeNegotiatedExtension(fd, ssl_renegotiation_info_xtn, &siteSupportsSafeRenego) != SECSuccess
       || !siteSupportsSafeRenego) {
 
-    bool wantWarning = (nsSSLIOLayerHelpers::getWarnLevelMissingRFC5746() > 0);
+    bool wantWarning = (ioLayerHelpers.getWarnLevelMissingRFC5746() > 0);
 
     nsCOMPtr<nsIConsoleService> console;
     if (infoObject && wantWarning) {
@@ -838,108 +877,93 @@ void PR_CALLBACK HandshakeCallback(PRFileDesc* fd, void* client_data) {
         console->LogStringMessage(msg.get());
       }
     }
-    if (nsSSLIOLayerHelpers::treatUnsafeNegotiationAsBroken()) {
+    if (ioLayerHelpers.treatUnsafeNegotiationAsBroken()) {
       secStatus = nsIWebProgressListener::STATE_IS_BROKEN;
     }
   }
 
+  ScopedCERTCertificate serverCert(SSL_PeerCertificate(fd));
 
-  CERTCertificate *peerCert = SSL_PeerCertificate(fd);
-  const char* caName = nullptr; // caName is a pointer only, no ownership
-  char* certOrgName = CERT_GetOrgName(&peerCert->issuer);
-  CERT_DestroyCertificate(peerCert);
-  caName = certOrgName ? certOrgName : signer;
+  infoObject->SetSecurityState(secStatus);
 
-  const char* verisignName = "Verisign, Inc.";
-  // If the CA name is RSA Data Security, then change the name to the real
-  // name of the company i.e. VeriSign, Inc.
-  if (nsCRT::strcmp((const char*)caName, "RSA Data Security, Inc.") == 0) {
-    caName = verisignName;
+  /* Set the SSL Status information */
+  RefPtr<nsSSLStatus> status(infoObject->SSLStatus());
+  if (!status) {
+    status = new nsSSLStatus();
+    infoObject->SetSSLStatus(status);
   }
 
-  nsAutoString shortDesc;
-  const PRUnichar* formatStrings[1] = { ToNewUnicode(NS_ConvertUTF8toUTF16(caName)) };
-  nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
-  if (NS_SUCCEEDED(rv)) {
-    rv = nssComponent->PIPBundleFormatStringFromName("SignedBy",
-                                                   formatStrings, 1,
-                                                   shortDesc);
+  RememberCertErrorsTable::GetInstance().LookupCertErrorBits(infoObject,
+                                                             status);
 
-    nsMemory::Free(const_cast<PRUnichar*>(formatStrings[0]));
+  RefPtr<nsNSSCertificate> nssc(nsNSSCertificate::Create(serverCert));
+  nsCOMPtr<nsIX509Cert> prevcert;
+  infoObject->GetPreviousCert(getter_AddRefs(prevcert));
 
-    nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
-    infoObject->SetSecurityState(secStatus);
-    infoObject->SetShortSecurityDescription(shortDesc.get());
-
-    /* Set the SSL Status information */
-    nsRefPtr<nsSSLStatus> status = infoObject->SSLStatus();
-    if (!status) {
-      status = new nsSSLStatus();
-      infoObject->SetSSLStatus(status);
+  bool equals_previous = false;
+  if (prevcert && nssc) {
+    nsresult rv = nssc->Equals(prevcert, &equals_previous);
+    if (NS_FAILED(rv)) {
+      equals_previous = false;
     }
+  }
 
-    RememberCertErrorsTable::GetInstance().LookupCertErrorBits(infoObject,
-                                                               status);
-
-    CERTCertificate *serverCert = SSL_PeerCertificate(fd);
-    if (serverCert) {
-      nsRefPtr<nsNSSCertificate> nssc = nsNSSCertificate::Create(serverCert);
-      CERT_DestroyCertificate(serverCert);
-      serverCert = nullptr;
-
-      nsCOMPtr<nsIX509Cert> prevcert;
-      infoObject->GetPreviousCert(getter_AddRefs(prevcert));
-
-      bool equals_previous = false;
-      if (prevcert && nssc) {
-        nsresult rv = nssc->Equals(prevcert, &equals_previous);
-        if (NS_FAILED(rv)) {
-          equals_previous = false;
-        }
-      }
-
-      if (equals_previous) {
-        PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
-               ("HandshakeCallback using PREV cert %p\n", prevcert.get()));
-        status->mServerCert = prevcert;
-      }
-      else {
-        if (status->mServerCert) {
-          PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
-                 ("HandshakeCallback KEEPING cert %p\n", status->mServerCert.get()));
-        }
-        else {
-          PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
-                 ("HandshakeCallback using NEW cert %p\n", nssc.get()));
-          status->mServerCert = nssc;
-        }
-      }
+  if (equals_previous) {
+    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+            ("HandshakeCallback using PREV cert %p\n", prevcert.get()));
+    status->mServerCert = prevcert;
+  }
+  else {
+    if (status->mServerCert) {
+      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+              ("HandshakeCallback KEEPING cert %p\n", status->mServerCert.get()));
     }
+    else {
+      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+              ("HandshakeCallback using NEW cert %p\n", nssc.get()));
+      status->mServerCert = nssc;
+    }
+  }
 
-    status->mHaveKeyLengthAndCipher = true;
-    status->mKeyLength = keyLength;
-    status->mSecretKeyLength = encryptBits;
-    status->mCipherName.Assign(cipherName);
+  status->mHaveKeyLengthAndCipher = true;
+  status->mKeyLength = keyLength;
+  status->mSecretKeyLength = encryptBits;
+  status->mCipherName.Assign(cipherName);
 
-    // Get the NPN value. Do this on the stack and copy it into
-    // a string rather than preallocating the string because right
-    // now we expect NPN to fail more often than it succeeds.
-    SSLNextProtoState state;
-    unsigned char npnbuf[256];
-    unsigned int npnlen;
+  // Get the NPN value.
+  SSLNextProtoState state;
+  unsigned char npnbuf[256];
+  unsigned int npnlen;
     
-    if (SSL_GetNextProto(fd, &state, npnbuf, &npnlen, 256) == SECSuccess &&
-        state == SSL_NEXT_PROTO_NEGOTIATED)
+  if (SSL_GetNextProto(fd, &state, npnbuf, &npnlen, 256) == SECSuccess) {
+    if (state == SSL_NEXT_PROTO_NEGOTIATED)
       infoObject->SetNegotiatedNPN(reinterpret_cast<char *>(npnbuf), npnlen);
     else
       infoObject->SetNegotiatedNPN(nullptr, 0);
-
-    infoObject->SetHandshakeCompleted();
+    mozilla::Telemetry::Accumulate(Telemetry::SSL_NPN_TYPE, state);
   }
+  else
+    infoObject->SetNegotiatedNPN(nullptr, 0);
+
+  SSLChannelInfo channelInfo;
+  if (SSL_GetChannelInfo(fd, &channelInfo, sizeof(channelInfo)) == SECSuccess) {
+    // Get the protocol version for telemetry
+    // 0=ssl3, 1=tls1, 2=tls1.1, 3=tls1.2
+    unsigned int versionEnum = channelInfo.protocolVersion & 0xFF;
+    Telemetry::Accumulate(Telemetry::SSL_HANDSHAKE_VERSION, versionEnum);
+
+    SSLCipherSuiteInfo cipherInfo;
+    if (SSL_GetCipherSuiteInfo(channelInfo.cipherSuite, &cipherInfo,
+                                sizeof (cipherInfo)) == SECSuccess) {
+      // keyExchange null=0, rsa=1, dh=2, fortezza=3, ecdh=4
+      Telemetry::Accumulate(Telemetry::SSL_KEY_EXCHANGE_ALGORITHM,
+                            cipherInfo.keaType);
+    }
+      
+  }
+  infoObject->SetHandshakeCompleted(isResumedSession);
 
   PORT_Free(cipherName);
-  PR_FREEIF(certOrgName);
-  PR_Free(signer);
 }
 
 struct OCSPDefaultResponders {
@@ -1028,7 +1052,7 @@ static CERT_StringFromCertFcn oldOCSPAIAInfoCallback = nullptr;
  *
  * The result needs to be freed (PORT_Free) when no longer in use.
  */
-char* PR_CALLBACK MyAlternateOCSPAIAInfoCallback(CERTCertificate *cert) {
+char* MyAlternateOCSPAIAInfoCallback(CERTCertificate *cert) {
   if (cert && !cert->isRoot) {
     unsigned int i;
     for (i=0; i < numResponders; i++) {

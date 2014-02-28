@@ -8,13 +8,11 @@
 #ifndef nsDOMCSSDeclaration_h___
 #define nsDOMCSSDeclaration_h___
 
+#include "mozilla/Attributes.h"
 #include "nsICSSDeclaration.h"
-#include "nsIDOMCSS2Properties.h"
 #include "nsCOMPtr.h"
 #include "mozilla/dom/CSS2PropertiesBinding.h"
 
-class nsCSSParser;
-class nsIURI;
 class nsIPrincipal;
 class nsIDocument;
 
@@ -26,46 +24,43 @@ class Rule;
 }
 }
 
-class nsDOMCSSDeclaration : public nsICSSDeclaration,
-                            public nsIDOMCSS2Properties
+class nsDOMCSSDeclaration : public nsICSSDeclaration
 {
 public:
   // Only implement QueryInterface; subclasses have the responsibility
   // of implementing AddRef/Release.
-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) MOZ_OVERRIDE;
 
   // Declare addref and release so they can be called on us, but don't
   // implement them.  Our subclasses must handle their own
   // refcounting.
-  NS_IMETHOD_(nsrefcnt) AddRef() = 0;
-  NS_IMETHOD_(nsrefcnt) Release() = 0;
+  NS_IMETHOD_(nsrefcnt) AddRef() MOZ_OVERRIDE = 0;
+  NS_IMETHOD_(nsrefcnt) Release() MOZ_OVERRIDE = 0;
 
   NS_DECL_NSICSSDECLARATION
   using nsICSSDeclaration::GetLength;
 
   // Require subclasses to implement |GetParentRule|.
   //NS_DECL_NSIDOMCSSSTYLEDECLARATION
-  NS_IMETHOD GetCssText(nsAString & aCssText);
-  NS_IMETHOD SetCssText(const nsAString & aCssText);
+  NS_IMETHOD GetCssText(nsAString & aCssText) MOZ_OVERRIDE;
+  NS_IMETHOD SetCssText(const nsAString & aCssText) MOZ_OVERRIDE;
   NS_IMETHOD GetPropertyValue(const nsAString & propertyName,
-                              nsAString & _retval);
-  NS_IMETHOD GetPropertyCSSValue(const nsAString & propertyName,
-                                 nsIDOMCSSValue **_retval);
+                              nsAString & _retval) MOZ_OVERRIDE;
+  virtual already_AddRefed<mozilla::dom::CSSValue>
+    GetPropertyCSSValue(const nsAString & propertyName,
+                        mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
+  using nsICSSDeclaration::GetPropertyCSSValue;
   NS_IMETHOD RemoveProperty(const nsAString & propertyName,
-                            nsAString & _retval);
+                            nsAString & _retval) MOZ_OVERRIDE;
   NS_IMETHOD GetPropertyPriority(const nsAString & propertyName,
-                                 nsAString & _retval);
+                                 nsAString & _retval) MOZ_OVERRIDE;
   NS_IMETHOD SetProperty(const nsAString & propertyName,
-                         const nsAString & value, const nsAString & priority);
-  NS_IMETHOD GetLength(uint32_t *aLength);
-  NS_IMETHOD GetParentRule(nsIDOMCSSRule * *aParentRule) = 0;
-
-  // We implement this as a shim which forwards to GetPropertyValue
-  // and SetPropertyValue; subclasses need not.
-  NS_DECL_NSIDOMCSS2PROPERTIES
+                         const nsAString & value, const nsAString & priority) MOZ_OVERRIDE;
+  NS_IMETHOD GetLength(uint32_t *aLength) MOZ_OVERRIDE;
+  NS_IMETHOD GetParentRule(nsIDOMCSSRule * *aParentRule) MOZ_OVERRIDE = 0;
 
   // WebIDL interface for CSS2Properties
-#define CSS_PROP_DOMPROP_PREFIXED(prop_) Moz ## prop_
+#define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) publicname_
 #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_,          \
                  kwtable_, stylestruct_, stylestructoffset_, animtype_)      \
   void                                                                       \
@@ -93,15 +88,14 @@ public:
 #undef CSS_PROP_SHORTHAND
 #undef CSS_PROP_LIST_EXCLUDE_INTERNAL
 #undef CSS_PROP
-#undef CSS_PROP_DOMPROP_PREFIXED
+#undef CSS_PROP_PUBLIC_OR_PRIVATE
 
-  virtual void IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aPropName);
+  virtual void IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aPropName) MOZ_OVERRIDE;
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap)
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE
   {
-    return mozilla::dom::CSS2PropertiesBinding::Wrap(cx, scope, this,
-                                                     triedToWrap);
+    return mozilla::dom::CSS2PropertiesBinding::Wrap(cx, scope, this);
   }
 
 protected:

@@ -57,7 +57,7 @@ NS_IMPL_ISUPPORTS_INHERITED4(nsFtpChannel,
 NS_IMETHODIMP
 nsFtpChannel::SetUploadStream(nsIInputStream *stream,
                               const nsACString &contentType,
-                              int32_t contentLength)
+                              int64_t contentLength)
 {
     NS_ENSURE_TRUE(!IsPending(), NS_ERROR_IN_PROGRESS);
 
@@ -135,7 +135,7 @@ nsFtpChannel::OpenContentStream(bool async, nsIInputStream **result,
 bool
 nsFtpChannel::GetStatusArg(nsresult status, nsString &statusArg)
 {
-    nsCAutoString host;
+    nsAutoCString host;
     URI()->GetHost(host);
     CopyUTF8toUTF16(host, statusArg);
     return true;

@@ -5,12 +5,14 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.gfx.Layer;
-import org.mozilla.gecko.gfx.Layer.RenderContext;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.util.EventDispatcher;
 import org.mozilla.gecko.util.FloatUtils;
 import org.mozilla.gecko.util.GeckoEventListener;
+import org.mozilla.gecko.util.ThreadUtils;
 
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import android.util.Log;
@@ -20,6 +22,7 @@ class TextSelection extends Layer implements GeckoEventListener {
     private static final String LOGTAG = "GeckoTextSelection";
 
     private final TextSelectionHandle mStartHandle;
+    private final TextSelectionHandle mMiddleHandle;
     private final TextSelectionHandle mEndHandle;
     private final EventDispatcher mEventDispatcher;
 
@@ -27,14 +30,18 @@ class TextSelection extends Layer implements GeckoEventListener {
     private float mViewTop;
     private float mViewZoom;
 
-    TextSelection(TextSelectionHandle startHandle, TextSelectionHandle endHandle,
-                  EventDispatcher eventDispatcher) {
+    TextSelection(TextSelectionHandle startHandle,
+                  TextSelectionHandle middleHandle,
+                  TextSelectionHandle endHandle,
+                  EventDispatcher eventDispatcher,
+                  GeckoApp activity) {
         mStartHandle = startHandle;
+        mMiddleHandle = middleHandle;
         mEndHandle = endHandle;
         mEventDispatcher = eventDispatcher;
 
-        // Only register listeners if we have valid start/end handles
-        if (mStartHandle == null || mEndHandle == null) {
+        // Only register listeners if we have valid start/middle/end handles
+        if (mStartHandle == null || mMiddleHandle == null || mEndHandle == null) {
             Log.e(LOGTAG, "Failed to initialize text selection because at least one handle is null");
         } else {
             registerEventListener("TextSelection:ShowHandles");
@@ -49,51 +56,63 @@ class TextSelection extends Layer implements GeckoEventListener {
         unregisterEventListener("TextSelection:PositionHandles");
     }
 
-    public void handleMessage(String event, JSONObject message) {
-        try {
-            if (event.equals("TextSelection:ShowHandles")) {
-                GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
-                    public void run() {
-                        mStartHandle.setVisibility(View.VISIBLE);
-                        mEndHandle.setVisibility(View.VISIBLE);
+    private TextSelectionHandle getHandle(String name) {
+        if (name.equals("START")) {
+            return mStartHandle;
+        } else if (name.equals("MIDDLE")) {
+            return mMiddleHandle;
+        } else {
+            return mEndHandle;
+        }
+    }
+
+    @Override
+    public void handleMessage(final String event, final JSONObject message) {
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (event.equals("TextSelection:ShowHandles")) {
+                        final JSONArray handles = message.getJSONArray("handles");
+                        for (int i=0; i < handles.length(); i++) {
+                            String handle = handles.getString(i);
+                            getHandle(handle).setVisibility(View.VISIBLE);
+                        }
 
                         mViewLeft = 0.0f;
                         mViewTop = 0.0f;
                         mViewZoom = 0.0f;
-                        LayerView layerView = GeckoApp.mAppContext.getLayerView();
+                        LayerView layerView = GeckoAppShell.getLayerView();
                         if (layerView != null) {
                             layerView.addLayer(TextSelection.this);
                         }
-                    }
-                });
-            } else if (event.equals("TextSelection:HideHandles")) {
-                GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
-                    public void run() {
-                        LayerView layerView = GeckoApp.mAppContext.getLayerView();
+                    } else if (event.equals("TextSelection:HideHandles")) {
+                        LayerView layerView = GeckoAppShell.getLayerView();
                         if (layerView != null) {
                             layerView.removeLayer(TextSelection.this);
                         }
 
                         mStartHandle.setVisibility(View.GONE);
+                        mMiddleHandle.setVisibility(View.GONE);
                         mEndHandle.setVisibility(View.GONE);
-                    }
-                });
-            } else if (event.equals("TextSelection:PositionHandles")) {
-                final int startLeft = message.getInt("startLeft");
-                final int startTop = message.getInt("startTop");
-                final int endLeft = message.getInt("endLeft");
-                final int endTop = message.getInt("endTop");
+                    } else if (event.equals("TextSelection:PositionHandles")) {
+                        final boolean rtl = message.getBoolean("rtl");
+                        final JSONArray positions = message.getJSONArray("positions");
+                        for (int i=0; i < positions.length(); i++) {
+                            JSONObject position = positions.getJSONObject(i);
+                            int left = position.getInt("left");
+                            int top = position.getInt("top");
 
-                GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
-                    public void run() {
-                        mStartHandle.positionFromGecko(startLeft, startTop);
-                        mEndHandle.positionFromGecko(endLeft, endTop);
+                            TextSelectionHandle handle = getHandle(position.getString("handle"));
+                            handle.setVisibility(position.getBoolean("hidden") ? View.GONE : View.VISIBLE);
+                            handle.positionFromGecko(left, top, rtl);
+                        }
                     }
-                });
+                } catch (JSONException e) {
+                    Log.e(LOGTAG, "JSON exception", e);
+                }
             }
-        } catch (Exception e) {
-            Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
-        }
+        });
     }
 
     @Override
@@ -101,19 +120,25 @@ class TextSelection extends Layer implements GeckoEventListener {
         // cache the relevant values from the context and bail out if they are the same. we do this
         // because this draw function gets called a lot (once per compositor frame) and we want to
         // avoid doing a lot of extra work in cases where it's not needed.
-        if (FloatUtils.fuzzyEquals(mViewLeft, context.viewport.left)
-                && FloatUtils.fuzzyEquals(mViewTop, context.viewport.top)
-                && FloatUtils.fuzzyEquals(mViewZoom, context.zoomFactor)) {
+        final float viewLeft = context.viewport.left - context.offset.x;
+        final float viewTop = context.viewport.top - context.offset.y;
+        final float viewZoom = context.zoomFactor;
+
+        if (FloatUtils.fuzzyEquals(mViewLeft, viewLeft)
+                && FloatUtils.fuzzyEquals(mViewTop, viewTop)
+                && FloatUtils.fuzzyEquals(mViewZoom, viewZoom)) {
             return;
         }
-        mViewLeft = context.viewport.left;
-        mViewTop = context.viewport.top;
-        mViewZoom = context.zoomFactor;
+        mViewLeft = viewLeft;
+        mViewTop = viewTop;
+        mViewZoom = viewZoom;
 
-        GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
             public void run() {
-                mStartHandle.repositionWithViewport(context.viewport.left, context.viewport.top, context.zoomFactor);
-                mEndHandle.repositionWithViewport(context.viewport.left, context.viewport.top, context.zoomFactor);
+                mStartHandle.repositionWithViewport(viewLeft, viewTop, viewZoom);
+                mMiddleHandle.repositionWithViewport(viewLeft, viewTop, viewZoom);
+                mEndHandle.repositionWithViewport(viewLeft, viewTop, viewZoom);
             }
         });
     }

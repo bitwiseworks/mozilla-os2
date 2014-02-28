@@ -4,6 +4,7 @@
 #include "nsComponentManagerUtils.h"
 
 #include <stdio.h>
+#include <algorithm>
 
 //////////////////////////////////////////////////
 // TestConverter
@@ -81,7 +82,7 @@ TestConverter::AsyncConvertData(const char *aFromType,
 static inline uint32_t
 saturated(uint64_t aValue)
 {
-    return (uint32_t) NS_MIN(aValue, (uint64_t) PR_UINT32_MAX);
+    return (uint32_t) std::min(aValue, (uint64_t) UINT32_MAX);
 }
 
 // nsIStreamListener method
@@ -90,7 +91,7 @@ NS_IMETHODIMP
 TestConverter::OnDataAvailable(nsIRequest* request,
                                nsISupports *ctxt, 
                                nsIInputStream *inStr, 
-                               uint32_t sourceOffset, 
+                               uint64_t sourceOffset, 
                                uint32_t count) {
     nsresult rv;
     nsCOMPtr<nsIInputStream> convertedStream;
@@ -106,7 +107,7 @@ TestConverter::OnDataAvailable(nsIRequest* request,
     uint64_t offset = sourceOffset;
     while (len > 0) {
         uint32_t count = saturated(len);
-        rv = mListener->OnDataAvailable(request, ctxt, convertedStream, saturated(offset), count);
+        rv = mListener->OnDataAvailable(request, ctxt, convertedStream, offset, count);
         if (NS_FAILED(rv)) return rv;
 
         offset += count;

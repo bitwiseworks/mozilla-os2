@@ -9,7 +9,7 @@
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsIScrollable.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsITextToSubURI.h"
 #include "nsIURL.h"
 #include "nsIContentViewer.h"
@@ -18,6 +18,9 @@
 #include "nsCharsetSource.h" // kCharsetFrom* macro definition
 #include "nsNodeInfoManager.h"
 #include "nsContentUtils.h"
+#include "nsDocElementCreatedNotificationRunner.h"
+#include "mozilla/Services.h"
+#include "nsServiceManagerUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -77,7 +80,7 @@ NS_IMETHODIMP
 MediaDocumentStreamListener::OnDataAvailable(nsIRequest* request,
                                              nsISupports *ctxt,
                                              nsIInputStream *inStr,
-                                             uint32_t sourceOffset,
+                                             uint64_t sourceOffset,
                                              uint32_t count)
 {
   if (mNextStream) {
@@ -97,7 +100,8 @@ const char* const MediaDocument::sFormatNames[4] =
 };
 
 MediaDocument::MediaDocument()
-    : mDocumentElementInserted(false)
+    : nsHTMLDocument(),
+      mDocumentElementInserted(false)
 {
 }
 MediaDocument::~MediaDocument()
@@ -163,13 +167,9 @@ MediaDocument::StartDocumentLoad(const char*         aCommand,
   // not being able to set the charset is not critical.
   NS_ENSURE_TRUE(docShell, NS_OK); 
 
-  nsCAutoString charset;
-
-  nsCOMPtr<nsIAtom> csAtom;
-  docShell->GetParentCharset(getter_AddRefs(csAtom));
-  if (csAtom) {   // opening in a new tab
-    csAtom->ToUTF8String(charset);
-  }
+  nsAutoCString charset;
+  // opening in a new tab
+  docShell->GetParentCharset(charset);
 
   if (charset.IsEmpty() || charset.Equals("UTF-8")) {
     nsCOMPtr<nsIContentViewer> cv;
@@ -224,7 +224,6 @@ MediaDocument::CreateSyntheticDocument()
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::html, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   nsRefPtr<nsGenericHTMLElement> root = NS_NewHTMLHtmlElement(nodeInfo.forget());
   NS_ENSURE_TRUE(root, NS_ERROR_OUT_OF_MEMORY);
@@ -236,7 +235,6 @@ MediaDocument::CreateSyntheticDocument()
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::head, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   // Create a <head> so our title has somewhere to live
   nsRefPtr<nsGenericHTMLElement> head = NS_NewHTMLHeadElement(nodeInfo.forget());
@@ -245,7 +243,6 @@ MediaDocument::CreateSyntheticDocument()
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::meta, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   nsRefPtr<nsGenericHTMLElement> metaContent = NS_NewHTMLMetaElement(nodeInfo.forget());
   NS_ENSURE_TRUE(metaContent, NS_ERROR_OUT_OF_MEMORY);
@@ -263,7 +260,6 @@ MediaDocument::CreateSyntheticDocument()
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::body, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   nsRefPtr<nsGenericHTMLElement> body = NS_NewHTMLBodyElement(nodeInfo.forget());
   NS_ENSURE_TRUE(body, NS_ERROR_OUT_OF_MEMORY);
@@ -280,9 +276,9 @@ MediaDocument::StartLayout()
   nsCOMPtr<nsIPresShell> shell = GetShell();
   // Don't mess with the presshell if someone has already handled
   // its initial reflow.
-  if (shell && !shell->DidInitialReflow()) {
+  if (shell && !shell->DidInitialize()) {
     nsRect visibleArea = shell->GetPresContext()->GetVisibleArea();
-    nsresult rv = shell->InitialReflow(visibleArea.width, visibleArea.height);
+    nsresult rv = shell->Initialize(visibleArea.width, visibleArea.height);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -298,12 +294,12 @@ MediaDocument::GetFileName(nsAString& aResult)
   if (!url)
     return;
 
-  nsCAutoString fileName;
+  nsAutoCString fileName;
   url->GetFileName(fileName);
   if (fileName.IsEmpty())
     return;
 
-  nsCAutoString docCharset;
+  nsAutoCString docCharset;
   // Now that the charset is set in |StartDocumentLoad| to the charset of
   // the document viewer instead of a bogus value ("ISO-8859-1" set in
   // |nsDocument|'s ctor), the priority is given to the current charset. 
@@ -336,7 +332,6 @@ MediaDocument::LinkStylesheet(const nsAString& aStylesheet)
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::link, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   nsRefPtr<nsGenericHTMLElement> link = NS_NewHTMLLinkElement(nodeInfo.forget());
   NS_ENSURE_TRUE(link, NS_ERROR_OUT_OF_MEMORY);

@@ -1,28 +1,22 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef StringObject_inl_h___
-#define StringObject_inl_h___
+#ifndef vm_StringObject_inl_h
+#define vm_StringObject_inl_h
 
 #include "StringObject.h"
 
-inline js::StringObject &
-JSObject::asString()
-{
-    JS_ASSERT(isString());
-    return *static_cast<js::StringObject *>(this);
-}
+#include "jsobjinlines.h"
 
 namespace js {
 
 inline bool
 StringObject::init(JSContext *cx, HandleString str)
 {
-    JS_ASSERT(gc::GetGCKindSlots(getAllocKind()) == 2);
+    JS_ASSERT(numFixedSlots() == 2);
 
     Rooted<StringObject *> self(cx, this);
 
@@ -31,15 +25,15 @@ StringObject::init(JSContext *cx, HandleString str)
             if (!assignInitialShape(cx))
                 return false;
         } else {
-            Shape *shape = assignInitialShape(cx);
+            RootedShape shape(cx, assignInitialShape(cx));
             if (!shape)
                 return false;
-            EmptyShape::insertInitialShape(cx, shape, self->getProto());
+            RootedObject proto(cx, self->getProto());
+            EmptyShape::insertInitialShape(cx, shape, proto);
         }
     }
 
-    JS_ASSERT(self->nativeLookupNoAllocation(NameToId(cx->runtime->atomState.lengthAtom))->slot()
-              == LENGTH_SLOT);
+    JS_ASSERT(self->nativeLookup(cx, NameToId(cx->names().length))->slot() == LENGTH_SLOT);
 
     self->setStringThis(str);
 
@@ -47,24 +41,12 @@ StringObject::init(JSContext *cx, HandleString str)
 }
 
 inline StringObject *
-StringObject::create(JSContext *cx, HandleString str)
+StringObject::create(JSContext *cx, HandleString str, NewObjectKind newKind)
 {
-    JSObject *obj = NewBuiltinClassInstance(cx, &StringClass);
+    JSObject *obj = NewBuiltinClassInstance(cx, &class_, newKind);
     if (!obj)
         return NULL;
-    Rooted<StringObject*> strobj(cx, &obj->asString());
-    if (!strobj->init(cx, str))
-        return NULL;
-    return strobj;
-}
-
-inline StringObject *
-StringObject::createWithProto(JSContext *cx, HandleString str, JSObject &proto)
-{
-    JSObject *obj = NewObjectWithClassProto(cx, &StringClass, &proto, NULL);
-    if (!obj)
-        return NULL;
-    Rooted<StringObject*> strobj(cx, &obj->asString());
+    Rooted<StringObject*> strobj(cx, &obj->as<StringObject>());
     if (!strobj->init(cx, str))
         return NULL;
     return strobj;
@@ -72,4 +54,4 @@ StringObject::createWithProto(JSContext *cx, HandleString str, JSObject &proto)
 
 } // namespace js
 
-#endif /* StringObject_inl_h__ */
+#endif /* vm_StringObject_inl_h */

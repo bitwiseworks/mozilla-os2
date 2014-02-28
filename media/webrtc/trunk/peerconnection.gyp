@@ -7,13 +7,13 @@
 # be found in the AUTHORS file in the root of the source tree.
 
 {
-  'includes': [ 'src/build/common.gypi', ],
+  'includes': [ 'webrtc/build/common.gypi', ],
   'variables': {
     'peerconnection_sample': 'third_party/libjingle/source/talk/examples/peerconnection',
   },  
 
   # for mozilla, we want to force stuff to build but we don't want peerconnection_client or server
-  # for unknown reasons, 'target' must be outside of conditions.  And don't try to build a dummy
+  # for unknown reasons, 'targets' must be outside of conditions.  And don't try to build a dummy
   # executable...
   'targets': [
   {
@@ -27,18 +27,19 @@
 	  'action': [
 	     'echo ARGHHHHHHHHHHHHHHHHHHHH',
           ],
+	  'inputs': [
+	     'dummy_file.txt',
+          ],
           'message': 'Generating scream',
         }, ],
         'dependencies': [
-# allow building without libjingle
-#	  'third_party/libjingle/libjingle.gyp:libjingle_app',
-          'src/modules/modules.gyp:audio_device',
-          'src/modules/modules.gyp:video_capture_module',
-          'src/modules/modules.gyp:video_render_module',
-          'src/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-          'src/video_engine/video_engine.gyp:video_engine_core',
-          'src/voice_engine/voice_engine.gyp:voice_engine_core',
-#          '<(DEPTH)/third_party/libsrtp/libsrtp.gyp:libsrtp',
+          'webrtc/modules/modules.gyp:audio_device',
+          'webrtc/modules/modules.gyp:video_capture_module',
+#          'webrtc/modules/modules.gyp:video_render_module',
+#          'webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
+          'webrtc/video_engine/video_engine.gyp:video_engine_core',
+          'webrtc/voice_engine/voice_engine.gyp:voice_engine_core',
+          '<(DEPTH)/third_party/libyuv/libyuv.gyp:libyuv',
         ],
       }, ],
     ],
@@ -63,6 +64,7 @@
       ],
      }, ],
   'conditions': [
+    # TODO(wu): Merge the target for different platforms.
     ['OS=="win"', {
       'targets': [
         {
@@ -87,11 +89,12 @@
             },
           },
           'dependencies': [
-            'third_party/libjingle/libjingle.gyp:libjingle_app',
+            'third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+            'third_party/libjingle/libjingle.gyp:libjingle_peerconnection',
           ],
           'include_dirs': [
             'src',
-            'src/modules/interface',
+            'webrtc/modules/interface',
             'third_party/libjingle/source',
           ],
         },
@@ -114,14 +117,13 @@
             '<(peerconnection_sample)/client/peer_connection_client.h',
           ],
           'dependencies': [
-            'third_party/libjingle/libjingle.gyp:libjingle_app',
+            'third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+            'third_party/libjingle/libjingle.gyp:libjingle_peerconnection',
             # TODO(tommi): Switch to this and remove specific gtk dependency
             # sections below for cflags and link_settings.
             # '<(DEPTH)/build/linux/system.gyp:gtk',
           ],
           'include_dirs': [
-            'src',
-            'src/modules/interface',
             'third_party/libjingle/source',
           ],
           'cflags': [
@@ -134,13 +136,27 @@
             'libraries': [
               '<!@(pkg-config --libs-only-l gtk+-2.0 gthread-2.0)',
               '-lX11',
+              '-lXcomposite',
               '-lXext',
+              '-lXrender',
             ],
           },
         },
       ],  # targets
     }, ],  # OS="linux"
+    # There's no peerconnection_client implementation for Mac.
+    # But add this dummy peerconnection_client target so that the runhooks
+    # won't complain.
+    ['OS=="mac"', {
+      'targets': [
+        {
+          'target_name': 'peerconnection_client',
+          'type': 'none',
+        },
+      ],
+    }, ],
   ],
     }, ],
   ],
+
 }

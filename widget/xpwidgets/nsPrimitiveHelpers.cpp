@@ -35,6 +35,7 @@
 #  include "nsIPlatformCharset.h"
 #include "nsISaveAsCharset.h"
 #include "nsAutoPtr.h"
+#include "mozilla/Likely.h"
 
 
 //
@@ -67,7 +68,7 @@ nsPrimitiveHelpers :: CreatePrimitiveForData ( const char* aFlavor, void* aDataB
     if (primitive ) {
       if (aDataLen % 2) { 
         nsAutoArrayPtr<char> buffer(new char[aDataLen + 1]);
-        if (!NS_LIKELY(buffer))
+        if (!MOZ_LIKELY(buffer))
           return;
       
         memcpy(buffer, aDataBuff, aDataLen);
@@ -106,7 +107,7 @@ nsPrimitiveHelpers :: CreateDataFromPrimitive ( const char* aFlavor, nsISupports
   if ( strcmp(aFlavor,kTextMime) == 0 ) {
     nsCOMPtr<nsISupportsCString> plainText ( do_QueryInterface(aPrimitive) );
     if ( plainText ) {
-      nsCAutoString data;
+      nsAutoCString data;
       plainText->GetData ( data );
       *aDataBuff = ToNewCString(data);
     }
@@ -142,7 +143,7 @@ nsPrimitiveHelpers :: ConvertUnicodeToPlatformPlainText ( PRUnichar* inUnicode, 
   nsresult rv;
   nsCOMPtr <nsIPlatformCharset> platformCharsetService = do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv);
 
-  nsCAutoString platformCharset;
+  nsAutoCString platformCharset;
   if (NS_SUCCEEDED(rv))
     rv = platformCharsetService->GetCharset(kPlatformCharsetSel_PlainTextInClipboard, platformCharset);
   if (NS_FAILED(rv))
@@ -190,7 +191,7 @@ nsPrimitiveHelpers :: ConvertPlatformPlainTextToUnicode ( const char* inText, in
   static bool hasConverter = false;
   if ( !hasConverter ) {
     // get the charset
-    nsCAutoString platformCharset;
+    nsAutoCString platformCharset;
     nsCOMPtr <nsIPlatformCharset> platformCharsetService = do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv);
     if (NS_SUCCEEDED(rv))
       rv = platformCharsetService->GetCharset(kPlatformCharsetSel_PlainTextInClipboard, platformCharset);

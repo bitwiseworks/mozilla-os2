@@ -12,6 +12,9 @@
 #  error "STL code can only be used with -fno-exceptions"
 #endif
 
+// Suppress windef.h min and max macros - they make std::min/max not compile.
+#define NOMINMAX 1
+
 // Code built with !_HAS_EXCEPTIONS calls std::_Throw(), but the win2k
 // CRT doesn't export std::_Throw().  So we define it.
 #ifndef mozilla_Throw_h
@@ -60,10 +63,12 @@
 //#  undef _SECURE_SCL
 #endif
 
-// We know that code won't be able to catch exceptions, but that's OK
-// because we're not throwing them.
+// C4275: When _HAS_EXCEPTIONS is set to 0, system STL header
+//        will generate the warning which we can't modify.
+// C4530: We know that code won't be able to catch exceptions,
+//        but that's OK because we're not throwing them.
 #pragma warning( push )
-#pragma warning( disable : 4530 )
+#pragma warning( disable : 4275 4530 )
 
 #include <${HEADER_PATH}>
 

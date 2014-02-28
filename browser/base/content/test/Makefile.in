@@ -8,14 +8,10 @@ srcdir		= @srcdir@
 VPATH		= @srcdir@
 relativesrcdir  = @relativesrcdir@
 
-DIRS += \
-		newtab \
-		$(NULL)
-
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_FILES = \
-		head.js \
+		head_plain.js \
 		test_feed_discovery.html \
 		feed_discovery.html \
 		test_bug395533.html \
@@ -40,15 +36,15 @@ MOCHITEST_FILES = \
 		gZipOfflineChild.html^headers^ \
 		gZipOfflineChild.cacheManifest \
 		gZipOfflineChild.cacheManifest^headers^ \
-		test_bug787619.html \
 		$(NULL)
 
 # test_contextmenu.html is disabled on Linux due to bug 513558
-ifneq (gtk2,$(MOZ_WIDGET_TOOLKIT))
+ifndef MOZ_WIDGET_GTK
 MOCHITEST_FILES += \
 		audio.ogg \
 		test_contextmenu.html \
 		subtst_contextmenu.html \
+		privateBrowsingMode.js \
 		$(NULL)
 endif
 
@@ -64,23 +60,24 @@ endif
 
 # browser_bug321000.js is disabled because newline handling is shaky (bug 592528)
 
-# browser_pageInfo.js + feed_tab.html is disabled for leaking (bug 767896)
-
-_BROWSER_FILES = \
+MOCHITEST_BROWSER_FILES = \
                  head.js \
                  browser_typeAheadFind.js \
                  browser_keywordSearch.js \
-                 browser_allTabsPanel.js \
+                 browser_keywordSearch_postData.js \
+                 POSTSearchEngine.xml \
+                 print_postdata.sjs \
                  browser_alltabslistener.js \
                  browser_bug304198.js \
                  title_test.svg \
                  browser_bug329212.js \
                  browser_bug356571.js \
                  browser_bug380960.js \
-                 browser_bug386835.js \
+	         browser_bug386835.js \
                  browser_bug405137.js \
                  browser_bug406216.js \
                  browser_bug409481.js \
+                 browser_bug409624.js \
                  browser_bug413915.js \
                  browser_bug416661.js \
                  browser_bug417483.js \
@@ -93,7 +90,6 @@ _BROWSER_FILES = \
                  browser_bug435035.js \
                  browser_bug435325.js \
                  browser_bug441778.js \
-                 browser_popupNotification.js \
                  browser_bug455852.js \
                  browser_bug460146.js \
                  browser_bug462673.js \
@@ -133,6 +129,7 @@ _BROWSER_FILES = \
                  browser_bug581242.js \
                  browser_bug581253.js \
                  browser_bug581947.js \
+                 browser_bug585558.js \
                  browser_bug585785.js \
                  browser_bug585830.js \
                  browser_bug590206.js \
@@ -151,15 +148,28 @@ _BROWSER_FILES = \
                  browser_bug647886.js \
                  browser_bug655584.js \
                  browser_bug664672.js \
+                 browser_bug678392.js \
+                 browser_bug678392-1.html \
+                 browser_bug678392-2.html \
                  browser_bug710878.js \
                  browser_bug719271.js \
                  browser_bug724239.js \
                  browser_bug735471.js \
                  browser_bug743421.js \
                  browser_bug749738.js \
-                 browser_bug763468.js \
-                 browser_bug767836.js \
+                 browser_bug752516.js \
+                 browser_bug763468_perwindowpb.js \
+                 browser_bug767836_perwindowpb.js \
+                 browser_bug771331.js \
                  browser_bug783614.js \
+                 browser_bug797677.js \
+                 browser_bug816527.js \
+                 browser_bug817947.js \
+                 browser_bug822367.js \
+                 browser_bug902156.js \
+                 browser_bug832435.js \
+                 browser_bug839103.js \
+                 browser_bug880101.js \
                  browser_canonizeURL.js \
                  browser_customize.js \
                  browser_findbarClose.js \
@@ -171,6 +181,8 @@ _BROWSER_FILES = \
                  browser_disablechrome.js \
                  browser_discovery.js \
                  browser_duplicateIDs.js \
+                 browser_fullscreen-window-open.js \
+                 file_fullscreen-window-open.html \
                  browser_gestureSupport.js \
                  browser_getshortcutoruri.js \
                  browser_hide_removing.js \
@@ -182,21 +194,35 @@ _BROWSER_FILES = \
                  browser_plainTextLinks.js \
                  browser_pluginnotification.js \
                  browser_plugins_added_dynamically.js \
-                 browser_CTPScriptPlugin.js \
+                 browser_CTP_drag_drop.js \
+                 browser_CTP_data_urls.js \
                  browser_pluginplaypreview.js \
+                 browser_pluginplaypreview2.js \
+                 browser_private_browsing_window.js \
                  browser_relatedTabs.js \
+                 browser_removeTabsToTheEnd.js \
                  browser_sanitize-passwordDisabledHosts.js \
                  browser_sanitize-sitepermissions.js \
                  browser_sanitize-timespans.js \
+                 browser_tabopen_reflows.js \
                  browser_clearplugindata.js \
                  browser_clearplugindata.html \
                  browser_clearplugindata_noage.html \
                  browser_popupUI.js \
                  browser_sanitizeDialog.js \
+                 browser_save_link-perwindowpb.js \
+                 browser_save_private_link_perwindowpb.js \
                  browser_save_video.js \
+                 browser_tabMatchesInAwesomebar_perwindowpb.js \
+                 browser_tab_drag_drop_perwindow.js \
                  bug564387.html \
                  bug564387_video1.ogv \
                  bug564387_video1.ogv^headers^ \
+                 bug792517.html \
+                 bug792517-2.html \
+                 bug792517.sjs \
+                 test_bug839103.html \
+                 bug839103.css \
                  browser_scope.js \
                  browser_selectTabAtIndex.js \
                  browser_tab_dragdrop.js \
@@ -212,6 +238,7 @@ _BROWSER_FILES = \
                  browser_urlbarRevert.js \
                  browser_urlbarStop.js \
                  browser_urlbarTrimURLs.js \
+                 browser_urlbar_search_healthreport.js \
                  browser_urlHighlight.js \
                  browser_visibleFindSelection.js \
                  browser_visibleTabs.js \
@@ -223,6 +250,19 @@ _BROWSER_FILES = \
                  disablechrome.html \
                  discovery.html \
                  domplate_test.js \
+                 file_bug822367_1.html \
+                 file_bug822367_1.js \
+                 file_bug822367_2.html \
+                 file_bug822367_3.html \
+                 file_bug822367_4.html \
+                 file_bug822367_4.js \
+                 file_bug822367_4B.html \
+                 file_bug822367_5.html \
+                 file_bug822367_6.html \
+                 file_bug902156_1.html \
+                 file_bug902156_2.html \
+                 file_bug902156_3.html \
+                 file_bug902156.js \
                  moz.png \
                  video.ogg \
                  test_bug435035.html \
@@ -232,13 +272,6 @@ _BROWSER_FILES = \
                  plugin_test.html \
                  plugin_test2.html \
                  plugin_test3.html \
-                 plugin_test_noScriptNoPopup.html \
-                 plugin_test_scriptedPopup1.html \
-                 plugin_test_scriptedPopup2.html \
-                 plugin_test_scriptedPopup3.html \
-                 plugin_test_scriptedNoPopup1.html \
-                 plugin_test_scriptedNoPopup2.html \
-                 plugin_test_scriptedNoPopup3.html \
                  plugin_alternate_content.html \
                  plugin_both.html \
                  plugin_both2.html \
@@ -247,17 +280,18 @@ _BROWSER_FILES = \
                  plugin_clickToPlayDeny.html \
                  plugin_bug744745.html \
                  plugin_bug749455.html \
-                 plugin_bug818009.html \
+                 plugin_bug752516.html \
+                 plugin_bug787619.html \
+                 plugin_bug797677.html \
                  plugin_bug820497.html \
                  plugin_hidden_to_visible.html \
                  plugin_two_types.html \
+                 plugin_data_url.html \
                  alltabslistener.html \
                  zoom_test.html \
                  dummy_page.html \
-                 browser_tabMatchesInAwesomebar.js \
                  file_bug550565_popup.html \
                  file_bug550565_favicon.ico \
-                 browser_aboutHome.js \
                  app_bug575561.html \
                  app_subframe_bug575561.html \
                  browser_contentAreaClick.js \
@@ -276,41 +310,64 @@ _BROWSER_FILES = \
                  browser_lastAccessedTab.js \
                  browser_bug734076.js \
                  browser_bug744745.js \
-                 browser_bug818009.js \
+                 browser_bug787619.js \
+                 browser_bug812562.js \
+                 browser_bug818118.js \
                  browser_bug820497.js \
-                 browser_social.js \
-                 browser_social_toolbar.js \
-                 browser_social_shareButton.js \
-                 browser_social_sidebar.js \
-                 browser_social_flyout.js \
-                 browser_social_mozSocial_API.js \
-                 browser_social_isVisible.js \
-                 browser_social_chatwindow.js \
-                 social_panel.html \
-                 social_share_image.png \
-                 social_sidebar.html \
-                 social_chat.html \
-                 social_flyout.html \
-                 social_window.html \
-                 social_worker.js \
+                 blockPluginVulnerableUpdatable.xml \
+                 blockPluginVulnerableNoUpdate.xml \
+                 blockNoPlugins.xml \
+                 blockPluginHard.xml \
+                 browser_utilityOverlay.js \
+                 browser_bug676619.js \
+                 download_page.html \
                  browser_URLBarSetURI.js \
+                 browser_pageInfo_plugins.js \
+                 browser_pageInfo.js \
+                 feed_tab.html \
+                 browser_pluginCrashCommentAndURL.js \
+                 pluginCrashCommentAndURL.html \
+                 browser_private_no_prompt.js \
+                 browser_blob-channelname.js \
+                 healthreport_testRemoteCommands.html \
+                 browser_offlineQuotaNotification.js \
+                 offlineQuotaNotification.html \
+                 offlineQuotaNotification.cacheManifest \
                  $(NULL)
 
+# Disable tests on Windows due to frequent failures (bugs 825739, 841341)
+ifneq (windows,$(MOZ_WIDGET_TOOLKIT))
+MOCHITEST_BROWSER_FILES += \
+                 browser_bookmark_titles.js \
+                 browser_popupNotification.js \
+                 $(NULL)
+endif
+
 ifneq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-_BROWSER_FILES += \
+MOCHITEST_BROWSER_FILES += \
 		browser_bug462289.js \
 		$(NULL)
 else
-_BROWSER_FILES += \
+MOCHITEST_BROWSER_FILES += \
 		browser_bug565667.js \
 		$(NULL)
+endif
 
-# TODO: Activate after carbon test plugin lands, bug 628651
-# 		browser_maconly_carbon_mismatch_plugin.js \
+ifdef MOZ_DATA_REPORTING
+MOCHITEST_BROWSER_FILES += \
+  browser_datareporting_notification.js \
+  $(NULL)
+endif
 
+# browser_aboutHealthReport.js disabled for frequent failures on Linux (bug 924307)
+# browser_aboutHome.js disabled for frequent failures on Linux (bug 945667)
+# browser_CTP_context_menu.js fails intermittently on Linux (bug 909342)
+ifndef MOZ_WIDGET_GTK
+MOCHITEST_BROWSER_FILES += \
+  browser_aboutHealthReport.js \
+  browser_aboutHome.js \
+  browser_CTP_context_menu.js \
+  $(NULL)
 endif
 
 include $(topsrcdir)/config/rules.mk
-
-libs::	$(_BROWSER_FILES)
-	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)

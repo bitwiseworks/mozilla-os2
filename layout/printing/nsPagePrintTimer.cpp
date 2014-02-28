@@ -8,15 +8,7 @@
 #include "nsIServiceManager.h"
 #include "nsPrintEngine.h"
 
-NS_IMPL_ISUPPORTS1(nsPagePrintTimer, nsITimerCallback)
-
-nsPagePrintTimer::nsPagePrintTimer() :
-  mPrintEngine(nullptr),
-  mDelay(0),
-  mFiringCount(0),
-  mPrintObj(nullptr)
-{
-}
+NS_IMPL_ISUPPORTS_INHERITED1(nsPagePrintTimer, nsRunnable, nsITimerCallback)
 
 nsPagePrintTimer::~nsPagePrintTimer()
 {
@@ -52,59 +44,117 @@ nsPagePrintTimer::StartTimer(bool aUseDelay)
   return result;
 }
 
-
-
-// nsITimerCallback
-NS_IMETHODIMP
-nsPagePrintTimer::Notify(nsITimer *timer)
+nsresult
+nsPagePrintTimer::StartWatchDogTimer()
 {
-  if (mDocViewerPrint) {
-    bool initNewTimer = true;
-    // Check to see if we are done
-    // inRange will be true if a page is actually printed
-    bool inRange;
-    // donePrinting will be true if it completed successfully or
-    // if the printing was cancelled
-    bool donePrinting = mPrintEngine->PrintPage(mPrintObj, inRange);
-    if (donePrinting) {
-      // now clean up print or print the next webshell
-      if (mPrintEngine->DonePrintingPages(mPrintObj, NS_OK)) {
-        initNewTimer = false;
-      }
-    }
+  nsresult result;
+  if (mWatchDogTimer) {
+    mWatchDogTimer->Cancel();
+  }
+  mWatchDogTimer = do_CreateInstance("@mozilla.org/timer;1", &result);
+  if (NS_FAILED(result)) {
+    NS_WARNING("unable to start the timer");
+  } else {
+    // Instead of just doing one timer for a long period do multiple so we
+    // can check if the user cancelled the printing.
+    mWatchDogTimer->InitWithCallback(this, WATCH_DOG_INTERVAL,
+                                     nsITimer::TYPE_ONE_SHOT);
+  }
+  return result;
+}
 
-    // Note that the Stop() destroys this after the print job finishes
-    // (The PrintEngine stops holding a reference when DonePrintingPages
-    // returns true.)
-    Stop(); 
-    if (initNewTimer) {
-      ++mFiringCount;
-      nsresult result = StartTimer(inRange);
-      if (NS_FAILED(result)) {
-        donePrinting = true;     // had a failure.. we are finished..
-        mPrintEngine->SetIsPrinting(false);
-      }
+void
+nsPagePrintTimer::StopWatchDogTimer()
+{
+  if (mWatchDogTimer) {
+    mWatchDogTimer->Cancel();
+    mWatchDogTimer = nullptr;
+  }
+}
+
+//nsRunnable
+NS_IMETHODIMP
+nsPagePrintTimer::Run() 
+{
+  bool initNewTimer = true;
+  // Check to see if we are done
+  // inRange will be true if a page is actually printed
+  bool inRange;
+  bool donePrinting;
+
+  // donePrinting will be true if it completed successfully or
+  // if the printing was cancelled
+  donePrinting = mPrintEngine->PrintPage(mPrintObj, inRange);
+  if (donePrinting) {
+    // now clean up print or print the next webshell
+    if (mPrintEngine->DonePrintingPages(mPrintObj, NS_OK)) {
+      initNewTimer = false;
+      mDone = true;
+    }
+  }
+
+  // Note that the Stop() destroys this after the print job finishes
+  // (The PrintEngine stops holding a reference when DonePrintingPages
+  // returns true.)
+  Stop(); 
+  if (initNewTimer) {
+    ++mFiringCount;
+    nsresult result = StartTimer(inRange);
+    if (NS_FAILED(result)) {
+      mDone = true;     // had a failure.. we are finished..
+      mPrintEngine->SetIsPrinting(false);
     }
   }
   return NS_OK;
 }
 
-void 
-nsPagePrintTimer::Init(nsPrintEngine*          aPrintEngine,
-                       nsIDocumentViewerPrint* aDocViewerPrint,
-                       uint32_t                aDelay)
+// nsITimerCallback
+NS_IMETHODIMP
+nsPagePrintTimer::Notify(nsITimer *timer)
 {
-  mPrintEngine     = aPrintEngine;
-  mDocViewerPrint  = aDocViewerPrint;
-  mDelay           = aDelay;
+  // When finished there may be still pending notifications, which we can just
+  // ignore.
+  if (mDone) {
+    return NS_OK;
+  }
 
-  mDocViewerPrint->IncrementDestroyRefCount();
+  // There are three things that call Notify with different values for timer:
+  // 1) the delay between pages (timer == mTimer)
+  // 2) canvasPrintState done (timer == null)
+  // 3) the watch dog timer (timer == mWatchDogTimer)
+  if (timer && timer == mWatchDogTimer) {
+    mWatchDogCount++;
+    if (mWatchDogCount > WATCH_DOG_MAX_COUNT) {
+      Fail();
+      return NS_OK;
+    }
+  } else if(!timer) {
+    // Reset the counter since a mozPrintCallback has finished.
+    mWatchDogCount = 0;
+  }
+
+  if (mDocViewerPrint) {
+    bool donePrePrint = mPrintEngine->PrePrintPage();
+
+    if (donePrePrint) {
+      StopWatchDogTimer();
+      NS_DispatchToMainThread(this);
+    } else {
+      // Start the watch dog if we're waiting for preprint to ensure that if any
+      // mozPrintCallbacks take to long we error out.
+      StartWatchDogTimer();
+    }
+
+  }
+  return NS_OK;
 }
 
 nsresult 
 nsPagePrintTimer::Start(nsPrintObject* aPO)
 {
   mPrintObj = aPO;
+  mWatchDogCount = 0;
+  mDone = false;
   return StartTimer(false);
 }
 
@@ -116,23 +166,15 @@ nsPagePrintTimer::Stop()
     mTimer->Cancel();
     mTimer = nullptr;
   }
+  StopWatchDogTimer();
 }
 
-nsresult NS_NewPagePrintTimer(nsPagePrintTimer **aResult)
+void
+nsPagePrintTimer::Fail()
 {
-
-  NS_PRECONDITION(aResult, "null param");
-
-  nsPagePrintTimer* result = new nsPagePrintTimer;
-
-  if (!result) {
-    *aResult = nullptr;
-    return NS_ERROR_OUT_OF_MEMORY;
+  mDone = true;
+  Stop();
+  if (mPrintEngine) {
+    mPrintEngine->CleanupOnFailure(NS_OK, false);
   }
-
-  NS_ADDREF(result);
-  *aResult = result;
-
-  return NS_OK;
 }
-

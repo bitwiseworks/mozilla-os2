@@ -2,12 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-function add_visit(aURI, aReferrer) {
-  return PlacesUtils.history.addVisit(aURI, Date.now() * 1000, aReferrer,
-                                      PlacesUtils.history.TRANSITION_TYPED,
-                                      false, 0);
-}
-
 function add_bookmark(aURI) {
   return PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
                                               aURI, PlacesUtils.bookmarks.DEFAULT_INDEX,
@@ -21,6 +15,7 @@ const MOZURISPEC = "http://mozilla.com/";
 
 let gLibrary;
 let PlacesOrganizer;
+let ContentTree;
 
 function test() {
   waitForExplicitFinish();
@@ -34,13 +29,17 @@ function onLibraryReady() {
   PlacesOrganizer = gLibrary.PlacesOrganizer;
   ok(PlacesOrganizer, "Places organizer in scope");
 
-  tests.makeHistVisit();
-  tests.makeTag();
-  tests.focusTag();
-  waitForClipboard(function(aData) !!aData,
-                   tests.copyHistNode,
-                   onClipboardReady,
-                   PlacesUtils.TYPE_X_MOZ_PLACE);
+  ContentTree = gLibrary.ContentTree;
+  ok(ContentTree, "ContentTree is in scope");
+
+  tests.makeHistVisit(function() {
+    tests.makeTag();
+    tests.focusTag();
+    waitForClipboard(function(aData) !!aData,
+                     tests.copyHistNode,
+                     onClipboardReady,
+                     PlacesUtils.TYPE_X_MOZ_PLACE);
+  });
 }
 
 function onClipboardReady() {
@@ -63,13 +62,14 @@ function onClipboardReady() {
 
 let tests = {
 
-  makeHistVisit: function() {
+  makeHistVisit: function(aCallback) {
     // need to add a history object
     let testURI1 = NetUtil.newURI(MOZURISPEC);
     isnot(testURI1, null, "testURI is not null");
-    let visitId = add_visit(testURI1);
-    ok(visitId > 0, "A visit was added to the history");
-    ok(PlacesUtils.ghistory2.isVisited(testURI1), MOZURISPEC + " is a visited url.");
+    addVisits(
+      {uri: testURI1, transition: PlacesUtils.history.TRANSITION_TYPED},
+      window,
+      aCallback);
   },
 
   makeTag: function() {
@@ -101,12 +101,12 @@ let tests = {
     PlacesUtils.asContainer(histContainer);
     histContainer.containerOpen = true;
     PlacesOrganizer._places.selectNode(histContainer.getChild(0));
-    let histNode = PlacesOrganizer._content.view.nodeForTreeIndex(0);
-    PlacesOrganizer._content.selectNode(histNode);
+    let histNode = ContentTree.view.view.nodeForTreeIndex(0);
+    ContentTree.view.selectNode(histNode);
     is(histNode.uri, MOZURISPEC,
        "historyNode exists: " + histNode.uri);
     // copy the history node
-    PlacesOrganizer._content.controller.copy();
+    ContentTree.view.controller.copy();
   },
 
   historyNode: function (){
@@ -116,7 +116,7 @@ let tests = {
     PlacesUtils.asContainer(histContainer);
     histContainer.containerOpen = true;
     PlacesOrganizer._places.selectNode(histContainer.getChild(0));
-    let histNode = PlacesOrganizer._content.view.nodeForTreeIndex(0);
+    let histNode = ContentTree.view.view.nodeForTreeIndex(0);
     ok(histNode, "histNode exists: " + histNode.title);
     // check to see if the history node is tagged!
     let tags = PlacesUtils.tagging.getTagsForURI(NetUtil.newURI(MOZURISPEC));
@@ -133,8 +133,8 @@ let tests = {
     // is the bookmark visible in the UI?
     // get the Unsorted Bookmarks node
     PlacesOrganizer.selectLeftPaneQuery("UnfiledBookmarks");
-    // now we can see what is in the _content tree
-    let unsortedNode = PlacesOrganizer._content.view.nodeForTreeIndex(1);
+    // now we can see what is in the ContentTree tree
+    let unsortedNode = ContentTree.view.view.nodeForTreeIndex(1);
     ok(unsortedNode, "unsortedNode is not null: " + unsortedNode.uri);
     is(unsortedNode.uri, MOZURISPEC, "node uri's are the same");
   },

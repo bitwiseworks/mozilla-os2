@@ -8,7 +8,6 @@
 #define _nsBMPDecoder_h
 
 #include "nsAutoPtr.h"
-#include "imgIDecoderObserver.h"
 #include "gfxColor.h"
 #include "Decoder.h"
 #include "BMPFileHeaders.h"
@@ -25,7 +24,7 @@ class nsBMPDecoder : public Decoder
 {
 public:
 
-    nsBMPDecoder(RasterImage &aImage, imgIDecoderObserver* aObserver);
+    nsBMPDecoder(RasterImage &aImage);
     ~nsBMPDecoder();
 
     // Specifies whether or not the BMP file will contain alpha data
@@ -68,7 +67,6 @@ private:
 
     bitFields mBitFields;
 
-    uint32_t *mImageData; ///< Pointer to the image data for the frame
     uint8_t *mRow;      ///< Holds one raw line of the image
     uint32_t mRowBytes; ///< How many bytes of the row were already received
     int32_t mCurLine;   ///< Index of the line of the image that's currently being decoded: [height,1]
@@ -103,7 +101,7 @@ private:
  */
 static inline void SetPixel(uint32_t*& aDecoded, uint8_t aRed, uint8_t aGreen, uint8_t aBlue, uint8_t aAlpha = 0xFF)
 {
-    *aDecoded++ = GFX_PACKED_PIXEL(aAlpha, aRed, aGreen, aBlue);
+    *aDecoded++ = gfxPackedPixel(aAlpha, aRed, aGreen, aBlue);
 }
 
 static inline void SetPixel(uint32_t*& aDecoded, uint8_t idx, colorTable* aColors)

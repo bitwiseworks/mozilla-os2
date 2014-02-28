@@ -1,6 +1,6 @@
 // -*- mode: c++ -*-
 
-// Copyright (c) 2010, Google Inc.
+// Copyright (c) 2011, Google Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -35,19 +35,44 @@
 #ifndef COMMON_LINUX_DUMP_SYMBOLS_H__
 #define COMMON_LINUX_DUMP_SYMBOLS_H__
 
-#include <stdio.h>
-
+#include <iostream>
 #include <string>
+#include <vector>
+
+#include "common/symbol_data.h"
+#include "common/using_std_string.h"
+#include "google_breakpad/common/breakpad_types.h"
 
 namespace google_breakpad {
 
+class Module;
+
 // Find all the debugging information in OBJ_FILE, an ELF executable
-// or shared library, and write it to SYM_FILE in the Breakpad symbol
+// or shared library, and write it to SYM_STREAM in the Breakpad symbol
 // file format.
 // If OBJ_FILE has been stripped but contains a .gnu_debuglink section,
-// then look for the debug file in DEBUG_DIR.
-bool WriteSymbolFile(const std::string &obj_file,
-                     const std::string &debug_dir, FILE *sym_file);
+// then look for the debug file in DEBUG_DIRS.
+// SYMBOL_DATA allows limiting the type of symbol data written.
+bool WriteSymbolFile(const string &obj_file,
+                     const std::vector<string>& debug_dirs,
+                     SymbolData symbol_data,
+                     std::ostream &sym_stream);
+
+// As above, but simply return the debugging information in MODULE
+// instead of writing it to a stream. The caller owns the resulting
+// Module object and must delete it when finished.
+bool ReadSymbolData(const string& obj_file,
+                    const std::vector<string>& debug_dirs,
+                    SymbolData symbol_data,
+                    Module** module);
+
+// Same as ReadSymbolData, except don't try to open the file; instead
+// just use the in-memory data (mapped image of it) located at OBJ_FILE.
+bool ReadSymbolDataInternal(const uint8_t* obj_file,
+                            const string& obj_filename,
+                            const std::vector<string>& debug_dirs,
+                            SymbolData symbol_data,
+                            Module** module);
 
 }  // namespace google_breakpad
 

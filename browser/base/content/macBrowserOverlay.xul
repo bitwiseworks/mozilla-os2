@@ -26,8 +26,8 @@
 #include global-scripts.inc
 
 <script type="application/javascript">
-  function OpenBrowserWindowFromDockMenu() {
-    let win = OpenBrowserWindow();
+  function OpenBrowserWindowFromDockMenu(options) {
+    let win = OpenBrowserWindow(options);
     win.addEventListener("load", function listener() {
       win.removeEventListener("load", listener);
       let dockSupport = Cc["@mozilla.org/widget/macdocksupport;1"]
@@ -55,7 +55,9 @@
   <menupopup id="menu_mac_dockmenu">
     <!-- The command cannot be cmd_newNavigator because we need to activate
          the application. -->
-    <menuitem label="&newNavigatorCmd.label;" oncommand="OpenBrowserWindowFromDockMenu();" />
+    <menuitem label="&newNavigatorCmd.label;" oncommand="OpenBrowserWindowFromDockMenu();"
+              id="macDockMenuNewWindow" />
+    <menuitem label="&newPrivateWindow.label;" oncommand="OpenBrowserWindowFromDockMenu({private: true});" />
   </menupopup>
 </popupset>
 

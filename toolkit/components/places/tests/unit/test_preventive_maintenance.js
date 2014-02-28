@@ -17,7 +17,6 @@ const FINISHED_MAINTENANCE_NOTIFICATION_TOPIC = "places-maintenance-finished";
 
 // Get services and database connection
 let hs = PlacesUtils.history;
-let bh = PlacesUtils.bhistory;
 let bs = PlacesUtils.bookmarks;
 let ts = PlacesUtils.tagging;
 let as = PlacesUtils.annotations;
@@ -72,7 +71,6 @@ function addBookmark(aPlaceId, aType, aParent, aKeywordId, aFolderType, aTitle) 
 // Tests
 
 let tests = [];
-let current_test = null;
 
 //------------------------------------------------------------------------------
 
@@ -1156,18 +1154,18 @@ tests.push({
     let now = Date.now() * 1000;
     // Add a page with 1 visit.
     let url = "http://1.moz.org/";
-    hs.addVisit(NetUtil.newURI(url), now++, null, hs.TRANSITION_TYPED, false, 0);
+    yield promiseAddVisits({ uri: uri(url), visitDate: now++ });
     // Add a page with 1 visit and set wrong visit_count.
     url = "http://2.moz.org/";
-    hs.addVisit(NetUtil.newURI(url), now++, null, hs.TRANSITION_TYPED, false, 0);
+    yield promiseAddVisits({ uri: uri(url), visitDate: now++ });
     setVisitCount(url, 10);
     // Add a page with 1 visit and set wrong last_visit_date.
     url = "http://3.moz.org/";
-    hs.addVisit(NetUtil.newURI(url), now++, null, hs.TRANSITION_TYPED, false, 0);
+    yield promiseAddVisits({ uri: uri(url), visitDate: now++ });
     setLastVisitDate(url, now++);
     // Add a page with 1 visit and set wrong stats.
     url = "http://4.moz.org/";
-    hs.addVisit(NetUtil.newURI(url), now++, null, hs.TRANSITION_TYPED, false, 0);
+    yield promiseAddVisits({ uri: uri(url), visitDate: now++ });
     setVisitCount(url, 10);
     setLastVisitDate(url, now++);
 
@@ -1211,7 +1209,7 @@ tests.push({
   desc: "recalculate hidden for redirects.",
 
   setup: function() {
-    addVisits([
+    promiseAddVisits([
       { uri: NetUtil.newURI("http://l3.moz.org/"),
         transition: TRANSITION_TYPED },
       { uri: NetUtil.newURI("http://l3.moz.org/redirecting/"),
@@ -1266,10 +1264,10 @@ tests.push({
 
   setup: function() {
     // use valid api calls to create a bunch of items
-    hs.addVisit(this._uri1, Date.now() * 1000, null,
-                hs.TRANSITION_TYPED, false, 0);
-    hs.addVisit(this._uri2, Date.now() * 1000, null,
-                hs.TRANSITION_TYPED, false, 0);
+    yield promiseAddVisits([
+      { uri: this._uri1 },
+      { uri: this._uri2 },
+    ]);
 
     this._folderId = bs.createFolder(bs.toolbarFolder, "testfolder",
                                      bs.DEFAULT_INDEX);
@@ -1281,7 +1279,8 @@ tests.push({
                                            bs.DEFAULT_INDEX);
     do_check_true(this._separatorId > 0);
     ts.tagURI(this._uri1, ["testtag"]);
-    fs.setAndFetchFaviconForPage(this._uri2, SMALLPNG_DATA_URI, false);
+    fs.setAndFetchFaviconForPage(this._uri2, SMALLPNG_DATA_URI, false,
+                                 PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE);
     bs.setKeywordForBookmark(this._bookmarkId, "testkeyword");
     as.setPageAnnotation(this._uri2, "anno", "anno", 0, as.EXPIRE_NEVER);
     as.setItemAnnotation(this._bookmarkId, "anno", "anno", 0, as.EXPIRE_NEVER);
@@ -1289,79 +1288,44 @@ tests.push({
 
   asyncCheck: function (aCallback) {
     // Check that all items are correct
-    do_check_true(bh.isVisited(this._uri1));
-    do_check_true(bh.isVisited(this._uri2));
+    PlacesUtils.asyncHistory.isURIVisited(this._uri1, function(aURI, aIsVisited) {
+      do_check_true(aIsVisited);
+      PlacesUtils.asyncHistory.isURIVisited(this._uri2, function(aURI, aIsVisited) {
+        do_check_true(aIsVisited);
 
-    do_check_eq(bs.getBookmarkURI(this._bookmarkId).spec, this._uri1.spec);
-    do_check_eq(bs.getItemIndex(this._folderId), 0);
+        do_check_eq(bs.getBookmarkURI(this._bookmarkId).spec, this._uri1.spec);
+        do_check_eq(bs.getItemIndex(this._folderId), 0);
 
-    do_check_eq(bs.getItemType(this._folderId), bs.TYPE_FOLDER);
-    do_check_eq(bs.getItemType(this._separatorId), bs.TYPE_SEPARATOR);
+        do_check_eq(bs.getItemType(this._folderId), bs.TYPE_FOLDER);
+        do_check_eq(bs.getItemType(this._separatorId), bs.TYPE_SEPARATOR);
 
-    do_check_eq(ts.getTagsForURI(this._uri1).length, 1);
-    do_check_eq(bs.getKeywordForBookmark(this._bookmarkId), "testkeyword");
-    do_check_eq(as.getPageAnnotation(this._uri2, "anno"), "anno");
-    do_check_eq(as.getItemAnnotation(this._bookmarkId, "anno"), "anno");
+        do_check_eq(ts.getTagsForURI(this._uri1).length, 1);
+        do_check_eq(bs.getKeywordForBookmark(this._bookmarkId), "testkeyword");
+        do_check_eq(as.getPageAnnotation(this._uri2, "anno"), "anno");
+        do_check_eq(as.getItemAnnotation(this._bookmarkId, "anno"), "anno");
 
-    fs.getFaviconURLForPage(this._uri2, function (aFaviconURI) {
-        do_check_true(aFaviconURI.equals(SMALLPNG_DATA_URI));
-        aCallback();
-      });
+        fs.getFaviconURLForPage(this._uri2, function (aFaviconURI) {
+          do_check_true(aFaviconURI.equals(SMALLPNG_DATA_URI));
+          aCallback();
+        });
+      }.bind(this));
+    }.bind(this));
   }
 });
 
 //------------------------------------------------------------------------------
 
-let observer = {
-  observe: function(aSubject, aTopic, aData) {
-    if (aTopic == FINISHED_MAINTENANCE_NOTIFICATION_TOPIC) {
-      // Check the lastMaintenance time has been saved.
-      do_check_neq(Services.prefs.getIntPref("places.database.lastMaintenance"), null);
-
-      function afterCheck() {
-        cleanDatabase();
-
-        if (tests.length) {
-          current_test = tests.shift();
-          do_log_info("Executing test: " + current_test.name + " *** " + current_test.desc);
-          current_test.setup();
-          PlacesDBUtils.maintenanceOnIdle();
-        }
-        else {
-          Services.obs.removeObserver(observer,
-                                      FINISHED_MAINTENANCE_NOTIFICATION_TOPIC);
-          // Sanity check: all roots should be intact
-          do_check_eq(bs.getFolderIdForItem(bs.placesRoot), 0);
-          do_check_eq(bs.getFolderIdForItem(bs.bookmarksMenuFolder), bs.placesRoot);
-          do_check_eq(bs.getFolderIdForItem(bs.tagsFolder), bs.placesRoot);
-          do_check_eq(bs.getFolderIdForItem(bs.unfiledBookmarksFolder), bs.placesRoot);
-          do_check_eq(bs.getFolderIdForItem(bs.toolbarFolder), bs.placesRoot);
-          do_test_finished();
-        }
-      }
-
-      try {
-        if (current_test.asyncCheck) {
-          current_test.asyncCheck(afterCheck);
-        } else {
-          current_test.check();
-          afterCheck();
-        }
-      } catch (ex) {
-        do_throw(ex);
-      }
-    }
-  }
-}
-Services.obs.addObserver(observer, FINISHED_MAINTENANCE_NOTIFICATION_TOPIC, false);
-
-
 // main
-function run_test() {
+function run_test()
+{
+  run_next_test();
+}
+
+add_task(function test_preventive_maintenance()
+{
   // Force initialization of the bookmarks hash. This test could cause
   // it to go out of sync due to direct queries on the database.
-  hs.addVisit(uri("http://force.bookmarks.hash"), Date.now() * 1000, null,
-              hs.TRANSITION_TYPED, false, 0);
+  yield promiseAddVisits(uri("http://force.bookmarks.hash"));
   do_check_false(bs.isBookmarked(uri("http://force.bookmarks.hash")));
 
   // Get current bookmarks max ID for cleanup
@@ -1371,12 +1335,33 @@ function run_test() {
   stmt.finalize();
   do_check_true(defaultBookmarksMaxId > 0);
 
-  // Let test run till completion.
-  // Test will end in the observer when all tests have finished running.
-  do_test_pending();
+  for ([, test] in Iterator(tests)) {
+    dump("\nExecuting test: " + test.name + "\n" + "*** " + test.desc + "\n");
+    yield test.setup();
 
-  current_test = tests.shift();
-  dump("\nExecuting test: " + current_test.name + "\n" + "*** " + current_test.desc + "\n");
-  current_test.setup();
-  PlacesDBUtils.maintenanceOnIdle();
-}
+    let promiseMaintenanceFinished =
+        promiseTopicObserved(FINISHED_MAINTENANCE_NOTIFICATION_TOPIC);
+    PlacesDBUtils.maintenanceOnIdle();
+    yield promiseMaintenanceFinished;
+
+    // Check the lastMaintenance time has been saved.
+    do_check_neq(Services.prefs.getIntPref("places.database.lastMaintenance"), null);
+
+    if (test.asyncCheck) {
+      let deferred = Promise.defer();
+      test.asyncCheck(deferred.resolve);
+      yield deferred.promise;
+    } else {
+      test.check();
+    }
+
+    cleanDatabase();
+  }
+
+  // Sanity check: all roots should be intact
+  do_check_eq(bs.getFolderIdForItem(bs.placesRoot), 0);
+  do_check_eq(bs.getFolderIdForItem(bs.bookmarksMenuFolder), bs.placesRoot);
+  do_check_eq(bs.getFolderIdForItem(bs.tagsFolder), bs.placesRoot);
+  do_check_eq(bs.getFolderIdForItem(bs.unfiledBookmarksFolder), bs.placesRoot);
+  do_check_eq(bs.getFolderIdForItem(bs.toolbarFolder), bs.placesRoot);
+});

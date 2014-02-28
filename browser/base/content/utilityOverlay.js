@@ -6,20 +6,16 @@
 // Services = object with smart getters for common XPCOM services
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+Components.utils.import("resource:///modules/RecentWindow.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "BROWSER_NEW_TAB_URL", function () {
   const PREF = "browser.newtab.url";
-  const TOPIC = "private-browsing-transition-complete";
 
   function getNewTabPageURL() {
-    if (("gPrivateBrowsingUI" in window) &&
-        !Services.prefs.prefHasUserValue(PREF)) {
-      // gPrivateBrowsingUI may not be initialized yet, in that case we'll
-      // update BROWSER_NEW_TAB_URL when it gets initialized.
-      if (!gPrivateBrowsingUI.initialized)
-        gPrivateBrowsingUI.addInitializationCallback(update);
-      else if (gPrivateBrowsingUI.privateWindow &&
-               !gPrivateBrowsingUI.autoStarted)
+    if (!Services.prefs.prefHasUserValue(PREF)) {
+      if (PrivateBrowsingUtils.isWindowPrivate(window) &&
+          !PrivateBrowsingUtils.permanentPrivateBrowsing)
         return "about:privatebrowsing";
     }
     return Services.prefs.getCharPref(PREF) || "about:blank";
@@ -30,12 +26,10 @@ XPCOMUtils.defineLazyGetter(this, "BROWSER_NEW_TAB_URL", function () {
   }
 
   Services.prefs.addObserver(PREF, update, false);
-  Services.obs.addObserver(update, TOPIC, false);
 
   addEventListener("unload", function onUnload() {
     removeEventListener("unload", onUnload);
     Services.prefs.removeObserver(PREF, update);
-    Services.obs.removeObserver(update, TOPIC);
   });
 
   return getNewTabPageURL();
@@ -65,12 +59,9 @@ function getTopWin(skipPopups) {
       (!skipPopups || top.toolbar.visible))
     return top;
 
-  if (skipPopups) {
-    return Components.classes["@mozilla.org/browser/browserglue;1"]
-                     .getService(Components.interfaces.nsIBrowserGlue)
-                     .getMostRecentBrowserWindow();
-  }
-  return Services.wm.getMostRecentWindow("navigator:browser");
+  let isPrivate = PrivateBrowsingUtils.isWindowPrivate(window);
+  return RecentWindow.getMostRecentBrowserWindow({private: isPrivate,
+                                                  allowPopups: !skipPopups});
 }
 
 function openTopWin(url) {
@@ -109,7 +100,8 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
     params = {
       allowThirdPartyFixup: aAllowThirdPartyFixup,
       postData: aPostData,
-      referrerURI: aReferrerURI
+      referrerURI: aReferrerURI,
+      initiatingDoc: event ? event.target.ownerDocument : null
     };
   }
 
@@ -224,9 +216,16 @@ function openLinkIn(url, where, params) {
   var aDisallowInheritPrincipal = params.disallowInheritPrincipal;
   // Currently, this parameter works only for where=="tab" or "current"
   var aIsUTF8               = params.isUTF8;
+  var aInitiatingDoc        = params.initiatingDoc;
+  var aIsPrivate            = params.private;
 
   if (where == "save") {
-    saveURL(url, null, null, true, null, aReferrerURI);
+    if (!aInitiatingDoc) {
+      Components.utils.reportError("openUILink/openLinkIn was called with " +
+        "where == 'save' but without initiatingDoc.  See bug 814264.");
+      return;
+    }
+    saveURL(url, null, null, true, null, aReferrerURI, aInitiatingDoc);
     return;
   }
   const Cc = Components.classes;
@@ -264,8 +263,12 @@ function openLinkIn(url, where, params) {
     sa.AppendElement(aPostData);
     sa.AppendElement(allowThirdPartyFixupSupports);
 
-    Services.ww.openWindow(w || window, getBrowserURL(),
-                           null, "chrome,dialog=no,all", sa);
+    let features = "chrome,dialog=no,all";
+    if (aIsPrivate) {
+      features += ",private";
+    }
+
+    Services.ww.openWindow(w || window, getBrowserURL(), null, features, sa);
     return;
   }
 
@@ -289,6 +292,10 @@ function openLinkIn(url, where, params) {
       loadInBackground = false;
     }
   }
+
+  // Raise the target window before loading the URI, since loading it may
+  // result in a new frontmost window (e.g. "javascript:window.open('');").
+  w.focus();
 
   switch (where) {
   case "current":
@@ -317,17 +324,9 @@ function openLinkIn(url, where, params) {
     break;
   }
 
-  // If this window is active, focus the target window. Otherwise, focus the
-  // content but don't raise the window, since the URI we just loaded may have
-  // resulted in a new frontmost window (e.g. "javascript:window.open('');").
-  var fm = Components.classes["@mozilla.org/focus-manager;1"].
-             getService(Components.interfaces.nsIFocusManager);
-  if (window == fm.activeWindow)
-    w.content.focus();
-  else
-    w.gBrowser.selectedBrowser.focus();
+  w.gBrowser.selectedBrowser.focus();
 
-  if (!loadInBackground && isBlankPageURL(url))
+  if (!loadInBackground && w.isBlankPageURL(url))
     w.focusAndSelectUrlBar();
 }
 
@@ -514,12 +513,23 @@ function openTroubleshootingPage()
   openUILinkIn("about:support", "tab");
 }
 
+#ifdef MOZ_SERVICES_HEALTHREPORT
+/**
+ * Opens the troubleshooting information (about:support) page for this version
+ * of the application.
+ */
+function openHealthReport()
+{
+  openUILinkIn("about:healthreport", "tab");
+}
+#endif
+
 /**
  * Opens the feedback page for this version of the application.
  */
 function openFeedbackPage()
 {
-  openUILinkIn("http://input.mozilla.com/feedback", "tab");
+  openUILinkIn("https://input.mozilla.org/feedback", "tab");
 }
 
 function buildHelpMenu()

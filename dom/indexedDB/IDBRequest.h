@@ -7,12 +7,14 @@
 #ifndef mozilla_dom_indexeddb_idbrequest_h__
 #define mozilla_dom_indexeddb_idbrequest_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
 #include "nsIIDBRequest.h"
 #include "nsIIDBOpenDBRequest.h"
 #include "nsDOMEventTargetHelper.h"
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
+#include "mozilla/dom/DOMError.h"
 
 class nsIScriptContext;
 class nsPIDOMWindow;
@@ -20,6 +22,7 @@ class nsPIDOMWindow;
 BEGIN_INDEXEDDB_NAMESPACE
 
 class HelperBase;
+class IDBFactory;
 class IDBTransaction;
 class IndexedDBRequestParentBase;
 
@@ -35,11 +38,10 @@ public:
   static
   already_AddRefed<IDBRequest> Create(nsISupports* aSource,
                                       IDBWrapperCache* aOwnerCache,
-                                      IDBTransaction* aTransaction,
-                                      JSContext* aCallingCx);
+                                      IDBTransaction* aTransaction);
 
   // nsIDOMEventTarget
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   nsISupports* Source()
   {
@@ -63,6 +65,8 @@ public:
   }
 #endif
 
+  DOMError* GetError(ErrorResult& aRv);
+
   JSContext* GetJSContext();
 
   void
@@ -79,9 +83,23 @@ public:
     return mActorParent;
   }
 
-  void CaptureCaller(JSContext* aCx);
+  void CaptureCaller();
 
   void FillScriptErrorEvent(nsScriptErrorEvent* aEvent) const;
+
+  bool
+  IsPending() const
+  {
+    return !mHaveResultOrErrorCode;
+  }
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  uint64_t
+  GetSerialNumber() const
+  {
+    return mSerialNumber;
+  }
+#endif
 
 protected:
   IDBRequest();
@@ -90,20 +108,16 @@ protected:
   nsCOMPtr<nsISupports> mSource;
   nsRefPtr<IDBTransaction> mTransaction;
 
-  NS_DECL_EVENT_HANDLER(success)
-  NS_DECL_EVENT_HANDLER(error)
-
-  jsval mResultVal;
-
-  nsCOMPtr<nsIDOMDOMError> mError;
-
+  JS::Heap<JS::Value> mResultVal;
+  nsRefPtr<mozilla::dom::DOMError> mError;
   IndexedDBRequestParentBase* mActorParent;
-
-  nsresult mErrorCode;
-  bool mHaveResultOrErrorCode;
-
   nsString mFilename;
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  uint64_t mSerialNumber;
+#endif
+  nsresult mErrorCode;
   uint32_t mLineNo;
+  bool mHaveResultOrErrorCode;
 };
 
 class IDBOpenDBRequest : public IDBRequest,
@@ -117,21 +131,31 @@ public:
 
   static
   already_AddRefed<IDBOpenDBRequest>
-  Create(nsPIDOMWindow* aOwner,
-         JSObject* aScriptOwner,
-         JSContext* aCallingCx);
+  Create(IDBFactory* aFactory,
+         nsPIDOMWindow* aOwner,
+         JS::Handle<JSObject*> aScriptOwner);
 
   void SetTransaction(IDBTransaction* aTransaction);
 
   // nsIDOMEventTarget
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor);
+  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+
+  DOMError* GetError(ErrorResult& aRv)
+  {
+    return IDBRequest::GetError(aRv);
+  }
+
+  IDBFactory*
+  Factory() const
+  {
+    return mFactory;
+  }
 
 protected:
   ~IDBOpenDBRequest();
 
   // Only touched on the main thread.
-  NS_DECL_EVENT_HANDLER(blocked)
-  NS_DECL_EVENT_HANDLER(upgradeneeded)
+  nsRefPtr<IDBFactory> mFactory;
 };
 
 END_INDEXEDDB_NAMESPACE

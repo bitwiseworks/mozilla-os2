@@ -1,24 +1,25 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ObjectImpl_inl_h___
-#define ObjectImpl_inl_h___
+#ifndef vm_ObjectImpl_inl_h
+#define vm_ObjectImpl_inl_h
 
 #include "mozilla/Assertions.h"
 
 #include "jscompartment.h"
 #include "jsgc.h"
-#include "jsinterp.h"
+#include "jsproxy.h"
 
 #include "gc/Heap.h"
 #include "gc/Marking.h"
 #include "js/TemplateLib.h"
+#include "vm/Interpreter.h"
+#include "vm/ObjectImpl.h"
 
-#include "ObjectImpl.h"
+#include "gc/Barrier-inl.h"
 
 namespace js {
 
@@ -40,6 +41,18 @@ Debug_SetSlotRangeToCrashOnTouch(HeapSlot *begin, HeapSlot *end)
 
 } // namespace js
 
+inline JSCompartment *
+js::ObjectImpl::compartment() const
+{
+    return lastProperty()->base()->compartment();
+}
+
+inline js::TaggedProto
+js::ObjectImpl::getTaggedProto() const
+{
+    return TaggedProto(getProto());
+}
+
 inline js::Shape *
 js::ObjectImpl::nativeLookup(JSContext *cx, PropertyId pid)
 {
@@ -49,68 +62,100 @@ js::ObjectImpl::nativeLookup(JSContext *cx, PropertyId pid)
 inline js::Shape *
 js::ObjectImpl::nativeLookup(JSContext *cx, PropertyName *name)
 {
-    return nativeLookup(cx, PropertyId(name));
+    return nativeLookup(cx, NameToId(name));
+}
+
+inline bool
+js::ObjectImpl::nativeContains(JSContext *cx, jsid id)
+{
+    return nativeLookup(cx, id) != NULL;
+}
+
+inline bool
+js::ObjectImpl::nativeContains(JSContext *cx, PropertyName *name)
+{
+    return nativeLookup(cx, name) != NULL;
+}
+
+inline bool
+js::ObjectImpl::nativeContains(JSContext *cx, Shape *shape)
+{
+    return nativeLookup(cx, shape->propid()) == shape;
 }
 
 inline js::Shape *
-js::ObjectImpl::nativeLookupNoAllocation(PropertyId pid)
+js::ObjectImpl::nativeLookupPure(PropertyId pid)
 {
-    return nativeLookupNoAllocation(pid.asId());
+    return nativeLookupPure(pid.asId());
 }
 
 inline js::Shape *
-js::ObjectImpl::nativeLookupNoAllocation(PropertyName *name)
+js::ObjectImpl::nativeLookupPure(PropertyName *name)
 {
-    return nativeLookupNoAllocation(PropertyId(name));
+    return nativeLookupPure(NameToId(name));
+}
+
+inline bool
+js::ObjectImpl::nativeContainsPure(jsid id)
+{
+    return nativeLookupPure(id) != NULL;
+}
+
+inline bool
+js::ObjectImpl::nativeContainsPure(PropertyName *name)
+{
+    return nativeContainsPure(NameToId(name));
+}
+
+inline bool
+js::ObjectImpl::nativeContainsPure(Shape *shape)
+{
+    return nativeLookupPure(shape->propid()) == shape;
 }
 
 inline bool
 js::ObjectImpl::isExtensible() const
 {
+    if (this->isProxy())
+        return Proxy::isExtensible(const_cast<JSObject*>(this->asObjectPtr()));
+
+    // [[Extensible]] for ordinary non-proxy objects is an object flag.
     return !lastProperty()->hasObjectFlag(BaseShape::NOT_EXTENSIBLE);
 }
 
-inline bool
-js::ObjectImpl::isDenseArray() const
-{
-    bool result = hasClass(&ArrayClass);
-    MOZ_ASSERT_IF(result, elements != emptyObjectElements);
-    return result;
-}
-
-inline bool
-js::ObjectImpl::isSlowArray() const
-{
-    bool result = hasClass(&SlowArrayClass);
-    MOZ_ASSERT_IF(result, elements != emptyObjectElements);
-    return result;
-}
-
-inline bool
-js::ObjectImpl::isArray() const
-{
-    return isSlowArray() || isDenseArray();
-}
-
 inline uint32_t
-js::ObjectImpl::getDenseArrayInitializedLength()
+js::ObjectImpl::getDenseInitializedLength()
 {
-    MOZ_ASSERT(isDenseArray());
+    MOZ_ASSERT(isNative());
     return getElementsHeader()->initializedLength;
 }
 
-inline js::HeapSlotArray
-js::ObjectImpl::getDenseArrayElements()
+inline uint32_t
+js::ObjectImpl::getDenseCapacity()
 {
-    MOZ_ASSERT(isDenseArray());
+    MOZ_ASSERT(isNative());
+    return getElementsHeader()->capacity;
+}
+
+inline js::HeapSlotArray
+js::ObjectImpl::getDenseElements()
+{
+    MOZ_ASSERT(isNative());
     return HeapSlotArray(elements);
 }
 
 inline const js::Value &
-js::ObjectImpl::getDenseArrayElement(uint32_t idx)
+js::ObjectImpl::getDenseElement(uint32_t idx)
 {
-    MOZ_ASSERT(isDenseArray() && idx < getDenseArrayInitializedLength());
+    MOZ_ASSERT(isNative() && idx < getDenseInitializedLength());
     return elements[idx];
+}
+
+inline bool
+js::ObjectImpl::containsDenseElement(uint32_t idx)
+{
+    MOZ_ASSERT(isNative());
+    return idx < getDenseInitializedLength() && !elements[idx].isMagic(JS_ELEMENTS_HOLE);
 }
 
 inline void
@@ -118,7 +163,6 @@ js::ObjectImpl::getSlotRangeUnchecked(uint32_t start, uint32_t length,
                                       HeapSlot **fixedStart, HeapSlot **fixedEnd,
                                       HeapSlot **slotsStart, HeapSlot **slotsEnd)
 {
-    MOZ_ASSERT(!isDenseArray());
     MOZ_ASSERT(start + length >= start);
 
     uint32_t fixed = numFixedSlots();
@@ -154,8 +198,6 @@ inline void
 js::ObjectImpl::invalidateSlotRange(uint32_t start, uint32_t length)
 {
 #ifdef DEBUG
-    MOZ_ASSERT(!isDenseArray());
-
     HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
     getSlotRange(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
     Debug_SetSlotRangeToCrashOnTouch(fixedStart, fixedEnd);
@@ -163,28 +205,16 @@ js::ObjectImpl::invalidateSlotRange(uint32_t start, uint32_t length)
 #endif /* DEBUG */
 }
 
-inline void
-js::ObjectImpl::initializeSlotRange(uint32_t start, uint32_t length)
-{
-    /*
-     * No bounds check, as this is used when the object's shape does not
-     * reflect its allocated slots (updateSlotsForSpan).
-     */
-    HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
-    getSlotRangeUnchecked(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
-
-    JSCompartment *comp = compartment();
-    uint32_t offset = start;
-    for (HeapSlot *sp = fixedStart; sp < fixedEnd; sp++)
-        sp->init(comp, this->asObjectPtr(), offset++, UndefinedValue());
-    for (HeapSlot *sp = slotsStart; sp < slotsEnd; sp++)
-        sp->init(comp, this->asObjectPtr(), offset++, UndefinedValue());
-}
-
 inline bool
 js::ObjectImpl::isNative() const
 {
     return lastProperty()->isNative();
+}
+
+inline bool
+js::ObjectImpl::isProxy() const
+{
+    return js::IsProxy(const_cast<JSObject*>(this->asObjectPtr()));
 }
 
 inline js::HeapSlot &
@@ -203,68 +233,66 @@ js::ObjectImpl::nativeGetSlot(uint32_t slot) const
     return getSlot(slot);
 }
 
-static JS_ALWAYS_INLINE JSCompartment *
-ValueCompartment(const js::Value &value)
+#ifdef DEBUG
+inline bool
+IsObjectValueInCompartment(js::Value v, JSCompartment *comp)
 {
-    JS_ASSERT(value.isMarkable());
-    return static_cast<js::gc::Cell *>(value.toGCThing())->compartment();
-}
-
-static bool
-IsValueInCompartment(js::Value v, JSCompartment *comp)
-{
-    if (!v.isMarkable())
+    if (!v.isObject())
         return true;
-    JSCompartment *vcomp = ValueCompartment(v);
-    return vcomp == comp->rt->atomsCompartment || vcomp == comp;
+    return v.toObject().compartment() == comp;
 }
+#endif
 
 inline void
 js::ObjectImpl::setSlot(uint32_t slot, const js::Value &value)
 {
     MOZ_ASSERT(slotInRange(slot));
-    MOZ_ASSERT(IsValueInCompartment(value, compartment()));
-    getSlotRef(slot).set(this->asObjectPtr(), slot, value);
+    MOZ_ASSERT(IsObjectValueInCompartment(value, asObjectPtr()->compartment()));
+    getSlotRef(slot).set(this->asObjectPtr(), HeapSlot::Slot, slot, value);
+}
+
+inline void
+js::ObjectImpl::setCrossCompartmentSlot(uint32_t slot, const js::Value &value)
+{
+    MOZ_ASSERT(slotInRange(slot));
+    getSlotRef(slot).set(this->asObjectPtr(), HeapSlot::Slot, slot, value);
 }
 
 inline void
 js::ObjectImpl::initSlot(uint32_t slot, const js::Value &value)
 {
-    MOZ_ASSERT(getSlot(slot).isUndefined() || getSlot(slot).isMagic(JS_ARRAY_HOLE));
+    MOZ_ASSERT(getSlot(slot).isUndefined());
     MOZ_ASSERT(slotInRange(slot));
-    MOZ_ASSERT(IsValueInCompartment(value, compartment()));
+    MOZ_ASSERT(IsObjectValueInCompartment(value, asObjectPtr()->compartment()));
     initSlotUnchecked(slot, value);
 }
 
 inline void
 js::ObjectImpl::initCrossCompartmentSlot(uint32_t slot, const js::Value &value)
 {
-    MOZ_ASSERT(getSlot(slot).isUndefined() || getSlot(slot).isMagic(JS_ARRAY_HOLE));
+    MOZ_ASSERT(getSlot(slot).isUndefined());
     MOZ_ASSERT(slotInRange(slot));
-    if (value.isMarkable())
-        getSlotRef(slot).init(ValueCompartment(value), this->asObjectPtr(), slot, value);
-    else
-        initSlot(slot, value);
+    initSlotUnchecked(slot, value);
 }
 
 inline void
 js::ObjectImpl::initSlotUnchecked(uint32_t slot, const js::Value &value)
 {
-    getSlotAddressUnchecked(slot)->init(this->asObjectPtr(), slot, value);
+    getSlotAddressUnchecked(slot)->init(this->asObjectPtr(), HeapSlot::Slot, slot, value);
 }
 
 inline void
 js::ObjectImpl::setFixedSlot(uint32_t slot, const js::Value &value)
 {
     MOZ_ASSERT(slot < numFixedSlots());
-    fixedSlots()[slot].set(this->asObjectPtr(), slot, value);
+    fixedSlots()[slot].set(this->asObjectPtr(), HeapSlot::Slot, slot, value);
 }
 
 inline void
 js::ObjectImpl::initFixedSlot(uint32_t slot, const js::Value &value)
 {
     MOZ_ASSERT(slot < numFixedSlots());
-    fixedSlots()[slot].init(this->asObjectPtr(), slot, value);
+    fixedSlots()[slot].init(this->asObjectPtr(), HeapSlot::Slot, slot, value);
 }
 
 inline uint32_t
@@ -281,22 +309,10 @@ js::ObjectImpl::numDynamicSlots() const
     return dynamicSlotsCount(numFixedSlots(), slotSpan());
 }
 
-inline js::Class *
-js::ObjectImpl::getClass() const
-{
-    return lastProperty()->getObjectClass();
-}
-
 inline JSClass *
 js::ObjectImpl::getJSClass() const
 {
     return Jsvalify(getClass());
-}
-
-inline bool
-js::ObjectImpl::hasClass(const Class *c) const
-{
-    return getClass() == c;
 }
 
 inline const js::ObjectOps *
@@ -332,20 +348,27 @@ js::ObjectImpl::dynamicSlotsCount(uint32_t nfixed, uint32_t span)
 }
 
 inline size_t
-js::ObjectImpl::sizeOfThis() const
+js::ObjectImpl::tenuredSizeOfThis() const
 {
-    return arenaHeader()->getThingSize();
+    return js::gc::Arena::thingSize(tenuredGetAllocKind());
+}
+
+JS_ALWAYS_INLINE JS::Zone *
+js::ObjectImpl::zone() const
+{
+    JS_ASSERT(InSequentialOrExclusiveParallelSection());
+    return shape_->zone();
 }
 
 /* static */ inline void
 js::ObjectImpl::readBarrier(ObjectImpl *obj)
 {
 #ifdef JSGC_INCREMENTAL
-    JSCompartment *comp = obj->compartment();
-    if (comp->needsBarrier()) {
-        MOZ_ASSERT(!comp->rt->isHeapBusy());
+    Zone *zone = obj->zone();
+    if (zone->needsBarrier()) {
+        MOZ_ASSERT(!zone->rt->isHeapMajorCollecting());
         JSObject *tmp = obj->asObjectPtr();
-        MarkObjectUnbarriered(comp->barrierTracer(), &tmp, "read barrier");
+        MarkObjectUnbarriered(zone->barrierTracer(), &tmp, "read barrier");
         MOZ_ASSERT(tmp == obj->asObjectPtr());
     }
 #endif
@@ -355,10 +378,10 @@ inline void
 js::ObjectImpl::privateWriteBarrierPre(void **old)
 {
 #ifdef JSGC_INCREMENTAL
-    JSCompartment *comp = compartment();
-    if (comp->needsBarrier()) {
+    Zone *zone = this->zone();
+    if (zone->needsBarrier()) {
         if (*old && getClass()->trace)
-            getClass()->trace(comp->barrierTracer(), this->asObjectPtr());
+            getClass()->trace(zone->barrierTracer(), this->asObjectPtr());
     }
 #endif
 }
@@ -367,7 +390,7 @@ inline void
 js::ObjectImpl::privateWriteBarrierPost(void **pprivate)
 {
 #ifdef JSGC_GENERATIONAL
-    compartment()->gcStoreBuffer.putCell(reinterpret_cast<js::gc::Cell **>(pprivate));
+    runtime()->gcStoreBuffer.putCell(reinterpret_cast<js::gc::Cell **>(pprivate));
 #endif
 }
 
@@ -379,14 +402,14 @@ js::ObjectImpl::writeBarrierPre(ObjectImpl *obj)
      * This would normally be a null test, but TypeScript::global uses 0x1 as a
      * special value.
      */
-    if (uintptr_t(obj) < 32)
+    if (IsNullTaggedPointer(obj) || !obj->runtime()->needsBarrier())
         return;
 
-    JSCompartment *comp = obj->compartment();
-    if (comp->needsBarrier()) {
-        MOZ_ASSERT(!comp->rt->isHeapBusy());
+    Zone *zone = obj->zone();
+    if (zone->needsBarrier()) {
+        MOZ_ASSERT(!zone->rt->isHeapMajorCollecting());
         JSObject *tmp = obj->asObjectPtr();
-        MarkObjectUnbarriered(comp->barrierTracer(), &tmp, "write barrier");
+        MarkObjectUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
         MOZ_ASSERT(tmp == obj->asObjectPtr());
     }
 #endif
@@ -396,42 +419,10 @@ js::ObjectImpl::writeBarrierPre(ObjectImpl *obj)
 js::ObjectImpl::writeBarrierPost(ObjectImpl *obj, void *addr)
 {
 #ifdef JSGC_GENERATIONAL
-    if (uintptr_t(obj) < 32)
+    if (IsNullTaggedPointer(obj))
         return;
-    obj->compartment()->gcStoreBuffer.putCell((Cell **)addr);
+    obj->runtime()->gcStoreBuffer.putCell((Cell **)addr);
 #endif
-}
-
-inline bool
-js::ObjectImpl::hasPrivate() const
-{
-    return getClass()->hasPrivate();
-}
-
-inline void *&
-js::ObjectImpl::privateRef(uint32_t nfixed) const
-{
-    /*
-     * The private pointer of an object can hold any word sized value.
-     * Private pointers are stored immediately after the last fixed slot of
-     * the object.
-     */
-    MOZ_ASSERT(nfixed == numFixedSlots());
-    MOZ_ASSERT(hasPrivate());
-    HeapSlot *end = &fixedSlots()[nfixed];
-    return *reinterpret_cast<void**>(end);
-}
-
-inline void *
-js::ObjectImpl::getPrivate() const
-{
-    return privateRef(numFixedSlots());
-}
-
-inline void *
-js::ObjectImpl::getPrivate(uint32_t nfixed) const
-{
-    return privateRef(nfixed);
 }
 
 inline void
@@ -464,4 +455,4 @@ js::ObjectImpl::initPrivate(void *data)
     privateRef(numFixedSlots()) = data;
 }
 
-#endif /* ObjectImpl_inl_h__ */
+#endif /* vm_ObjectImpl_inl_h */

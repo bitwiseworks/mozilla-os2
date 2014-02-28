@@ -8,6 +8,7 @@
 
 #include "mozilla/dom/Element.h"
 #include "nsComputedDOMStyle.h"
+#include "nsCSSProps.h"
 #include "nsIFrame.h"
 
 using namespace mozilla;
@@ -27,7 +28,7 @@ StyleInfo::Display(nsAString& aValue)
 {
   aValue.Truncate();
   AppendASCIItoUTF16(
-    nsCSSProps::ValueToKeyword(mStyleContext->GetStyleDisplay()->mDisplay,
+    nsCSSProps::ValueToKeyword(mStyleContext->StyleDisplay()->mDisplay,
                                nsCSSProps::kDisplayKTable), aValue);
 }
 
@@ -36,7 +37,7 @@ StyleInfo::TextAlign(nsAString& aValue)
 {
   aValue.Truncate();
   AppendASCIItoUTF16(
-    nsCSSProps::ValueToKeyword(mStyleContext->GetStyleText()->mTextAlign,
+    nsCSSProps::ValueToKeyword(mStyleContext->StyleText()->mTextAlign,
                                nsCSSProps::kTextAlignKTable), aValue);
 }
 
@@ -46,7 +47,7 @@ StyleInfo::TextIndent(nsAString& aValue)
   aValue.Truncate();
 
   const nsStyleCoord& styleCoord =
-    mStyleContext->GetStyleText()->mTextIndent;
+    mStyleContext->StyleText()->mTextIndent;
 
   nscoord coordVal = 0;
   switch (styleCoord.GetUnit()) {

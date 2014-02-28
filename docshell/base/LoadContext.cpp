@@ -8,10 +8,11 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsContentUtils.h"
+#include "mozIApplication.h"
 
 namespace mozilla {
 
-NS_IMPL_ISUPPORTS1(LoadContext, nsILoadContext);
+NS_IMPL_ISUPPORTS1(LoadContext, nsILoadContext)
 
 //-----------------------------------------------------------------------------
 // LoadContext::nsILoadContext
@@ -33,6 +34,14 @@ LoadContext::GetTopWindow(nsIDOMWindow**)
 
   // can't support this in the parent process
   return NS_ERROR_UNEXPECTED;
+}
+
+NS_IMETHODIMP
+LoadContext::GetTopFrameElement(nsIDOMElement** aElement)
+{
+  nsCOMPtr<nsIDOMElement> element = do_QueryReferent(mTopFrameElement);
+  element.forget(aElement);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -68,6 +77,15 @@ LoadContext::GetUsePrivateBrowsing(bool* aUsePrivateBrowsing)
 
 NS_IMETHODIMP
 LoadContext::SetUsePrivateBrowsing(bool aUsePrivateBrowsing)
+{
+  MOZ_ASSERT(mIsNotNull);
+
+  // We shouldn't need this on parent...
+  return NS_ERROR_UNEXPECTED;
+}
+
+NS_IMETHODIMP
+LoadContext::SetPrivateBrowsing(bool aUsePrivateBrowsing)
 {
   MOZ_ASSERT(mIsNotNull);
 

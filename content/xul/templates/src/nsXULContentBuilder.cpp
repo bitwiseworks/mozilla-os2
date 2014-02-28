@@ -31,6 +31,7 @@
 #include "nsAttrName.h"
 #include "nsNodeUtils.h"
 #include "mozAutoDocUpdate.h"
+#include "nsTextNode.h"
 
 #include "jsapi.h"
 #include "pldhash.h"
@@ -619,10 +620,8 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
                 rv = SubstituteText(aChild, attrValue, value);
                 if (NS_FAILED(rv)) return rv;
 
-                nsCOMPtr<nsIContent> content;
-                rv = NS_NewTextNode(getter_AddRefs(content),
-                                    mRoot->NodeInfo()->NodeInfoManager());
-                if (NS_FAILED(rv)) return rv;
+                nsRefPtr<nsTextNode> content =
+                  new nsTextNode(mRoot->NodeInfo()->NodeInfoManager());
 
                 content->SetText(value, false);
 
@@ -1116,7 +1115,7 @@ nsXULContentBuilder::CreateContainerContentsForQuerySet(nsIContent* aElement,
             continue;
 
         nsTemplateMatch *newmatch =
-            nsTemplateMatch::Create(mPool, aQuerySet->Priority(),
+            nsTemplateMatch::Create(aQuerySet->Priority(),
                                     nextresult, aElement);
         if (!newmatch)
             return NS_ERROR_OUT_OF_MEMORY;
@@ -1177,7 +1176,7 @@ nsXULContentBuilder::CreateContainerContentsForQuerySet(nsIContent* aElement,
             rv = DetermineMatchedRule(aElement, nextresult, aQuerySet,
                                       &matchedrule, &ruleindex);
             if (NS_FAILED(rv)) {
-                nsTemplateMatch::Destroy(mPool, newmatch, false);
+                nsTemplateMatch::Destroy(newmatch, false);
                 return rv;
             }
 
@@ -1185,7 +1184,7 @@ nsXULContentBuilder::CreateContainerContentsForQuerySet(nsIContent* aElement,
                 rv = newmatch->RuleMatched(aQuerySet, matchedrule,
                                            ruleindex, nextresult);
                 if (NS_FAILED(rv)) {
-                    nsTemplateMatch::Destroy(mPool, newmatch, false);
+                    nsTemplateMatch::Destroy(newmatch, false);
                     return rv;
                 }
 
@@ -1210,7 +1209,7 @@ nsXULContentBuilder::CreateContainerContentsForQuerySet(nsIContent* aElement,
 
         if (removematch) {
             newmatch->mNext = removematch->mNext;
-            nsTemplateMatch::Destroy(mPool, removematch, true);
+            nsTemplateMatch::Destroy(removematch, true);
         }
         else {
             newmatch->mNext = existingmatch;
@@ -1891,7 +1890,7 @@ nsXULContentBuilder::InsertSortedNode(nsIContent* aContainer,
             // found "static" XUL element count hint
             nsresult strErr = NS_OK;
             staticCount = staticValue.ToInteger(&strErr);
-            if (strErr)
+            if (NS_FAILED(strErr))
                 staticCount = 0;
         } else {
             // compute the "static" XUL element count

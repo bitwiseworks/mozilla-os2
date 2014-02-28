@@ -25,9 +25,7 @@ TimerThread::TimerThread() :
   mMonitor("TimerThread.mMonitor"),
   mShutdown(false),
   mWaiting(false),
-  mSleeping(false),
-  mDelayLineCounter(0),
-  mMinTimerPeriod(0)
+  mSleeping(false)
 {
 }
 
@@ -67,6 +65,8 @@ TimerObserverRunnable::Run()
   if (observerService) {
     observerService->AddObserver(mObserver, "sleep_notification", false);
     observerService->AddObserver(mObserver, "wake_notification", false);
+    observerService->AddObserver(mObserver, "suspend_process_notification", false);
+    observerService->AddObserver(mObserver, "resume_process_notification", false);
   }
   return NS_OK;
 }
@@ -75,7 +75,7 @@ TimerObserverRunnable::Run()
 
 nsresult TimerThread::Init()
 {
-  PR_LOG(gTimerLog, PR_LOG_DEBUG, ("TimerThread::Init [%d]\n", mInitialized));
+  PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("TimerThread::Init [%d]\n", mInitialized));
 
   if (mInitialized) {
     if (!mThread)
@@ -121,7 +121,7 @@ nsresult TimerThread::Init()
 
 nsresult TimerThread::Shutdown()
 {
-  PR_LOG(gTimerLog, PR_LOG_DEBUG, ("TimerThread::Shutdown begin\n"));
+  PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("TimerThread::Shutdown begin\n"));
 
   if (!mThread)
     return NS_ERROR_NOT_INITIALIZED;
@@ -155,62 +155,8 @@ nsresult TimerThread::Shutdown()
 
   mThread->Shutdown();    // wait for the thread to die
 
-  PR_LOG(gTimerLog, PR_LOG_DEBUG, ("TimerThread::Shutdown end\n"));
+  PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("TimerThread::Shutdown end\n"));
   return NS_OK;
-}
-
-// Keep track of how early (positive slack) or late (negative slack) timers
-// are running, and use the filtered slack number to adaptively estimate how
-// early timers should fire to be "on time".
-void TimerThread::UpdateFilter(uint32_t aDelay, TimeStamp aTimeout,
-                               TimeStamp aNow)
-{
-  TimeDuration slack = aTimeout - aNow;
-  double smoothSlack = 0;
-  uint32_t i, filterLength;
-  static TimeDuration kFilterFeedbackMaxTicks =
-    TimeDuration::FromMilliseconds(FILTER_FEEDBACK_MAX);
-  static TimeDuration kFilterFeedbackMinTicks =
-    TimeDuration::FromMilliseconds(-FILTER_FEEDBACK_MAX);
-
-  if (slack > kFilterFeedbackMaxTicks)
-    slack = kFilterFeedbackMaxTicks;
-  else if (slack < kFilterFeedbackMinTicks)
-    slack = kFilterFeedbackMinTicks;
-
-  mDelayLine[mDelayLineCounter & DELAY_LINE_LENGTH_MASK] =
-    slack.ToMilliseconds();
-  if (++mDelayLineCounter < DELAY_LINE_LENGTH) {
-    // Startup mode: accumulate a full delay line before filtering.
-    PR_ASSERT(mTimeoutAdjustment.ToSeconds() == 0);
-    filterLength = 0;
-  } else {
-    // Past startup: compute number of filter taps based on mMinTimerPeriod.
-    if (mMinTimerPeriod == 0) {
-      mMinTimerPeriod = (aDelay != 0) ? aDelay : 1;
-    } else if (aDelay != 0 && aDelay < mMinTimerPeriod) {
-      mMinTimerPeriod = aDelay;
-    }
-
-    filterLength = (uint32_t) (FILTER_DURATION / mMinTimerPeriod);
-    if (filterLength > DELAY_LINE_LENGTH)
-      filterLength = DELAY_LINE_LENGTH;
-    else if (filterLength < 4)
-      filterLength = 4;
-
-    for (i = 1; i <= filterLength; i++)
-      smoothSlack += mDelayLine[(mDelayLineCounter-i) & DELAY_LINE_LENGTH_MASK];
-    smoothSlack /= filterLength;
-
-    // XXXbe do we need amplification?  hacking a fudge factor, need testing...
-    mTimeoutAdjustment = TimeDuration::FromMilliseconds(smoothSlack * 1.5);
-  }
-
-#ifdef DEBUG_TIMERS
-  PR_LOG(gTimerLog, PR_LOG_DEBUG,
-         ("UpdateFilter: smoothSlack = %g, filterLength = %u\n",
-          smoothSlack, filterLength));
-#endif
 }
 
 /* void Run(); */
@@ -257,7 +203,7 @@ NS_IMETHODIMP TimerThread::Run()
       if (!mTimers.IsEmpty()) {
         timer = mTimers[0];
 
-        if (now >= timer->mTimeout + mTimeoutAdjustment) {
+        if (now >= timer->mTimeout) {
     next:
           // NB: AddRef before the Release under RemoveTimerInternal to avoid
           // mRefCnt passing through zero, in case all other refs than the one
@@ -273,8 +219,8 @@ NS_IMETHODIMP TimerThread::Run()
             MonitorAutoUnlock unlock(mMonitor);
 
 #ifdef DEBUG_TIMERS
-            if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
-              PR_LOG(gTimerLog, PR_LOG_DEBUG,
+            if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
+              PR_LOG(GetTimerLog(), PR_LOG_DEBUG,
                      ("Timer thread woke up %fms from when it was supposed to\n",
                       fabs((now - timer->mTimeout).ToMilliseconds())));
             }
@@ -298,7 +244,7 @@ NS_IMETHODIMP TimerThread::Run()
               // is from the timer thread) and when it hits this will remove the
               // timer from the timer thread and thus destroy the last reference,
               // preventing this situation from occurring.
-              NS_ASSERTION(rc != 0, "destroyed timer off its target thread!");
+              MOZ_ASSERT(rc != 0, "destroyed timer off its target thread!");
             }
             timer = nullptr;
           }
@@ -315,7 +261,7 @@ NS_IMETHODIMP TimerThread::Run()
       if (!mTimers.IsEmpty()) {
         timer = mTimers[0];
 
-        TimeStamp timeout = timer->mTimeout + mTimeoutAdjustment;
+        TimeStamp timeout = timer->mTimeout;
 
         // Don't wait at all (even for PR_INTERVAL_NO_WAIT) if the next timer
         // is due now or overdue.
@@ -327,18 +273,18 @@ NS_IMETHODIMP TimerThread::Run()
         double microseconds = (timeout - now).ToMilliseconds()*1000;
         if (microseconds < halfMicrosecondsIntervalResolution)
           goto next; // round down; execute event now
-        waitFor = PR_MicrosecondsToInterval(microseconds);
+        waitFor = PR_MicrosecondsToInterval(static_cast<uint32_t>(microseconds)); // Floor is accurate enough.
         if (waitFor == 0)
           waitFor = 1; // round up, wait the minimum time we can wait
       }
 
 #ifdef DEBUG_TIMERS
-      if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
+      if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
         if (waitFor == PR_INTERVAL_NO_TIMEOUT)
-          PR_LOG(gTimerLog, PR_LOG_DEBUG,
+          PR_LOG(GetTimerLog(), PR_LOG_DEBUG,
                  ("waiting for PR_INTERVAL_NO_TIMEOUT\n"));
         else
-          PR_LOG(gTimerLog, PR_LOG_DEBUG,
+          PR_LOG(GetTimerLog(), PR_LOG_DEBUG,
                  ("waiting for %u\n", PR_IntervalToMilliseconds(waitFor)));
       }
 #endif
@@ -415,31 +361,16 @@ int32_t TimerThread::AddTimerInternal(nsTimerImpl *aTimer)
     return -1;
 
   TimeStamp now = TimeStamp::Now();
-  uint32_t count = mTimers.Length();
-  uint32_t i = 0;
-  for (; i < count; i++) {
-    nsTimerImpl *timer = mTimers[i];
 
-    // Don't break till we have skipped any overdue timers.
+  TimerAdditionComparator c(now, aTimer);
+  nsTimerImpl** insertSlot = mTimers.InsertElementSorted(aTimer, c);
 
-    // XXXbz why?  Given our definition of overdue in terms of
-    // mTimeoutAdjustment, aTimer might be overdue already!  Why not
-    // just fire timers in order?
-
-    // XXX does this hold for TYPE_REPEATING_PRECISE?  /be
-
-    if (now < timer->mTimeout + mTimeoutAdjustment &&
-        aTimer->mTimeout < timer->mTimeout) {
-      break;
-    }
-  }
-
-  if (!mTimers.InsertElementAt(i, aTimer))
+  if (!insertSlot)
     return -1;
 
   aTimer->mArmed = true;
   NS_ADDREF(aTimer);
-  return i;
+  return insertSlot - mTimers.Elements();
 }
 
 bool TimerThread::RemoveTimerInternal(nsTimerImpl *aTimer)
@@ -474,9 +405,6 @@ void TimerThread::DoAfterSleep()
     timer->SetDelay(delay);
   }
 
-  // nuke the stored adjustments, so they get recalibrated
-  mTimeoutAdjustment = TimeDuration(0);
-  mDelayLineCounter = 0;
   mSleeping = false;
 }
 
@@ -485,9 +413,11 @@ void TimerThread::DoAfterSleep()
 NS_IMETHODIMP
 TimerThread::Observe(nsISupports* /* aSubject */, const char *aTopic, const PRUnichar* /* aData */)
 {
-  if (strcmp(aTopic, "sleep_notification") == 0)
+  if (strcmp(aTopic, "sleep_notification") == 0 ||
+      strcmp(aTopic, "suspend_process_notification") == 0)
     DoBeforeSleep();
-  else if (strcmp(aTopic, "wake_notification") == 0)
+  else if (strcmp(aTopic, "wake_notification") == 0 ||
+           strcmp(aTopic, "resume_process_notification") == 0)
     DoAfterSleep();
 
   return NS_OK;

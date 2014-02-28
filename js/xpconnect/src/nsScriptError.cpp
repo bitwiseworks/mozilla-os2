@@ -11,6 +11,8 @@
 #include "xpcprivate.h"
 #include "nsGlobalWindow.h"
 #include "nsPIDOMWindow.h"
+#include "nsILoadContext.h"
+#include "nsIDocShell.h"
 
 NS_IMPL_THREADSAFE_ISUPPORTS2(nsScriptError, nsIConsoleMessage, nsIScriptError)
 
@@ -24,7 +26,8 @@ nsScriptError::nsScriptError()
        mCategory(),
        mOuterWindowID(0),
        mInnerWindowID(0),
-       mTimeStamp(0)
+       mTimeStamp(0),
+       mIsFromPrivateWindow(false)
 {
 }
 
@@ -35,7 +38,7 @@ NS_IMETHODIMP
 nsScriptError::GetMessageMoz(PRUnichar **result) {
     nsresult rv;
 
-    nsCAutoString message;
+    nsAutoCString message;
     rv = ToString(message);
     if (NS_FAILED(rv))
         return rv;
@@ -91,9 +94,9 @@ nsScriptError::GetCategory(char **result) {
 }
 
 NS_IMETHODIMP
-nsScriptError::Init(const PRUnichar *message,
-                    const PRUnichar *sourceName,
-                    const PRUnichar *sourceLine,
+nsScriptError::Init(const nsAString& message,
+                    const nsAString& sourceName,
+                    const nsAString& sourceLine,
                     uint32_t lineNumber,
                     uint32_t columnNumber,
                     uint32_t flags,
@@ -104,9 +107,9 @@ nsScriptError::Init(const PRUnichar *message,
 }
 
 NS_IMETHODIMP
-nsScriptError::InitWithWindowID(const PRUnichar *message,
-                                const PRUnichar *sourceName,
-                                const PRUnichar *sourceLine,
+nsScriptError::InitWithWindowID(const nsAString& message,
+                                const nsAString& sourceName,
+                                const nsAString& sourceLine,
                                 uint32_t lineNumber,
                                 uint32_t columnNumber,
                                 uint32_t flags,
@@ -130,6 +133,18 @@ nsScriptError::InitWithWindowID(const PRUnichar *message,
             nsPIDOMWindow* outer = window->GetOuterWindow();
             if (outer)
                 mOuterWindowID = outer->WindowID();
+
+            nsIDocShell* docShell = window->GetDocShell();
+            nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
+
+            if (loadContext) {
+                // Never mark exceptions from chrome windows as having come from
+                // private windows, since we always want them to be reported.
+                nsIPrincipal* winPrincipal = window->GetPrincipal();
+                mIsFromPrivateWindow = loadContext->UsePrivateBrowsing() &&
+                                       !nsContentUtils::IsSystemPrincipal(winPrincipal);
+            }
+
         }
     }
 
@@ -215,5 +230,12 @@ NS_IMETHODIMP
 nsScriptError::GetTimeStamp(int64_t *aTimeStamp)
 {
     *aTimeStamp = mTimeStamp;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScriptError::GetIsFromPrivateWindow(bool *aIsFromPrivateWindow)
+{
+    *aIsFromPrivateWindow = mIsFromPrivateWindow;
     return NS_OK;
 }

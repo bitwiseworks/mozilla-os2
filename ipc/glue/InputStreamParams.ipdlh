@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include "IPC/IPCMessageUtils.h";
+include "ipc/IPCMessageUtils.h";
 
 using mozilla::void_t;
+include protocol PBlob;
 
 namespace mozilla {
 namespace ipc {
@@ -36,6 +37,11 @@ struct MultiplexInputStreamParams
   bool startedReadingCurrent;
 };
 
+struct RemoteInputStreamParams
+{
+  PBlob remoteBlob;
+};
+
 union InputStreamParams
 {
   StringInputStreamParams;
@@ -44,6 +50,7 @@ union InputStreamParams
   BufferedInputStreamParams;
   MIMEInputStreamParams;
   MultiplexInputStreamParams;
+  RemoteInputStreamParams;
 };
 
 union OptionalInputStreamParams

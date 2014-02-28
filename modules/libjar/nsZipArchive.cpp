@@ -20,7 +20,6 @@
 #include "nsWildCard.h"
 #include "nsZipArchive.h"
 #include "nsString.h"
-#include "mozilla/FunctionTimer.h"
 #include "prenv.h"
 #if defined(XP_WIN)
 #include <windows.h>
@@ -31,6 +30,7 @@
 #define ZIP_ARENABLOCKSIZE (1*1024)
 
 #ifdef XP_UNIX
+    #include <sys/mman.h>
     #include <sys/types.h>
     #include <sys/stat.h>
     #include <limits.h>
@@ -56,6 +56,9 @@
 #  endif
 #endif  /* XP_UNIX */
 
+#ifdef XP_WIN
+#include "private/pprio.h"  // To get PR_ImportFile
+#endif
 
 using namespace mozilla;
 
@@ -70,6 +73,71 @@ static uint32_t HashName(const char* aName, uint16_t nameLen);
 #ifdef XP_UNIX
 static nsresult ResolveSymlink(const char *path);
 #endif
+
+class ZipArchiveLogger {
+public:
+  void Write(const nsACString &zip, const char *entry) const {
+    if (!fd) {
+      char *env = PR_GetEnv("MOZ_JAR_LOG_FILE");
+      if (!env)
+        return;
+
+      nsCOMPtr<nsIFile> logFile;
+      nsresult rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(env), false, getter_AddRefs(logFile));
+      if (NS_FAILED(rv))
+        return;
+
+      // Create the log file and its parent directory (in case it doesn't exist)
+      logFile->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
+
+      PRFileDesc* file;
+#ifdef XP_WIN
+      // PR_APPEND is racy on Windows, so open a handle ourselves with flags that
+      // will work, and use PR_ImportFile to make it a PRFileDesc.
+      // This can go away when bug 840435 is fixed.
+      nsAutoString path;
+      logFile->GetPath(path);
+      if (path.IsEmpty())
+        return;
+      HANDLE handle = CreateFileW(path.get(), FILE_APPEND_DATA, FILE_SHARE_WRITE,
+                                  NULL, OPEN_ALWAYS, 0, NULL);
+      if (handle == INVALID_HANDLE_VALUE)
+        return;
+      file = PR_ImportFile((PROsfd)handle);
+      if (!file)
+        return;
+#else
+      rv = logFile->OpenNSPRFileDesc(PR_WRONLY|PR_CREATE_FILE|PR_APPEND, 0644, &file);
+      if (NS_FAILED(rv))
+        return;
+#endif
+      fd = file;
+    }
+    nsCString buf(zip);
+    buf.Append(" ");
+    buf.Append(entry);
+    buf.Append('\n');
+    PR_Write(fd, buf.get(), buf.Length());
+  }
+
+  void AddRef() {
+    MOZ_ASSERT(refCnt >= 0);
+    ++refCnt;
+  }
+
+  void Release() {
+    MOZ_ASSERT(refCnt > 0);
+    if ((0 == --refCnt) && fd) {
+      PR_Close(fd);
+      fd = NULL;
+    }
+  }
+private:
+  int refCnt;
+  mutable PRFileDesc *fd;
+};
+
+static ZipArchiveLogger zipLog;
 
 //***********************************************************
 // For every inflation the following allocations are done:
@@ -98,15 +166,19 @@ nsZipHandle::nsZipHandle()
 NS_IMPL_THREADSAFE_ADDREF(nsZipHandle)
 NS_IMPL_THREADSAFE_RELEASE(nsZipHandle)
 
-nsresult nsZipHandle::Init(nsIFile *file, nsZipHandle **ret)
+nsresult nsZipHandle::Init(nsIFile *file, nsZipHandle **ret, PRFileDesc **aFd)
 {
   mozilla::AutoFDClose fd;
-  nsresult rv = file->OpenNSPRFileDesc(PR_RDONLY, 0000, &fd.rwget());
+  int32_t flags = PR_RDONLY;
+#if defined(XP_WIN)
+  flags |= nsIFile::OS_READAHEAD;
+#endif
+  nsresult rv = file->OpenNSPRFileDesc(flags, 0000, &fd.rwget());
   if (NS_FAILED(rv))
     return rv;
 
   int64_t size = PR_Available64(fd);
-  if (size >= PR_INT32_MAX)
+  if (size >= INT32_MAX)
     return NS_ERROR_FILE_TOO_BIG;
 
   PRFileMap *map = PR_CreateFileMap(fd, size, PR_PROT_READONLY);
@@ -127,6 +199,11 @@ nsresult nsZipHandle::Init(nsIFile *file, nsZipHandle **ret)
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
+#if defined(XP_WIN)
+  if (aFd) {
+    *aFd = fd.forget();
+  }
+#endif
   handle->mMap = map;
   handle->mFile.Init(file);
   handle->mLen = (uint32_t) size;
@@ -181,7 +258,7 @@ nsZipHandle::~nsZipHandle()
 //---------------------------------------------
 //  nsZipArchive::OpenArchive
 //---------------------------------------------
-nsresult nsZipArchive::OpenArchive(nsZipHandle *aZipHandle)
+nsresult nsZipArchive::OpenArchive(nsZipHandle *aZipHandle, PRFileDesc *aFd)
 {
   mFd = aZipHandle;
 
@@ -189,28 +266,10 @@ nsresult nsZipArchive::OpenArchive(nsZipHandle *aZipHandle)
   PL_INIT_ARENA_POOL(&mArena, "ZipArena", ZIP_ARENABLOCKSIZE);
 
   //-- get table of contents for archive
-  nsresult rv = BuildFileList();
-  char *env = PR_GetEnv("MOZ_JAR_LOG_DIR");
-  if (env && NS_SUCCEEDED(rv) && aZipHandle->mFile) {
-    nsCOMPtr<nsIFile> logFile;
-    nsresult rv2 = NS_NewLocalFile(NS_ConvertUTF8toUTF16(env), false, getter_AddRefs(logFile));
-    
-    if (!NS_SUCCEEDED(rv2))
-      return rv;
-
-    // Create a directory for the log (in case it doesn't exist)
-    logFile->Create(nsIFile::DIRECTORY_TYPE, 0700);
-
-    nsAutoString name;
-    nsCOMPtr<nsIFile> file = aZipHandle->mFile.GetBaseFile();
-    file->GetLeafName(name);
-    name.Append(NS_LITERAL_STRING(".log"));
-    logFile->Append(name);
-
-    PRFileDesc* fd;
-    rv2 = logFile->OpenNSPRFileDesc(PR_WRONLY|PR_CREATE_FILE|PR_APPEND, 0644, &fd);
-    if (NS_SUCCEEDED(rv2))
-      mLog = fd;
+  nsresult rv = BuildFileList(aFd);
+  if (NS_SUCCEEDED(rv)) {
+    if (aZipHandle->mFile)
+      aZipHandle->mFile.GetURIString(mURI);
   }
   return rv;
 }
@@ -218,11 +277,20 @@ nsresult nsZipArchive::OpenArchive(nsZipHandle *aZipHandle)
 nsresult nsZipArchive::OpenArchive(nsIFile *aFile)
 {
   nsRefPtr<nsZipHandle> handle;
+#if defined(XP_WIN)
+  mozilla::AutoFDClose fd;
+  nsresult rv = nsZipHandle::Init(aFile, getter_AddRefs(handle), &fd.rwget());
+#else
   nsresult rv = nsZipHandle::Init(aFile, getter_AddRefs(handle));
+#endif
   if (NS_FAILED(rv))
     return rv;
 
+#if defined(XP_WIN)
+  return OpenArchive(handle, fd.get());
+#else
   return OpenArchive(handle);
+#endif
 }
 
 //---------------------------------------------
@@ -301,13 +369,8 @@ MOZ_WIN_MEM_TRY_BEGIN
       if ((len == item->nameLength) && 
           (!memcmp(aEntryName, item->Name(), len))) {
         
-        if (mLog) {
-          // Successful GetItem() is a good indicator that the file is about to be read
-          char *tmp = PL_strdup(aEntryName);
-          tmp[len]='\n';
-          PR_Write(mLog, tmp, len+1);
-          PL_strfree(tmp);
-        }
+        // Successful GetItem() is a good indicator that the file is about to be read
+        zipLog.Write(mURI, aEntryName);
         return item; //-- found it
       }
       item = item->next;
@@ -515,11 +578,8 @@ nsZipItem* nsZipArchive::CreateZipItem()
 //---------------------------------------------
 //  nsZipArchive::BuildFileList
 //---------------------------------------------
-nsresult nsZipArchive::BuildFileList()
+nsresult nsZipArchive::BuildFileList(PRFileDesc *aFd)
 {
-#ifndef XP_WIN
-  NS_TIME_FUNCTION;
-#endif
   // Get archive size using end pos
   const uint8_t* buf;
   const uint8_t* startp = mFd->mFileData;
@@ -528,6 +588,17 @@ MOZ_WIN_MEM_TRY_BEGIN
   uint32_t centralOffset = 4;
   if (mFd->mLen > ZIPCENTRAL_SIZE && xtolong(startp + centralOffset) == CENTRALSIG) {
     // Success means optimized jar layout from bug 559961 is in effect
+    uint32_t readaheadLength = xtolong(startp);
+    if (readaheadLength) {
+#if defined(XP_UNIX)
+      madvise(const_cast<uint8_t*>(startp), readaheadLength, MADV_WILLNEED);
+#elif defined(XP_WIN)
+      if (aFd) {
+        HANDLE hFile = (HANDLE) PR_FileDesc2NativeHandle(aFd);
+        mozilla::ReadAhead(hFile, 0, readaheadLength);
+      }
+#endif
+    }
   } else {
     for (buf = endp - ZIPEND_SIZE; buf > startp; buf--)
       {
@@ -746,6 +817,8 @@ nsZipArchive::nsZipArchive()
   : mRefCnt(0)
   , mBuiltSynthetics(false)
 {
+  zipLog.AddRef();
+
   MOZ_COUNT_CTOR(nsZipArchive);
 
   // initialize the table to NULL
@@ -760,6 +833,8 @@ nsZipArchive::~nsZipArchive()
   CloseArchive();
 
   MOZ_COUNT_DTOR(nsZipArchive);
+
+  zipLog.Release();
 }
 
 

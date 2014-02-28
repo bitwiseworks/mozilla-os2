@@ -27,6 +27,20 @@ ifndef INCLUDED_AUTOCONF_MK
 include $(DEPTH)/config/autoconf.mk
 endif
 
+space = $(NULL) $(NULL)
+
+# Include defs.mk files that can be found in $(srcdir)/$(DEPTH),
+# $(srcdir)/$(DEPTH-1), $(srcdir)/$(DEPTH-2), etc., and $(srcdir)
+# where $(DEPTH-1) is one level less of depth, $(DEPTH-2), two, etc.
+# i.e. for DEPTH=../../.., DEPTH-1 is ../.. and DEPTH-2 is ..
+# These defs.mk files are used to define variables in a directory
+# and all its subdirectories, recursively.
+__depth := $(subst /, ,$(DEPTH))
+ifeq (.,$(__depth))
+__depth :=
+endif
+$(foreach __d,$(__depth) .,$(eval __depth = $(wordlist 2,$(words $(__depth)),$(__depth))$(eval -include $(subst $(space),/,$(strip $(srcdir) $(__depth) defs.mk)))))
+
 COMMA = ,
 
 # Sanity check some variables
@@ -51,9 +65,6 @@ $(foreach x,$(CHECK_VARS),$(check-variable))
 core_abspath = $(if $(findstring :,$(1)),$(1),$(if $(filter /%,$(1)),$(1),$(CURDIR)/$(1)))
 core_realpath = $(if $(realpath $(1)),$(realpath $(1)),$(call core_abspath,$(1)))
 
-nullstr :=
-space :=$(nullstr) # EOL
-
 core_winabspath = $(firstword $(subst /, ,$(call core_abspath,$(1)))):$(subst $(space),,$(patsubst %,\\%,$(wordlist 2,$(words $(subst /, ,$(call core_abspath,$(1)))), $(strip $(subst /, ,$(call core_abspath,$(1)))))))
 
 RM = rm -f
@@ -65,9 +76,9 @@ LIBXUL_DIST ?= $(DIST)
 # build products (typelibs, components, chrome).
 #
 # If XPI_NAME is set, the files will be shipped to $(DIST)/xpi-stage/$(XPI_NAME)
-# If DIST_SUBDIR is set, the files will be shipped to $(DIST)/$(DIST_SUBDIR)
-# Otherwise, the default $(DIST)/bin will be used.
-FINAL_TARGET = $(if $(XPI_NAME),$(DIST)/xpi-stage/$(XPI_NAME),$(if $(DIST_SUBDIR),$(DIST)/bin/$(DIST_SUBDIR),$(DIST)/bin))
+# instead of $(DIST)/bin. In both cases, if DIST_SUBDIR is set, the files will be
+# shipped to a $(DIST_SUBDIR) subdirectory.
+FINAL_TARGET = $(if $(XPI_NAME),$(DIST)/xpi-stage/$(XPI_NAME),$(DIST)/bin)$(DIST_SUBDIR:%=/%)
 
 ifdef XPI_NAME
 DEFINES += -DXPI_NAME=$(XPI_NAME)
@@ -113,14 +124,8 @@ MOZ_UNICHARUTIL_LIBS = $(LIBXUL_DIST)/lib/$(LIB_PREFIX)unicharutil_s.$(LIB_SUFFI
 MOZ_WIDGET_SUPPORT_LIBS    = $(DIST)/lib/$(LIB_PREFIX)widgetsupport_s.$(LIB_SUFFIX)
 
 ifdef _MSC_VER
-ifdef .PYMAKE
-PYCOMMANDPATH += $(topsrcdir)/build
-CC_WRAPPER ?= %cl InvokeClWithDependencyGeneration
-CXX_WRAPPER ?= %cl InvokeClWithDependencyGeneration
-else
 CC_WRAPPER ?= $(PYTHON) -O $(topsrcdir)/build/cl.py
 CXX_WRAPPER ?= $(PYTHON) -O $(topsrcdir)/build/cl.py
-endif # .PYMAKE
 endif # _MSC_VER
 
 CC := $(CC_WRAPPER) $(CC)
@@ -194,17 +199,17 @@ endif
 endif
 
 #
-# Handle trace-malloc in optimized builds.
+# Handle trace-malloc and DMD in optimized builds.
 # No opt to give sane callstacks.
 #
-ifdef NS_TRACE_MALLOC
+ifneq (,$(NS_TRACE_MALLOC)$(MOZ_DMD))
 MOZ_OPTIMIZE_FLAGS=-Zi -Od -UDEBUG -DNDEBUG
 ifdef HAVE_64BIT_OS
-OS_LDFLAGS = -DEBUG -PDB:NONE -OPT:REF,ICF
+OS_LDFLAGS = -DEBUG -OPT:REF,ICF
 else
-OS_LDFLAGS = -DEBUG -PDB:NONE -OPT:REF
+OS_LDFLAGS = -DEBUG -OPT:REF
 endif
-endif # NS_TRACE_MALLOC
+endif # NS_TRACE_MALLOC || MOZ_DMD
 
 endif # MOZ_DEBUG
 
@@ -241,7 +246,9 @@ $(error Component makefile does not specify MODULE_NAME.)
 endif
 endif
 FORCE_STATIC_LIB=1
-SHORT_LIBNAME=
+ifneq ($(SHORT_LIBNAME),)
+$(error SHORT_LIBNAME is $(SHORT_LIBNAME) but SHORT_LIBNAME is not compatable with LIBXUL_LIBRARY)
+endif
 endif
 
 # If we are building this component into an extension/xulapp, it cannot be
@@ -265,6 +272,13 @@ endif
 ifndef STATIC_LIBRARY_NAME
 ifdef LIBRARY_NAME
 STATIC_LIBRARY_NAME=$(LIBRARY_NAME)
+endif
+endif
+
+# PGO on MSVC is opt-in
+ifdef _MSC_VER
+ifndef MSVC_ENABLE_PGO
+NO_PROFILE_GUIDED_OPTIMIZE = 1
 endif
 endif
 
@@ -347,11 +361,6 @@ endif
 TAR_CREATE_FLAGS = -cvhf
 TAR_CREATE_FLAGS_QUIET = -chf
 
-ifeq ($(OS_ARCH),BSD_OS)
-TAR_CREATE_FLAGS = -cvLf
-TAR_CREATE_FLAGS_QUIET = -cLf
-endif
-
 ifeq ($(OS_ARCH),OS2)
 TAR_CREATE_FLAGS = -cvf
 TAR_CREATE_FLAGS_QUIET = -cf
@@ -374,14 +383,17 @@ JAVA_GEN_DIR  = _javagen
 JAVA_DIST_DIR = $(DEPTH)/$(JAVA_GEN_DIR)
 JAVA_IFACES_PKG_NAME = org/mozilla/interfaces
 
-OS_INCLUDES += $(NSPR_CFLAGS) $(NSS_CFLAGS) $(MOZ_JPEG_CFLAGS) $(MOZ_PNG_CFLAGS) $(MOZ_ZLIB_CFLAGS)
+OS_INCLUDES += $(MOZ_JPEG_CFLAGS) $(MOZ_PNG_CFLAGS) $(MOZ_ZLIB_CFLAGS)
 
+# NSPR_CFLAGS and NSS_CFLAGS must appear ahead of OS_INCLUDES to avoid Linux
+# builds wrongly picking up system NSPR/NSS header files.
 INCLUDES = \
   $(LOCAL_INCLUDES) \
   -I$(srcdir) \
   -I. \
   -I$(DIST)/include \
   $(if $(LIBXUL_SDK),-I$(LIBXUL_SDK)/include) \
+  $(NSPR_CFLAGS) $(NSS_CFLAGS) \
   $(OS_INCLUDES) \
   $(NULL)
 
@@ -465,20 +477,20 @@ ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_)
 #//------------------------------------------------------------------------
 ifdef USE_STATIC_LIBS
 RTL_FLAGS=-MT          # Statically linked multithreaded RTL
-ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC))
+ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC)$(MOZ_DMD))
 ifndef MOZ_NO_DEBUG_RTL
 RTL_FLAGS=-MTd         # Statically linked multithreaded MSVC4.0 debug RTL
 endif
-endif # MOZ_DEBUG || NS_TRACE_MALLOC
+endif # MOZ_DEBUG || NS_TRACE_MALLOC || MOZ_DMD
 
 else # !USE_STATIC_LIBS
 
 RTL_FLAGS=-MD          # Dynamically linked, multithreaded RTL
-ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC))
+ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC)$(MOZ_DMD))
 ifndef MOZ_NO_DEBUG_RTL
 RTL_FLAGS=-MDd         # Dynamically linked, multithreaded MSVC4.0 debug RTL
 endif
-endif # MOZ_DEBUG || NS_TRACE_MALLOC
+endif # MOZ_DEBUG || NS_TRACE_MALLOC || MOZ_DMD
 endif # USE_STATIC_LIBS
 endif # WINNT && !GNU_CC
 
@@ -523,7 +535,7 @@ endif
 # Default location of include files
 IDL_DIR		= $(DIST)/idl
 
-XPIDL_FLAGS = -I$(srcdir) -I$(IDL_DIR)
+XPIDL_FLAGS += -I$(srcdir) -I$(IDL_DIR)
 ifdef LIBXUL_SDK
 XPIDL_FLAGS += -I$(LIBXUL_SDK)/idl
 endif
@@ -549,42 +561,14 @@ endif
 endif
 endif
 
-ifeq ($(OS_ARCH),Darwin)
-ifdef NEXT_ROOT
-export NEXT_ROOT
-PBBUILD = NEXT_ROOT= $(PBBUILD_BIN)
-else # NEXT_ROOT
-PBBUILD = $(PBBUILD_BIN)
-endif # NEXT_ROOT
-PBBUILD_SETTINGS = GCC_VERSION="$(GCC_VERSION)" SYMROOT=build ARCHS="$(OS_TEST)"
-ifdef MACOS_SDK_DIR
-PBBUILD_SETTINGS += SDKROOT="$(MACOS_SDK_DIR)"
-endif # MACOS_SDK_DIR
 ifdef MACOSX_DEPLOYMENT_TARGET
 export MACOSX_DEPLOYMENT_TARGET
-PBBUILD_SETTINGS += MACOSX_DEPLOYMENT_TARGET="$(MACOSX_DEPLOYMENT_TARGET)"
 endif # MACOSX_DEPLOYMENT_TARGET
-
-ifdef MOZ_OPTIMIZE
-ifeq (2,$(MOZ_OPTIMIZE))
-# Only override project defaults if the config specified explicit settings
-PBBUILD_SETTINGS += GCC_MODEL_TUNING= OPTIMIZATION_CFLAGS="$(MOZ_OPTIMIZE_FLAGS)"
-endif # MOZ_OPTIMIZE=2
-endif # MOZ_OPTIMIZE
-endif # OS_ARCH=Darwin
 
 ifdef MOZ_USING_CCACHE
 ifdef CLANG_CXX
 export CCACHE_CPP2=1
 endif
-endif
-
-ifdef MOZ_NATIVE_MAKEDEPEND
-MKDEPEND_DIR =
-MKDEPEND = $(MOZ_NATIVE_MAKEDEPEND)
-else
-MKDEPEND_DIR = $(CONFIG_TOOLS)/mkdepend
-MKDEPEND = $(MKDEPEND_DIR)/mkdepend$(BIN_SUFFIX)
 endif
 
 # Set link flags according to whether we want a console.
@@ -614,6 +598,13 @@ endif
 endif
 endif
 
+ifdef _MSC_VER
+ifeq ($(CPU_ARCH),x86_64)
+# set stack to 2MB on x64 build.  See bug 582910
+WIN32_EXE_LDFLAGS	+= -STACK:2097152
+endif
+endif
+
 # If we're building a component on MSVC, we don't want to generate an
 # import lib, because that import lib will collide with the name of a
 # static version of the same library.
@@ -632,7 +623,7 @@ endif
 
 ######################################################################
 
-GARBAGE		+= $(DEPENDENCIES) $(MKDEPENDENCIES) $(MKDEPENDENCIES).bak core $(wildcard core.[0-9]*) $(wildcard *.err) $(wildcard *.pure) $(wildcard *_pure_*.o) Templates.DB
+GARBAGE		+= $(DEPENDENCIES) core $(wildcard core.[0-9]*) $(wildcard *.err) $(wildcard *.pure) $(wildcard *_pure_*.o) Templates.DB
 
 ifeq ($(OS_ARCH),Darwin)
 ifndef NSDISTMODE
@@ -706,17 +697,21 @@ ifdef relativesrcdir
 LOCALE_SRCDIR = $(call EXPAND_LOCALE_SRCDIR,$(relativesrcdir))
 endif
 
-ifdef LOCALE_SRCDIR
-# if LOCALE_MERGEDIR is set, use mergedir first, then the localization,
-# and finally en-US
+ifdef relativesrcdir
+MAKE_JARS_FLAGS += --relativesrcdir=$(relativesrcdir)
+ifneq (en-US,$(AB_CD))
 ifdef LOCALE_MERGEDIR
-MAKE_JARS_FLAGS += -c $(LOCALE_MERGEDIR)/$(subst /locales,,$(relativesrcdir))
+MAKE_JARS_FLAGS += --locale-mergedir=$(LOCALE_MERGEDIR)
 endif
+ifdef IS_LANGUAGE_REPACK
+MAKE_JARS_FLAGS += --l10n-base=$(L10NBASEDIR)/$(AB_CD)
+endif
+else
 MAKE_JARS_FLAGS += -c $(LOCALE_SRCDIR)
-ifdef LOCALE_MERGEDIR
-MAKE_JARS_FLAGS += -c $(topsrcdir)/$(relativesrcdir)/en-US
-endif
-endif
+endif # en-US
+else
+MAKE_JARS_FLAGS += -c $(LOCALE_SRCDIR)
+endif # ! relativesrcdir
 
 ifdef LOCALE_MERGEDIR
 MERGE_FILE = $(firstword \
@@ -747,17 +742,13 @@ ifdef MOZ_DEBUG
 JAVAC_FLAGS += -g
 endif
 
-ifdef TIERS
-DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_dirs))
-STATIC_DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_staticdirs))
-endif
-
-OPTIMIZE_JARS_CMD = $(PYTHON) $(call core_abspath,$(topsrcdir)/config/optimizejars.py)
-
 CREATE_PRECOMPLETE_CMD = $(PYTHON) $(call core_abspath,$(topsrcdir)/config/createprecomplete.py)
 
-EXPAND_LIBS_EXEC = $(PYTHON) $(topsrcdir)/config/pythonpath.py -I$(DEPTH)/config $(topsrcdir)/config/expandlibs_exec.py $(if $@,--depend $(MDDEPDIR)/$(@F).pp --target $@)
-EXPAND_LIBS_GEN = $(PYTHON) $(topsrcdir)/config/pythonpath.py -I$(DEPTH)/config $(topsrcdir)/config/expandlibs_gen.py $(if $@,--depend $(MDDEPDIR)/$(@F).pp)
+# MDDEPDIR is the subdirectory where dependency files are stored
+MDDEPDIR := .deps
+
+EXPAND_LIBS_EXEC = $(PYTHON) $(topsrcdir)/config/expandlibs_exec.py $(if $@,--depend $(MDDEPDIR)/$(dir $@)/$(@F).pp --target $@)
+EXPAND_LIBS_GEN = $(PYTHON) $(topsrcdir)/config/expandlibs_gen.py $(if $@,--depend $(MDDEPDIR)/$(dir $@)/$(@F).pp)
 EXPAND_AR = $(EXPAND_LIBS_EXEC) --extract -- $(AR)
 EXPAND_CC = $(EXPAND_LIBS_EXEC) --uselist -- $(CC)
 EXPAND_CCC = $(EXPAND_LIBS_EXEC) --uselist -- $(CCC)
@@ -823,3 +814,5 @@ export CL_INCLUDES_PREFIX
 ifeq ($(MOZ_WIDGET_GTK),2)
 MOZ_GTK2_CFLAGS := -I$(topsrcdir)/widget/gtk2/compat $(MOZ_GTK2_CFLAGS)
 endif
+
+DEFINES += -DNO_NSPR_10_SUPPORT

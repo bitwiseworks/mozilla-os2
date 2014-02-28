@@ -1,21 +1,18 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsnum_h___
-#define jsnum_h___
+#ifndef jsnum_h
+#define jsnum_h
 
 #include "mozilla/FloatingPoint.h"
 
-#include <math.h>
-
-#include "jsobj.h"
+#include "jscntxt.h"
 
 #include "vm/NumericConversions.h"
 
-extern double js_NaN;
 extern double js_PositiveInfinity;
 extern double js_NegativeInfinity;
 
@@ -24,14 +21,16 @@ namespace js {
 extern bool
 InitRuntimeNumberState(JSRuntime *rt);
 
+#if !ENABLE_INTL_API
 extern void
 FinishRuntimeNumberState(JSRuntime *rt);
+#endif
 
 } /* namespace js */
 
 /* Initialize the Number class, returning its prototype object. */
 extern JSObject *
-js_InitNumberClass(JSContext *cx, JSObject *obj);
+js_InitNumberClass(JSContext *cx, js::HandleObject obj);
 
 /*
  * String constants for global function names, used in jsapi.c and jsnum.c.
@@ -42,19 +41,20 @@ extern const char js_parseFloat_str[];
 extern const char js_parseInt_str[];
 
 class JSString;
-class JSFixedString;
 
 /*
  * When base == 10, this function implements ToString() as specified by
  * ECMA-262-5 section 9.8.1; but note that it handles integers specially for
  * performance.  See also js::NumberToCString().
  */
-extern JSString * JS_FASTCALL
+template <js::AllowGC allowGC>
+extern JSString *
 js_NumberToString(JSContext *cx, double d);
 
 namespace js {
 
-extern JSFixedString *
+template <AllowGC allowGC>
+extern JSFlatString *
 Int32ToString(JSContext *cx, int32_t i);
 
 /*
@@ -65,10 +65,10 @@ extern bool JS_FASTCALL
 NumberValueToStringBuffer(JSContext *cx, const Value &v, StringBuffer &sb);
 
 /* Same as js_NumberToString, different signature. */
-extern JSFixedString *
+extern JSFlatString *
 NumberToString(JSContext *cx, double d);
 
-extern JSFixedString *
+extern JSFlatString *
 IndexToString(JSContext *cx, uint32_t index);
 
 /*
@@ -105,6 +105,15 @@ NumberToCString(JSContext *cx, ToCStringBuf *cbuf, double d, int base = 10);
  * may be precisely represented using the IEEE-754 double-precision format.
  */
 const double DOUBLE_INTEGRAL_PRECISION_LIMIT = uint64_t(1) << 53;
+
+/*
+ * Parse a decimal number encoded in |chars|.  The decimal number must be
+ * sufficiently small that it will not overflow the integrally-precise range of
+ * the double type -- that is, the number will be smaller than
+ * DOUBLE_INTEGRAL_PRECISION_LIMIT
+ */
+extern double
+ParseDecimalNumber(const JS::TwoByteChars chars);
 
 /*
  * Compute the positive integer of the given base described immediately at the
@@ -175,7 +184,7 @@ ValueFitsInInt32(const Value &v, int32_t *pi)
         *pi = v.toInt32();
         return true;
     }
-    return v.isDouble() && MOZ_DOUBLE_IS_INT32(v.toDouble(), pi);
+    return v.isDouble() && mozilla::DoubleIsInt32(v.toDouble(), pi);
 }
 
 /*
@@ -196,7 +205,7 @@ IsDefinitelyIndex(const Value &v, uint32_t *indexp)
     }
 
     int32_t i;
-    if (v.isDouble() && MOZ_DOUBLE_IS_INT32(v.toDouble(), &i) && i >= 0) {
+    if (v.isDouble() && mozilla::DoubleIsInt32(v.toDouble(), &i) && i >= 0) {
         *indexp = uint32_t(i);
         return true;
     }
@@ -230,6 +239,30 @@ ToInteger(JSContext *cx, const js::Value &v, double *dp)
     return true;
 }
 
+inline bool
+SafeAdd(int32_t one, int32_t two, int32_t *res)
+{
+    *res = one + two;
+    int64_t ores = (int64_t)one + (int64_t)two;
+    return ores == (int64_t)*res;
+}
+
+inline bool
+SafeSub(int32_t one, int32_t two, int32_t *res)
+{
+    *res = one - two;
+    int64_t ores = (int64_t)one - (int64_t)two;
+    return ores == (int64_t)*res;
+}
+
+inline bool
+SafeMul(int32_t one, int32_t two, int32_t *res)
+{
+    *res = one * two;
+    int64_t ores = (int64_t)one * (int64_t)two;
+    return ores == (int64_t)*res;
+}
+
 } /* namespace js */
 
-#endif /* jsnum_h___ */
+#endif /* jsnum_h */

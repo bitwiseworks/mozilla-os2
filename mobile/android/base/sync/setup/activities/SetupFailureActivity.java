@@ -7,19 +7,17 @@ package org.mozilla.gecko.sync.setup.activities;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.sync.setup.Constants;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 
-public class SetupFailureActivity extends Activity {
+public class SetupFailureActivity extends SyncActivity {
   private Context mContext;
 
   @Override
   public void onCreate(Bundle savedInstanceState) {
-    setTheme(R.style.SyncTheme);
     super.onCreate(savedInstanceState);
     setContentView(R.layout.sync_setup_failure);
     mContext = this.getApplicationContext();

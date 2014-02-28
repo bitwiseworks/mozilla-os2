@@ -10,13 +10,11 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
-#include "nsIDOMSVGPathSegList.h"
 #include "nsSVGElement.h"
 #include "nsTArray.h"
 #include "SVGPathData.h" // IWYU pragma: keep
 #include "mozilla/Attributes.h"
-
-class nsIDOMSVGPathSeg;
+#include "mozilla/ErrorResult.h"
 
 namespace mozilla {
 
@@ -48,7 +46,7 @@ class SVGAnimatedPathSegList;
  *
  * Our DOM items are created lazily on demand as and when script requests them.
  */
-class DOMSVGPathSegList MOZ_FINAL : public nsIDOMSVGPathSegList,
+class DOMSVGPathSegList MOZ_FINAL : public nsISupports,
                                     public nsWrapperCache
 {
   friend class DOMSVGPathSeg;
@@ -56,10 +54,9 @@ class DOMSVGPathSegList MOZ_FINAL : public nsIDOMSVGPathSegList,
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGPathSegList)
-  NS_DECL_NSIDOMSVGPATHSEGLIST
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   nsISupports* GetParentObject()
   {
@@ -100,7 +97,7 @@ public:
    * This will normally be the same as InternalList().CountItems(), except if
    * we've hit OOM, in which case our length will be zero.
    */
-  uint32_t Length() const {
+  uint32_t LengthNoFlush() const {
     NS_ABORT_IF_FALSE(mItems.Length() == 0 ||
                       mItems.Length() == InternalList().CountItems(),
                       "DOM wrapper's list length is out of sync");
@@ -131,6 +128,45 @@ public:
    */
   bool AttrIsAnimating() const;
 
+  uint32_t NumberOfItems() const
+  {
+    if (IsAnimValList()) {
+      Element()->FlushAnimations();
+    }
+    return LengthNoFlush();
+  }
+  void Clear(ErrorResult& aError);
+  already_AddRefed<DOMSVGPathSeg> Initialize(DOMSVGPathSeg& aNewItem,
+                                             ErrorResult& aError);
+  DOMSVGPathSeg* GetItem(uint32_t aIndex, ErrorResult& aError)
+  {
+    bool found;
+    DOMSVGPathSeg* item = IndexedGetter(aIndex, found, aError);
+    if (!found) {
+      aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    }
+    return item;
+  }
+  DOMSVGPathSeg* IndexedGetter(uint32_t aIndex, bool& found,
+                               ErrorResult& aError);
+  already_AddRefed<DOMSVGPathSeg> InsertItemBefore(DOMSVGPathSeg& aNewItem,
+                                                   uint32_t aIndex,
+                                                   ErrorResult& aError);
+  already_AddRefed<DOMSVGPathSeg> ReplaceItem(DOMSVGPathSeg& aNewItem,
+                                              uint32_t aIndex,
+                                              ErrorResult& aError);
+  already_AddRefed<DOMSVGPathSeg> RemoveItem(uint32_t aIndex,
+                                             ErrorResult& aError);
+  already_AddRefed<DOMSVGPathSeg> AppendItem(DOMSVGPathSeg& aNewItem,
+                                             ErrorResult& aError)
+  {
+    return InsertItemBefore(aNewItem, LengthNoFlush(), aError);
+  }
+  uint32_t Length() const
+  {
+    return NumberOfItems();
+  }
+
 private:
 
   /**
@@ -148,7 +184,7 @@ private:
 
   ~DOMSVGPathSegList();
 
-  nsSVGElement* Element() {
+  nsSVGElement* Element() const {
     return mElement.get();
   }
 
@@ -177,7 +213,7 @@ private:
                                       uint32_t aInternalIndex,
                                       uint32_t aArgCountForItem);
   void MaybeRemoveItemFromAnimValListAt(uint32_t aIndex,
-                                        uint32_t aArgCountForItem);
+                                        int32_t aArgCountForItem);
 
   // Calls UpdateListIndex on all elements in |mItems| that satisfy ItemAt(),
   // from |aStartingIndex| to the end of |mItems|.  Also adjusts
@@ -211,7 +247,7 @@ private:
 
   // Weak refs to our DOMSVGPathSeg items. The items are friends and take care
   // of clearing our pointer to them when they die.
-  nsTArray<ItemProxy> mItems;
+  FallibleTArray<ItemProxy> mItems;
 
   // Strong ref to our element to keep it alive. We hold this not only for
   // ourself, but also for our DOMSVGPathSeg items too.

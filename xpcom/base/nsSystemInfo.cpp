@@ -12,6 +12,10 @@
 #include "mozilla/SSE.h"
 #include "mozilla/arm.h"
 
+#ifdef XP_WIN
+#include <windows.h>
+#endif
+
 #ifdef MOZ_WIDGET_GTK
 #include <gtk/gtk.h>
 #endif
@@ -102,7 +106,17 @@ nsSystemInfo::Init()
         NS_ENSURE_SUCCESS(rv, rv);
     }
 
-#ifdef MOZ_WIDGET_GTK2
+#ifdef XP_WIN
+    BOOL isWow64;
+    BOOL gotWow64Value = IsWow64Process(GetCurrentProcess(), &isWow64);
+    NS_WARN_IF_FALSE(gotWow64Value, "IsWow64Process failed");
+    if (gotWow64Value) {
+      rv = SetPropertyAsBool(NS_LITERAL_STRING("isWow64"), !!isWow64);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+#endif
+
+#if defined(MOZ_WIDGET_GTK)
     // This must be done here because NSPR can only separate OS's when compiled, not libraries.
     char* gtkver = PR_smprintf("GTK %u.%u.%u", gtk_major_version, gtk_minor_version, gtk_micro_version);
     if (gtkver) {
@@ -173,23 +187,23 @@ nsSystemInfo::Init()
             SetPropertyAsAString(NS_LITERAL_STRING("device"), str);
         if (mozilla::AndroidBridge::Bridge()->GetStaticStringField("android/os/Build", "MANUFACTURER", str))
             SetPropertyAsAString(NS_LITERAL_STRING("manufacturer"), str);
+        if (mozilla::AndroidBridge::Bridge()->GetStaticStringField("android/os/Build$VERSION", "RELEASE", str))
+            SetPropertyAsAString(NS_LITERAL_STRING("release_version"), str);
         int32_t version;
         if (!mozilla::AndroidBridge::Bridge()->GetStaticIntField("android/os/Build$VERSION", "SDK_INT", &version))
             version = 0;
         android_sdk_version = version;
         if (version >= 8 && mozilla::AndroidBridge::Bridge()->GetStaticStringField("android/os/Build", "HARDWARE", str))
             SetPropertyAsAString(NS_LITERAL_STRING("hardware"), str);
-        SetPropertyAsAString(NS_LITERAL_STRING("shellName"), NS_LITERAL_STRING("Android"));
-        if (mozilla::AndroidBridge::Bridge()->GetStaticStringField("android/os/Build$VERSION", "CODENAME", str)) {
-            if (version) {
-                str.Append(NS_LITERAL_STRING(" ("));
-                str.AppendInt(version);
-                str.Append(NS_LITERAL_STRING(")"));
-            }
-            SetPropertyAsAString(NS_LITERAL_STRING("shellVersion"), str);
-        }
         bool isTablet = mozilla::AndroidBridge::Bridge()->IsTablet();
         SetPropertyAsBool(NS_LITERAL_STRING("tablet"), isTablet);
+        // NSPR "version" is the kernel version. For Android we want the Android version.
+        // Rename SDK version to version and put the kernel version into kernel_version.
+        rv = GetPropertyAsAString(NS_LITERAL_STRING("version"), str);
+        if (NS_SUCCEEDED(rv)) {
+            SetPropertyAsAString(NS_LITERAL_STRING("kernel_version"), str);
+        }
+        SetPropertyAsInt32(NS_LITERAL_STRING("version"), android_sdk_version);
     }
 #endif
 

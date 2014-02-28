@@ -44,9 +44,10 @@ void SignalTracerThread()
   if (!sMutex || !sCondVar)
     return;
   MutexAutoLock lock(*sMutex);
-  NS_ABORT_IF_FALSE(!sTracerProcessed, "Tracer synchronization state is wrong");
-  sTracerProcessed = true;
-  sCondVar->Notify();
+  if (!sTracerProcessed) {
+    sTracerProcessed = true;
+    sCondVar->Notify();
+  }
 }
 
 // This function is called from the background tracer thread.
@@ -55,7 +56,12 @@ bool FireAndWaitForTracerEvent()
   NS_ABORT_IF_FALSE(sMutex && sCondVar, "Tracing not initialized!");
   NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
   MutexAutoLock lock(*sMutex);
-  NS_ABORT_IF_FALSE(!sTracerProcessed, "Tracer synchronization state is wrong");
+  if (sTracerProcessed) {
+    // Things are out of sync. This is likely because we're in
+    // the middle of shutting down. Just return false and hope the
+    // tracer thread is quitting anyway.
+    return false;
+  }
 
   // Post an application-defined event to the main thread's event queue
   // and wait for it to get processed.

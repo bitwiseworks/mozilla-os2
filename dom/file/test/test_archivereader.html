@@ -11,8 +11,8 @@
 
   <script type="text/javascript;version=1.7">
   function createZipFileWithData(fileData) {
-    var Cc = SpecialPowers.wrap(Components).classes;
-    var Ci = SpecialPowers.wrap(Components).interfaces;
+    var Cc = SpecialPowers.Cc;
+    var Ci = SpecialPowers.Ci;
 
     var dirSvc = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
     var testFile = dirSvc.get("ProfD", Ci.nsIFile);
@@ -30,8 +30,8 @@
   }
 
   function createTextFileWithData(fileData) {
-    var Cc = SpecialPowers.wrap(Components).classes;
-    var Ci = SpecialPowers.wrap(Components).interfaces;
+    var Cc = SpecialPowers.Cc;
+    var Ci = SpecialPowers.Ci;
 
     var dirSvc = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
     var testFile = dirSvc.get("ProfD", Ci.nsIFile);
@@ -46,6 +46,17 @@
     SpecialPowers.wrap(fileList).value = testFile.path;
 
     return fileList.files[0];
+  }
+
+  handleFinished = 0;
+  function markTestDone() {
+    ++handleFinished;
+    if (isFinished()) {
+      finishTest();
+    }
+  }
+  function isFinished() {
+    return handleFinished == 6;
   }
 
   function testSteps()
@@ -111,10 +122,12 @@
     isnot(handle, null, "ArchiveReader.getFilenames() cannot be null");
     handle.onsuccess = function() {
       ok(false, "ArchiveReader.getFilenames() should return a 'failure' if the input file is not a zip");
+      markTestDone();
     }
     handle.onerror = function() {
       ok(true, "ArchiveReader.getFilenames() should return a 'error' if the input file is a zip file");
       is(this.reader, rt, "ArchiveRequest.reader == ArchiveReader");
+      markTestDone();
     }
 
     // Create - good!
@@ -131,9 +144,11 @@
       is(this.result[0], "test/a.txt", "ArchiveReader.getFilenames(): first file is 'test/a.txt'");
       is(this.result[1], "test/b.txt", "ArchiveReader.getFilenames(): second file is 'test/b.txt'");
       ok(this.reader, r, "ArchiveRequest.reader should be == ArchiveReader");
+      markTestDone();
     }
     handle.onerror = function() {
       ok(false, "ArchiveReader.getFilenames() should not return any 'error'");
+      markTestDone();
     }
 
     // GetFile - wrong (no args)
@@ -150,10 +165,12 @@
     isnot(handle2, null, "ArchiveReader.getFile() cannot be null");
     handle2.onsuccess = function() {
       ok(false, "ArchiveReader.getFile('unknown file') should not return a 'success'");
+      markTestDone();
     }
     handle2.onerror = function() {
       ok(true, "ArchiveReader.getFile('unknown file') should return an 'error'");
       ok(this.reader, r, "ArchiveRequest.reader should be == ArchiveReader");
+      markTestDone();
     }
 
     var handle3 = r.getFile("test/b.txt");
@@ -168,14 +185,17 @@
       fr.readAsText(this.result);
       fr.onerror = function() {
         ok(false, "ArchiveReader + FileReader should work!");
+        markTestDone();
       }
       fr.onload = function(event) {
         is(event.target.result, "hello world, 2!\n", "ArchiveReader + FileReader are working together.");
+        markTestDone();
       }
     }
 
     handle3.onerror = function() {
       ok(false, "ArchiveReader.getFile('test/b.txt') should not return an 'error'");
+      markTestDone();
     }
 
     var handle4 = r.getFile("test/a.txt");
@@ -190,6 +210,7 @@
       fr.readAsText(this.result);
       fr.onerror = function() {
         ok(false, "ArchiveReader + FileReader should work!");
+        markTestDone();
       }
       fr.onload = function(event) {
         is(event.target.result.length, 600, "ArchiveReader + FileReader are working with a compress data");
@@ -198,18 +219,37 @@
 
         for (var i = 0; i < p.length; ++i)
           is(p[i], "hello world", "ArchiveReader + FileReader are working with a compress data");
+        markTestDone();
       }
     }
     handle4.onerror = function() {
       ok(false, "ArchiveReader.getFile('test/a.txt') should not return an 'error'");
+      markTestDone();
     }
 
-    finishTest();
+    var handle5 = r.getFiles();
+    isnot(handle5, null, "ArchiveReader.getFiles() cannot be null");
+    handle5.onsuccess = function() {
+      ok(true, "ArchiveReader.getFiles() should return a 'success'");
+      ok(this.reader, r, "ArchiveRequest.reader should be == ArchiveReader");
+
+      is(this.result.length, 2, "ArchiveReader.getFilenames(): the array contains 2 items");
+      is(this.result[0].name, "test/a.txt", "ArchiveReader.getFilenames(): first file is 'test/a.txt'");
+      is(this.result[1].name, "test/b.txt", "ArchiveReader.getFilenames(): second file is 'test/b.txt'");
+      is(this.result[0].type, "text/plain", "ArchiveReader.getFile('test/a.txt') the type MUST be 'text/plain'");
+      is(this.result[1].type, "text/plain", "ArchiveReader.getFile('test/a.txt') the type MUST be 'text/plain'");
+
+      markTestDone();
+    }
+    handle5.onerror = function() {
+      ok(false, "ArchiveReader.getFiles() should not return an 'error'");
+      markTestDone();
+    }
     yield;
   }
+
   </script>
   <script type="text/javascript;version=1.7" src="helpers.js"></script>
-
 </head>
 
 <body onload="runTest();">

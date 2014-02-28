@@ -5,42 +5,20 @@
 #ifndef mozilla_dom_ScreenOrientation_h
 #define mozilla_dom_ScreenOrientation_h
 
-#include "IPC/IPCMessageUtils.h"
-
 namespace mozilla {
 namespace dom {
 
 // Make sure that any change here is also made in
 // * mobile/android/base/GeckoScreenOrientationListener.java
-// * embedding/android/GeckoScreenOrientationListener.java
-enum ScreenOrientation {
-  eScreenOrientation_None               = 0,
-  eScreenOrientation_PortraitPrimary    = 1,  // 00000001
-  eScreenOrientation_PortraitSecondary  = 2,  // 00000010
-  eScreenOrientation_Portrait           = 3,  // 00000011
-  eScreenOrientation_LandscapePrimary   = 4,  // 00000100
-  eScreenOrientation_LandscapeSecondary = 8,  // 00001000
-  eScreenOrientation_Landscape          = 12, // 00001100
-  eScreenOrientation_EndGuard
-};
+typedef uint32_t ScreenOrientation;
+
+static const ScreenOrientation eScreenOrientation_None               = 0;
+static const ScreenOrientation eScreenOrientation_PortraitPrimary    = 1u << 0;
+static const ScreenOrientation eScreenOrientation_PortraitSecondary  = 1u << 1;
+static const ScreenOrientation eScreenOrientation_LandscapePrimary   = 1u << 2;
+static const ScreenOrientation eScreenOrientation_LandscapeSecondary = 1u << 3;
 
 } // namespace dom
 } // namespace mozilla
-
-namespace IPC {
-
-/**
- * Screen orientation serializer.
- * Note that technically, 5, 6, 7, 9, 10 and 11 are illegal values but will
- * not make the serializer to fail. We might want to write our own serializer.
- */
-template <>
-struct ParamTraits<mozilla::dom::ScreenOrientation>
-  : public EnumSerializer<mozilla::dom::ScreenOrientation,
-                          mozilla::dom::eScreenOrientation_None,
-                          mozilla::dom::eScreenOrientation_EndGuard>
-{};
-
-} // namespace IPC
 
 #endif // mozilla_dom_ScreenOrientation_h

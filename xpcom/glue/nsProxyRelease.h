@@ -10,6 +10,7 @@
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
+#include "mozilla/Likely.h"
 
 #ifdef XPCOM_GLUE_AVOID_NSPR
 #error NS_ProxyRelease implementation depends on NSPR.
@@ -101,14 +102,18 @@ NS_ProxyRelease
  * an nsMainThreadPtrHandle<T> rather than an nsCOMPtr<T>.
  */
 template<class T>
-class nsMainThreadPtrHolder
+class nsMainThreadPtrHolder MOZ_FINAL
 {
 public:
-  // We can only acquire a pointer on the main thread.
-  nsMainThreadPtrHolder(T* ptr) : mRawPtr(NULL) {
+  // We can only acquire a pointer on the main thread. We to fail fast for
+  // threading bugs, so by default we assert if our pointer is used or acquired
+  // off-main-thread. But some consumers need to use the same pointer for
+  // multiple classes, some of which are main-thread-only and some of which
+  // aren't. So we allow them to explicitly disable this strict checking.
+  nsMainThreadPtrHolder(T* ptr, bool strict = true) : mRawPtr(NULL), mStrict(strict) {
     // We can only AddRef our pointer on the main thread, which means that the
     // holder must be constructed on the main thread.
-    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(!mStrict || NS_IsMainThread());
     NS_IF_ADDREF(mRawPtr = ptr);
   }
 
@@ -116,7 +121,7 @@ public:
   ~nsMainThreadPtrHolder() {
     if (NS_IsMainThread()) {
       NS_IF_RELEASE(mRawPtr);
-    } else {
+    } else if (mRawPtr) {
       nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
       if (!mainThread) {
         NS_WARNING("Couldn't get main thread! Leaking pointer.");
@@ -128,10 +133,14 @@ public:
 
   T* get() {
     // Nobody should be touching the raw pointer off-main-thread.
-    if (NS_UNLIKELY(!NS_IsMainThread()))
+    if (mStrict && MOZ_UNLIKELY(!NS_IsMainThread())) {
+      NS_ERROR("Can't dereference nsMainThreadPtrHolder off main thread");
       MOZ_CRASH();
+    }
     return mRawPtr;
   }
+
+  bool operator==(const nsMainThreadPtrHolder<T>& aOther) const { return mRawPtr == aOther.mRawPtr; }
 
   NS_IMETHOD_(nsrefcnt) Release();
   NS_IMETHOD_(nsrefcnt) AddRef();
@@ -142,6 +151,9 @@ private:
 
   // Our wrapped pointer.
   T* mRawPtr;
+
+  // Whether to strictly enforce thread invariants in this class.
+  bool mStrict;
 
   // Copy constructor and operator= not implemented. Once constructed, the
   // holder is immutable.
@@ -160,10 +172,12 @@ class nsMainThreadPtrHandle
   nsRefPtr<nsMainThreadPtrHolder<T> > mPtr;
 
   public:
+  nsMainThreadPtrHandle() : mPtr(NULL) {}
   nsMainThreadPtrHandle(nsMainThreadPtrHolder<T> *aHolder) : mPtr(aHolder) {}
   nsMainThreadPtrHandle(const nsMainThreadPtrHandle& aOther) : mPtr(aOther.mPtr) {}
   nsMainThreadPtrHandle& operator=(const nsMainThreadPtrHandle& aOther) {
     mPtr = aOther.mPtr;
+    return *this;
   }
 
   operator nsMainThreadPtrHolder<T>*() { return mPtr.get(); }
@@ -171,9 +185,31 @@ class nsMainThreadPtrHandle
   // These all call through to nsMainThreadPtrHolder, and thus implicitly
   // assert that we're on the main thread. Off-main-thread consumers must treat
   // these handles as opaque.
-  T* get() { return mPtr.get()->get(); }
+  T* get()
+  {
+    if (mPtr) {
+      return mPtr.get()->get();
+    }
+    return nullptr;
+  }
+  const T* get() const
+  {
+    if (mPtr) {
+      return mPtr.get()->get();
+    }
+    return nullptr;
+  }
+
   operator T*() { return get(); }
   T* operator->() { return get(); }
+
+  // These are safe to call on other threads with appropriate external locking.
+  bool operator==(const nsMainThreadPtrHandle<T>& aOther) const {
+    if (!mPtr || !aOther.mPtr)
+      return mPtr == aOther.mPtr;
+    return *mPtr == *aOther.mPtr;
+  }
+  bool operator!() { return !mPtr; }
 };
 
 #endif

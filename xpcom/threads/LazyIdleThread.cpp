@@ -8,6 +8,7 @@
 
 #include "nsIObserverService.h"
 
+#include "GeckoProfiler.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
@@ -20,7 +21,7 @@
     if (currentThread) {                                                       \
       nsCOMPtr<nsISupports> current(do_QueryInterface(currentThread));         \
       nsCOMPtr<nsISupports> test(do_QueryInterface(mOwningThread));            \
-      NS_ASSERTION(current == test, "Wrong thread!");                          \
+      MOZ_ASSERT(current == test, "Wrong thread!");                            \
     }                                                                          \
   PR_END_MACRO
 #else
@@ -46,7 +47,7 @@ LazyIdleThread::LazyIdleThread(uint32_t aIdleTimeoutMS,
   mIdleTimeoutEnabled(true),
   mName(aName)
 {
-  NS_ASSERTION(mOwningThread, "This should never fail!");
+  MOZ_ASSERT(mOwningThread, "Need owning thread!");
 }
 
 LazyIdleThread::~LazyIdleThread()
@@ -86,7 +87,7 @@ LazyIdleThread::DisableIdleTimeout()
   MutexAutoLock lock(mMutex);
 
   // Pretend we have a pending event to keep the idle timer from firing.
-  NS_ASSERTION(mPendingEventCount < PR_UINT32_MAX, "Way too many!");
+  MOZ_ASSERT(mPendingEventCount < UINT32_MAX, "Way too many!");
   mPendingEventCount++;
 }
 
@@ -102,7 +103,7 @@ LazyIdleThread::EnableIdleTimeout()
   {
     MutexAutoLock lock(mMutex);
 
-    NS_ASSERTION(mPendingEventCount, "Mismatched calls to observer methods!");
+    MOZ_ASSERT(mPendingEventCount, "Mismatched calls to observer methods!");
     --mPendingEventCount;
   }
 
@@ -119,7 +120,7 @@ LazyIdleThread::PreDispatch()
 {
   MutexAutoLock lock(mMutex);
 
-  NS_ASSERTION(mPendingEventCount < PR_UINT32_MAX, "Way too many!");
+  MOZ_ASSERT(mPendingEventCount < UINT32_MAX, "Way too many!");
   mPendingEventCount++;
 }
 
@@ -136,10 +137,10 @@ LazyIdleThread::EnsureThread()
     return NS_OK;
   }
 
-  NS_ASSERTION(!mPendingEventCount, "Shouldn't have events yet!");
-  NS_ASSERTION(!mIdleNotificationCount, "Shouldn't have idle events yet!");
-  NS_ASSERTION(!mIdleTimer, "Should have killed this long ago!");
-  NS_ASSERTION(!mThreadIsShuttingDown, "Should have cleared that!");
+  MOZ_ASSERT(!mPendingEventCount, "Shouldn't have events yet!");
+  MOZ_ASSERT(!mIdleNotificationCount, "Shouldn't have idle events yet!");
+  MOZ_ASSERT(!mIdleTimer, "Should have killed this long ago!");
+  MOZ_ASSERT(!mThreadIsShuttingDown, "Should have cleared that!");
 
   nsresult rv;
 
@@ -168,12 +169,15 @@ LazyIdleThread::EnsureThread()
 void
 LazyIdleThread::InitThread()
 {
-  PR_SetCurrentThreadName(mName.BeginReading());
+  char aLocal;
+  profiler_register_thread(mName.get(), &aLocal);
+
+  PR_SetCurrentThreadName(mName.get());
 
   // Happens on mThread but mThread may not be set yet...
 
   nsCOMPtr<nsIThreadInternal> thread(do_QueryInterface(NS_GetCurrentThread()));
-  NS_ASSERTION(thread, "This should always succeed!");
+  MOZ_ASSERT(thread, "This should always succeed!");
 
   if (NS_FAILED(thread->SetObserver(this))) {
     NS_WARNING("Failed to set thread observer!");
@@ -184,16 +188,20 @@ void
 LazyIdleThread::CleanupThread()
 {
   nsCOMPtr<nsIThreadInternal> thread(do_QueryInterface(NS_GetCurrentThread()));
-  NS_ASSERTION(thread, "This should always succeed!");
+  MOZ_ASSERT(thread, "This should always succeed!");
 
   if (NS_FAILED(thread->SetObserver(nullptr))) {
     NS_WARNING("Failed to set thread observer!");
   }
 
-  MutexAutoLock lock(mMutex);
+  {
+    MutexAutoLock lock(mMutex);
 
-  NS_ASSERTION(!mThreadIsShuttingDown, "Shouldn't be true ever!");
-  mThreadIsShuttingDown = true;
+    MOZ_ASSERT(!mThreadIsShuttingDown, "Shouldn't be true ever!");
+    mThreadIsShuttingDown = true;
+  }
+
+  profiler_unregister_thread();
 }
 
 void
@@ -205,7 +213,7 @@ LazyIdleThread::ScheduleTimer()
   {
     MutexAutoLock lock(mMutex);
 
-    NS_ASSERTION(mIdleNotificationCount, "Should have at least one!");
+    MOZ_ASSERT(mIdleNotificationCount, "Should have at least one!");
     --mIdleNotificationCount;
 
     shouldSchedule = !mIdleNotificationCount && !mPendingEventCount;
@@ -254,7 +262,7 @@ LazyIdleThread::ShutdownThread()
 #ifdef DEBUG
     {
       MutexAutoLock lock(mMutex);
-      NS_ASSERTION(!mThreadIsShuttingDown, "Huh?!");
+      MOZ_ASSERT(!mThreadIsShuttingDown, "Huh?!");
     }
 #endif
 
@@ -282,9 +290,9 @@ LazyIdleThread::ShutdownThread()
     {
       MutexAutoLock lock(mMutex);
 
-      NS_ASSERTION(!mPendingEventCount, "Huh?!");
-      NS_ASSERTION(!mIdleNotificationCount, "Huh?!");
-      NS_ASSERTION(mThreadIsShuttingDown, "Huh?!");
+      MOZ_ASSERT(!mPendingEventCount, "Huh?!");
+      MOZ_ASSERT(!mIdleNotificationCount, "Huh?!");
+      MOZ_ASSERT(mThreadIsShuttingDown, "Huh?!");
       mThreadIsShuttingDown = false;
     }
   }
@@ -308,7 +316,7 @@ LazyIdleThread::ShutdownThread()
     for (uint32_t index = 0; index < queuedRunnables.Length(); index++) {
       nsCOMPtr<nsIRunnable> runnable;
       runnable.swap(queuedRunnables[index]);
-      NS_ASSERTION(runnable, "Null runnable?!");
+      MOZ_ASSERT(runnable, "Null runnable?!");
 
       if (NS_FAILED(Dispatch(runnable, NS_DISPATCH_NORMAL))) {
         NS_ERROR("Failed to re-dispatch queued runnable!");
@@ -322,7 +330,7 @@ LazyIdleThread::ShutdownThread()
 void
 LazyIdleThread::SelfDestruct()
 {
-  NS_ASSERTION(mRefCnt == 1, "Bad refcount!");
+  MOZ_ASSERT(mRefCnt == 1, "Bad refcount!");
   delete this;
 }
 
@@ -343,7 +351,7 @@ LazyIdleThread::Release()
     NS_WARN_IF_FALSE(runnable, "Couldn't make runnable!");
 
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
-      NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+      MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
       // The only way this could fail is if we're in shutdown, and in that case
       // threads should have been joined already. Deleting here isn't dangerous
       // anymore because we won't spin the event loop waiting to join the
@@ -415,7 +423,7 @@ LazyIdleThread::Shutdown()
   mShutdown = true;
 
   nsresult rv = ShutdownThread();
-  NS_ASSERTION(!mThread, "Should have destroyed this by now!");
+  MOZ_ASSERT(!mThread, "Should have destroyed this by now!");
 
   mIdleObserver = nullptr;
 
@@ -467,7 +475,7 @@ LazyIdleThread::Notify(nsITimer* aTimer)
 NS_IMETHODIMP
 LazyIdleThread::OnDispatchedEvent(nsIThreadInternal* /*aThread */)
 {
-  NS_ASSERTION(NS_GetCurrentThread() == mOwningThread, "Wrong thread!");
+  MOZ_ASSERT(NS_GetCurrentThread() == mOwningThread, "Wrong thread!");
   return NS_OK;
 }
 
@@ -487,7 +495,7 @@ LazyIdleThread::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
   {
     MutexAutoLock lock(mMutex);
 
-    NS_ASSERTION(mPendingEventCount, "Mismatched calls to observer methods!");
+    MOZ_ASSERT(mPendingEventCount, "Mismatched calls to observer methods!");
     --mPendingEventCount;
 
     if (mThreadIsShuttingDown) {
@@ -497,7 +505,7 @@ LazyIdleThread::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
 
     shouldNotifyIdle = !mPendingEventCount;
     if (shouldNotifyIdle) {
-      NS_ASSERTION(mIdleNotificationCount < PR_UINT32_MAX, "Way too many!");
+      MOZ_ASSERT(mIdleNotificationCount < UINT32_MAX, "Way too many!");
       mIdleNotificationCount++;
     }
   }
@@ -519,10 +527,10 @@ LazyIdleThread::Observe(nsISupports* /* aSubject */,
                         const char*  aTopic,
                         const PRUnichar* /* aData */)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  NS_ASSERTION(mShutdownMethod == AutomaticShutdown,
-               "Should not receive notifications if not AutomaticShutdown!");
-  NS_ASSERTION(!strcmp("xpcom-shutdown-threads", aTopic), "Bad topic!");
+  MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+  MOZ_ASSERT(mShutdownMethod == AutomaticShutdown,
+             "Should not receive notifications if not AutomaticShutdown!");
+  MOZ_ASSERT(!strcmp("xpcom-shutdown-threads", aTopic), "Bad topic!");
 
   Shutdown();
   return NS_OK;

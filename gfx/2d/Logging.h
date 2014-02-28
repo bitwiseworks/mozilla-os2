@@ -20,7 +20,7 @@
 #ifdef PR_LOGGING
 #include <prlog.h>
 
-extern PRLogModuleInfo *sGFX2DLog;
+extern PRLogModuleInfo *GetGFX2DLog();
 #endif
 
 namespace mozilla {
@@ -45,13 +45,13 @@ inline PRLogModuleLevel PRLogLevelForLevel(int aLevel) {
 
 extern int sGfxLogLevel;
 
-static void OutputMessage(const std::string &aString, int aLevel) {
+static inline void OutputMessage(const std::string &aString, int aLevel) {
 #if defined(WIN32) && !defined(PR_LOGGING)
   if (aLevel >= sGfxLogLevel) {
     ::OutputDebugStringA(aString.c_str());
   }
 #elif defined(PR_LOGGING)
-  if (PR_LOG_TEST(sGFX2DLog, PRLogLevelForLevel(aLevel))) {
+  if (PR_LOG_TEST(GetGFX2DLog(), PRLogLevelForLevel(aLevel))) {
     PR_LogPrint(aString.c_str());
   }
 #else

@@ -19,7 +19,6 @@
 #include "nsIDocument.h"
 #include "nsINameSpaceManager.h"
 #include "nsScrollbarButtonFrame.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMEventListener.h"
 #include "nsIDOMMouseEvent.h"
 #include "nsIPresShell.h"
@@ -260,15 +259,13 @@ nsSplitterFrame::AttributeChanged(int32_t aNameSpaceID,
 /**
  * Initialize us. If we are in a box get our alignment so we know what direction we are
  */
-NS_IMETHODIMP
+void
 nsSplitterFrame::Init(nsIContent*      aContent,
                       nsIFrame*        aParent,
                       nsIFrame*        aPrevInFlow)
 {
-  NS_ENSURE_FALSE(mInner, NS_ERROR_ALREADY_INITIALIZED);
+  MOZ_ASSERT(!mInner);
   mInner = new nsSplitterFrameInner(this);
-  if (!mInner)
-    return NS_ERROR_OUT_OF_MEMORY;
 
   mInner->AddRef();
   mInner->mChildInfosAfter = nullptr;
@@ -286,7 +283,7 @@ nsSplitterFrame::Init(nsIContent*      aContent,
                                            nsGkAtoms::orient)) {
         aContent->SetAttr(kNameSpaceID_None, nsGkAtoms::orient,
                           NS_LITERAL_STRING("vertical"), false);
-        nsStyleContext* parentStyleContext = GetStyleContext()->GetParent();
+        nsStyleContext* parentStyleContext = StyleContext()->GetParent();
         nsRefPtr<nsStyleContext> newContext = PresContext()->StyleSet()->
           ResolveStyleFor(aContent->AsElement(), parentStyleContext);
         SetStyleContextWithoutNotification(newContext);
@@ -294,13 +291,11 @@ nsSplitterFrame::Init(nsIContent*      aContent,
     }
   }
 
-  nsresult  rv = nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
 
   mInner->mState = nsSplitterFrameInner::Open;
   mInner->AddListener(PresContext());
   mInner->mParentBox = nullptr;
-  return rv;
 }
 
 NS_IMETHODIMP
@@ -360,23 +355,21 @@ nsSplitterFrame::HandleRelease(nsPresContext* aPresContext,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsSplitterFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                   const nsRect&           aDirtyRect,
                                   const nsDisplayListSet& aLists)
 {
-  nsresult rv = nsBoxFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsBoxFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
   
   // if the mouse is captured always return us as the frame.
   if (mInner->mDragging)
   {
     // XXX It's probably better not to check visibility here, right?
-    return aLists.Outlines()->AppendNewToTop(new (aBuilder)
-        nsDisplayEventReceiver(aBuilder, this));
+    aLists.Outlines()->AppendNewToTop(new (aBuilder)
+      nsDisplayEventReceiver(aBuilder, this));
+    return;
   }
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -486,7 +479,7 @@ nsSplitterFrameInner::MouseDrag(nsPresContext* aPresContext, nsGUIEvent* aEvent)
     bool supportsBefore = SupportsCollapseDirection(Before);
     bool supportsAfter = SupportsCollapseDirection(After);
 
-    const bool isRTL = mOuter->GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+    const bool isRTL = mOuter->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
     bool pastEnd = oldPos > 0 && oldPos > pos;
     bool pastBegin = oldPos < 0 && oldPos < pos;
     if (isRTL) {
@@ -901,10 +894,6 @@ nsSplitterFrameInner::AdjustChildren(nsPresContext* aPresContext)
 
   AdjustChildren(aPresContext, mChildInfosBefore, mChildInfosBeforeCount, isHorizontal);
   AdjustChildren(aPresContext, mChildInfosAfter, mChildInfosAfterCount, isHorizontal);
-   
-   // printf("----- Posting Dirty -----\n");
-
-  aPresContext->PresShell()->FlushPendingNotifications(Flush_Display);
 }
 
 static nsIFrame* GetChildBoxForContent(nsIFrame* aParentBox, nsIContent* aContent)

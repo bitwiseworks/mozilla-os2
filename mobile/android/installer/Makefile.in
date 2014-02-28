@@ -9,6 +9,8 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
+STANDALONE_MAKEFILE := 1
+
 # overwrite mobile-l10n.js with a matchOS=true one for multi-locale builds
 ifeq ($(AB_CD),multi)
 PREF_JS_EXPORTS = $(srcdir)/mobile-l10n.js
@@ -34,21 +36,14 @@ DEFINES += \
 	-DPREF_DIR=$(PREF_DIR) \
 	$(NULL)
 
-ifeq ($(MOZ_CHROME_FILE_FORMAT),jar)
-JAREXT=.jar
-else
-JAREXT=
-endif
-DEFINES += -DJAREXT=$(JAREXT)
-
-include $(topsrcdir)/ipc/app/defs.mk
+DEFINES += -DJAREXT=
 DEFINES += -DMOZ_CHILD_PROCESS_NAME=$(MOZ_CHILD_PROCESS_NAME)
 
 ifdef MOZ_PKG_MANIFEST_P
 MOZ_PKG_MANIFEST = package-manifest
 endif
 
-MOZ_POST_STAGING_CMD = find chrome -type f -name *.properties -exec sed -i '/^\#/d' {} \;
+MOZ_PACKAGER_MINIFY=1
 
 include $(topsrcdir)/toolkit/mozapps/installer/packager.mk
 
@@ -60,6 +55,10 @@ else
 BINPATH = bin
 endif
 DEFINES += -DBINPATH=$(BINPATH)
+
+ifdef ENABLE_MARIONETTE
+DEFINES += -DENABLE_MARIONETTE=1
+endif
 
 ifdef MOZ_PKG_MANIFEST_P
 $(MOZ_PKG_MANIFEST): $(MOZ_PKG_MANIFEST_P) $(GLOBAL_DEPS)

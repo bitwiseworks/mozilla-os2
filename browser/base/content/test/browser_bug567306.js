@@ -6,35 +6,39 @@ let Ci = Components.interfaces;
 
 function test() {
   waitForExplicitFinish();
-  let tab = gBrowser.addTab();
-  gBrowser.selectedTab = tab;
-  tab.linkedBrowser.addEventListener("load", function(aEvent) {
-    tab.linkedBrowser.removeEventListener("load", arguments.callee, true);
 
-    ok(true, "Load listener called");
-    waitForFocus(onFocus, content);
-  }, true);
-
-  content.location = "data:text/html,<h1 id='h1'>Select Me</h1>";
+  whenNewWindowLoaded(undefined, function (win) {
+    whenDelayedStartupFinished(win, function () {
+      let selectedBrowser = win.gBrowser.selectedBrowser;
+      selectedBrowser.addEventListener("pageshow", function() {
+        selectedBrowser.removeEventListener("pageshow", arguments.callee, true);
+        ok(true, "pageshow listener called: " + win.content.location);
+        waitForFocus(function () {
+          onFocus(win);
+        }, selectedBrowser.contentWindow);
+      }, true);
+      selectedBrowser.loadURI("data:text/html,<h1 id='h1'>Select Me</h1>");
+    });
+  });
 }
 
-function selectText() {
-  let elt = content.document.getElementById("h1");
-  let selection = content.getSelection();
-  let range = content.document.createRange();
+function selectText(win) {
+  let elt = win.document.getElementById("h1");
+  let selection = win.getSelection();
+  let range = win.document.createRange();
   range.setStart(elt, 0);
   range.setEnd(elt, 1);
   selection.removeAllRanges();
   selection.addRange(range);
 }
 
-
-function onFocus() {
-  ok(!gFindBarInitialized, "find bar is not yet initialized");
-  selectText();
-  gFindBar.onFindCommand();
-  ok(gFindBar._findField.value == "Select Me", "Findbar is initialized with selection");
-  gFindBar.close();
-  gBrowser.removeCurrentTab();
+function onFocus(win) {
+  ok(!win.gFindBarInitialized, "find bar is not yet initialized");
+  let findBar = win.gFindBar;
+  selectText(win.content);
+  findBar.onFindCommand();
+  is(findBar._findField.value, "Select Me", "Findbar is initialized with selection");
+  findBar.close();
+  win.close();
   finish();
 }

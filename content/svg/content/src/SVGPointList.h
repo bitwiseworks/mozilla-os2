@@ -18,6 +18,7 @@
 #include <string.h>
 
 namespace mozilla {
+class nsISVGPoint;
 
 /**
  * ATTENTION! WARNING! WATCH OUT!!
@@ -30,6 +31,7 @@ namespace mozilla {
  */
 class SVGPointList
 {
+  friend class mozilla::nsISVGPoint;
   friend class SVGAnimatedPointList;
   friend class DOMSVGPointList;
   friend class DOMSVGPoint;
@@ -136,10 +138,10 @@ private:
 
 protected:
 
-  /* See SVGLengthList for the rationale for using nsTArray<SVGPoint> instead
-   * of nsTArray<SVGPoint, 1>.
+  /* See SVGLengthList for the rationale for using FallibleTArray<SVGPoint> instead
+   * of FallibleTArray<SVGPoint, 1>.
    */
-  nsTArray<SVGPoint> mItems;
+  FallibleTArray<SVGPoint> mItems;
 };
 
 

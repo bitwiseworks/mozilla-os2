@@ -1,11 +1,11 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef MacroAssemblerSparc_h
-#define MacroAssemblerSparc_h
+#ifndef assembler_assembler_MacroAssemblerSparc_h
+#define assembler_assembler_MacroAssemblerSparc_h
 
 #include <assembler/wtf/Platform.h>
 
@@ -1024,7 +1024,7 @@ namespace JSC {
             store32(SparcRegisters::g2, address.m_ptr);
         }
 
-        void load32(void* address, RegisterID dest)
+        void load32(const void* address, RegisterID dest)
         {
             m_assembler.move_nocheck((int)address, SparcRegisters::g3);
             m_assembler.lduw_r(SparcRegisters::g3, SparcRegisters::g0, dest);
@@ -1458,4 +1458,4 @@ namespace JSC {
 
 #endif // ENABLE(ASSEMBLER) && CPU(SPARC)
 
-#endif // MacroAssemblerSparc_h
+#endif /* assembler_assembler_MacroAssemblerSparc_h */

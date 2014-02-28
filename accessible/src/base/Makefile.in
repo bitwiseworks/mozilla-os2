@@ -9,64 +9,7 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = accessibility
-LIBRARY_NAME = accessibility_base_s
 LIBXUL_LIBRARY = 1
-
-
-CPPSRCS = \
-  AccCollector.cpp \
-  AccEvent.cpp \
-  AccGroupInfo.cpp \
-  AccIterator.cpp \
-  ARIAStateMap.cpp \
-  filters.cpp \
-  FocusManager.cpp \
-  NotificationController.cpp \
-  nsAccDocManager.cpp \
-  nsAccessNode.cpp \
-  nsARIAMap.cpp \
-  nsCoreUtils.cpp \
-  nsAccUtils.cpp \
-  nsAccessibilityService.cpp \
-  nsAccessiblePivot.cpp \
-  nsAccTreeWalker.cpp \
-  nsEventShell.cpp \
-  nsCaretAccessible.cpp \
-  nsTextEquivUtils.cpp \
-  RoleAsserts.cpp \
-  StyleInfo.cpp \
-  TextAttrs.cpp \
-  TextUpdater.cpp \
-  $(NULL)
-
-ifdef MOZ_DEBUG
-CPPSRCS += \
-  Logging.cpp \
-  $(NULL)
-endif
-
-EXPORTS = \
-  a11yGeneric.h \
-  AccEvent.h \
-  nsAccDocManager.h \
-  nsAccessibilityService.h \
-  nsAccessNode.h \
-  $(NULL)
-
-EXPORTS_NAMESPACES = mozilla/a11y
-
-EXPORTS_mozilla/a11y = \
-  FocusManager.h \
-  States.h \
-  Role.h \
-  $(NULL)
-
-ifdef MOZ_DEBUG
-EXPORTS_mozilla/a11y += \
-  Logging.h \
-  $(NULL)
-endif
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -79,20 +22,24 @@ LOCAL_INCLUDES += \
   -I$(srcdir)/../html \
   -I$(srcdir)/../xpcom \
   -I$(srcdir)/../xul \
-  -I$(srcdir)/../xforms \
   -I$(srcdir)/../../../layout/generic \
   -I$(srcdir)/../../../layout/style \
+  -I$(srcdir)/../../../layout/svg \
   -I$(srcdir)/../../../layout/xul/base/src \
+  -I$(srcdir)/../../../layout/xul/tree/ \
+  -I$(srcdir)/../../../ipc/chromium/src \
   $(NULL)
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+ifdef MOZ_ENABLE_GTK
+CXXFLAGS        += $(MOZ_CAIRO_CFLAGS)
 LOCAL_INCLUDES += \
   -I$(srcdir)/../atk \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 LOCAL_INCLUDES += \
-  -I$(srcdir)/../msaa \
+  -I$(srcdir)/../windows/msaa \
+  -I$(srcdir)/../windows/ia2 \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
@@ -105,4 +52,8 @@ LOCAL_INCLUDES += \
   $(NULL)
 endif
 endif
+endif
+
+ifneq ($(A11Y_LOG),0)
+  DEFINES += -DA11Y_LOG
 endif

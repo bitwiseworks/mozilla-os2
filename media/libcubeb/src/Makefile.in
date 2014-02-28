@@ -9,48 +9,72 @@ VPATH           = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE          = cubeb
-LIBRARY_NAME    = cubeb
+MSVC_ENABLE_PGO := 1
 FORCE_STATIC_LIB= 1
 ifeq ($(OS_TARGET),WINNT)
 VISIBILITY_FLAGS =
 endif
 
+DISABLED_CSRCS           = \
+                cubeb.c \
+                $(NULL)
+
 ifeq ($(OS_TARGET),WINNT)
-CSRCS           = \
+DISABLED_CSRCS           += \
                 cubeb_winmm.c \
                 $(NULL)
+DEFINES         += -DUSE_WINMM
 endif
 
 ifeq ($(OS_TARGET),Android)
-# No Android implementation of libcubeb yet.
-else ifeq ($(OS_TARGET),Linux)
-CSRCS         = \
-              cubeb_alsa.c \
-              $(NULL)
+ifneq ($(MOZ_WIDGET_TOOLKIT),gonk)
+DISABLED_CSRCS           += \
+                cubeb_audiotrack.c \
+                $(NULL)
+DEFINES         += -DUSE_AUDIOTRACK
+endif
+DISABLED_CSRCS           += \
+                cubeb_opensl.c \
+                $(NULL)
+DEFINES         += -DUSE_OPENSL
 endif
 
 ifeq ($(OS_TARGET),Darwin)
-CSRCS           = \
+DISABLED_CSRCS           += \
                 cubeb_audiounit.c \
                 $(NULL)
+DEFINES         += -DUSE_AUDIOUNIT
 endif
 
 ifeq ($(OS_ARCH),OpenBSD)
-CSRCS           = \
+DISABLED_CSRCS           += \
                 cubeb_sndio.c \
                 $(NULL)
+DEFINES         += -DUSE_SNDIO
+endif
+
+ifdef MOZ_ALSA
+DISABLED_CSRCS           += \
+                cubeb_alsa.c \
+                $(NULL)
+DEFINES         += -DUSE_ALSA
 endif
 
 ifdef MOZ_PULSEAUDIO
-CSRCS		= \
-		cubeb_pulse.c \
-		$(NULL)
+DISABLED_CSRCS           += \
+                cubeb_pulse.c \
+                $(NULL)
+DEFINES         += -DUSE_PULSE
 endif
 
 include $(topsrcdir)/config/rules.mk
 
 CFLAGS += \
-	$(MOZ_ALSA_CFLAGS) \
-	$(MOZ_PULSEAUDIO_CFLAGS) \
-	$(NULL)
+        $(MOZ_ALSA_CFLAGS) \
+        $(MOZ_PULSEAUDIO_CFLAGS) \
+        $(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
+LOCAL_INCLUDES += -I$(ANDROID_SOURCE)/frameworks/wilhelm/include \
+                  -I$(ANDROID_SOURCE)/system/media/wilhelm/include
+endif

@@ -1,0 +1,34 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'libupdatecommon'
+
+EXPORTS += [
+    'readstrings.h',
+    'updatedefines.h',
+    'updatelogging.h',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    EXPORTS += [
+        'pathhash.h',
+        'uachelper.h',
+        'updatehelper.cpp',
+        'updatehelper.h',
+    ]
+    CPP_SOURCES += [
+        'updatehelper.cpp',
+        'uachelper.cpp',
+        'pathhash.cpp',
+    ]
+
+CPP_SOURCES += [
+    'readstrings.cpp',
+    'updatelogging.cpp',
+]
+
+LIBRARY_NAME = 'updatecommon'
+

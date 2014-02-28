@@ -14,15 +14,14 @@
 #include "nsIContent.h"
 #include "nsINameSpaceManager.h"
 #include "nsIDocument.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMMouseEvent.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMNodeList.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsIScrollableFrame.h"
 #include "nsScrollbarFrame.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsStyleContext.h"
 #include "nsFontMetrics.h"
 #include "nsITimer.h"
@@ -35,6 +34,7 @@
 #include "nsContentUtils.h"
 #include "nsChildIterator.h"
 #include "nsRenderingContext.h"
+#include <algorithm>
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -175,13 +175,12 @@ NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
 ////////// nsIFrame /////////////////
 
-NS_IMETHODIMP
+void
 nsListBoxBodyFrame::Init(nsIContent*     aContent,
                          nsIFrame*       aParent, 
                          nsIFrame*       aPrevInFlow)
 {
-  nsresult rv = nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
   nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetScrollableFrameFor(this);
   if (scrollFrame) {
     nsIFrame* verticalScrollbar = scrollFrame->GetScrollbarBox(true);
@@ -193,8 +192,6 @@ nsListBoxBodyFrame::Init(nsIContent*     aContent,
   nsRefPtr<nsFontMetrics> fm;
   nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm));
   mRowHeight = fm->MaxHeight();
-
-  return rv;
 }
 
 void
@@ -266,7 +263,7 @@ nsListBoxBodyFrame::DoLayout(nsBoxLayoutState& aBoxLayoutState)
     nsSize prefSize = mLayoutManager->GetPrefSize(this, aBoxLayoutState);
     NS_FOR_FRAME_OVERFLOW_TYPES(otype) {
       nsRect& o = overflow.Overflow(otype);
-      o.height = NS_MAX(o.height, prefSize.height);
+      o.height = std::max(o.height, prefSize.height);
     }
   }
   FinishAndStoreOverflow(overflow, GetSize());
@@ -667,10 +664,10 @@ nsListBoxBodyFrame::ComputeIntrinsicWidth(nsBoxLayoutState& aBoxLayoutState)
     nscoord width = 0;
     nsMargin margin(0,0,0,0);
 
-    if (styleContext->GetStylePadding()->GetPadding(margin))
+    if (styleContext->StylePadding()->GetPadding(margin))
       width += margin.LeftRight();
-    width += styleContext->GetStyleBorder()->GetComputedBorder().LeftRight();
-    if (styleContext->GetStyleMargin()->GetMargin(margin))
+    width += styleContext->StyleBorder()->GetComputedBorder().LeftRight();
+    if (styleContext->StyleMargin()->GetMargin(margin))
       width += margin.LeftRight();
 
 
@@ -907,12 +904,7 @@ nsListBoxBodyFrame::DoInternalPositionChanged(bool aUp, int32_t aDelta)
 
   PRTime end = PR_Now();
 
-  PRTime difTime;
-  LL_SUB(difTime, end, start);
-
-  int32_t newTime;
-  LL_L2I(newTime, difTime);
-  newTime /= aDelta;
+  int32_t newTime = int32_t(end - start) / aDelta;
 
   // average old and new
   mTimePerRow = (newTime + mTimePerRow)/2;
@@ -943,8 +935,12 @@ nsListBoxBodyFrame::VerticalScroll(int32_t aPosition)
 
   nsPoint scrollPosition = scrollFrame->GetScrollPosition();
  
+  nsWeakFrame weakFrame(this);
   scrollFrame->ScrollTo(nsPoint(scrollPosition.x, aPosition),
                         nsIScrollableFrame::INSTANT);
+  if (!weakFrame.IsAlive()) {
+    return;
+  }
 
   mYPosition = aPosition;
 }
@@ -1377,7 +1373,11 @@ nsListBoxBodyFrame::OnContentRemoved(nsPresContext* aPresContext,
         NS_PRECONDITION(mCurrentIndex > 0, "mCurrentIndex > 0");
         --mCurrentIndex;
         mYPosition = mCurrentIndex*mRowHeight;
+        nsWeakFrame weakChildFrame(aChildFrame);
         VerticalScroll(mYPosition);
+        if (!weakChildFrame.IsAlive()) {
+          return;
+        }
       }
     } else if (mCurrentIndex > 0) {
       // At this point, we know we have a scrollbar, and we need to know 
@@ -1400,7 +1400,11 @@ nsListBoxBodyFrame::OnContentRemoved(nsPresContext* aPresContext,
           mRowsToPrepend = 1;
           --mCurrentIndex;
           mYPosition = mCurrentIndex*mRowHeight;
+          nsWeakFrame weakChildFrame(aChildFrame);
           VerticalScroll(mYPosition);
+          if (!weakChildFrame.IsAlive()) {
+            return;
+          }
         }
       }
     }
@@ -1473,15 +1477,8 @@ void
 nsListBoxBodyFrame::RemoveChildFrame(nsBoxLayoutState &aState,
                                      nsIFrame         *aFrame)
 {
-  if (!mFrames.ContainsFrame(aFrame)) {
-    NS_ERROR("tried to remove a child frame which isn't our child");
-    return;
-  }
-
-  if (aFrame == GetContentInsertionFrame()) {
-    // Don't touch that one
-    return;
-  }
+  MOZ_ASSERT(mFrames.ContainsFrame(aFrame));
+  MOZ_ASSERT(aFrame != GetContentInsertionFrame());
 
 #ifdef ACCESSIBILITY
   nsAccessibilityService* accService = nsIPresShell::AccService();

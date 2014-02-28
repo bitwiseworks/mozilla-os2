@@ -19,7 +19,7 @@ interface nsIDOMValidityState;
  * http://www.whatwg.org/specs/web-apps/current-work/
  */
 
-[scriptable, uuid(2A395065-2D92-48C1-AC00-643DE9CA681B)]
+[scriptable, uuid(b7e1b86f-c98e-4658-81ce-ac29962f854a)]
 interface nsIDOMHTMLTextAreaElement : nsIDOMHTMLElement
 {
            attribute boolean               autofocus;
@@ -60,5 +60,7 @@ interface nsIDOMHTMLTextAreaElement : nsIDOMHTMLElement
 
 
   // Mozilla extensions
+  // Please make sure to update the HTMLTextAreaElement Web IDL interface to
+  // mirror the list of Mozilla extensions here when changing it.
   readonly attribute nsIControllers   controllers;
 };

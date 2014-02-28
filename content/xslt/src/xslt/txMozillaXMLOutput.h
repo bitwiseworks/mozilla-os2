@@ -39,7 +39,7 @@ public:
     // nsICSSLoaderObserver
     NS_IMETHOD StyleSheetLoaded(nsCSSStyleSheet* aSheet,
                                 bool aWasAlternate,
-                                nsresult aStatus);
+                                nsresult aStatus) MOZ_OVERRIDE;
 
     void Init(nsITransformObserver* aObserver);
     nsresult AddScriptElement(nsIScriptElement* aElement);
@@ -74,7 +74,8 @@ public:
     nsresult closePrevious(bool aFlushText);
 
     nsresult createResultDocument(const nsSubstring& aName, int32_t aNsID,
-                                  nsIDOMDocument* aSourceDocument);
+                                  nsIDOMDocument* aSourceDocument,
+                                  bool aLoadedAsData);
 
 private:
     nsresult createTxWrapper();

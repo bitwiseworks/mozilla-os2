@@ -11,12 +11,16 @@ function test() {
   waitForExplicitFinish();
   registerCleanupFunction(function() {
     Services.prefs.clearUserPref("plugins.click_to_play");
+    getTestPlugin().enabledState = Ci.nsIPluginTag.STATE_ENABLED;
+    getTestPlugin("Second Test Plug-in").enabledState = Ci.nsIPluginTag.STATE_ENABLED;
     gTestBrowser.removeEventListener("PluginBindingAttached", pluginBindingAttached, true, true);
     gBrowser.removeCurrentTab();
     window.focus();
   });
 
   Services.prefs.setBoolPref("plugins.click_to_play", true);
+  getTestPlugin().enabledState = Ci.nsIPluginTag.STATE_CLICKTOPLAY;
+  getTestPlugin("Second Test Plug-in").enabledState = Ci.nsIPluginTag.STATE_CLICKTOPLAY;
 
   gBrowser.selectedTab = gBrowser.addTab();
   gTestBrowser = gBrowser.selectedBrowser;
@@ -36,7 +40,10 @@ function pluginBindingAttached() {
     ok(!secondtestplugin, "should not yet have second test plugin");
     var notification = PopupNotifications.getNotification("click-to-play-plugins", gTestBrowser);
     ok(notification, "should have popup notification");
+    // We don't set up the action list until the notification is shown
+    notification.reshow();
     is(notification.options.centerActions.length, 1, "should be 1 type of plugin in the popup notification");
+    XPCNativeWrapper.unwrap(gTestBrowser.contentWindow).addSecondPlugin();
   } else if (gNumPluginBindingsAttached == 2) {
     var doc = gTestBrowser.contentDocument;
     var testplugin = doc.getElementById("test");
@@ -45,6 +52,7 @@ function pluginBindingAttached() {
     ok(secondtestplugin, "should have second test plugin");
     var notification = PopupNotifications.getNotification("click-to-play-plugins", gTestBrowser);
     ok(notification, "should have popup notification");
+    notification.reshow();
     is(notification.options.centerActions.length, 2, "should be 2 types of plugin in the popup notification");
     finish();
   } else {

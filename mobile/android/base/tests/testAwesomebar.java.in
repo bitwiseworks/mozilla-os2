@@ -1,8 +1,6 @@
 #filter substitution
 package @ANDROID_PACKAGE_NAME@.tests;
 
-import @ANDROID_PACKAGE_NAME@.*;
-
 public class testAwesomebar extends BaseTest {
     @Override
     protected int getTestType() {
@@ -10,7 +8,7 @@ public class testAwesomebar extends BaseTest {
     }
 
     public void testAwesomebar() {
-        mActions.expectGeckoEvent("Gecko:Ready").blockForEvent();
+        blockForGeckoReady();
 
         String url = getAbsoluteUrl("/robocop/robocop_blank_01.html");
         loadUrl(url);

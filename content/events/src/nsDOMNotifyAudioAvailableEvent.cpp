@@ -6,17 +6,20 @@
 
 #include "nsError.h"
 #include "nsDOMNotifyAudioAvailableEvent.h"
-#include "nsDOMClassInfoID.h" // DOMCI_DATA, NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO
 #include "nsContentUtils.h" // NS_DROP_JS_OBJECTS
 #include "jsfriendapi.h"
 
-nsDOMNotifyAudioAvailableEvent::nsDOMNotifyAudioAvailableEvent(nsPresContext* aPresContext,
+using namespace mozilla;
+using namespace mozilla::dom;
+
+nsDOMNotifyAudioAvailableEvent::nsDOMNotifyAudioAvailableEvent(EventTarget* aOwner,
+                                                               nsPresContext* aPresContext,
                                                                nsEvent* aEvent,
                                                                uint32_t aEventType,
                                                                float* aFrameBuffer,
                                                                uint32_t aFrameBufferLength,
                                                                float aTime)
-  : nsDOMEvent(aPresContext, aEvent),
+  : nsDOMEvent(aOwner, aPresContext, aEvent),
     mFrameBuffer(aFrameBuffer),
     mFrameBufferLength(aFrameBufferLength),
     mTime(aTime),
@@ -29,44 +32,38 @@ nsDOMNotifyAudioAvailableEvent::nsDOMNotifyAudioAvailableEvent(nsPresContext* aP
   }
 }
 
-DOMCI_DATA(NotifyAudioAvailableEvent, nsDOMNotifyAudioAvailableEvent)
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMNotifyAudioAvailableEvent)
-
 NS_IMPL_ADDREF_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
 NS_IMPL_RELEASE_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
   if (tmp->mCachedArray) {
-    NS_DROP_JS_OBJECTS(tmp, nsDOMNotifyAudioAvailableEvent);
     tmp->mCachedArray = nullptr;
+    NS_DROP_JS_OBJECTS(tmp, nsDOMNotifyAudioAvailableEvent);
   }
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsDOMNotifyAudioAvailableEvent)
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedArray)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsDOMNotifyAudioAvailableEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMNotifyAudioAvailableEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NotifyAudioAvailableEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
 
 nsDOMNotifyAudioAvailableEvent::~nsDOMNotifyAudioAvailableEvent()
 {
   MOZ_COUNT_DTOR(nsDOMNotifyAudioAvailableEvent);
   if (mCachedArray) {
-    NS_DROP_JS_OBJECTS(this, nsDOMNotifyAudioAvailableEvent);
     mCachedArray = nullptr;
+    NS_DROP_JS_OBJECTS(this, nsDOMNotifyAudioAvailableEvent);
   }
 }
 
 NS_IMETHODIMP
-nsDOMNotifyAudioAvailableEvent::GetFrameBuffer(JSContext* aCx, jsval* aResult)
+nsDOMNotifyAudioAvailableEvent::GetFrameBuffer(JSContext* aCx, JS::Value* aResult)
 {
   if (!mAllowAudioData) {
     // Media is not same-origin, don't allow the data out.
@@ -86,7 +83,7 @@ nsDOMNotifyAudioAvailableEvent::GetFrameBuffer(JSContext* aCx, jsval* aResult)
     NS_DROP_JS_OBJECTS(this, nsDOMNotifyAudioAvailableEvent);
     return NS_ERROR_FAILURE;
   }
-  memcpy(JS_GetFloat32ArrayData(mCachedArray, aCx), mFrameBuffer.get(), mFrameBufferLength * sizeof(float));
+  memcpy(JS_GetFloat32ArrayData(mCachedArray), mFrameBuffer.get(), mFrameBufferLength * sizeof(float));
 
   *aResult = OBJECT_TO_JSVAL(mCachedArray);
   return NS_OK;
@@ -95,7 +92,7 @@ nsDOMNotifyAudioAvailableEvent::GetFrameBuffer(JSContext* aCx, jsval* aResult)
 NS_IMETHODIMP
 nsDOMNotifyAudioAvailableEvent::GetTime(float *aRetVal)
 {
-  *aRetVal = mTime;
+  *aRetVal = Time();
   return NS_OK;
 }
 
@@ -119,10 +116,42 @@ nsDOMNotifyAudioAvailableEvent::InitAudioAvailableEvent(const nsAString& aType,
   mFrameBufferLength = aFrameBufferLength;
   mTime = aTime;
   mAllowAudioData = aAllowAudioData;
+  mCachedArray = nullptr;
   return NS_OK;
 }
 
+void
+nsDOMNotifyAudioAvailableEvent::InitAudioAvailableEvent(const nsAString& aType,
+                                                        bool aCanBubble,
+                                                        bool aCancelable,
+                                                        const Nullable<Sequence<float> >& aFrameBuffer,
+                                                        uint32_t aFrameBufferLength,
+                                                        float aTime,
+                                                        bool aAllowAudioData,
+                                                        ErrorResult& aRv)
+{
+  if ((aFrameBuffer.IsNull() && aFrameBufferLength > 0) ||
+      (!aFrameBuffer.IsNull() &&
+       aFrameBuffer.Value().Length() < aFrameBufferLength)) {
+    aRv = NS_ERROR_UNEXPECTED;
+    return;
+  }
+
+  nsAutoArrayPtr<float> buffer;
+  if (!aFrameBuffer.IsNull()) {
+    buffer = new float[aFrameBufferLength];
+    memcpy(buffer.get(), aFrameBuffer.Value().Elements(),
+           aFrameBufferLength * sizeof(float));
+  }
+
+  aRv = InitAudioAvailableEvent(aType, aCanBubble, aCancelable,
+                                buffer.forget(),
+                                aFrameBufferLength,
+                                aTime, aAllowAudioData);
+}
+
 nsresult NS_NewDOMAudioAvailableEvent(nsIDOMEvent** aInstancePtrResult,
+                                      EventTarget* aOwner,
                                       nsPresContext* aPresContext,
                                       nsEvent *aEvent,
                                       uint32_t aEventType,
@@ -131,7 +160,7 @@ nsresult NS_NewDOMAudioAvailableEvent(nsIDOMEvent** aInstancePtrResult,
                                       float aTime)
 {
   nsDOMNotifyAudioAvailableEvent* it =
-    new nsDOMNotifyAudioAvailableEvent(aPresContext, aEvent, aEventType,
+    new nsDOMNotifyAudioAvailableEvent(aOwner, aPresContext, aEvent, aEventType,
                                        aFrameBuffer, aFrameBufferLength, aTime);
   return CallQueryInterface(it, aInstancePtrResult);
 }

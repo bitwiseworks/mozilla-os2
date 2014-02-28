@@ -23,8 +23,15 @@ using namespace mozilla;
 //
 // set NSPR_LOG_MODULES=nsPipe:5
 //
-static PRLogModuleInfo *gPipeLog = PR_NewLogModule("nsPipe");
-#define LOG(args) PR_LOG(gPipeLog, PR_LOG_DEBUG, args)
+static PRLogModuleInfo *
+GetPipeLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("nsPipe");
+  return sLog;
+}
+#define LOG(args) PR_LOG(GetPipeLog(), PR_LOG_DEBUG, args)
 #else
 #define LOG(args)
 #endif
@@ -824,9 +831,7 @@ nsPipeInputStream::AsyncWait(nsIInputStreamCallback *callback,
 
         nsCOMPtr<nsIInputStreamCallback> proxy;
         if (target) {
-            nsresult rv = NS_NewInputStreamReadyEvent(getter_AddRefs(proxy),
-                                                      callback, target);
-            if (NS_FAILED(rv)) return rv;
+            proxy = NS_NewInputStreamReadyEvent(callback, target);
             callback = proxy;
         }
 
@@ -928,7 +933,7 @@ nsPipeInputStream::Search(const char *forString,
         len2 = limit2 - cursor2;
 
         // check if the string is straddling the next buffer segment
-        uint32_t lim = NS_MIN(strLen, len2 + 1);
+        uint32_t lim = XPCOM_MIN(strLen, len2 + 1);
         for (i = 0; i < lim; ++i) {
             uint32_t strPart1Len = strLen - i - 1;
             uint32_t strPart2Len = strLen - strPart1Len;
@@ -1205,9 +1210,7 @@ nsPipeOutputStream::AsyncWait(nsIOutputStreamCallback *callback,
 
         nsCOMPtr<nsIOutputStreamCallback> proxy;
         if (target) {
-            nsresult rv = NS_NewOutputStreamReadyEvent(getter_AddRefs(proxy),
-                                                       callback, target);
-            if (NS_FAILED(rv)) return rv;
+            proxy = NS_NewOutputStreamReadyEvent(callback, target);
             callback = proxy;
         }
 
@@ -1239,10 +1242,10 @@ NS_NewPipe(nsIInputStream **pipeIn,
     if (segmentSize == 0)
         segmentSize = DEFAULT_SEGMENT_SIZE;
 
-    // Handle maxSize of PR_UINT32_MAX as a special case
+    // Handle maxSize of UINT32_MAX as a special case
     uint32_t segmentCount;
-    if (maxSize == PR_UINT32_MAX)
-        segmentCount = PR_UINT32_MAX;
+    if (maxSize == UINT32_MAX)
+        segmentCount = UINT32_MAX;
     else
         segmentCount = maxSize / segmentSize;
 

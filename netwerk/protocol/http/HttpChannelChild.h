@@ -27,6 +27,7 @@
 #include "nsIAssociatedContentSecurity.h"
 #include "nsIChildChannel.h"
 #include "nsIHttpChannelChild.h"
+#include "mozilla/net/DNS.h"
 
 namespace mozilla {
 namespace net {
@@ -66,9 +67,10 @@ public:
   NS_IMETHOD GetSecurityInfo(nsISupports **aSecurityInfo);
   NS_IMETHOD AsyncOpen(nsIStreamListener *listener, nsISupports *aContext);
   // HttpBaseChannel::nsIHttpChannel
-  NS_IMETHOD SetRequestHeader(const nsACString& aHeader, 
-                              const nsACString& aValue, 
+  NS_IMETHOD SetRequestHeader(const nsACString& aHeader,
+                              const nsACString& aValue,
                               bool aMerge);
+  NS_IMETHOD RedirectTo(nsIURI *newURI);
   // nsIHttpChannelInternal
   NS_IMETHOD SetupFallbackChannel(const char *aFallbackKey);
   NS_IMETHOD GetLocalAddress(nsACString& addr);
@@ -97,13 +99,13 @@ protected:
                           const uint32_t& cacheExpirationTime,
                           const nsCString& cachedCharset,
                           const nsCString& securityInfoSerialization,
-                          const PRNetAddr& selfAddr,
-                          const PRNetAddr& peerAddr);
+                          const mozilla::net::NetAddr& selfAddr,
+                          const mozilla::net::NetAddr& peerAddr);
   bool RecvOnTransportAndData(const nsresult& status,
                               const uint64_t& progress,
                               const uint64_t& progressMax,
                               const nsCString& data,
-                              const uint32_t& offset,
+                              const uint64_t& offset,
                               const uint32_t& count);
   bool RecvOnStopRequest(const nsresult& statusCode);
   bool RecvOnProgress(const uint64_t& progress, const uint64_t& progressMax);
@@ -136,7 +138,7 @@ private:
 
   bool mIPCOpen;
   bool mKeptAlive;            // IPC kept open, but only for security info
-  ChannelEventQueue mEventQ;
+  nsRefPtr<ChannelEventQueue> mEventQ;
 
   // true after successful AsyncOpen until OnStopRequest completes.
   bool RemoteChannelExists() { return mIPCOpen && !mKeptAlive; }
@@ -151,13 +153,13 @@ private:
                       const uint32_t& cacheExpirationTime,
                       const nsCString& cachedCharset,
                       const nsCString& securityInfoSerialization,
-                      const PRNetAddr& selfAddr,
-                      const PRNetAddr& peerAddr);
+                      const mozilla::net::NetAddr& selfAddr,
+                      const mozilla::net::NetAddr& peerAddr);
   void OnTransportAndData(const nsresult& status,
                           const uint64_t progress,
                           const uint64_t& progressMax,
                           const nsCString& data,
-                          const uint32_t& offset,
+                          const uint64_t& offset,
                           const uint32_t& count);
   void OnStopRequest(const nsresult& statusCode);
   void OnProgress(const uint64_t& progress, const uint64_t& progressMax);
@@ -170,9 +172,6 @@ private:
                       const nsHttpResponseHead& responseHead);
   void Redirect3Complete();
   void DeleteSelf();
-
-  // Called asynchronously from Resume: continues any pending calls into client.
-  void CompleteResume();
 
   friend class AssociateApplicationCacheEvent;
   friend class StartRequestEvent;

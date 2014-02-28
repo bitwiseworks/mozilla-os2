@@ -1,0 +1,184 @@
+<!DOCTYPE HTML>
+<html>
+<!--
+https://bugzilla.mozilla.org/show_bug.cgi?id=753984
+-->
+  <head>
+    <title>[AccessFu] utterance order test</title>
+    <meta charset="utf-8">
+    <link rel="stylesheet" type="text/css"
+          href="chrome://mochikit/content/tests/SimpleTest/test.css" />
+    <script type="application/javascript"
+            src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+    <script type="application/javascript"
+            src="../common.js"></script>
+    <script type="application/javascript"
+            src="./output.js"></script>
+    <script type="application/javascript">
+
+      function doTest() {
+        // Test the following accOrElmOrID (with optional old accOrElmOrID).
+        // Note: each accOrElmOrID entry maps to a unique object utterance
+        // generator function within the UtteranceGenerator.
+        var tests = [{
+          accOrElmOrID: "anchor",
+          expected: [["link", "title"], ["title", "link"]]
+        }, {
+          accOrElmOrID: "textarea",
+          expected: [[
+            "text area", "This is the text area text."
+          ], [
+            "This is the text area text.", "text area"
+          ]]
+        }, {
+          accOrElmOrID: "heading",
+          expected: [
+            ["heading level 1", "Test heading"],
+            ["Test heading", "heading level 1"]
+          ]
+        }, {
+          accOrElmOrID: "list",
+          expected: [
+            ["list 1 items", "First item", "1.", "list one"],
+            ["1.", "list one", "First item", "list 1 items"]
+          ]
+        }, {
+          accOrElmOrID: "dlist",
+          expected: [
+            ["definition list 0.5 items", "dd one"],
+            ["dd one", "definition list 0.5 items"]
+          ]
+        }, {
+          accOrElmOrID: "li_one",
+          expected: [
+            ["list 1 items", "First item", "1.", "list one"],
+            ["1.", "list one", "First item", "list 1 items"]
+          ]
+        }, {
+          accOrElmOrID: "cell",
+          expected: [[
+            "table", "Fruits and vegetables", "list 4 items", "First item",
+            "link", "Apples", "link", "Bananas", "link", "Peaches",
+            "Last item", "link", "Plums"
+          ], [
+            "Apples", "link", "First item", "Bananas", "link", "Peaches",
+            "link", "Plums", "link", "Last item", "list 4 items",
+            "Fruits and vegetables", "table"
+          ]]
+        }, {
+          // Test pivot to list from li_one.
+          accOrElmOrID: "list",
+          oldAccOrElmOrID: "li_one",
+          expected: [
+            ["list 1 items", "First item", "1.", "list one"],
+            ["1.", "list one", "First item", "list 1 items"]
+          ]
+        }, {
+          // Test pivot to "apples" link from the table cell.
+          accOrElmOrID: "apples",
+          oldAccOrElmOrID: "cell",
+          expected: [
+            ["list 4 items", "First item", "link", "Apples"],
+            ["Apples", "link", "First item", "list 4 items"]
+          ]
+        }, {
+          // Test pivot to 'bananas' link from 'apples' link.
+          accOrElmOrID: "bananas",
+          oldAccOrElmOrID: "apples",
+          expected: [["link", "Bananas"], ["Bananas", "link"]]
+        }, {
+          // test unavailable state utterance
+          accOrElmOrID: 'unavailableButton',
+          expected: [["unavailable button", "I am unavailable"],
+            ["I am unavailable", "unavailable button"]]
+        }, {
+          // test expanded state utterance
+          accOrElmOrID: 'expandedButton',
+          expected: [["expanded button", "I am expanded"],
+            ["I am expanded", "expanded button"]]
+        }, {
+          // test collapsed state utterance
+          accOrElmOrID: 'collapsedButton',
+          expected: [["collapsed button", "I am collapsed"],
+            ["I am collapsed", "collapsed button"]]
+        }, {
+          // test required state utterance
+          accOrElmOrID: 'requiredInput',
+          expected: [["required entry", "I am required"],
+            ["I am required", "required entry"]]
+        }, {
+          // test has popup state utterance
+          accOrElmOrID: 'hasPopupButton',
+          expected: [["has pop up button menu", "I have a popup"],
+            ["I have a popup", "has pop up button menu"]]
+        }];
+
+        // Test all possible utterance order preference values.
+        tests.forEach(function run(test) {
+          var utteranceOrderValues = [0, 1];
+          utteranceOrderValues.forEach(
+            function testUtteranceOrder(utteranceOrder) {
+              SpecialPowers.setIntPref(PREF_UTTERANCE_ORDER, utteranceOrder);
+              var expected = test.expected[utteranceOrder];
+              testOutput(expected, test.accOrElmOrID, test.oldAccOrElmOrID, 1);
+            }
+          );
+        });
+
+        // If there was an original utterance order preference, revert to it.
+        SpecialPowers.clearUserPref(PREF_UTTERANCE_ORDER);
+        SimpleTest.finish();
+      }
+
+      SimpleTest.waitForExplicitFinish();
+      addA11yLoadEvent(doTest);
+
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <a target="_blank"
+         href="https://bugzilla.mozilla.org/show_bug.cgi?id=753984"
+         title="[AccessFu] utterance order test">
+         Mozilla Bug 753984</a>
+      <p id="display"></p>
+      <div id="content" style="display: none"></div>
+      <pre id="test"></pre>
+      <a id="anchor" href="#test" title="title"></a>
+      <textarea id="textarea" cols="80" rows="5">
+        This is the text area text.
+      </textarea>
+      <h1 id="heading" title="Test heading"></h1>
+      <ol id="list">
+        <li id="li_one">list one</li>
+      </ol>
+      <dl id="dlist">
+        <dd id="dd_one">
+          dd one
+        </dd>
+      </dl>
+      <table>
+        <caption>Fruits and vegetables</caption>
+        <tr>
+          <td id="cell">
+            <ul style="list-style-type: none;">
+              <li><a id="apples" href="#">Apples</a></li>
+              <li><a id="bananas" href="#">Bananas</a></li>
+              <li><a href="#">Peaches</a></li>
+              <li>
+                <a href="#">
+                  Plums
+                </a>
+              </li>
+            </ul>
+          </td>
+        </tr>
+      </table>
+      <button id="unavailableButton" disabled>I am unavailable</button>
+      <button id="expandedButton" aria-expanded="true">I am expanded</button>
+      <button id="collapsedButton" aria-expanded="false">I am collapsed</button>
+      <input id="requiredInput" required placeholder="I am required" />
+      <button id="hasPopupButton" aria-haspopup="true">I have a popup</button>
+    </div>
+  </body>
+</html>

@@ -113,7 +113,7 @@
         <![CDATA[
           var iterator = aSubtree.ownerDocument.createTreeWalker(aSubtree, 
                                                                  NodeFilter.SHOW_ELEMENT, 
-                                                                 this.filterButtons, false);
+                                                                 this.filterButtons);
           while (iterator.nextNode()) {
             var test = iterator.currentNode;
             if (test.accessKey.toLowerCase() == aAccessKeyLower && 
@@ -340,6 +340,17 @@
       </method>
 
     </implementation>
+
+    <handlers>
+      <handler event="keypress" keycode="VK_RETURN">
+        if (event.originalTarget == this)
+          this.open = true;
+      </handler>
+      <handler event="keypress" key=" ">
+        if (event.originalTarget == this)
+          this.open = true;
+      </handler>
+    </handlers>
   </binding>
 
   <binding id="menu-button" display="xul:menu"

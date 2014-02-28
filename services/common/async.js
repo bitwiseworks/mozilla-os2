@@ -2,9 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const EXPORTED_SYMBOLS = ["Async"];
+#ifndef MERGED_COMPARTMENT
+
+this.EXPORTED_SYMBOLS = ["Async"];
 
 const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+
+#endif
 
 // Constants for makeSyncCallback, waitForSyncCallback.
 const CB_READY = {};
@@ -18,7 +22,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 /*
  * Helpers for various async operations.
  */
-let Async = {
+this.Async = {
 
   /**
    * Execute an arbitrary number of asynchronous functions one after the

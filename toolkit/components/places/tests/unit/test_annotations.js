@@ -4,13 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Get history service
-try {
-  var histsvc = Cc["@mozilla.org/browser/nav-history-service;1"].getService(Ci.nsINavHistoryService);
-} catch(ex) {
-  do_throw("Could not get history service\n");
-}
-
 // Get bookmark service
 try {
   var bmsvc = Cc["@mozilla.org/browser/nav-bookmarks-service;1"].getService(Ci.nsINavBookmarksService);
@@ -57,7 +50,13 @@ var annoObserver = {
 };
 
 // main
-function run_test() {
+function run_test()
+{
+  run_next_test();
+}
+
+add_task(function test_execute()
+{
   var testURI = uri("http://mozilla.com/");
   var testItemId = bmsvc.insertBookmark(bmsvc.bookmarksMenuFolder, testURI, -1, "");
   var testAnnoName = "moz-test-places/annotations";
@@ -106,7 +105,7 @@ function run_test() {
 
   // test getPagesWithAnnotation
   var uri2 = uri("http://www.tests.tld");
-  histsvc.addVisit(uri2, Date.now() * 1000, null, histsvc.TRANSITION_TYPED, false, 0);
+  yield promiseAddVisits(uri2);
   annosvc.setPageAnnotation(uri2, testAnnoName, testAnnoVal, 0, 0);
   var pages = annosvc.getPagesWithAnnotation(testAnnoName);
   do_check_eq(pages.length, 2);
@@ -160,7 +159,7 @@ function run_test() {
 
   // copy annotations to another uri
   var newURI = uri("http://mozilla.org");
-  histsvc.addVisit(newURI, Date.now() * 1000, null, histsvc.TRANSITION_TYPED, false, 0);
+  yield promiseAddVisits(newURI);
   annosvc.setPageAnnotation(testURI, "oldAnno", "new", 0, 0);
   annosvc.setPageAnnotation(newURI, "oldAnno", "old", 0, 0);
   var annoNames = annosvc.getPageAnnotationNames(newURI);
@@ -357,4 +356,58 @@ function run_test() {
   }
 
   annosvc.removeObserver(annoObserver);
-}
+});
+
+add_test(function test_getAnnotationsHavingName() {
+  let uri = NetUtil.newURI("http://cat.mozilla.org");
+  let id = PlacesUtils.bookmarks.insertBookmark(
+    PlacesUtils.unfiledBookmarksFolderId, uri,
+    PlacesUtils.bookmarks.DEFAULT_INDEX, "cat");
+  let fid = PlacesUtils.bookmarks.createFolder(
+    PlacesUtils.unfiledBookmarksFolderId, "pillow",
+    PlacesUtils.bookmarks.DEFAULT_INDEX);
+
+  const ANNOS = {
+    "int": 7,
+    "double": 7.7,
+    "string": "seven"
+  };
+  for (let name in ANNOS) {
+    PlacesUtils.annotations.setPageAnnotation(
+      uri, name, ANNOS[name], 0,
+      PlacesUtils.annotations.EXPIRE_SESSION);
+    PlacesUtils.annotations.setItemAnnotation(
+      id, name, ANNOS[name], 0,
+      PlacesUtils.annotations.EXPIRE_SESSION);
+    PlacesUtils.annotations.setItemAnnotation(
+      fid, name, ANNOS[name], 0,
+      PlacesUtils.annotations.EXPIRE_SESSION);
+  }
+
+  for (let name in ANNOS) {
+    let results = PlacesUtils.annotations.getAnnotationsWithName(name);
+    do_check_eq(results.length, 3);
+
+    for (let result of results) {
+      do_check_eq(result.annotationName, name);
+      do_check_eq(result.annotationValue, ANNOS[name]);
+      if (result.uri)
+        do_check_true(result.uri.equals(uri));
+      else
+        do_check_true(result.itemId > 0);
+
+      if (result.itemId != -1) {
+        if (result.uri)
+          do_check_eq(result.itemId, id);
+        else
+          do_check_eq(result.itemId, fid);
+        do_check_guid_for_bookmark(result.itemId, result.guid);
+      }
+      else {
+        do_check_guid_for_uri(result.uri, result.guid);
+      }
+    }
+  }
+
+  run_next_test();
+});

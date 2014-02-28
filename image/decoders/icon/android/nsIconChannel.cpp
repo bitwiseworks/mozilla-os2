@@ -5,6 +5,7 @@
 
 #include <stdlib.h>
 #include "mozilla/dom/ContentChild.h"
+#include "nsMimeTypes.h"
 #include "nsIURL.h"
 #include "nsXULAppAPI.h"
 #include "AndroidBridge.h"
@@ -102,7 +103,7 @@ moz_icon_to_channel(nsIURI *aURI, const nsACString& aFileExt, uint32_t aIconSize
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_NewInputStreamChannel(aChannel, aURI, stream,
-                                  NS_LITERAL_CSTRING("image/icon"));
+                                  NS_LITERAL_CSTRING(IMAGE_ICON_MS));
 }
 
 nsresult
@@ -111,13 +112,13 @@ nsIconChannel::Init(nsIURI* aURI)
   nsCOMPtr<nsIMozIconURI> iconURI = do_QueryInterface(aURI);
   NS_ASSERTION(iconURI, "URI is not an nsIMozIconURI");
 
-  nsCAutoString stockIcon;
+  nsAutoCString stockIcon;
   iconURI->GetStockIcon(stockIcon);
 
   uint32_t desiredImageSize;
   iconURI->GetImageSize(&desiredImageSize);
 
-  nsCAutoString iconFileExt;
+  nsAutoCString iconFileExt;
   iconURI->GetFileExtension(iconFileExt);
 
   return moz_icon_to_channel(iconURI, iconFileExt, desiredImageSize, getter_AddRefs(mRealChannel));

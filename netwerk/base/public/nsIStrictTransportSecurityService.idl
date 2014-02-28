@@ -8,7 +8,7 @@ interface nsIURI;
 interface nsIObserver;
 interface nsIHttpChannel;
 
-[scriptable, uuid(16955eee-6c48-4152-9309-c42a465138a1)]
+[scriptable, uuid(c6138514-f212-4747-98c2-7abfce3be293)]
 interface nsIStrictTransportSecurityService : nsISupports
 {
     /**
@@ -20,20 +20,31 @@ interface nsIStrictTransportSecurityService : nsISupports
      *
      * @param aSourceURI the URI of the resource with the HTTP header.
      * @param aHeader the HTTP response header specifying STS data.
+     * @param aFlags  options for this request as defined in nsISocketProvider:
+     *                  NO_PERMANENT_STORAGE
+     * @param aMaxAge the parsed max-age directive of the header.
+     * @param aIncludeSubdomains the parsed includeSubdomains directive.
      * @return NS_OK            if it succeeds
      *         NS_ERROR_FAILURE if it can't be parsed
      *         NS_SUCCESS_LOSS_OF_INSIGNIFICANT_DATA
      *                          if there are unrecognized tokens in the header.
      */
     void processStsHeader(in nsIURI aSourceURI,
-                          in string aHeader);
+                          in string aHeader,
+                          in uint32_t aFlags,
+                          [optional] out unsigned long long aMaxAge,
+                          [optional] out boolean aIncludeSubdomains);
 
     /**
      * Removes the STS state of a host, including the includeSubdomains state
      * that would affect subdomains.  This essentially removes STS state for
      * the domain tree rooted at this host.
+     * @param aURI    the URI of the target host
+     * @param aFlags  options for this request as defined in nsISocketProvider:
+     *                  NO_PERMANENT_STORAGE
      */
-    void removeStsState(in nsIURI aURI);
+    void removeStsState(in nsIURI aURI,
+                        in uint32_t aFlags);
 
     /**
      * Checks if the given security info is for an STS host with a broken
@@ -47,8 +58,10 @@ interface nsIStrictTransportSecurityService : nsISupports
      * its super-domains has an STS "includeSubdomains" permission set.
      *
      * @param aHost the hostname (punycode) to query for STS state.
+     * @param aFlags  options for this request as defined in nsISocketProvider:
+     *                  NO_PERMANENT_STORAGE
      */
-    boolean isStsHost(in string aHost);
+    boolean isStsHost(in string aHost, in uint32_t aFlags);
 
     /**
      * Checks whether or not the URI's hostname has STS state set.
@@ -59,14 +72,15 @@ interface nsIStrictTransportSecurityService : nsISupports
      * such as path and port.
      *
      * @param aURI the URI to query for STS state.
+     * @param aFlags  options for this request as defined in nsISocketProvider:
+     *                  NO_PERMANENT_STORAGE
      */
-    boolean isStsURI(in nsIURI aURI);
+    boolean isStsURI(in nsIURI aURI, in uint32_t aFlags);
 
 };
 
 %{C++
 #define NS_STSSERVICE_CONTRACTID "@mozilla.org/stsservice;1"
-#define NS_STSSERVICE_CLASSNAME "stsservice"
 
 #define STS_PERMISSION "sts/use"
 #define STS_SUBDOMAIN_PERMISSION "sts/subd"

@@ -17,7 +17,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 
-var EXPORTED_SYMBOLS = [ "AddonRepository" ];
+this.EXPORTED_SYMBOLS = [ "AddonRepository" ];
 
 const PREF_GETADDONS_CACHE_ENABLED       = "extensions.getAddons.cache.enabled";
 const PREF_GETADDONS_CACHE_TYPES         = "extensions.getAddons.cache.types";
@@ -222,6 +222,11 @@ AddonSearchResult.prototype = {
   homepageURL: null,
 
   /**
+   * The homepage for the add-on
+   */
+  learnmoreURL: null,
+
+  /**
    * The support URL for the add-on
    */
   supportURL: null,
@@ -418,7 +423,7 @@ AddonSearchResult.prototype = {
  * that are compatible with the current application and are not already
  * installed.
  */
-var AddonRepository = {
+this.AddonRepository = {
   /**
    * Whether caching is currently enabled
    */
@@ -1073,7 +1078,8 @@ var AddonRepository = {
           }
           break;
         case "learnmore":
-          addon.homepageURL = addon.homepageURL || this._getTextContent(node);
+          addon.learnmoreURL = this._getTextContent(node);
+          addon.homepageURL = addon.homepageURL || addon.learnmoreURL;
           break;
         case "contribution_data":
           let meetDevelopers = this._getDescendantTextContent(node, "meet_developers");
@@ -1748,7 +1754,7 @@ var AddonDatabase = {
       self.getAsyncStatement("getAllAddons").executeAsync({
         handleResult: function getAllAddons_handleResult(aResults) {
           let row = null;
-          while (row = aResults.getNextRow()) {
+          while ((row = aResults.getNextRow())) {
             let internal_id = row.getResultByName("internal_id");
             addons[internal_id] = self._makeAddonFromAsyncRow(row);
           }
@@ -1773,7 +1779,7 @@ var AddonDatabase = {
       self.getAsyncStatement("getAllDevelopers").executeAsync({
         handleResult: function getAllDevelopers_handleResult(aResults) {
           let row = null;
-          while (row = aResults.getNextRow()) {
+          while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
             if (!(addon_internal_id in addons)) {
               WARN("Found a developer not linked to an add-on in database");
@@ -1807,7 +1813,7 @@ var AddonDatabase = {
       self.getAsyncStatement("getAllScreenshots").executeAsync({
         handleResult: function getAllScreenshots_handleResult(aResults) {
           let row = null;
-          while (row = aResults.getNextRow()) {
+          while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
             if (!(addon_internal_id in addons)) {
               WARN("Found a screenshot not linked to an add-on in database");
@@ -1839,7 +1845,7 @@ var AddonDatabase = {
       self.getAsyncStatement("getAllCompatOverrides").executeAsync({
         handleResult: function getAllCompatOverrides_handleResult(aResults) {
           let row = null;
-          while (row = aResults.getNextRow()) {
+          while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
             if (!(addon_internal_id in addons)) {
               WARN("Found a compatibility override not linked to an add-on in database");
@@ -1869,9 +1875,9 @@ var AddonDatabase = {
 
     function getAllIcons() {
       self.getAsyncStatement("getAllIcons").executeAsync({
-        handleResult: function(aResults) {
+        handleResult: function getAllIcons_handleResult(aResults) {
           let row = null;
-          while (row = aResults.getNextRow()) {
+          while ((row = aResults.getNextRow())) {
             let addon_internal_id = row.getResultByName("addon_internal_id");
             if (!(addon_internal_id in addons)) {
               WARN("Found an icon not linked to an add-on in database");
@@ -1888,7 +1894,7 @@ var AddonDatabase = {
 
         handleError: self.asyncErrorLogger,
 
-        handleCompletion: function(aReason) {
+        handleCompletion: function getAllIcons_handleCompletion(aReason) {
           if (aReason != Ci.mozIStorageStatementCallback.REASON_FINISHED) {
             ERROR("Error retrieving icons from database. Returning empty results");
             aCallback({});

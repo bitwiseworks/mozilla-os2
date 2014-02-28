@@ -1,19 +1,22 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.gecko.sync.setup.activities;
 
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.sync.Logger;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.setup.Constants;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 
-public class RedirectToSetupActivity extends Activity {
+public class RedirectToSetupActivity extends SyncActivity {
   public static final String LOG_TAG = "RedirectToSetupActivity";
+
   @Override
   public void onCreate(Bundle savedInstanceState) {
-    setTheme(R.style.SyncTheme);
     super.onCreate(savedInstanceState);
     setContentView(R.layout.sync_redirect_to_setup);
   }

@@ -72,9 +72,6 @@ let gBookmarksFileOld;
 // Places bookmarks.html file pointer.
 let gBookmarksFileNew;
 
-let exporter = Cc["@mozilla.org/browser/places/import-export-service;1"].
-               getService(Ci.nsIPlacesImportExportService);
-
 Cu.import("resource://gre/modules/BookmarkHTMLUtils.jsm");
 
 function run_test()
@@ -82,7 +79,7 @@ function run_test()
   run_next_test();
 }
 
-add_test(function setup() {
+add_task(function setup() {
   // Avoid creating smart bookmarks during the test.
   Services.prefs.setIntPref("browser.places.smartBookmarksVersion", -1);
 
@@ -95,64 +92,36 @@ add_test(function setup() {
   if (gBookmarksFileNew.exists()) {
     gBookmarksFileNew.remove(false);
   }
-  gBookmarksFileNew.create(Ci.nsILocalFile.NORMAL_FILE_TYPE, 0600);
-  if (!gBookmarksFileNew.exists()) {
-    do_throw("couldn't create file: bookmarks.exported.html");
-  }
 
   // This test must be the first one, since it setups the new bookmarks.html.
   // Test importing a pre-Places canonical bookmarks file.
   // 1. import bookmarks.preplaces.html
   // 2. run the test-suite
   // Note: we do not empty the db before this import to catch bugs like 380999
-  try {
-    BookmarkHTMLUtils.importFromFile(gBookmarksFileOld, true, function(success) {
-      if (success) {
-        waitForAsyncUpdates(function () {
-          testImportedBookmarks();
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileOld, true);
+  yield promiseAsyncUpdates();
+  yield testImportedBookmarks();
 
-          // Prepare for next tests.
-          try {
-            exporter.exportHTMLToFile(gBookmarksFileNew);
-          } catch(ex) { do_throw("couldn't export to file: " + ex); }
-
-          waitForAsyncUpdates(function () {
-            remove_all_bookmarks();
-            run_next_test();
-          });
-        });
-      } else {
-        do_throw("couldn't import legacy bookmarks file.");
-      }
-    });
-  } catch(ex) { do_throw("couldn't import legacy bookmarks file: " + ex); }
+  yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
+  yield promiseAsyncUpdates();
+  remove_all_bookmarks();
 });
 
-add_test(function test_import_new()
+add_task(function test_import_new()
 {
   // Test importing a Places bookmarks.html file.
   // 1. import bookmarks.exported.html
   // 2. run the test-suite
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
+  yield promiseAsyncUpdates();
 
-  try {
-    BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true, function(success) {
-      if (success) {
-        waitForAsyncUpdates(function () {
-          testImportedBookmarks();
+  yield testImportedBookmarks();
+  yield promiseAsyncUpdates();
 
-          waitForAsyncUpdates(function () {
-            remove_all_bookmarks();
-            run_next_test();
-          });
-        });
-      } else {
-        do_throw("couldn't import the exported file.");
-      }
-    });
-  } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
+  remove_all_bookmarks();
 });
 
-add_test(function test_emptytitle_export()
+add_task(function test_emptytitle_export()
 {
   // Test exporting and importing with an empty-titled bookmark.
   // 1. import bookmarks
@@ -165,54 +134,32 @@ add_test(function test_emptytitle_export()
   // 8. export to bookmarks.exported.html
   // 9. empty bookmarks db and continue
 
-  try {
-    BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true, function(success) {
-      if (success) {
-        const NOTITLE_URL = "http://notitle.mozilla.org/";
-        let id = PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
-                                                      NetUtil.newURI(NOTITLE_URL),
-                                                      PlacesUtils.bookmarks.DEFAULT_INDEX,
-                                                      "");
-        test_bookmarks.unfiled.push({ title: "", url: NOTITLE_URL });
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
 
-        try {
-          exporter.exportHTMLToFile(gBookmarksFileNew);
-        } catch(ex) { do_throw("couldn't export to file: " + ex); }
+  const NOTITLE_URL = "http://notitle.mozilla.org/";
+  let id = PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
+                                                NetUtil.newURI(NOTITLE_URL),
+                                                PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                                "");
+  test_bookmarks.unfiled.push({ title: "", url: NOTITLE_URL });
 
-        remove_all_bookmarks();
+  yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
+  remove_all_bookmarks();
 
-        try {
-          BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true, function(success) {
-           if (success) {
-              waitForAsyncUpdates(function () {
-                testImportedBookmarks();
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
+  yield promiseAsyncUpdates();
+  yield testImportedBookmarks();
 
-                // Cleanup.
-                test_bookmarks.unfiled.pop();
-                PlacesUtils.bookmarks.removeItem(id);
+  // Cleanup.
+  test_bookmarks.unfiled.pop();
+  PlacesUtils.bookmarks.removeItem(id);
 
-                try {
-                  exporter.exportHTMLToFile(gBookmarksFileNew);
-                } catch(ex) { do_throw("couldn't export to file: " + ex); }
-
-                waitForAsyncUpdates(function () {
-                  remove_all_bookmarks();
-                  run_next_test();
-                });
-              });
-            } else {
-              do_throw("couldn't import the exported file.");
-            }
-          });
-        } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
-      } else {
-        do_throw("couldn't import the exported file.");
-      }
-    });
-  } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
+  yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
+  yield promiseAsyncUpdates();
+  remove_all_bookmarks();
 });
 
-add_test(function test_import_chromefavicon()
+add_task(function test_import_chromefavicon()
 {
   // Test exporting and importing with a bookmark pointing to a chrome favicon.
   // 1. import bookmarks
@@ -229,67 +176,56 @@ add_test(function test_import_chromefavicon()
   const CHROME_FAVICON_URI = NetUtil.newURI("chrome://global/skin/icons/information-16.png");
   const CHROME_FAVICON_URI_2 = NetUtil.newURI("chrome://global/skin/icons/error-16.png");
 
-  try {
-    BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true, function(success) {
-      if (!success) {
-        do_throw("couldn't import the exported file.");
-      }
-      let id = PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
-                                                    PAGE_URI,
-                                                    PlacesUtils.bookmarks.DEFAULT_INDEX,
-                                                    "Test");
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
+  let id = PlacesUtils.bookmarks.insertBookmark(PlacesUtils.unfiledBookmarksFolderId,
+                                                PAGE_URI,
+                                                PlacesUtils.bookmarks.DEFAULT_INDEX,
+                                                "Test");
 
-      PlacesUtils.favicons.setAndFetchFaviconForPage(
-        PAGE_URI, CHROME_FAVICON_URI, true, function () {
-          PlacesUtils.favicons.getFaviconDataForPage(
-            PAGE_URI, function (aURI, aDataLen, aData, aMimeType) {
-              let base64Icon = "data:image/png;base64," +
-                  base64EncodeString(String.fromCharCode.apply(String, aData));
+  let deferred = Promise.defer();
+  PlacesUtils.favicons.setAndFetchFaviconForPage(
+                                  PAGE_URI, CHROME_FAVICON_URI, true,
+                                  PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
+                                  deferred.resolve);
+  yield deferred.promise;
 
-              test_bookmarks.unfiled.push(
-                { title: "Test", url: PAGE_URI.spec, icon: base64Icon });
+  deferred = Promise.defer();
+  PlacesUtils.favicons.getFaviconDataForPage(PAGE_URI,
+    function (aURI, aDataLen, aData, aMimeType) deferred.resolve(aData));
+  let data = yield deferred.promise;
 
-              try {
-                exporter.exportHTMLToFile(gBookmarksFileNew);
-              } catch(ex) { do_throw("couldn't export to file: " + ex); }
+  let base64Icon = "data:image/png;base64," +
+      base64EncodeString(String.fromCharCode.apply(String, data));
 
-              // Change the favicon to check it's really imported again later.
-              PlacesUtils.favicons.setAndFetchFaviconForPage(
-                PAGE_URI, CHROME_FAVICON_URI_2, true, function () {
+  test_bookmarks.unfiled.push(
+    { title: "Test", url: PAGE_URI.spec, icon: base64Icon });
 
-                  remove_all_bookmarks();
+  yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
 
-                  try {
-                    BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true, function(success) {
-                     if (!success) {
-                        do_throw("couldn't import the exported file.");
-                      }
-                      waitForAsyncUpdates(function () {
-                        testImportedBookmarks();
+  // Change the favicon to check it's really imported again later.
+  deferred = Promise.defer();
+  PlacesUtils.favicons.setAndFetchFaviconForPage(
+                                  PAGE_URI, CHROME_FAVICON_URI_2, true,
+                                  PlacesUtils.favicons.FAVICON_LOAD_NON_PRIVATE,
+                                  deferred.resolve);
+  yield deferred.promise;
 
-                        // Cleanup.
-                        test_bookmarks.unfiled.pop();
-                        PlacesUtils.bookmarks.removeItem(id);
+  remove_all_bookmarks();
 
-                        try {
-                          exporter.exportHTMLToFile(gBookmarksFileNew);
-                        } catch(ex) { do_throw("couldn't export to file: " + ex); }
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
+  yield promiseAsyncUpdates();
+  yield testImportedBookmarks();
 
-                        waitForAsyncUpdates(function () {
-                          remove_all_bookmarks();
-                          run_next_test();
-                        });
-                      });
-                    });
-                  } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
-                });
-            });
-        });
-    });
-  } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
+  // Cleanup.
+  test_bookmarks.unfiled.pop();
+  PlacesUtils.bookmarks.removeItem(id);
+
+  yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
+  yield promiseAsyncUpdates();
+  remove_all_bookmarks();
 });
 
-add_test(function test_import_ontop()
+add_task(function test_import_ontop()
 {
   // Test importing the exported bookmarks.html file *on top of* the existing
   // bookmarks.
@@ -299,34 +235,13 @@ add_test(function test_import_ontop()
   // 3. import the exported bookmarks file
   // 4. run the test-suite
 
-  try {
-    BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true, function(success) {
-      if (success) {
-        try {
-          exporter.exportHTMLToFile(gBookmarksFileNew);
-        } catch(ex) { do_throw("couldn't export to file: " + ex); }
-        try {
-          BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true, function(success) {
-            if (success) {
-              waitForAsyncUpdates(function () {
-                testImportedBookmarks();
-
-                waitForAsyncUpdates(function () {
-                  remove_all_bookmarks();
-                  run_next_test();
-                });
-              });
-            } else {
-              do_throw("couldn't import the exported file.");
-            }
-          });
-        } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
-
-      } else {
-        do_throw("couldn't import the exported file.");
-      }
-    });
-  } catch(ex) { do_throw("couldn't import the exported file: " + ex); }
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
+  yield BookmarkHTMLUtils.exportToFile(gBookmarksFileNew);
+  yield BookmarkHTMLUtils.importFromFile(gBookmarksFileNew, true);
+  yield promiseAsyncUpdates();
+  yield testImportedBookmarks();
+  yield promiseAsyncUpdates();
+  remove_all_bookmarks();
 });
 
 function testImportedBookmarks()
@@ -350,7 +265,9 @@ function testImportedBookmarks()
     let items = test_bookmarks[group];
     do_check_eq(root.childCount, items.length);
 
-    items.forEach(function (item, index) checkItem(item, root.getChild(index)));
+    for (let key in items) {
+      yield checkItem(items[key], root.getChild(key));
+    }
 
     root.containerOpen = false;
   }
@@ -389,83 +306,99 @@ function testImportedBookmarksToFolder(aFolder)
 function checkItem(aExpected, aNode)
 {
   let id = aNode.itemId;
-  for (prop in aExpected) {
-    switch (prop) {
-      case "type":
-        do_check_eq(aNode.type, aExpected.type);
-        break;
-      case "title":
-        do_check_eq(aNode.title, aExpected.title);
-        break;
-      case "description":
-        do_check_eq(PlacesUtils.annotations
-                               .getItemAnnotation(id, DESCRIPTION_ANNO),
-                    aExpected.description);
-        break;
-      case "dateAdded":
+
+  return Task.spawn(function() {
+    for (prop in aExpected) {
+      switch (prop) {
+        case "type":
+          do_check_eq(aNode.type, aExpected.type);
+          break;
+        case "title":
+          do_check_eq(aNode.title, aExpected.title);
+          break;
+        case "description":
+          do_check_eq(PlacesUtils.annotations
+                                 .getItemAnnotation(id, DESCRIPTION_ANNO),
+                      aExpected.description);
+          break;
+        case "dateAdded":
           do_check_eq(PlacesUtils.bookmarks.getItemDateAdded(id),
                       aExpected.dateAdded);
-        break;
-      case "lastModified":
+          break;
+        case "lastModified":
           do_check_eq(PlacesUtils.bookmarks.getItemLastModified(id),
                       aExpected.lastModified);
-        break;
-      case "url":
-        PlacesUtils.livemarks.getLivemark(
-          { id: id },
-          function (aStatus, aLivemark) {
-            if (!Components.isSuccessCode(aStatus)) {
-              do_check_eq(aNode.uri, aExpected.url);
-            }
-          }
-        );
-        break;
-      case "icon":
-        let faviconURI = PlacesUtils.favicons.getFaviconForPage(
-          NetUtil.newURI(aExpected.url)
-        );
-        let dataURL = PlacesUtils.favicons.getFaviconDataAsDataURL(faviconURI);
-        // Avoid do_check_eq for console spam.
-        do_check_true(dataURL == aExpected.icon);
-        break;
-      case "keyword":
-        break;
-      case "sidebar":
-        do_check_eq(PlacesUtils.annotations
-                               .itemHasAnnotation(id, LOAD_IN_SIDEBAR_ANNO),
-                    aExpected.sidebar);
-        break;
-      case "postData":
-        do_check_eq(PlacesUtils.annotations
-                               .getItemAnnotation(id, PlacesUtils.POST_DATA_ANNO),
-                    aExpected.postData);
-        break;
-      case "charset":
-        do_check_eq(PlacesUtils.history.getCharsetForURI(NetUtil.newURI(aNode.uri)),
-                    aExpected.charset);
-        break;
-      case "feedUrl":
-        PlacesUtils.livemarks.getLivemark(
-          { id: id },
-          function (aStatus, aLivemark) {
-            do_check_true(Components.isSuccessCode(aStatus));
-            do_check_eq(aLivemark.siteURI.spec, aExpected.url);
-            do_check_eq(aLivemark.feedURI.spec, Expected.feedUrl);
-          }
-        );
-        break;
-      case "children":
-        let folder = aNode.QueryInterface(Ci.nsINavHistoryContainerResultNode);
-        do_check_eq(folder.hasChildren, aExpected.children.length > 0);
-        folder.containerOpen = true;
-        do_check_eq(folder.childCount, aExpected.children.length);
+          break;
+        case "url":
+          yield function() {
+            let deferred = Promise.defer();
+            PlacesUtils.livemarks.getLivemark(
+              { id: id },
+              function (aStatus, aLivemark) {
+                if (!Components.isSuccessCode(aStatus)) {
+                  do_check_eq(aNode.uri, aExpected.url);
+                }
+                deferred.resolve();
+              }
+            );
+          return deferred.promise; }();
+          break;
+        case "icon":
+          yield function() {
+            let deferred = Promise.defer();
+            PlacesUtils.favicons.getFaviconDataForPage(
+              NetUtil.newURI(aExpected.url),
+              function (aURI, aDataLen, aData, aMimeType) {
+                let base64Icon = "data:image/png;base64," +
+                  base64EncodeString(String.fromCharCode.apply(String, aData));
+                do_check_true(base64Icon == aExpected.icon);
+                deferred.resolve();
+            });
+            return deferred.promise; }();
+          break;
+        case "keyword":
+          break;
+        case "sidebar":
+          do_check_eq(PlacesUtils.annotations
+                                 .itemHasAnnotation(id, LOAD_IN_SIDEBAR_ANNO),
+                      aExpected.sidebar);
+          break;
+        case "postData":
+          do_check_eq(PlacesUtils.annotations
+                                 .getItemAnnotation(id, PlacesUtils.POST_DATA_ANNO),
+                      aExpected.postData);
+          break;
+        case "charset":
+          let testURI = NetUtil.newURI(aNode.uri);
+          do_check_eq((yield PlacesUtils.getCharsetForURI(testURI)), aExpected.charset);
+          break;
+        case "feedUrl":
+          yield function() {
+            let deferred = Promise.defer();
+            PlacesUtils.livemarks.getLivemark(
+              { id: id },
+              function (aStatus, aLivemark) {
+                do_check_true(Components.isSuccessCode(aStatus));
+                do_check_eq(aLivemark.siteURI.spec, aExpected.url);
+                do_check_eq(aLivemark.feedURI.spec, aExpected.feedUrl);
+                deferred.resolve();
+              }
+            );
+          return deferred.promise; }();
+          break;
+        case "children":
+          let folder = aNode.QueryInterface(Ci.nsINavHistoryContainerResultNode);
+          do_check_eq(folder.hasChildren, aExpected.children.length > 0);
+          folder.containerOpen = true;
+          do_check_eq(folder.childCount, aExpected.children.length);
 
-        aExpected.children.forEach(function (item, index) checkItem(item, folder.getChild(index)));
+          aExpected.children.forEach(function (item, index) checkItem(item, folder.getChild(index)));
 
-        folder.containerOpen = false;
-        break;
-      default:
-        throw new Error("Unknown property");
+          folder.containerOpen = false;
+          break;
+        default:
+          throw new Error("Unknown property");
+      }
     }
-  };
+  });
 }

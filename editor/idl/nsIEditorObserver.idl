@@ -9,7 +9,7 @@
 Editor Observer interface to outside world
 */
 
-[scriptable, uuid(a6cf9125-15b3-11d2-932e-00805f8add32)]
+[scriptable, uuid(e52a09fd-d33a-4f85-be0a-fbd348f0fa27)]
 
 /**
  * A generic editor observer interface. 

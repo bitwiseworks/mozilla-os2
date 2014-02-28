@@ -6,6 +6,7 @@
 package org.mozilla.gecko.gfx;
 
 import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.util.FloatUtils;
 
 import org.json.JSONArray;
@@ -15,10 +16,11 @@ import android.graphics.RectF;
 import android.util.FloatMath;
 import android.util.Log;
 
+import java.util.HashMap;
 import java.util.Map;
 
 final class DisplayPortCalculator {
-    private static final String LOGTAG = "GeckoDisplayPortCalculator";
+    private static final String LOGTAG = "GeckoDisplayPort";
     private static final PointF ZERO_VELOCITY = new PointF(0, 0);
 
     // Keep this in sync with the TILEDLAYERBUFFER_TILE_SIZE defined in gfx/layers/TiledLayerBuffer.h
@@ -58,7 +60,8 @@ final class DisplayPortCalculator {
         sStrategy.resetPageState();
     }
 
-    static void addPrefNames(JSONArray prefs) {
+    static void initPrefs() {
+        JSONArray prefs = new JSONArray();
         prefs.put(PREF_DISPLAYPORT_STRATEGY);
         prefs.put(PREF_DISPLAYPORT_FM_MULTIPLIER);
         prefs.put(PREF_DISPLAYPORT_FM_DANGER_X);
@@ -71,6 +74,18 @@ final class DisplayPortCalculator {
         prefs.put(PREF_DISPLAYPORT_VB_DANGER_X_INCR);
         prefs.put(PREF_DISPLAYPORT_VB_DANGER_Y_INCR);
         prefs.put(PREF_DISPLAYPORT_PB_VELOCITY_THRESHOLD);
+
+        PrefsHelper.getPrefs(prefs, new PrefsHelper.PrefHandlerBase() {
+            private Map<String, Integer> mValues = new HashMap<String, Integer>();
+
+            @Override public void prefValue(String pref, int value) {
+                mValues.put(pref, value);
+            }
+
+            @Override public void finish() {
+                setStrategy(mValues);
+            }
+        });
     }
 
     /**
@@ -229,6 +244,7 @@ final class DisplayPortCalculator {
             // no prefs in this strategy
         }
 
+        @Override
         public DisplayPortMetrics calculate(ImmutableViewportMetrics metrics, PointF velocity) {
             return new DisplayPortMetrics(metrics.viewportRectLeft,
                     metrics.viewportRectTop,
@@ -237,6 +253,7 @@ final class DisplayPortCalculator {
                     metrics.zoomFactor);
         }
 
+        @Override
         public boolean aboutToCheckerboard(ImmutableViewportMetrics metrics, PointF velocity, DisplayPortMetrics displayPort) {
             return true;
         }
@@ -271,6 +288,7 @@ final class DisplayPortCalculator {
             DANGER_ZONE_Y_MULTIPLIER = getFloatPref(prefs, PREF_DISPLAYPORT_FM_DANGER_Y, 200);
         }
 
+        @Override
         public DisplayPortMetrics calculate(ImmutableViewportMetrics metrics, PointF velocity) {
             float displayPortWidth = metrics.getWidth() * SIZE_MULTIPLIER;
             float displayPortHeight = metrics.getHeight() * SIZE_MULTIPLIER;
@@ -298,6 +316,7 @@ final class DisplayPortCalculator {
             return getTileAlignedDisplayPortMetrics(margins, metrics.zoomFactor, metrics);
         }
 
+        @Override
         public boolean aboutToCheckerboard(ImmutableViewportMetrics metrics, PointF velocity, DisplayPortMetrics displayPort) {
             // Increase the size of the viewport based on the danger zone multiplier (and clamp to page
             // boundaries), and intersect it with the current displayport to determine whether we're
@@ -380,6 +399,7 @@ final class DisplayPortCalculator {
             return margins;
         }
 
+        @Override
         public DisplayPortMetrics calculate(ImmutableViewportMetrics metrics, PointF velocity) {
             float displayPortWidth = metrics.getWidth() * SIZE_MULTIPLIER;
             float displayPortHeight = metrics.getHeight() * SIZE_MULTIPLIER;
@@ -407,6 +427,7 @@ final class DisplayPortCalculator {
             return getTileAlignedDisplayPortMetrics(margins, metrics.zoomFactor, metrics);
         }
 
+        @Override
         public boolean aboutToCheckerboard(ImmutableViewportMetrics metrics, PointF velocity, DisplayPortMetrics displayPort) {
             // calculate the danger zone amounts based on the prefs
             float dangerZoneX = metrics.getWidth() * (DANGER_ZONE_BASE_X_MULTIPLIER + (velocity.x * DANGER_ZONE_INCR_X_MULTIPLIER));
@@ -503,6 +524,7 @@ final class DisplayPortCalculator {
             // ignore prefs for now
         }
 
+        @Override
         public DisplayPortMetrics calculate(ImmutableViewportMetrics metrics, PointF velocity) {
             float displayPortWidth = metrics.getWidth() * SIZE_MULTIPLIER;
             float displayPortHeight = metrics.getHeight() * SIZE_MULTIPLIER;
@@ -602,6 +624,7 @@ final class DisplayPortCalculator {
             }
         }
 
+        @Override
         public boolean aboutToCheckerboard(ImmutableViewportMetrics metrics, PointF velocity, DisplayPortMetrics displayPort) {
             // Expand the viewport based on our velocity (and clamp it to page boundaries).
             // Then intersect it with the last-requested displayport to determine whether we're
@@ -659,6 +682,7 @@ final class DisplayPortCalculator {
             resetPageState();
         }
 
+        @Override
         public DisplayPortMetrics calculate(ImmutableViewportMetrics metrics, PointF velocity) {
             float width = metrics.getWidth();
             float height = metrics.getHeight();
@@ -695,6 +719,7 @@ final class DisplayPortCalculator {
             return getTileAlignedDisplayPortMetrics(margins, metrics.zoomFactor, metrics);
         }
 
+        @Override
         public boolean aboutToCheckerboard(ImmutableViewportMetrics metrics, PointF velocity, DisplayPortMetrics displayPort) {
             // the code below is the same as in calculate() but is awkward to refactor since it has multiple outputs.
             // refer to the comments in calculate() to understand what this is doing.

@@ -56,6 +56,10 @@
 # define INT64_MAX              (9223372036854775807)
 #endif
 
+#ifndef SIZE_MAX
+# define SIZE_MAX               ((size_t)-1)
+#endif
+
 
 #ifndef M_PI
 # define M_PI			3.14159265358979323846
@@ -96,6 +100,10 @@
 
 #endif
 
+/* member offsets */
+#define CONTAINER_OF(type, member, data)				\
+    ((type *)(((uint8_t *)data) - offsetof (type, member)))
+
 /* TLS */
 #if defined(PIXMAN_NO_TLS)
 
@@ -111,10 +119,12 @@
 #   define PIXMAN_GET_THREAD_LOCAL(name)				\
     (&name)
 
-#elif defined(__MINGW32__)
+#elif defined(__MINGW32__) || defined(PIXMAN_USE_XP_DLL_TLS_WORKAROUND)
 
 #   define _NO_W32_PSEUDO_MODIFIERS
 #   include <windows.h>
+#undef IN
+#undef OUT
 
 #   define PIXMAN_DEFINE_THREAD_LOCAL(type, name)			\
     static volatile int tls_ ## name ## _initialized = 0;		\

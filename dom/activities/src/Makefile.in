@@ -9,32 +9,19 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = dom
 LIBRARY_NAME     = dom_activities_s
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/dom/dom-config.mk
 
-CPPSRCS = \
-  Activity.cpp \
-  $(NULL)
-
-EXPORTS_NAMESPACES = mozilla/dom
-EXPORTS_mozilla/dom = \
-  Activity.h \
-  $(NULL)
-
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
   ActivityOptions.js \
   ActivityProxy.js \
   ActivityRequestHandler.js \
   ActivityWrapper.js \
   Activities.manifest \
-  $(NULL)
-
-EXTRA_JS_MODULES =   \
-  ActivitiesService.jsm \
   $(NULL)
 
 include $(topsrcdir)/config/config.mk

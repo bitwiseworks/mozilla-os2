@@ -7,9 +7,9 @@
 // Helper function to clear the image cache of content images
 function clearImageCache()
 {
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-  var imageCache = Components.classes["@mozilla.org/image/cache;1"]
-                             .getService(Components.interfaces.imgICache);
+  var tools = SpecialPowers.Cc["@mozilla.org/image/tools;1"]
+                             .getService(SpecialPowers.Ci.imgITools);
+  var imageCache = tools.getImgCacheForDocument(window.document);
   imageCache.clearCache(false); // true=chrome, false=content
 }
 
@@ -17,7 +17,7 @@ function clearImageCache()
 function isFrameDecoded(id)
 {
   return (getImageStatus(id) &
-          Components.interfaces.imgIRequest.STATUS_FRAME_COMPLETE)
+          SpecialPowers.Ci.imgIRequest.STATUS_FRAME_COMPLETE)
          ? true : false;
 }
 
@@ -25,7 +25,7 @@ function isFrameDecoded(id)
 function isImageLoaded(id)
 {
   return (getImageStatus(id) &
-          Components.interfaces.imgIRequest.STATUS_LOAD_COMPLETE)
+          SpecialPowers.Ci.imgIRequest.STATUS_LOAD_COMPLETE)
          ? true : false;
 }
 
@@ -36,13 +36,13 @@ function getImageStatus(id)
   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
 
   // Get the image
-  var img = document.getElementById(id);
+  var img = SpecialPowers.wrap(document.getElementById(id));
 
   // QI the image to nsImageLoadingContent
-  img.QueryInterface(Components.interfaces.nsIImageLoadingContent);
+  img.QueryInterface(SpecialPowers.Ci.nsIImageLoadingContent);
 
   // Get the request
-  var request = img.getRequest(Components.interfaces
+  var request = img.getRequest(SpecialPowers.Ci
                                          .nsIImageLoadingContent
                                          .CURRENT_REQUEST);
 
@@ -121,15 +121,14 @@ function getImagePref(pref)
     return null;
 }
 
-// JS implementation of imgIDecoderObserver with stubs for all of its methods.
+// JS implementation of imgIScriptedNotificationObserver with stubs for all of its methods.
 function ImageDecoderObserverStub()
 {
-  this.onStartRequest = function onStartRequest(aRequest)                 {}
-  this.onStartDecode = function onStartDecode(aRequest)                   {}
-  this.onStartContainer = function onStartContainer(aRequest, aContainer) {}
-  this.onStartFrame = function onStartFrame(aRequest, aFrame)             {}
-  this.onStopFrame = function onStopFrame(aRequest, aFrame)               {}
-  this.onStopContainer = function onStopContainer(aRequest, aContainer)   {}
-  this.onStopDecode = function onStopDecode(aRequest, status, statusArg)  {}
-  this.onStopRequest = function onStopRequest(aRequest, aIsLastPart)      {}
+  this.sizeAvailable = function sizeAvailable(aRequest)   {}
+  this.frameComplete = function frameComplete(aRequest)   {}
+  this.decodeComplete = function decodeComplete(aRequest) {}
+  this.loadComplete = function loadComplete(aRequest)     {}
+  this.frameUpdate = function frameUpdate(aRequest)       {}
+  this.discard = function discard(aRequest)               {}
+  this.isAnimated = function isAnimated(aRequest)         {}
 }

@@ -7,7 +7,7 @@ body {
   font-family: Roboto,"Droid Sans",helvetica,arial,clean,sans-serif;
   font-size: 14px;
   color: #222;
-  background-image: url("chrome://browser/skin/images/about-bg-lightblue.png");
+  background-color: #ced7de;
   padding: 10px;
 }
 
@@ -137,12 +137,12 @@ section:not([active]) {
   padding: 10px;
   font-size: 16px;
   width: 100%;
-  background-image: -moz-linear-gradient(rgb(87,94,102), rgb(71,77,83) 90%, rgb(45,49,53));
+  background-image: linear-gradient(rgb(87,94,102), rgb(71,77,83) 90%, rgb(45,49,53));
   border-radius: 4px;
   border-width: 0;
   color: #fff;
 }
 
 .send-feedback:active {
-  background-image: -moz-linear-gradient(rgb(138,143,148), rgb(127,130,135) 90%, rgb(108,111,114));
+  background-image: linear-gradient(rgb(138,143,148), rgb(127,130,135) 90%, rgb(108,111,114));
 }

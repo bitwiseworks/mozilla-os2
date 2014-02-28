@@ -11,23 +11,16 @@
 
 namespace mozilla {
 namespace a11y {
- 
+
 class ApplicationAccessibleWrap: public ApplicationAccessible
 {
-public:
-  static void Unload();
-  static void PreCreate();
-
 public:
   ApplicationAccessibleWrap();
   virtual ~ApplicationAccessibleWrap();
 
-  // nsAccessNode
-  virtual void Init();
-
   // Accessible
   virtual mozilla::a11y::ENameValueFlag Name(nsString& aName);
-  virtual bool AppendChild(Accessible* aChild);
+  virtual bool InsertChildAt(uint32_t aIdx, Accessible* aChild) MOZ_OVERRIDE;
   virtual bool RemoveChild(Accessible* aChild);
 
   /**

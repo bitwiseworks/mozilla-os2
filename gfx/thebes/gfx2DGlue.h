@@ -9,7 +9,9 @@
 #include "gfxPlatform.h"
 #include "gfxRect.h"
 #include "gfxMatrix.h"
+#include "gfx3DMatrix.h"
 #include "gfxContext.h"
+#include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/2D.h"
 
@@ -196,6 +198,23 @@ inline gfxASurface::gfxImageFormat SurfaceFormatToImageFormat(SurfaceFormat aFor
   }
 }
 
+inline SurfaceFormat ImageFormatToSurfaceFormat(gfxASurface::gfxImageFormat aFormat)
+{
+  switch (aFormat) {
+  case gfxASurface::ImageFormatARGB32:
+    return FORMAT_B8G8R8A8;
+  case gfxASurface::ImageFormatRGB24:
+    return FORMAT_B8G8R8X8;
+  case gfxASurface::ImageFormatRGB16_565:
+    return FORMAT_R5G6B5;
+  case gfxASurface::ImageFormatA8:
+    return FORMAT_A8;
+  default:
+  case gfxASurface::ImageFormatUnknown:
+    return FORMAT_B8G8R8A8;
+  }
+}
+
 inline gfxASurface::gfxContentType ContentForFormat(const SurfaceFormat &aFormat)
 {
   switch (aFormat) {
@@ -231,6 +250,36 @@ inline CompositionOp CompositionOpForOp(gfxContext::GraphicsOperator aOp)
     return OP_DEST_ATOP;
   case gfxContext::OPERATOR_XOR:
     return OP_XOR;
+  case gfxContext::OPERATOR_MULTIPLY:
+    return OP_MULTIPLY;
+  case gfxContext::OPERATOR_SCREEN:
+    return OP_SCREEN;
+  case gfxContext::OPERATOR_OVERLAY:
+    return OP_OVERLAY;
+  case gfxContext::OPERATOR_DARKEN:
+    return OP_DARKEN;
+  case gfxContext::OPERATOR_LIGHTEN:
+    return OP_LIGHTEN;
+  case gfxContext::OPERATOR_COLOR_DODGE:
+    return OP_COLOR_DODGE;
+  case gfxContext::OPERATOR_COLOR_BURN:
+    return OP_COLOR_BURN;
+  case gfxContext::OPERATOR_HARD_LIGHT:
+    return OP_HARD_LIGHT;
+  case gfxContext::OPERATOR_SOFT_LIGHT:
+    return OP_SOFT_LIGHT;
+  case gfxContext::OPERATOR_DIFFERENCE:
+    return OP_DIFFERENCE;
+  case gfxContext::OPERATOR_EXCLUSION:
+    return OP_EXCLUSION;
+  case gfxContext::OPERATOR_HUE:
+    return OP_HUE;
+  case gfxContext::OPERATOR_SATURATION:
+    return OP_SATURATION;
+  case gfxContext::OPERATOR_COLOR:
+    return OP_COLOR;
+  case gfxContext::OPERATOR_LUMINOSITY:
+    return OP_LUMINOSITY;
   default:
     return OP_OVER;
   }
@@ -257,9 +306,81 @@ inline gfxContext::GraphicsOperator ThebesOp(CompositionOp aOp)
     return gfxContext::OPERATOR_DEST_ATOP;
   case OP_XOR:
     return gfxContext::OPERATOR_XOR;
+  case OP_MULTIPLY:
+    return gfxContext::OPERATOR_MULTIPLY;
+  case OP_SCREEN:
+    return gfxContext::OPERATOR_SCREEN;
+  case OP_OVERLAY:
+    return gfxContext::OPERATOR_OVERLAY;
+  case OP_DARKEN:
+    return gfxContext::OPERATOR_DARKEN;
+  case OP_LIGHTEN:
+    return gfxContext::OPERATOR_LIGHTEN;
+  case OP_COLOR_DODGE:
+    return gfxContext::OPERATOR_COLOR_DODGE;
+  case OP_COLOR_BURN:
+    return gfxContext::OPERATOR_COLOR_BURN;
+  case OP_HARD_LIGHT:
+    return gfxContext::OPERATOR_HARD_LIGHT;
+  case OP_SOFT_LIGHT:
+    return gfxContext::OPERATOR_SOFT_LIGHT;
+  case OP_DIFFERENCE:
+    return gfxContext::OPERATOR_DIFFERENCE;
+  case OP_EXCLUSION:
+    return gfxContext::OPERATOR_EXCLUSION;
+  case OP_HUE:
+    return gfxContext::OPERATOR_HUE;
+  case OP_SATURATION:
+    return gfxContext::OPERATOR_SATURATION;
+  case OP_COLOR:
+    return gfxContext::OPERATOR_COLOR;
+  case OP_LUMINOSITY:
+    return gfxContext::OPERATOR_LUMINOSITY;
   default:
     return gfxContext::OPERATOR_OVER;
   }
+}
+
+inline void
+ToMatrix4x4(const gfx3DMatrix& aIn, Matrix4x4& aOut)
+{
+  aOut._11 = aIn._11;
+  aOut._12 = aIn._12;
+  aOut._13 = aIn._13;
+  aOut._14 = aIn._14;
+  aOut._21 = aIn._21;
+  aOut._22 = aIn._22;
+  aOut._23 = aIn._23;
+  aOut._24 = aIn._24;
+  aOut._31 = aIn._31;
+  aOut._32 = aIn._32;
+  aOut._33 = aIn._33;
+  aOut._34 = aIn._34;
+  aOut._41 = aIn._41;
+  aOut._42 = aIn._42;
+  aOut._43 = aIn._43;
+  aOut._44 = aIn._44;
+}
+
+inline void
+To3DMatrix(const Matrix4x4& aIn, gfx3DMatrix& aOut)
+{
+  aOut._11 = aIn._11;
+  aOut._12 = aIn._12;
+  aOut._13 = aIn._13;
+  aOut._14 = aIn._14;
+  aOut._21 = aIn._21;
+  aOut._22 = aIn._22;
+  aOut._23 = aIn._23;
+  aOut._24 = aIn._24;
+  aOut._31 = aIn._31;
+  aOut._32 = aIn._32;
+  aOut._33 = aIn._33;
+  aOut._34 = aIn._34;
+  aOut._41 = aIn._41;
+  aOut._42 = aIn._42;
+  aOut._43 = aIn._43;
+  aOut._44 = aIn._44;
 }
 
 }

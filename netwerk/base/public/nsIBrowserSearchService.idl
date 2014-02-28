@@ -20,9 +20,15 @@ interface nsISearchSubmission : nsISupports
    * The URI to submit a search to.
    */
   readonly attribute nsIURI uri;
+
+  /**
+   * The POST data associated with a search submission as an
+   * application/x-www-form-urlencoded string. May be null.
+   */
+  readonly attribute AString postDataString;
 };
 
-[scriptable, uuid(803e510b-4b27-4ba2-a16d-bb5fa953c166)]
+[scriptable, uuid(ccf6aa20-10a9-4a0c-a81d-31b10ea846de)]
 interface nsISearchEngine : nsISupports
 {
   /**
@@ -37,12 +43,18 @@ interface nsISearchEngine : nsISupports
    *         The MIME type that we'd like to receive in response
    *         to this submission.  If null, will default to "text/html".
    *
+   * @param purpose [optional]
+   *        A string meant to indicate the context of the search request. This
+   *        allows the search service to provide a different nsISearchSubmission
+   *        depending on e.g. where the search is triggered in the UI.
+   *
    * @returns A nsISearchSubmission object that contains information about what
    *          to send to the search engine.  If no submission can be
    *          obtained for the given responseType, returns null.
    */
   nsISearchSubmission getSubmission(in AString data,
-                                    [optional] in AString responseType);
+                                    [optional] in AString responseType,
+                                    [optional] in AString purpose);
 
   /**
    * Adds a parameter to the search engine's submission data. This should only
@@ -126,6 +138,36 @@ interface nsISearchEngine : nsISupports
    */
   readonly attribute long type;
 
+  /**
+   * An optional unique identifier for this search engine within the context of
+   * the distribution, as provided by the distributing entity.
+   */
+  readonly attribute AString identifier;
+
+};
+
+[scriptable, uuid(9fc39136-f08b-46d3-b232-96f4b7b0e235)]
+interface nsISearchInstallCallback : nsISupports
+{
+  const unsigned long ERROR_UNKNOWN_FAILURE = 0x1;
+  const unsigned long ERROR_DUPLICATE_ENGINE = 0x2;
+
+  /**
+   * Called to indicate that the engine addition process succeeded.
+   *
+   * @param engine
+   *        The nsISearchEngine object that was added (will not be null).
+   */
+  void onSuccess(in nsISearchEngine engine);
+
+  /**
+   * Called to indicate that the engine addition process failed.
+   *
+   * @param errorCode
+   *        One of the ERROR_* values described above indicating the cause of
+   *        the failure.
+   */
+  void onError(in unsigned long errorCode);
 };
 
 /**
@@ -142,7 +184,7 @@ interface nsIBrowserSearchInitObserver : nsISupports
   void onInitComplete(in nsresult aStatus);
 };
 
-[scriptable, uuid(a676eb70-6987-4429-a668-3e253b6f7c7c)]
+[scriptable, uuid(939d74a4-5b01-463c-80c7-4301f0c0f9ef)]
 interface nsIBrowserSearchService : nsISupports
 {
   /**
@@ -174,8 +216,7 @@ interface nsIBrowserSearchService : nsISupports
    * Adds a new search engine from the file at the supplied URI, optionally
    * asking the user for confirmation first.  If a confirmation dialog is
    * shown, it will offer the option to begin using the newly added engine
-   * right away; if no confirmation dialog is shown, the new engine will be
-   * used right away automatically.
+   * right away.
    *
    * @param engineURL
    *        The URL to the search engine's description file.
@@ -195,11 +236,16 @@ interface nsIBrowserSearchService : nsISupports
    *        value is false, the engine will be added to the list upon successful
    *        load, but it will not be selected as the current engine.
    *
+   * @param callback
+   *        A nsISearchInstallCallback that will be notified when the
+   *        addition is complete, or if the addition fails. It will not be
+   *        called if addEngine throws an exception.
+   *
    * @throws NS_ERROR_FAILURE if the type is invalid, or if the description
    *         file cannot be successfully loaded.
    */
   void addEngine(in AString engineURL, in long dataType, in AString iconURL,
-                 in boolean confirm);
+                 in boolean confirm, [optional] in nsISearchInstallCallback callback);
 
   /**
    * Adds a new search engine, without asking the user for confirmation and
@@ -318,20 +364,13 @@ interface nsIBrowserSearchService : nsISupports
    * The default search engine. Returns the first visible engine if the default
    * engine is hidden. May be null if there are no visible search engines.
    */
-  readonly attribute nsISearchEngine defaultEngine;
+  attribute nsISearchEngine defaultEngine;
 
   /**
    * The currently active search engine. May be null if there are no visible
    * search engines.
    */
   attribute nsISearchEngine currentEngine;
-
-  /**
-   * The original default engine. This differs from the "defaultEngine"
-   * attribute in that it always returns a given build's default engine,
-   * regardless of whether it is hidden.
-   */
-  readonly attribute nsISearchEngine originalDefaultEngine;
 };
 
 %{ C++
@@ -370,5 +409,12 @@ interface nsIBrowserSearchService : nsISupports
  * Sent when the "current" engine is changed.
  */
 #define SEARCH_ENGINE_CURRENT      "engine-current";
+
+/**
+ * Sent when the "default" engine is changed.
+ */
+#define SEARCH_ENGINE_DEFAULT      "engine-default";
+
+
 
 %}

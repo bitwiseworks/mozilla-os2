@@ -10,26 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= nkgio
-LIBRARY_NAME	= nkgio
-SHORT_LIBNAME	= nkgio
 IS_COMPONENT	= 1
-
-CPPSRCS		= \
-		nsGIOProtocolHandler.cpp \
-		$(NULL)
+EXPORT_LIBRARY	= 1
+MODULE_NAME	= nsGIOModule
+LIBXUL_LIBRARY	= 1
+FAIL_ON_WARNINGS = 1
 
 LOCAL_INCLUDES	= $(MOZ_GIO_CFLAGS)
-
-EXTRA_DSO_LDOPTS = \
-		   $(XPCOM_GLUE_LDOPTS) \
-		   $(NSPR_LIBS) \
-		   $(MOZ_GIO_LIBS) \
-		   $(NULL)
-
-# make sure this component is never statically linked into the main
-# application.  this is necessary since we don't want to force users
-# to install gio in order to use the rest of mozilla ;-)
-FORCE_SHARED_LIB= 1
 
 include $(topsrcdir)/config/rules.mk

@@ -60,10 +60,10 @@ var gSyncSetup = {
 
   init: function () {
     let obs = [
-      ["weave:service:changepph:finish", "onResetPassphrase"],
-      ["weave:service:login:start",  "onLoginStart"],
-      ["weave:service:login:error",  "onLoginEnd"],
-      ["weave:service:login:finish", "onLoginEnd"]];
+      ["weave:service:change-passphrase", "onResetPassphrase"],
+      ["weave:service:login:start",       "onLoginStart"],
+      ["weave:service:login:error",       "onLoginEnd"],
+      ["weave:service:login:finish",      "onLoginEnd"]];
 
     // Add the observers now and remove them on unload
     let self = this;
@@ -141,13 +141,13 @@ var gSyncSetup = {
   resetPassphrase: function resetPassphrase() {
     // Apply the existing form fields so that
     // Weave.Service.changePassphrase() has the necessary credentials.
-    Weave.Identity.account = document.getElementById("existingAccountName").value;
-    Weave.Identity.basicPassword = document.getElementById("existingPassword").value;
+    Weave.Service.identity.account = document.getElementById("existingAccountName").value;
+    Weave.Service.identity.basicPassword = document.getElementById("existingPassword").value;
 
     // Generate a new passphrase so that Weave.Service.login() will
     // actually do something.
     let passphrase = Weave.Utils.generatePassphrase();
-    Weave.Identity.syncKey = passphrase;
+    Weave.Service.identity.syncKey = passphrase;
 
     // Only open the dialog if username + password are actually correct.
     Weave.Service.login();
@@ -172,7 +172,7 @@ var gSyncSetup = {
 
   onResetPassphrase: function () {
     document.getElementById("existingPassphrase").value =
-      Weave.Utils.hyphenatePassphrase(Weave.Identity.syncKey);
+      Weave.Utils.hyphenatePassphrase(Weave.Service.identity.syncKey);
     this.checkFields();
     this.wizard.advance();
   },
@@ -189,9 +189,9 @@ var gSyncSetup = {
     let send = function() {
       Services.obs.removeObserver("weave:service:sync:finish", send);
       Services.obs.removeObserver("weave:service:sync:error", send);
-      let credentials = {account:   Weave.Identity.account,
-                         password:  Weave.Identity.basicPassword,
-                         synckey:   Weave.Identity.syncKey,
+      let credentials = {account:   Weave.Service.identity.account,
+                         password:  Weave.Service.identity.basicPassword,
+                         synckey:   Weave.Service.identity.syncKey,
                          serverURL: Weave.Service.serverURL};
       this._jpakeclient.sendAndComplete(credentials);
     }.bind(this);
@@ -330,7 +330,7 @@ var gSyncSetup = {
     this._setFeedbackMessage(feedback, valid, str);
     this.status.email = valid;
     if (valid)
-      Weave.Identity.account = value;
+      Weave.Service.identity.account = value;
     this.checkFields();
   },
 
@@ -400,7 +400,7 @@ var gSyncSetup = {
         this.wizard.getButton("back").hidden = true;
         this.wizard.getButton("cancel").hidden = !this._resettingSync;
         this.wizard.getButton("extra1").hidden = true;
-        document.getElementById("syncComputerName").value = Weave.Clients.localName;
+        document.getElementById("syncComputerName").value = Weave.Service.clientsEngine.localName;
         document.getElementById("syncOptions").collapsed = this._resettingSync;
         document.getElementById("mergeOptions").collapsed = this._settingUpNew;
         break;
@@ -416,6 +416,21 @@ var gSyncSetup = {
         break;
     }
   },
+
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+  _securelyStoreForMetroSync: function(weaveEmail, weavePassword, weaveKey) {
+    try {
+      let metroUtils = Cc["@mozilla.org/windows-metroutils;1"].
+                       createInstance(Ci.nsIWinMetroUtils);
+      if (!metroUtils)
+          return;
+      metroUtils.storeSyncInfo(weaveEmail, weavePassword, weaveKey);
+    } catch (ex) {
+    }
+  },
+#endif
+#endif
 
   onWizardAdvance: function () {
     // Check pageIndex so we don't prompt before the Sync setup wizard appears.
@@ -466,11 +481,18 @@ var gSyncSetup = {
                                                 challenge, response);
 
         if (error == null) {
-          Weave.Identity.account = email;
-          Weave.Identity.basicPassword = password;
-          Weave.Identity.syncKey = Weave.Utils.generatePassphrase();
+          Weave.Service.identity.account = email;
+          Weave.Service.identity.basicPassword = password;
+          Weave.Service.identity.syncKey = Weave.Utils.generatePassphrase();
           this._handleNoScript(false);
           Weave.Svc.Prefs.set("firstSync", "newAccount");
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+          if (document.getElementById("metroSetupCheckbox").checked) {
+            this._securelyStoreForMetroSync(email, password, Weave.Service.identity.syncKey);
+          }
+#endif
+#endif
           this.wizardFinish();
           return false;
         }
@@ -479,12 +501,12 @@ var gSyncSetup = {
         label.value = Weave.Utils.getErrorString(error);
         return false;
       case EXISTING_ACCOUNT_LOGIN_PAGE:
-        Weave.Identity.account = Weave.Utils.normalizeAccount(
+        Weave.Service.identity.account = Weave.Utils.normalizeAccount(
           document.getElementById("existingAccountName").value);
-        Weave.Identity.basicPassword =
+        Weave.Service.identity.basicPassword =
           document.getElementById("existingPassword").value;
         let pp = document.getElementById("existingPassphrase").value;
-        Weave.Identity.syncKey = Weave.Utils.normalizePassphrase(pp);
+        Weave.Service.identity.syncKey = Weave.Utils.normalizePassphrase(pp);
         if (Weave.Service.login()) {
           this.wizardFinish();
         }
@@ -639,7 +661,8 @@ var gSyncSetup = {
       // have to pair again?
       return;
     }
-    let controller = new Weave.SendCredentialsController(this._jpakeclient);
+    let controller = new Weave.SendCredentialsController(this._jpakeclient,
+                                                         Weave.Service);
     this._jpakeclient.controller = controller;
   },
 
@@ -663,9 +686,9 @@ var gSyncSetup = {
       onPairingStart: function onPairingStart() {},
 
       onComplete: function onComplete(credentials) {
-        Weave.Identity.account = credentials.account;
-        Weave.Identity.basicPassword = credentials.password;
-        Weave.Identity.syncKey = credentials.synckey;
+        Weave.Service.identity.account = credentials.account;
+        Weave.Service.identity.basicPassword = credentials.password;
+        Weave.Service.identity.syncKey = credentials.synckey;
         Weave.Service.serverURL = credentials.serverURL;
         gSyncSetup.wizardFinish();
       },
@@ -870,7 +893,7 @@ var gSyncSetup = {
         let places_db = PlacesUtils.history
                                    .QueryInterface(Ci.nsPIPlacesDatabase)
                                    .DBConnection;
-        if (Weave.Engines.get("history").enabled) {
+        if (Weave.Service.engineManager.get("history").enabled) {
           let daysOfHistory = 0;
           let stm = places_db.createStatement(
             "SELECT ROUND(( " +
@@ -893,7 +916,7 @@ var gSyncSetup = {
           document.getElementById("historyCount").hidden = true;
         }
 
-        if (Weave.Engines.get("bookmarks").enabled) {
+        if (Weave.Service.engineManager.get("bookmarks").enabled) {
           let bookmarks = 0;
           let stm = places_db.createStatement(
             "SELECT count(*) AS bookmarks " +
@@ -913,7 +936,7 @@ var gSyncSetup = {
           document.getElementById("bookmarkCount").hidden = true;
         }
 
-        if (Weave.Engines.get("passwords").enabled) {
+        if (Weave.Service.engineManager.get("passwords").enabled) {
           let logins = Services.logins.getAllLogins({});
           // Support %S for historical reasons (see bug 600141)
           document.getElementById("passwordCount").value =
@@ -925,8 +948,26 @@ var gSyncSetup = {
           document.getElementById("passwordCount").hidden = true;
         }
 
-        if (!Weave.Engines.get("prefs").enabled) {
+        if (!Weave.Service.engineManager.get("prefs").enabled) {
           document.getElementById("prefsWipe").hidden = true;
+        }
+
+        let addonsEngine = Weave.Service.engineManager.get("addons");
+        if (addonsEngine.enabled) {
+          let ids = addonsEngine._store.getAllIDs();
+          let blessedcount = 0;
+          for each (let i in ids) {
+            if (i) {
+              blessedcount++;
+            }
+          }
+          // bug 600141 does not apply, as this does not have to support existing strings
+          document.getElementById("addonCount").value =
+            PluralForm.get(blessedcount,
+                           this._stringBundle.GetStringFromName("addonsCount.label"))
+                      .replace("#1", blessedcount);
+        } else {
+          document.getElementById("addonCount").hidden = true;
         }
 
         this._case1Setup = true;
@@ -943,9 +984,9 @@ var gSyncSetup = {
           box.appendChild(node);
         }
 
-        for each (let name in Weave.Clients.stats.names) {
+        for each (let name in Weave.Service.clientsEngine.stats.names) {
           // Don't list the current client
-          if (name == Weave.Clients.localName)
+          if (name == Weave.Service.clientsEngine.localName)
             continue;
 
           // Only show the first several client names

@@ -9,7 +9,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-LIBRARY_NAME = google_breakpad_standalone_s
 FORCE_STATIC_LIB = 1
 USE_STATIC_LIBS = 1
 MOZ_GLUE_LDFLAGS =
@@ -26,12 +25,6 @@ VPATH += \
   $(topsrcdir)/toolkit/crashreporter/google-breakpad/src/common/windows \
   $(topsrcdir)/toolkit/crashreporter/google-breakpad/src/client/windows/handler \
   $(topsrcdir)/toolkit/crashreporter/google-breakpad/src/client/windows/crash_generation \
-  $(NULL)
-
-CPPSRCS = \
-  $(objs_common) \
-  $(objs_handler) \
-  $(objs_crash_generation) \
   $(NULL)
 
 DEFINES += -DUNICODE -DUNICODE_ -DBREAKPAD_NO_TERMINATE_THREAD -DNOMINMAX

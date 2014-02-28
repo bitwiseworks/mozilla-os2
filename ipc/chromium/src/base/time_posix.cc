@@ -33,7 +33,7 @@ namespace base {
 // Some functions in time.cc use time_t directly, so we provide a zero offset
 // for them.  The epoch is 1970-01-01 00:00:00 UTC.
 // static
-const int64 Time::kTimeTToMicrosecondsOffset = GG_INT64_C(0);
+const int64_t Time::kTimeTToMicrosecondsOffset = GG_INT64_C(0);
 
 // static
 Time Time::Now() {
@@ -78,7 +78,7 @@ Time Time::FromExploded(bool is_local, const Exploded& exploded) {
     seconds = timegm(&timestruct);
 #endif
 
-  int64 milliseconds;
+  int64_t milliseconds;
   // Handle overflow.  Clamping the range to what mktime and timegm might
   // return is the best that can be done here.  It's not ideal, but it's better
   // than failing here or ignoring the overflow case and treating each time
@@ -117,7 +117,7 @@ Time Time::FromExploded(bool is_local, const Exploded& exploded) {
 void Time::Explode(bool is_local, Exploded* exploded) const {
   // Time stores times with microsecond resolution, but Exploded only carries
   // millisecond resolution, so begin by being lossy.
-  int64 milliseconds = us_ / kMicrosecondsPerMillisecond;
+  int64_t milliseconds = us_ / kMicrosecondsPerMillisecond;
   time_t seconds = milliseconds / kMillisecondsPerSecond;
 
   struct tm timestruct;
@@ -167,7 +167,7 @@ TimeTicks TimeTicks::Now() {
   // With numer and denom = 1 (the expected case), the 64-bit absolute time
   // reported in nanoseconds is enough to last nearly 585 years.
 
-#elif defined(__OpenBSD__) || defined(OS_POSIX) && \
+#elif defined(OS_OPENBSD) || defined(OS_POSIX) && \
       defined(_POSIX_MONOTONIC_CLOCK) && _POSIX_MONOTONIC_CLOCK >= 0
 
   struct timespec ts;
@@ -177,8 +177,8 @@ TimeTicks TimeTicks::Now() {
   }
 
   absolute_micro =
-      (static_cast<int64>(ts.tv_sec) * Time::kMicrosecondsPerSecond) +
-      (static_cast<int64>(ts.tv_nsec) / Time::kNanosecondsPerMicrosecond);
+      (static_cast<int64_t>(ts.tv_sec) * Time::kMicrosecondsPerSecond) +
+      (static_cast<int64_t>(ts.tv_nsec) / Time::kNanosecondsPerMicrosecond);
 
 #else  // _POSIX_MONOTONIC_CLOCK
 #error No usable tick clock function on this platform.

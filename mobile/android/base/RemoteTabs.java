@@ -4,25 +4,19 @@
 
 package org.mozilla.gecko;
 
-import org.json.JSONObject;
-
 import android.content.Context;
-import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.AttributeSet;
-import android.util.Log;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ExpandableListView;
-import android.widget.LinearLayout;
 import android.widget.SimpleExpandableListAdapter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
-public class RemoteTabs extends LinearLayout
+public class RemoteTabs extends ExpandableListView
                         implements TabsPanel.PanelView,
                                    ExpandableListView.OnGroupClickListener,
                                    ExpandableListView.OnChildClickListener, 
@@ -32,24 +26,19 @@ public class RemoteTabs extends LinearLayout
     private Context mContext;
     private TabsPanel mTabsPanel;
 
-    private static ExpandableListView mList;
-    
     private static ArrayList <ArrayList <HashMap <String, String>>> mTabsList;
 
     private static final String[] CLIENT_KEY = new String[] { "name" };
-    private static final String[] TAB_KEY = new String[] { "title" };
+    private static final String[] TAB_KEY = new String[] { "title", "url" };
     private static final int[] CLIENT_RESOURCE = new int[] { R.id.client };
-    private static final int[] TAB_RESOURCE = new int[] { R.id.tab };
+    private static final int[] TAB_RESOURCE = new int[] { R.id.tab, R.id.url };
 
     public RemoteTabs(Context context, AttributeSet attrs) {
         super(context, attrs);
         mContext = context;
 
-        LayoutInflater.from(context).inflate(R.layout.remote_tabs, this);
-
-        mList = (ExpandableListView) findViewById(R.id.list);
-        mList.setOnGroupClickListener(this);
-        mList.setOnChildClickListener(this);
+        setOnGroupClickListener(this);
+        setOnChildClickListener(this);
     }
 
     @Override
@@ -64,15 +53,22 @@ public class RemoteTabs extends LinearLayout
 
     @Override
     public void show() {
+        setVisibility(View.VISIBLE);
         TabsAccessor.getTabs(mContext, this);
     }
 
     @Override
     public void hide() {
+        setVisibility(View.GONE);
     }
 
-    void autoHidePanel() {
+    private void autoHidePanel() {
         mTabsPanel.autoHidePanel();
+    }
+
+    @Override
+    public boolean shouldExpand() {
+        return true;
     }
 
     @Override
@@ -89,18 +85,7 @@ public class RemoteTabs extends LinearLayout
             return true;
         }
 
-        String url = tab.get("url");
-        JSONObject args = new JSONObject();
-        try {
-            args.put("url", url);
-            args.put("engine", null);
-            args.put("userEntered", false);
-        } catch (Exception e) {
-            Log.e(LOGTAG, "error building JSON arguments");
-        }
-
-        Log.d(LOGTAG, "Sending message to Gecko: " + SystemClock.uptimeMillis() + " - Tab:Add");
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Tab:Add", args.toString()));
+        Tabs.getInstance().loadUrl(tab.get("url"), Tabs.LOADURL_NEW_TAB);
         autoHidePanel();
         return true;
     }
@@ -108,10 +93,8 @@ public class RemoteTabs extends LinearLayout
     @Override
     public void onQueryTabsComplete(List<TabsAccessor.RemoteTab> remoteTabsList) {
         ArrayList<TabsAccessor.RemoteTab> remoteTabs = new ArrayList<TabsAccessor.RemoteTab> (remoteTabsList);
-        if (remoteTabs == null || remoteTabs.size() == 0) {
-            autoHidePanel();
+        if (remoteTabs == null || remoteTabs.size() == 0)
             return;
-        }
         
         ArrayList <HashMap <String, String>> clients = new ArrayList <HashMap <String, String>>();
 
@@ -140,18 +123,18 @@ public class RemoteTabs extends LinearLayout
             tabsForClient.add(tab);
         }
         
-        mList.setAdapter(new SimpleExpandableListAdapter(mContext,
-                                                         clients,
-                                                         R.layout.remote_tabs_group,
-                                                         CLIENT_KEY,
-                                                         CLIENT_RESOURCE,
-                                                         mTabsList,
-                                                         R.layout.remote_tabs_child,
-                                                         TAB_KEY,
-                                                         TAB_RESOURCE));
+        setAdapter(new SimpleExpandableListAdapter(mContext,
+                                                   clients,
+                                                   R.layout.remote_tabs_group,
+                                                   CLIENT_KEY,
+                                                   CLIENT_RESOURCE,
+                                                   mTabsList,
+                                                   R.layout.remote_tabs_child,
+                                                   TAB_KEY,
+                                                   TAB_RESOURCE));
         
         for (int i = 0; i < clients.size(); i++) {
-            mList.expandGroup(i);
+            expandGroup(i);
         }
     }
 }

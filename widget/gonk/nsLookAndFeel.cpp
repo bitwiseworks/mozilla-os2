@@ -17,6 +17,9 @@
 #include "nsLookAndFeel.h"
 #include "nsStyleConsts.h"
 #include "gfxFont.h"
+#include "cutils/properties.h"
+
+static const PRUnichar UNICODE_BULLET = 0x2022;
 
 nsLookAndFeel::nsLookAndFeel()
     : nsXPLookAndFeel()
@@ -364,6 +367,13 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
             aResult = 0;
             break;
 
+        case eIntID_PhysicalHomeButton: {
+            char propValue[PROPERTY_VALUE_MAX];
+            property_get("ro.moz.has_home_button", propValue, "1");
+            aResult = atoi(propValue);
+            break;
+        }
+
         default:
             aResult = 0;
             rv = NS_ERROR_FAILURE;
@@ -375,7 +385,8 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
 /*virtual*/
 bool
 nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
-                           gfxFontStyle& aFontStyle)
+                           gfxFontStyle& aFontStyle,
+                           float aDevPixPerCSSPixel)
 {
     aFontName.AssignLiteral("\"Droid Sans\"");
     aFontStyle.style = NS_FONT_STYLE_NORMAL;
@@ -390,4 +401,19 @@ nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
 bool
 nsLookAndFeel::GetEchoPasswordImpl() {
     return true;
+}
+
+/*virtual*/
+uint32_t
+nsLookAndFeel::GetPasswordMaskDelayImpl()
+{
+    // Same value on Android framework
+    return 1500;
+}
+
+/* virtual */
+PRUnichar
+nsLookAndFeel::GetPasswordCharacterImpl()
+{
+    return UNICODE_BULLET;
 }

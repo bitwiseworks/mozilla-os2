@@ -9,19 +9,9 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-CPPSRCS = \
-  maintenanceservice.cpp \
-  serviceinstall.cpp \
-  workmonitor.cpp \
-  certificatecheck.cpp \
-  servicebase.cpp \
-  registrycertificates.cpp \
-  $(NULL)
-
 # For debugging purposes only
 #DEFINES += -DDISABLE_UPDATER_AUTHENTICODE_CHECK
 
-PROGRAM = maintenanceservice$(BIN_SUFFIX)
 DIST_PROGRAM = maintenanceservice$(BIN_SUFFIX)
 
 # Don't link the maintenanceservice against mozglue.dll. See bug 687139 and

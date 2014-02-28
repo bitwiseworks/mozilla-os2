@@ -13,5 +13,6 @@
 interface HTMLCollection {
   readonly attribute unsigned long length;
   getter Element? item(unsigned long index);
+  [Throws]
   getter object? namedItem(DOMString name); // only returns Element
 };

@@ -23,7 +23,7 @@ class FontEntry;
 typedef struct FT_LibraryRec_ *FT_Library;
 #endif
 
-class THEBES_API gfxPlatformGtk : public gfxPlatform {
+class gfxPlatformGtk : public gfxPlatform {
 public:
     gfxPlatformGtk();
     virtual ~gfxPlatformGtk();
@@ -35,7 +35,7 @@ public:
     already_AddRefed<gfxASurface> CreateOffscreenSurface(const gfxIntSize& size,
                                                          gfxASurface::gfxContentType contentType);
 
-    mozilla::RefPtr<mozilla::gfx::ScaledFont>
+    mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
 
     nsresult GetFontList(nsIAtom *aLangGroup,
@@ -98,7 +98,7 @@ public:
 
     static int32_t GetDPI();
 
-    static bool UseXRender() {
+    bool UseXRender() {
 #if defined(MOZ_X11) && defined(MOZ_PLATFORM_MAEMO)
         // XRender is not accelerated on the Maemo at the moment, and 
         // X server pixman is out of our control; it's likely to be 
@@ -111,6 +111,10 @@ public:
         // this, we'll only disable this for maemo.
         return true;
 #elif defined(MOZ_X11)
+        if (GetContentBackend() != mozilla::gfx::BACKEND_NONE &&
+            GetContentBackend() != mozilla::gfx::BACKEND_CAIRO)
+            return false;
+
         return sUseXRender;
 #else
         return false;
@@ -119,11 +123,15 @@ public:
 
     virtual gfxImageFormat GetOffscreenFormat();
 
+    virtual int GetScreenDepth() const;
+
 protected:
     static gfxFontconfigUtils *sFontconfigUtils;
 
 private:
     virtual qcms_profile *GetPlatformCMSOutputProfile();
+
+    virtual bool SupportsOffMainThreadCompositing();
 #ifdef MOZ_X11
     static bool sUseXRender;
 #endif

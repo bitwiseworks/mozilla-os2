@@ -8,6 +8,7 @@
 #include "nsISupports.h"
 #include "nsCoord.h"
 #include "mozilla/gfx/Types.h"
+#include "mozilla/StandardInteger.h"
 
 class nsTableCellFrame;
 class nsCellMap;
@@ -135,11 +136,10 @@ protected:
   // not start on an odd bit boundary. If mSpan is 0 then mOrigCell is in effect
   // and the data does not represent a span. If mSpan is 1, then mBits is in
   // effect and the data represents a span.
-  // mBits must be an unsigned long because it must match the size of
-  // mOrigCell on both 32- and 64-bit platforms.
+  // mBits must match the size of mOrigCell on both 32- and 64-bit platforms.
   union {
     nsTableCellFrame* mOrigCell;
-    unsigned long     mBits;
+    uintptr_t         mBits;
   };
 };
 
@@ -163,7 +163,7 @@ typedef uint16_t BCPixelSize;
 
 // These are the max sizes that are stored. If they are exceeded, then the max is stored and
 // the actual value is computed when needed.
-#define MAX_BORDER_WIDTH nscoord(PR_BITMASK(sizeof(BCPixelSize) * 8))
+#define MAX_BORDER_WIDTH nscoord((1u << (sizeof(BCPixelSize) * 8)) - 1)
 
 static inline nscoord
 BC_BORDER_TOP_HALF_COORD(int32_t p2t, uint16_t px)    { return (px - px / 2) * p2t; }

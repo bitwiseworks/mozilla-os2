@@ -10,39 +10,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xultmpl
-LIBRARY_NAME	= gkconxultmpl_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY	= 1
-
-
-CPPSRCS		= \
-		nsContentSupportMap.cpp \
-		nsContentTestNode.cpp \
-		nsInstantiationNode.cpp \
-		nsTreeRows.cpp \
-		nsRDFConInstanceTestNode.cpp \
-		nsRDFConMemberTestNode.cpp \
-		nsRDFPropertyTestNode.cpp \
-		nsRDFBinding.cpp \
-		nsRDFQuery.cpp \
-		nsResourceSet.cpp \
-		nsRuleNetwork.cpp \
-		nsTemplateMatch.cpp \
-		nsTemplateRule.cpp \
-		nsXULContentBuilder.cpp \
-		nsXULContentUtils.cpp \
-		nsXULTreeBuilder.cpp \
-		nsXULSortService.cpp \
-		nsXULTemplateBuilder.cpp \
-		nsXULTemplateQueryProcessorRDF.cpp \
-		nsXULTemplateResultRDF.cpp \
-		nsXULTemplateResultSetRDF.cpp \
- 		nsXMLBinding.cpp \
- 		nsXULTemplateQueryProcessorXML.cpp \
- 		nsXULTemplateResultXML.cpp \
-		nsXULTemplateQueryProcessorStorage.cpp \
-		nsXULTemplateResultStorage.cpp \
-		$(NULL)
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -51,7 +20,8 @@ include $(topsrcdir)/config/rules.mk
 
 LOCAL_INCLUDES	= -I$(srcdir)/../../../base/src \
 		  -I$(srcdir)/../../content/src \
-		  -I$(srcdir)/../../../../layout/xul/base/src/tree/src \
+		  -I$(srcdir)/../../../../dom/base \
+		  -I$(srcdir)/../../../../layout/xul/tree/ \
 		  $(NULL)
 
 DEFINES += -D_IMPL_NS_LAYOUT

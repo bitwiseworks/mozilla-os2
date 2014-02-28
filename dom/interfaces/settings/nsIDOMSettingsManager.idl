@@ -11,6 +11,9 @@ interface nsIVariant;
 [scriptable, uuid(ef95ddd0-6308-11e1-b86c-0800200c9a66)]
 interface nsIDOMSettingsLock : nsISupports
 {
+  // Whether this lock is invalid
+  readonly attribute boolean closed;
+
   // Contains a JSON object with name/value pairs to be set.
   nsIDOMDOMRequest set(in nsIVariant settings);
 
@@ -20,10 +23,10 @@ interface nsIDOMSettingsLock : nsISupports
   nsIDOMDOMRequest clear();
 };
 
-[scriptable, uuid(dd9f5380-a454-11e1-b3dd-0800200c9a66)]
+[scriptable, uuid(c40b1c70-00fb-11e2-a21f-0800200c9a66)]
 interface nsIDOMSettingsManager : nsISupports
 {
-  nsIDOMSettingsLock getLock();
+  nsIDOMSettingsLock createLock();
 
   void addObserver(in DOMString name, in jsval callback);
   void removeObserver(in DOMString name, in jsval callback);

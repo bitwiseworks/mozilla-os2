@@ -11,7 +11,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= mar
 ifeq ($(OS_ARCH),WINNT)
 USE_STATIC_LIBS = 1
 endif
@@ -20,10 +19,6 @@ endif
 # would only be used by our build system and should not itself be included in a
 # Mozilla distribution.
 HOST_PROGRAM = mar$(HOST_BIN_SUFFIX)
-
-ifdef MOZ_ENABLE_SIGNMAR
-PROGRAM = signmar$(BIN_SUFFIX)
-endif
 
 # Don't link the against libmozglue because we don't need it.
 MOZ_GLUE_LDFLAGS =
@@ -45,10 +40,7 @@ HOST_CFLAGS += \
   $(DEFINES) \
   $(NULL)
 
-HOST_CSRCS = \
-  mar.c \
-  $(NULL)
-CSRCS = $(HOST_CSRCS)
+DISABLED_CSRCS = $(HOST_CSRCS)
 
 HOST_LIBS = $(DIST)/host/lib/$(LIB_PREFIX)hostmar.$(LIB_SUFFIX)
 LIBS = $(DEPTH)/modules/libmar/src/$(LIB_PREFIX)mar.$(LIB_SUFFIX)

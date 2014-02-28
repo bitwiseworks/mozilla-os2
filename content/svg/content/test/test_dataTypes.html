@@ -167,6 +167,9 @@ function runTests()
   is(marker.orientAngle.animVal.value, 30, "angle animVal");
   is(marker.getAttribute("orient"), "30deg", "angle attribute");
 
+  marker.setAttribute("orient", "auto");
+  is(marker.getAttribute("orient"), "auto", "checking 'auto' string preserved");
+
   marker.setAttribute("orient", "");
   ok(marker.getAttribute("orient") === "", "empty angle attribute");
   marker.removeAttribute("orient");
@@ -245,19 +248,8 @@ function runTests()
   // viewBox attribute
   var baseViewBox = marker.viewBox.baseVal;
   var animViewBox = marker.viewBox.animVal;
-  is(baseViewBox.x, 0, "viewBox baseVal");
-  is(animViewBox.x, 0, "viewBox baseVal");
-  is(baseViewBox.y, 0, "viewBox baseVal");
-  is(animViewBox.y, 0, "viewBox baseVal");
-  is(baseViewBox.width, 0, "viewBox baseVal");
-  is(animViewBox.width, 0, "viewBox baseVal");
-  is(baseViewBox.height, 0, "viewBox baseVal");
-  is(animViewBox.height, 0, "viewBox baseVal");
-  baseViewBox.x = 10;
-  baseViewBox.y = 11;
-  baseViewBox.width = 12;
-  baseViewBox.height = 13;
-  is(marker.getAttribute("viewBox"), "10 11 12 13", "viewBox attribute");
+  is(baseViewBox, null, "viewBox baseVal");
+  is(animViewBox, null, "viewBox animVal");
 
   marker.setAttribute("viewBox", "1 2 3 4");
   is(marker.viewBox.baseVal.x, 1, "viewBox.x baseVal");
@@ -277,12 +269,41 @@ function runTests()
   marker.viewBox.baseVal.height = 8;
   is(marker.viewBox.animVal.height, 8, "viewBox.height animVal");
   is(marker.getAttribute("viewBox"), "5 6 7 8", "viewBox attribute");
+  var storedViewBox = marker.viewBox.baseVal;
   marker.removeAttribute("viewBox");
   is(marker.hasAttribute("viewBox"), false, "viewBox hasAttribute");
   ok(marker.getAttribute("viewBox") === null, "removed viewBox attribute");
+  is(marker.viewBox.baseVal, null, "viewBox baseVal");
+  is(marker.viewBox.animVal, null, "viewBox animVal");
+
+  is(storedViewBox.width, 7, "Should not lose values");
+  storedViewBox.width = 200;
+  is(storedViewBox.width, 200, "Should be able to change detached viewBox rect");
+  is(marker.hasAttribute("viewBox"), false, "viewBox hasAttribute should still be false");
+  ok(marker.getAttribute("viewBox") === null, "viewBox attribute should still be null");
+  is(marker.viewBox.baseVal, null, "viewBox baseVal");
+  is(marker.viewBox.animVal, null, "viewBox animVal");
+
+  marker.setAttribute("viewBox", "none");
+  is(marker.hasAttribute("viewBox"), true, "viewBox hasAttribute");
+  is(marker.viewBox.baseVal, null, "viewBox baseVal");
+  is(marker.viewBox.animVal, null, "viewBox animVal");
 
   marker.setAttribute("viewBox", "");
+  is(marker.hasAttribute("viewBox"), true, "viewBox hasAttribute");
   ok(marker.getAttribute("viewBox") === "", "empty viewBox attribute");
+
+  marker.setAttribute("viewBox", "9 10 11 12");
+  marker.removeAttribute("viewBox");
+  marker.setAttribute("viewBox", "9 10 11 12");
+  is(marker.viewBox.baseVal.x, 9, "viewBox.x baseVal after re-setting attribute to same rect value");
+  is(marker.viewBox.baseVal.y, 10, "viewBox.y baseVal after re-setting attribute to same rect value");
+  is(marker.viewBox.baseVal.width, 11, "viewBox.width baseVal after re-setting attribute to same rect value");
+  is(marker.viewBox.baseVal.height, 12, "viewBox.height baseVal after re-setting attribute to same rect value");
+  is(marker.viewBox.animVal.x, 9, "viewBox.x animVal after re-setting attribute to same rect value");
+  is(marker.viewBox.animVal.y, 10, "viewBox.y animVal after re-setting attribute to same rect value");
+  is(marker.viewBox.animVal.width, 11, "viewBox.width animVal after re-setting attribute to same rect value");
+  is(marker.viewBox.animVal.height, 12, "viewBox.height animVal after re-setting attribute to same rect value");
 
   SimpleTest.finish();
 }

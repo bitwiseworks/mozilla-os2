@@ -7,49 +7,79 @@
 
 function test() {
   // initialization
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
   waitForExplicitFinish();
+  let windowsToClose = [];
+  let windowsToReset = [];
 
-  let tabBlank = gBrowser.selectedTab;
-  let blankBrowser = gBrowser.getBrowserForTab(tabBlank);
-  blankBrowser.addEventListener("load", function() {
-    blankBrowser.removeEventListener("load", arguments.callee, true);
+  function doTestWhenReady(aIsZoomedWindow, aWindow, aCallback) {
+    // Need to wait on two things, the ordering of which is not guaranteed:
+    // (1) the page load, and (2) FullZoom's update to the new page's zoom
+    // level.  FullZoom broadcasts "browser-fullZoom:locationChange" when its
+    // update is done.  (See bug 856366 for details.)
 
-    // change the zoom on the blank page
-    FullZoom.enlarge();
-    isnot(ZoomManager.zoom, 1, "Zoom level for about:blank should be changed");
+    let n = 0;
 
-    // enter private browsing mode
-    pb.privateBrowsingEnabled = true;
-    let tabAboutPB = gBrowser.selectedTab;
-    let browserAboutPB = gBrowser.getBrowserForTab(tabAboutPB);
-    browserAboutPB.addEventListener("load", function() {
-      browserAboutPB.removeEventListener("load", arguments.callee, true);
-      setTimeout(function() {
-        // make sure the zoom level is set to 1
-        is(ZoomManager.zoom, 1, "Zoom level for about:privatebrowsing should be reset");
-        finishTest();
-      }, 0);
+    let browser = aWindow.gBrowser.selectedBrowser;
+    browser.addEventListener("load", function onLoad() {
+      browser.removeEventListener("load", onLoad, true);
+      if (++n == 2)
+        doTest(aIsZoomedWindow, aWindow, aCallback);
     }, true);
-  }, true);
-  blankBrowser.loadURI("about:blank");
-}
 
-function finishTest() {
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
-  // leave private browsing mode
-  pb.privateBrowsingEnabled = false;
-  let tabBlank = gBrowser.selectedTab;
-  let blankBrowser = gBrowser.getBrowserForTab(tabBlank);
-  blankBrowser.addEventListener("load", function() {
-    blankBrowser.removeEventListener("load", arguments.callee, true);
+    let topic = "browser-fullZoom:locationChange";
+    Services.obs.addObserver(function onLocationChange() {
+      Services.obs.removeObserver(onLocationChange, topic);
+      if (++n == 2)
+        doTest(aIsZoomedWindow, aWindow, aCallback);
+    }, topic, false);
 
-    executeSoon(function() {
-      // cleanup
-      FullZoom.reset();
-      finish();
+    browser.loadURI("about:blank");
+  }
+
+  function doTest(aIsZoomedWindow, aWindow, aCallback) {
+    if (aIsZoomedWindow) {
+      is(aWindow.ZoomManager.zoom, 1,
+         "Zoom level for freshly loaded about:blank should be 1");
+      // change the zoom on the blank page
+      aWindow.FullZoom.enlarge();
+      isnot(aWindow.ZoomManager.zoom, 1, "Zoom level for about:blank should be changed");
+      aCallback();
+      return;
+    }
+    // make sure the zoom level is set to 1
+    is(aWindow.ZoomManager.zoom, 1, "Zoom level for about:privatebrowsing should be reset");
+    aCallback();
+  }
+
+  function finishTest() {
+    // cleanup
+    windowsToReset.forEach(function(win) {
+      win.FullZoom.reset();
     });
-  }, true);
+    finish();
+  }
+
+  function testOnWindow(options, callback) {
+    let win = OpenBrowserWindow(options);
+    win.addEventListener("load", function onLoad() {
+      win.removeEventListener("load", onLoad, false);
+      windowsToClose.push(win);
+      windowsToReset.push(win);
+      executeSoon(function() callback(win));
+    }, false);
+  };
+
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(win) {
+      win.close();
+    });
+  });
+
+  testOnWindow({}, function(win) {
+    doTestWhenReady(true, win, function() {
+      testOnWindow({private: true}, function(win) {
+        doTestWhenReady(false, win, finishTest);
+      });
+    });
+  });
 }

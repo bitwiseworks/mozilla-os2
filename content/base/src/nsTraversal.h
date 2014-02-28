@@ -12,32 +12,36 @@
 #define nsTraversal_h___
 
 #include "nsCOMPtr.h"
+#include "nsIDocument.h"
+#include "mozilla/dom/CallbackObject.h"
+#include "mozilla/ErrorResult.h"
+#include "mozilla/dom/NodeFilterBinding.h"
+#include "nsIDOMNodeFilter.h"
 
 class nsINode;
-class nsIDOMNodeFilter;
 
 class nsTraversal
 {
 public:
     nsTraversal(nsINode *aRoot,
                 uint32_t aWhatToShow,
-                nsIDOMNodeFilter *aFilter);
+                const mozilla::dom::NodeFilterHolder &aFilter);
     virtual ~nsTraversal();
 
 protected:
     nsCOMPtr<nsINode> mRoot;
     uint32_t mWhatToShow;
-    nsCOMPtr<nsIDOMNodeFilter> mFilter;
+    mozilla::dom::NodeFilterHolder mFilter;
     bool mInAcceptNode;
 
     /*
      * Tests if and how a node should be filtered. Uses mWhatToShow and
      * mFilter to test the node.
      * @param aNode     Node to test
-     * @param _filtered Returned filtervalue. See nsIDOMNodeFilter.idl
-     * @returns         Errorcode
+     * @param aResult   Whether we succeeded
+     * @returns         Filtervalue. See nsIDOMNodeFilter.idl
      */
-    nsresult TestNode(nsINode* aNode, int16_t* _filtered);
+    int16_t TestNode(nsINode* aNode, mozilla::ErrorResult& aResult);
 };
 
 #endif

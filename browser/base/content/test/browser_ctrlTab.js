@@ -9,7 +9,7 @@ function test() {
 
   ctrlTabTest([2]      , 1, 0);
   ctrlTabTest([2, 3, 1], 2, 2);
-  ctrlTabTest([]       , 5, 2);
+  ctrlTabTest([]       , 4, 2);
 
   {
     let selectedIndex = gBrowser.tabContainer.selectedIndex;
@@ -39,7 +39,7 @@ function test() {
 
   gBrowser.addTab();
   checkTabs(3);
-  ctrlTabTest([2, 1, 0], 9, 1);
+  ctrlTabTest([2, 1, 0], 7, 1);
 
   gBrowser.addTab();
   checkTabs(4);
@@ -59,7 +59,7 @@ function test() {
     pressCtrlTab(true);
     pressCtrlTab(true);
     releaseCtrl();
-    ok(gBrowser.selectedTab == selectedTab,
+    ok(selectedTab.selected,
        "Ctrl+Tab*2 -> Ctrl+W -> Ctrl+Shift+Tab*2 keeps the selected tab");
   }
   gBrowser.removeTab(gBrowser.tabContainer.lastChild);

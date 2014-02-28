@@ -8,7 +8,7 @@
 ## CSS Snapshot 2007
 
 # CSS2.1
-# include css2.1/reftest.list
+include css21/reftest.list
 
 # Animations
 # include animations/reftest.list
@@ -19,6 +19,9 @@
 # Conditional Rules Level 3
 include conditional3/reftest.list
 
+# Flexible Box Layout Module
+include flexbox/reftest.list
+
 # Fonts Level 3
 # include fonts3/reftest.list
 
@@ -28,8 +31,8 @@ include conditional3/reftest.list
 # Media Queries Level 3
 # include mediaqueries3/reftest.list
 
-# Multi-column Layout
-# include multicol/reftest.list
+# Multi-column Layout 3
+include multicol3/reftest.list
 
 # Selectors Level 3
 # include selectors3/reftest.list
@@ -50,4 +53,4 @@ include conditional3/reftest.list
 # include ui3/reftest.list
 
 # Values and Units Level 3
-# include values/reftest.list
+include values3/reftest.list

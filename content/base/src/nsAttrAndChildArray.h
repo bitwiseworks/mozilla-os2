@@ -68,10 +68,14 @@ public:
   // Like RemoveChildAt but hands the reference to the child being
   // removed back to the caller instead of just releasing it.
   already_AddRefed<nsIContent> TakeChildAt(uint32_t aPos);
-  int32_t IndexOfChild(nsINode* aPossibleChild) const;
+  int32_t IndexOfChild(const nsINode* aPossibleChild) const;
 
   uint32_t AttrCount() const;
-  const nsAttrValue* GetAttr(nsIAtom* aLocalName, int32_t aNamespaceID = kNameSpaceID_None) const;
+  const nsAttrValue* GetAttr(nsIAtom* aLocalName,
+                             int32_t aNamespaceID = kNameSpaceID_None) const;
+  // As above but using a string attr name and always using
+  // kNameSpaceID_None.  This is always case-sensitive.
+  const nsAttrValue* GetAttr(const nsAString& aName) const;
   // Get an nsAttrValue by qualified name.  Can optionally do
   // ASCII-case-insensitive name matching.
   const nsAttrValue* GetAttr(const nsAString& aName,

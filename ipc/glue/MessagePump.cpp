@@ -22,7 +22,7 @@
 using mozilla::ipc::DoWorkRunnable;
 using mozilla::ipc::MessagePump;
 using mozilla::ipc::MessagePumpForChildProcess;
-using base::Time;
+using base::TimeTicks;
 
 NS_IMPL_THREADSAFE_ISUPPORTS2(DoWorkRunnable, nsIRunnable, nsITimerCallback)
 
@@ -92,7 +92,7 @@ MessagePump::Run(MessagePump::Delegate* aDelegate)
     // This processes messages in the Android Looper. Note that we only
     // get here if the normal Gecko event loop has been awoken above.
     // Bug 750713
-    AndroidBridge::Bridge()->PumpMessageLoop();
+    did_work |= AndroidBridge::Bridge()->PumpMessageLoop();
 #endif
 
     did_work |= aDelegate->DoDelayedWork(&delayed_work_time_);
@@ -147,7 +147,7 @@ MessagePump::ScheduleWorkForNestedLoop()
 }
 
 void
-MessagePump::ScheduleDelayedWork(const base::Time& aDelayedTime)
+MessagePump::ScheduleDelayedWork(const base::TimeTicks& aDelayedTime)
 {
   if (!mDelayedWorkTimer) {
     mDelayedWorkTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
@@ -165,7 +165,7 @@ MessagePump::ScheduleDelayedWork(const base::Time& aDelayedTime)
 
   delayed_work_time_ = aDelayedTime;
 
-  base::TimeDelta delay = aDelayedTime - base::Time::Now();
+  base::TimeDelta delay = aDelayedTime - base::TimeTicks::Now();
   uint32_t delayMS = uint32_t(delay.InMilliseconds());
   mDelayedWorkTimer->InitWithCallback(mDoWorkEvent, delayMS,
                                       nsITimer::TYPE_ONE_SHOT);

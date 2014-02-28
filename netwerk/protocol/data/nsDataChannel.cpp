@@ -5,8 +5,10 @@
 
 // data implementation
 
-#include "nsIOService.h"
 #include "nsDataChannel.h"
+
+#include "mozilla/Base64.h"
+#include "nsIOService.h"
 #include "nsDataHandler.h"
 #include "nsNetUtil.h"
 #include "nsIPipe.h"
@@ -14,9 +16,8 @@
 #include "nsIOutputStream.h"
 #include "nsReadableUtils.h"
 #include "nsEscape.h"
-#include "plbase64.h"
-#include "plstr.h"
-#include "prmem.h"
+
+using namespace mozilla;
 
 nsresult
 nsDataChannel::OpenContentStream(bool async, nsIInputStream **result,
@@ -26,7 +27,7 @@ nsDataChannel::OpenContentStream(bool async, nsIInputStream **result,
 
     nsresult rv;
 
-    nsCAutoString spec;
+    nsAutoCString spec;
     rv = URI()->GetAsciiSpec(spec);
     if (NS_FAILED(rv)) return rv;
 
@@ -51,7 +52,7 @@ nsDataChannel::OpenContentStream(bool async, nsIInputStream **result,
     rv = NS_NewPipe(getter_AddRefs(bufInStream),
                     getter_AddRefs(bufOutStream),
                     nsIOService::gDefaultSegmentSize,
-                    PR_UINT32_MAX,
+                    UINT32_MAX,
                     async, true);
     if (NS_FAILED(rv))
         return rv;
@@ -70,17 +71,10 @@ nsDataChannel::OpenContentStream(bool async, nsIInputStream **result,
         }
         resultLen = ((resultLen * 3) / 4);
 
-        // XXX PL_Base64Decode will return a null pointer for decoding
-        // errors.  Since those are more likely than out-of-memory,
-        // should we return NS_ERROR_MALFORMED_URI instead?
-        char * decodedData = PL_Base64Decode(dataBuffer.get(), dataLen, nullptr);
-        if (!decodedData) {
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
-
-        rv = bufOutStream->Write(decodedData, resultLen, &contentLen);
-
-        PR_Free(decodedData);
+        nsAutoCString decodedData;
+        rv = Base64Decode(dataBuffer, decodedData);
+        NS_ENSURE_SUCCESS(rv, rv);
+        rv = bufOutStream->Write(decodedData.get(), resultLen, &contentLen);
     } else {
         rv = bufOutStream->Write(dataBuffer.get(), dataBuffer.Length(), &contentLen);
     }
@@ -89,7 +83,7 @@ nsDataChannel::OpenContentStream(bool async, nsIInputStream **result,
 
     SetContentType(contentType);
     SetContentCharset(contentCharset);
-    SetContentLength64(contentLen);
+    mContentLength = contentLen;
 
     NS_ADDREF(*result = bufInStream);
 

@@ -40,20 +40,24 @@ interface nsIAtom : nsISupports
 
 %{C++
   // note this is NOT virtual so this won't muck with the vtable!
-  inline bool Equals(const nsAString& aString) {
+  inline bool Equals(const nsAString& aString) const {
     return aString.Equals(nsDependentString(mString, mLength));
   }
 
-  inline const PRUnichar* GetUTF16String() {
+  inline const PRUnichar* GetUTF16String() const {
     return mString;
   }
 
-  inline const uint32_t GetLength() {
+  inline const uint32_t GetLength() const {
     return mLength;
   }
 
   inline void ToString(nsAString& aBuf) {
     nsStringBuffer::FromData(mString)->ToString(mLength, aBuf);
+  }
+
+  inline nsStringBuffer* GetStringBuffer() const {
+    return nsStringBuffer::FromData(mString);
   }
 
   /**
@@ -93,32 +97,32 @@ protected:
 
 /**
  * Find an atom that matches the given UTF-8 string.
- * The string is assumed to be zero terminated.
+ * The string is assumed to be zero terminated.  Never returns null.
  */
-extern nsIAtom* NS_NewAtom(const char* aUTF8String);
+extern already_AddRefed<nsIAtom> NS_NewAtom(const char* aUTF8String);
 
 inline already_AddRefed<nsIAtom> do_GetAtom(const char* aUTF8String)
     { return NS_NewAtom(aUTF8String); }
  
 /**
- * Find an atom that matches the given UTF-8 string.
+ * Find an atom that matches the given UTF-8 string.  Never returns null.
  */
-extern nsIAtom* NS_NewAtom(const nsACString& aUTF8String);
+extern already_AddRefed<nsIAtom> NS_NewAtom(const nsACString& aUTF8String);
 inline already_AddRefed<nsIAtom> do_GetAtom(const nsACString& aUTF8String)
     { return NS_NewAtom(aUTF8String); }
 
 /**
  * Find an atom that matches the given UTF-16 string.
- * The string is assumed to be zero terminated.
+ * The string is assumed to be zero terminated.  Never returns null.
  */
-extern nsIAtom* NS_NewAtom(const PRUnichar* aUTF16String);
+extern already_AddRefed<nsIAtom> NS_NewAtom(const PRUnichar* aUTF16String);
 inline already_AddRefed<nsIAtom> do_GetAtom(const PRUnichar* aUTF16String)
     { return NS_NewAtom(aUTF16String); }
 
 /**
- * Find an atom that matches the given UTF-16 string.
+ * Find an atom that matches the given UTF-16 string.  Never returns null.
  */
-extern nsIAtom* NS_NewAtom(const nsAString& aUTF16String);
+extern already_AddRefed<nsIAtom> NS_NewAtom(const nsAString& aUTF16String);
 extern nsIAtom* NS_NewPermanentAtom(const nsAString& aUTF16String);
 inline already_AddRefed<nsIAtom> do_GetAtom(const nsAString& aUTF16String)
     { return NS_NewAtom(aUTF16String); }

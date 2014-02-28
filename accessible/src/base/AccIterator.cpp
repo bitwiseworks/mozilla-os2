@@ -5,7 +5,11 @@
 #include "AccIterator.h"
 
 #include "nsAccessibilityService.h"
-#include "Accessible.h"
+#include "AccGroupInfo.h"
+#include "Accessible-inl.h"
+#ifdef MOZ_XUL
+#include "XULTreeAccessible.h"
+#endif
 
 #include "mozilla/dom/Element.h"
 #include "nsBindingManager.h"
@@ -18,9 +22,8 @@ using namespace mozilla::a11y;
 ////////////////////////////////////////////////////////////////////////////////
 
 AccIterator::AccIterator(Accessible* aAccessible,
-                         filters::FilterFuncPtr aFilterFunc,
-                         IterationType aIterationType) :
-  mFilterFunc(aFilterFunc), mIsDeep(aIterationType != eFlatNav)
+                         filters::FilterFuncPtr aFilterFunc) :
+  mFilterFunc(aFilterFunc)
 {
   mState = new IteratorState(aAccessible);
 }
@@ -40,19 +43,19 @@ AccIterator::Next()
   while (mState) {
     Accessible* child = mState->mParent->GetChildAt(mState->mIndex++);
     if (!child) {
-      IteratorState *tmp = mState;
+      IteratorState* tmp = mState;
       mState = mState->mParentState;
       delete tmp;
 
       continue;
     }
 
-    bool isComplying = mFilterFunc(child);
-    if (isComplying)
+    uint32_t result = mFilterFunc(child);
+    if (result & filters::eMatch)
       return child;
 
-    if (mIsDeep) {
-      IteratorState *childState = new IteratorState(child, mState);
+    if (!(result & filters::eSkipSubtree)) {
+      IteratorState* childState = new IteratorState(child, mState);
       mState = childState;
     }
   }
@@ -330,6 +333,11 @@ IDRefsIterator::Next()
   return nextElm ? mDoc->GetAccessible(nextElm) : nullptr;
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+// SingleAccIterator
+////////////////////////////////////////////////////////////////////////////////
+
 Accessible*
 SingleAccIterator::Next()
 {
@@ -338,3 +346,56 @@ SingleAccIterator::Next()
   return (nextAcc && !nextAcc->IsDefunct()) ? nextAcc : nullptr;
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+// ItemIterator
+////////////////////////////////////////////////////////////////////////////////
+
+Accessible*
+ItemIterator::Next()
+{
+  if (mContainer) {
+    mAnchor = AccGroupInfo::FirstItemOf(mContainer);
+    mContainer = nullptr;
+    return mAnchor;
+  }
+
+  return mAnchor ? (mAnchor = AccGroupInfo::NextItemTo(mAnchor)) : nullptr;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// XULTreeItemIterator
+////////////////////////////////////////////////////////////////////////////////
+
+XULTreeItemIterator::XULTreeItemIterator(XULTreeAccessible* aXULTree,
+                                         nsITreeView* aTreeView,
+                                         int32_t aRowIdx) :
+  mXULTree(aXULTree), mTreeView(aTreeView), mRowCount(-1),
+  mContainerLevel(-1), mCurrRowIdx(aRowIdx + 1)
+{
+  mTreeView->GetRowCount(&mRowCount);
+  if (aRowIdx != -1)
+    mTreeView->GetLevel(aRowIdx, &mContainerLevel);
+}
+
+Accessible*
+XULTreeItemIterator::Next()
+{
+  while (mCurrRowIdx < mRowCount) {
+    int32_t level = 0;
+    mTreeView->GetLevel(mCurrRowIdx, &level);
+
+    if (level == mContainerLevel + 1)
+      return mXULTree->GetTreeItemAccessible(mCurrRowIdx++);
+
+    if (level <= mContainerLevel) { // got level up
+      mCurrRowIdx = mRowCount;
+      break;
+    }
+
+    mCurrRowIdx++;
+  }
+
+  return nullptr;
+}

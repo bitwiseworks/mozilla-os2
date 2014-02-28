@@ -9,7 +9,7 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = sutAgentAndroid
+ANDROID_APK_NAME := sutAgentAndroid
 
 JAVAFILES = \
   AlertLooperThread.java \
@@ -24,7 +24,6 @@ JAVAFILES = \
   RunCmdThread.java \
   RunDataThread.java \
   SUTAgentAndroid.java \
-  SUTStartupIntentReceiver.java \
   WifiConfiguration.java \
   R.java \
   $(NULL)
@@ -42,41 +41,39 @@ RES_FILES = \
 GARBAGE += \
   AndroidManifest.xml  \
   classes.dex  \
-  sutAgentAndroid.apk  \
+  $(ANDROID_APK_NAME).ap_ \
+  $(ANDROID_APK_NAME)-unsigned-unaligned.apk \
+  $(ANDROID_APK_NAME)-unaligned.apk \
+  $(ANDROID_APK_NAME).apk \
   $(NULL)
 
-GARBAGE_DIRS += res classes network-libs
+GARBAGE_DIRS += network-libs
 
-JAVA_CLASSPATH = $(ANDROID_SDK)/android.jar:$(srcdir)/network-libs/commons-net-2.0.jar
+EXTRA_JARS = $(srcdir)/network-libs/commons-net-2.0.jar:$(srcdir)/network-libs/jmdns.jar
+
+JAVA_CLASSPATH = $(ANDROID_SDK)/android.jar:$(EXTRA_JARS)
 
 include $(topsrcdir)/config/rules.mk
 
 # include Android specific java flags - using these instead of what's in rules.mk
 include $(topsrcdir)/config/android-common.mk
 
-tools:: sutAgentAndroid.apk
+tools:: $(ANDROID_APK_NAME).apk
 
 classes.dex: $(JAVAFILES)
-	$(NSINSTALL) -D classes
 	$(JAVAC) $(JAVAC_FLAGS) -d classes  $(addprefix $(srcdir)/,$(JAVAFILES))
-	$(DX) --dex --output=$@ classes
+	$(DX) --dex --output=$@ classes $(subst :, ,$(EXTRA_JARS))
 
-sutAgentAndroid.ap_: $(srcdir)/AndroidManifest.xml
-	$(AAPT) package -f -M $(srcdir)/AndroidManifest.xml -I $(ANDROID_SDK)/android.jar  -S res -F $@
+$(ANDROID_APK_NAME).ap_: AndroidManifest.xml
+	$(AAPT) package -f -M $< -I $(ANDROID_SDK)/android.jar -S res -F $@
 
-sutAgentAndroid-unsigned-unaligned.apk: sutAgentAndroid.ap_ classes.dex
-	$(APKBUILDER) $@ -v $(APKBUILDER_FLAGS) -z sutAgentAndroid.ap_ -f classes.dex
+$(ANDROID_APK_NAME)-unsigned-unaligned.apk: $(ANDROID_APK_NAME).ap_ classes.dex
+	cp $< $@
+	$(ZIP) -0 $@ classes.dex
 
-sutAgentAndroid-unaligned.apk: sutAgentAndroid-unsigned-unaligned.apk
-	cp  sutAgentAndroid-unsigned-unaligned.apk $@
-ifdef JARSIGNER
-	$(JARSIGNER) $@
-endif
+$(ANDROID_APK_NAME)-unaligned.apk: $(ANDROID_APK_NAME)-unsigned-unaligned.apk
+	cp $< $@
+	$(DEBUG_JARSIGNER) $@
 
-sutAgentAndroid.apk: sutAgentAndroid-unaligned.apk
-	$(ZIPALIGN) -f -v 4 sutAgentAndroid-unaligned.apk $@
-
-export::
-	$(NSINSTALL) -D res
-	@(cd $(srcdir)/res && tar $(TAR_CREATE_FLAGS) - *) | (cd $(DEPTH)/build/mobile/sutagent/android/res && tar -xf -)
-
+$(ANDROID_APK_NAME).apk: $(ANDROID_APK_NAME)-unaligned.apk
+	$(ZIPALIGN) -f -v 4 $< $@

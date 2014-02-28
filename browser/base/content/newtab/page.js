@@ -39,15 +39,21 @@ let gPage = {
     this._updateAttributes(enabled);
 
     // Initialize the whole page if we haven't done that, yet.
-    if (enabled)
+    if (enabled) {
       this._init();
+    } else {
+      gUndoDialog.hide();
+    }
   },
 
   /**
    * Updates the whole page and the grid when the storage has changed.
    */
   update: function Page_update() {
-    gGrid.refresh();
+    // The grid might not be ready yet as we initialize it asynchronously.
+    if (gGrid.ready) {
+      gGrid.refresh();
+    }
   },
 
   /**

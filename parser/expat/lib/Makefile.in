@@ -9,18 +9,13 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= expat
-LIBRARY_NAME	= mozexpat_s
+MSVC_ENABLE_PGO := 1
 
 CSRCS		= \
 		xmlparse.c \
 		xmlrole.c \
 		xmltok.c \
 		$(NULL)
-
-EXPORTS		= \
-		expat.h \
-		expat_external.h
 
 # We want only the static lib, not the shared lib
 FORCE_STATIC_LIB = 1

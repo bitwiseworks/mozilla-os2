@@ -14,7 +14,6 @@
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/ErrorResult.h"
 
-using namespace mozilla::dom;
 
 BEGIN_WORKERS_NAMESPACE
 
@@ -38,16 +37,16 @@ public:
   _finalize(JSFreeOp* aFop) MOZ_OVERRIDE;
 
   void
-  AddEventListener(const nsAString& aType, JSObject* aListener,
+  AddEventListener(const nsAString& aType, JS::Handle<JSObject*> aListener,
                    bool aCapture, Nullable<bool> aWantsUntrusted,
                    ErrorResult& aRv);
 
   void
-  RemoveEventListener(const nsAString& aType, JSObject* aListener,
+  RemoveEventListener(const nsAString& aType, JS::Handle<JSObject*> aListener,
                       bool aCapture, ErrorResult& aRv);
 
   bool
-  DispatchEvent(JSObject* aEvent, ErrorResult& aRv) const
+  DispatchEvent(JS::Handle<JSObject*> aEvent, ErrorResult& aRv) const
   {
     return mListenerManager.DispatchEvent(GetJSContext(), *this, aEvent, aRv);
   }
@@ -56,13 +55,30 @@ public:
   GetEventListener(const nsAString& aType, ErrorResult& aRv) const;
 
   void
-  SetEventListener(const nsAString& aType, JSObject* aListener,
+  SetEventListener(const nsAString& aType, JS::Handle<JSObject*> aListener,
                    ErrorResult& aRv);
 
   bool
   HasListeners() const
   {
     return mListenerManager.HasListeners();
+  }
+
+  void SetEventHandler(JSContext*, const nsAString& aType, JSObject* aHandler,
+                       ErrorResult& rv)
+  {
+    rv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+  }
+
+  JSObject* GetEventHandler(JSContext*, const nsAString& aType)
+  {
+    return nullptr;
+  }
+
+  JSObject* GetOwnerGlobal() const
+  {
+    // We have no windows
+    return nullptr;
   }
 };
 

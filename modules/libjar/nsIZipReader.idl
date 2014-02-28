@@ -9,7 +9,7 @@
 interface nsIUTF8StringEnumerator;
 interface nsIInputStream;
 interface nsIFile;
-interface nsIPrincipal;
+interface nsICertificatePrincipal;
 
 [scriptable, uuid(e1c028bc-c478-11da-95a8-00e08161165f)]
 interface nsIZipEntry : nsISupports
@@ -53,7 +53,7 @@ interface nsIZipEntry : nsISupports
     readonly attribute boolean          isSynthetic;
 };
 
-[scriptable, uuid(8fbf5023-3827-4fbc-a464-5db546e7f747)]
+[scriptable, uuid(38d6d07a-8a58-4fe7-be8b-ef6472fa83ff)]
 interface nsIZipReader : nsISupports
 {
     /**
@@ -77,6 +77,9 @@ interface nsIZipReader : nsISupports
     /**
      * Closes a zip reader. Subsequent attempts to extract files or read from
      * its input stream will result in an error.
+     *
+     * Subsequent attempts to access a nsIZipEntry obtained from this zip
+     * reader will cause unspecified behavior.
      */
     void close();
 
@@ -177,7 +180,7 @@ interface nsIZipReader : nsISupports
      * stored in the jar, verifyExternalFile (not yet implemented) must 
      * be called before getPrincipal.
      */
-    nsIPrincipal getCertificatePrincipal(in AUTF8String aEntryName);   
+    nsICertificatePrincipal getCertificatePrincipal(in AUTF8String aEntryName);   
     
     readonly attribute uint32_t manifestEntriesCount;
 };
@@ -185,7 +188,7 @@ interface nsIZipReader : nsISupports
 ////////////////////////////////////////////////////////////////////////////////
 // nsIZipReaderCache
 
-[scriptable, uuid(72fc56e5-3e6e-4d11-8967-26ab96071032)]
+[scriptable, uuid(748050ac-3ab6-4472-bc2a-cb1564ac6a81)]
 interface nsIZipReaderCache : nsISupports
 {
     /**
@@ -209,6 +212,11 @@ interface nsIZipReaderCache : nsISupports
      *       will return the closed zip reader.
      */
     nsIZipReader getZip(in nsIFile zipFile);
+
+    /**
+     * returns true if this zipreader already has this file cached
+     */
+    bool isCached(in nsIFile zipFile);
 
     /**
      * Returns a (possibly shared) nsIZipReader for a zip inside another zip

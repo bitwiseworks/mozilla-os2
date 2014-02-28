@@ -1,13 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function log(text) {
-  dump("WORKER "+text+"\n");
-}
-
-function send(message) {
-  self.postMessage(message);
-}
+importScripts('worker_test_osfile_shared.js');
 
 self.onmessage = function(msg) {
   self.onmessage = function(msg) {
@@ -19,46 +13,31 @@ self.onmessage = function(msg) {
   test_OpenClose();
   test_CreateFile();
   test_ReadWrite();
-  test_path();
   finish();
 };
 
-function finish() {
-  send({kind: "finish"});
-}
-
-function ok(condition, description) {
-  send({kind: "ok", condition: condition, description:description});
-}
-function is(a, b, description) {
-  let outcome = a == b; // Need to decide outcome here, as not everything can be serialized
-  send({kind: "is", outcome: outcome, description: description, a:""+a, b:""+b});
-}
-function isnot(a, b, description) {
-  let outcome = a != b; // Need to decide outcome here, as not everything can be serialized
-  send({kind: "isnot", outcome: outcome, description: description, a:""+a, b:""+b});
-}
-
 function test_init() {
-  ok(true, "Starting test_init");
-  importScripts("resource:///modules/osfile.jsm");
+  info("Starting test_init");
+  importScripts("resource://gre/modules/osfile.jsm");
 }
 
 function test_OpenClose() {
-  ok(true, "Starting test_OpenClose");
+  info("Starting test_OpenClose");
   is(typeof OS.Win.File.CreateFile, "function", "OS.Win.File.CreateFile is a function");
+  is(OS.Win.File.CloseHandle(OS.Constants.Win.INVALID_HANDLE_VALUE), true, "CloseHandle returns true given the invalid handle");
+  is(OS.Win.File.FindClose(OS.Constants.Win.INVALID_HANDLE_VALUE), true, "FindClose returns true given the invalid handle");
   isnot(OS.Constants.Win.GENERIC_READ, undefined, "GENERIC_READ exists");
   isnot(OS.Constants.Win.FILE_SHARE_READ, undefined, "FILE_SHARE_READ exists");
   isnot(OS.Constants.Win.FILE_ATTRIBUTE_NORMAL, undefined, "FILE_ATTRIBUTE_NORMAL exists");
   let file = OS.Win.File.CreateFile(
-    "chrome\\toolkit\\components\\osfile\\tests\\mochi\\worker_test_osfile_unix.js",
+    "chrome\\toolkit\\components\\osfile\\tests\\mochi\\worker_test_osfile_win.js",
     OS.Constants.Win.GENERIC_READ,
     0,
     null,
     OS.Constants.Win.OPEN_EXISTING,
     0,
     null);
-  ok(true, "test_OpenClose: Passed open");
+  info("test_OpenClose: Passed open");
   isnot(file, OS.Constants.Win.INVALID_HANDLE_VALUE, "test_OpenClose: file opened");
   let result = OS.Win.File.CloseHandle(file);
   isnot(result, 0, "test_OpenClose: close succeeded");
@@ -77,7 +56,7 @@ function test_OpenClose() {
 
 function test_CreateFile()
 {
-  ok(true, "Starting test_CreateFile");
+  info("Starting test_CreateFile");
   let file = OS.Win.File.CreateFile(
     "test.tmp",
     OS.Constants.Win.GENERIC_READ | OS.Constants.Win.GENERIC_WRITE,
@@ -101,11 +80,11 @@ function test_GetCurrentDirectory()
 
 function test_ReadWrite()
 {
-  ok(true, "Starting test_ReadWrite");
+  info("Starting test_ReadWrite");
   let output_name = "osfile_copy.tmp";
   // Copy file
   let input = OS.Win.File.CreateFile(
-    "chrome\\toolkit\\components\\osfile\\tests\\mochi\\worker_test_osfile_unix.js",
+    "chrome\\toolkit\\components\\osfile\\tests\\mochi\\worker_test_osfile_win.js",
      OS.Constants.Win.GENERIC_READ,
      0,
      null,
@@ -151,7 +130,7 @@ function test_ReadWrite()
       bytes_left -= bytes_written;
     }
   }
-  ok(true, "test_ReadWrite: copy complete");
+  info("test_ReadWrite: copy complete");
 
   // Compare files
   result = OS.Win.File.SetFilePointer(input, 0, null, OS.Constants.Win.FILE_BEGIN);
@@ -199,73 +178,13 @@ function test_ReadWrite()
       }
     }
   }
-  ok(true, "test_ReadWrite test complete");
+  info("test_ReadWrite test complete");
   result = OS.Win.File.CloseHandle(input);
   isnot(result, 0, "test_ReadWrite: inpout close succeeded");
   result = OS.Win.File.CloseHandle(output);
   isnot(result, 0, "test_ReadWrite: outpout close succeeded");
   result = OS.Win.File.DeleteFile(output_name);
   isnot(result, 0, "test_ReadWrite: output remove succeeded");
-  ok(true, "test_ReadWrite cleanup complete");
+  info("test_ReadWrite cleanup complete");
 }
 
-function test_path()
-{
-  ok(true, "test_path: starting");
-  is(OS.Win.Path.basename("a\\b"), "b", "basename of a\\b");
-  is(OS.Win.Path.basename("a\\b\\"), "", "basename of a\\b\\");
-  is(OS.Win.Path.basename("abc"), "abc", "basename of abc");
-  is(OS.Win.Path.dirname("a\\b"), "a", "dirname of a\\b");
-  is(OS.Win.Path.dirname("a\\b\\"), "a\\b", "dirname of a\\b\\");
-  is(OS.Win.Path.dirname("a\\\\\\\\b"), "a", "dirname of a\\\\\\b");
-  is(OS.Win.Path.dirname("abc"), ".", "dirname of abc");
-  is(OS.Win.Path.normalize("\\a\\b\\c"), "\\a\\b\\c", "normalize \\a\\b\\c");
-  is(OS.Win.Path.normalize("\\a\\b\\\\\\\\c"), "\\a\\b\\c", "normalize \\a\\b\\\\\\\\c");
-  is(OS.Win.Path.normalize("\\a\\b\\c\\\\\\"), "\\a\\b\\c", "normalize \\a\\b\\c\\\\\\");
-  is(OS.Win.Path.normalize("\\a\\b\\c\\..\\..\\..\\d\\e\\f"), "\\d\\e\\f", "normalize \\a\\b\\c\\..\\..\\..\\d\\e\\f");
-  is(OS.Win.Path.normalize("a\\b\\c\\..\\..\\..\\d\\e\\f"), "d\\e\\f", "normalize a\\b\\c\\..\\..\\..\\d\\e\\f");
-  let error = false;
-  try {
-    OS.Win.Path.normalize("\\a\\b\\c\\..\\..\\..\\..\\d\\e\\f");
-  } catch (x) {
-    error = true;
-  }
-  ok(error, "cannot normalize \\a\\b\\c\\..\\..\\..\\..\\d\\e\\f");
-  is(OS.Win.Path.join("\\tmp", "foo", "bar"), "\\tmp\\foo\\bar", "join \\tmp,foo,bar");
-  is(OS.Win.Path.join("\\tmp", "\\foo", "bar"), "\\foo\\bar", "join \\tmp,\\foo,bar");
-
-  is(OS.Win.Path.basename("c:a\\b"), "b", "basename of c:a\\b");
-  is(OS.Win.Path.basename("c:a\\b\\"), "", "basename of c:a\\b\\");
-  is(OS.Win.Path.basename("c:abc"), "abc", "basename of c:abc");
-  is(OS.Win.Path.dirname("c:a\\b"), "c:a", "dirname of c:a\\b");
-  is(OS.Win.Path.dirname("c:a\\b\\"), "c:a\\b", "dirname of c:a\\b\\");
-  is(OS.Win.Path.dirname("c:a\\\\\\\\b"), "c:a", "dirname of c:a\\\\\\b");
-  is(OS.Win.Path.dirname("c:abc"), "c:", "dirname of c:abc");
-  let options = {
-    winNoDrive: true
-  };
-  is(OS.Win.Path.dirname("c:a\\b", options), "a", "dirname of c:a\\b");
-  is(OS.Win.Path.dirname("c:a\\b\\", options), "a\\b", "dirname of c:a\\b\\");
-  is(OS.Win.Path.dirname("c:a\\\\\\\\b", options), "a", "dirname of c:a\\\\\\b");
-  is(OS.Win.Path.dirname("c:abc", options), ".", "dirname of c:abc");
-
-  is(OS.Win.Path.normalize("c:\\a\\b\\c"), "c:\\a\\b\\c", "normalize c:\\a\\b\\c");
-  is(OS.Win.Path.normalize("c:\\a\\b\\\\\\\\c"), "c:\\a\\b\\c", "normalize c:\\a\\b\\\\\\\\c");
-  is(OS.Win.Path.normalize("c:\\\\\\\\a\\b\\c"), "c:\\a\\b\\c", "normalize c:\\\\\\a\\b\\c");
-  is(OS.Win.Path.normalize("c:\\a\\b\\c\\\\\\"), "c:\\a\\b\\c", "normalize c:\\a\\b\\c\\\\\\");
-  is(OS.Win.Path.normalize("c:\\a\\b\\c\\..\\..\\..\\d\\e\\f"), "c:\\d\\e\\f", "normalize c:\\a\\b\\c\\..\\..\\..\\d\\e\\f");
-  is(OS.Win.Path.normalize("c:a\\b\\c\\..\\..\\..\\d\\e\\f"), "c:d\\e\\f", "normalize c:a\\b\\c\\..\\..\\..\\d\\e\\f");
-  error = false;
-  try {
-    OS.Win.Path.normalize("c:\\a\\b\\c\\..\\..\\..\\..\\d\\e\\f");
-  } catch (x) {
-    error = true;
-  }
-  ok(error, "cannot normalize c:\\a\\b\\c\\..\\..\\..\\..\\d\\e\\f");
-  is(OS.Win.Path.join("c:\\tmp", "foo", "bar"), "c:\\tmp\\foo\\bar", "join c:\\tmp,foo,bar");
-  is(OS.Win.Path.join("c:\\tmp", "\\foo", "bar"), "c:\\foo\\bar", "join c:\\tmp,\\foo,bar");
-  is(OS.Win.Path.join("c:\\tmp", "c:\\foo", "bar"), "c:\\foo\\bar", "join c:\\tmp,c:\\foo,bar");
-  is(OS.Win.Path.join("c:\\tmp", "c:foo", "bar"), "c:foo\\bar", "join c:\\tmp,c:foo,bar");
-
-  ok(true, "test_path: complete");
-}

@@ -10,6 +10,8 @@ extern "C" {
 #include <libgnomevfs/gnome-vfs-mime-utils.h>
 }
 
+#include <algorithm>
+
 #include "nsServiceManagerUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "mozilla/ModuleUtils.h"
@@ -157,7 +159,7 @@ ProxiedAuthCallback(gconstpointer in,
     //     that we originally gave to it.  In spite of the likelihood of
     //     false hits, this check is probably still valuable.
     //
-    nsCAutoString spec;
+    nsAutoCString spec;
     uri->GetSpec(spec);
     int uriLen = strlen(authIn->uri);
     if (!StringHead(spec, uriLen).Equals(nsDependentCString(authIn->uri, uriLen)))
@@ -168,7 +170,7 @@ ProxiedAuthCallback(gconstpointer in,
   }
 #endif
 
-  nsCAutoString scheme, hostPort;
+  nsAutoCString scheme, hostPort;
   uri->GetScheme(scheme);
   uri->GetHostPort(hostPort);
 
@@ -319,7 +321,7 @@ class nsGnomeVFSInputStream MOZ_FINAL : public nsIInputStream
       : mSpec(uriSpec)
       , mChannel(nullptr)
       , mHandle(nullptr)
-      , mBytesRemaining(PR_UINT64_MAX)
+      , mBytesRemaining(UINT64_MAX)
       , mStatus(NS_OK)
       , mDirList(nullptr)
       , mDirListPtr(nullptr)
@@ -376,9 +378,9 @@ nsGnomeVFSInputStream::DoOpen()
   // nsIAuthPrompt instance.
 
   gnome_vfs_module_callback_push(GNOME_VFS_MODULE_CALLBACK_AUTHENTICATION,
-                                 AuthCallback, mChannel, NULL);
+                                 AuthCallback, mChannel, nullptr);
 
-  // Query the mime type first (this could return NULL). 
+  // Query the mime type first (this could return nullptr). 
   //
   // XXX We need to do this up-front in order to determine how to open the URI.
   //     Unfortunately, the error code GNOME_VFS_ERROR_IS_DIRECTORY is not
@@ -433,9 +435,10 @@ nsGnomeVFSInputStream::DoOpen()
 
       // Update the content length attribute on the channel.  We do this
       // synchronously without proxying.  This hack is not as bad as it looks!
-      if (mBytesRemaining != PR_UINT64_MAX) {
-        // XXX 64-bit
-        mChannel->SetContentLength(NS_MAX((int32_t)mBytesRemaining, PR_INT32_MAX));
+      if (mBytesRemaining > INT64_MAX) {
+        mChannel->SetContentLength(-1);
+      } else {
+        mChannel->SetContentLength(mBytesRemaining);
       }
     }
     else
@@ -494,7 +497,7 @@ nsGnomeVFSInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
       uint32_t bufLen = mDirBuf.Length() - mDirBufCursor;
       if (bufLen)
       {
-        uint32_t n = NS_MIN(bufLen, aCount);
+        uint32_t n = std::min(bufLen, aCount);
         memcpy(aBuf, mDirBuf.get() + mDirBufCursor, n);
         *aCountRead += n;
         aBuf += n;
@@ -901,7 +904,7 @@ nsGnomeVFSProtocolHandler::NewChannel(nsIURI *aURI, nsIChannel **aResult)
   NS_ENSURE_ARG_POINTER(aURI);
   nsresult rv;
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   rv = aURI->GetSpec(spec);
   if (NS_FAILED(rv))
     return rv;
@@ -959,13 +962,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsGnomeVFSProtocolHandler, Init)
 NS_DEFINE_NAMED_CID(NS_GNOMEVFSPROTOCOLHANDLER_CID);
 
 static const mozilla::Module::CIDEntry kVFSCIDs[] = {
-  { &kNS_GNOMEVFSPROTOCOLHANDLER_CID, false, NULL, nsGnomeVFSProtocolHandlerConstructor },
-  { NULL }
+  { &kNS_GNOMEVFSPROTOCOLHANDLER_CID, false, nullptr, nsGnomeVFSProtocolHandlerConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kVFSContracts[] = {
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX MOZ_GNOMEVFS_SCHEME, &kNS_GNOMEVFSPROTOCOLHANDLER_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kVFSModule = {

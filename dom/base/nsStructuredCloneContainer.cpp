@@ -8,9 +8,9 @@
 #include "nsStructuredCloneContainer.h"
 
 #include "nsCOMPtr.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptContext.h"
 #include "nsIVariant.h"
+#include "nsIXPConnect.h"
 #include "nsServiceManagerUtils.h"
 #include "nsContentUtils.h"
 
@@ -43,23 +43,19 @@ nsStructuredCloneContainer::InitFromVariant(nsIVariant *aData, JSContext *aCx)
   NS_ENSURE_ARG_POINTER(aData);
   NS_ENSURE_ARG_POINTER(aCx);
 
-  // First, try to extract a jsval from the variant |aData|.  This works only
+  // First, try to extract a JS::Value from the variant |aData|.  This works only
   // if the variant implements GetAsJSVal.
-  jsval jsData;
-  nsresult rv = aData->GetAsJSVal(&jsData);
+  JS::Rooted<JS::Value> jsData(aCx);
+  nsresult rv = aData->GetAsJSVal(jsData.address());
   NS_ENSURE_SUCCESS(rv, NS_ERROR_UNEXPECTED);
 
   // Make sure that we serialize in the right context.
-  JSAutoRequest ar(aCx);
- JSAutoCompartment ac(aCx, JS_GetGlobalObject(aCx));
-  JS_WrapValue(aCx, &jsData);
-
-  nsCxPusher cxPusher;
-  cxPusher.Push(aCx);
+  MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
+  JS_WrapValue(aCx, jsData.address());
 
   uint64_t* jsBytes = nullptr;
   bool success = JS_WriteStructuredClone(aCx, jsData, &jsBytes, &mSize,
-                                           nullptr, nullptr);
+                                           nullptr, nullptr, JSVAL_VOID);
   NS_ENSURE_STATE(success);
   NS_ENSURE_STATE(jsBytes);
 
@@ -69,9 +65,7 @@ nsStructuredCloneContainer::InitFromVariant(nsIVariant *aData, JSContext *aCx)
     mSize = 0;
     mVersion = 0;
 
-    // FIXME This should really be js::Foreground::Free, but that's not public.
-    JS_free(aCx, jsBytes);
-
+    JS_ClearStructuredClone(jsBytes, mSize);
     return NS_ERROR_FAILURE;
   }
   else {
@@ -80,8 +74,7 @@ nsStructuredCloneContainer::InitFromVariant(nsIVariant *aData, JSContext *aCx)
 
   memcpy(mData, jsBytes, mSize);
 
-  // FIXME Similarly, this should be js::Foreground::free.
-  JS_free(aCx, jsBytes);
+  JS_ClearStructuredClone(jsBytes, mSize);
   return NS_OK;
 }
 
@@ -94,7 +87,7 @@ nsStructuredCloneContainer::InitFromBase64(const nsAString &aData,
 
   NS_ConvertUTF16toUTF8 data(aData);
 
-  nsCAutoString binaryData;
+  nsAutoCString binaryData;
   nsresult rv = Base64Decode(data, binaryData);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -117,17 +110,22 @@ nsStructuredCloneContainer::DeserializeToVariant(JSContext *aCx,
   NS_ENSURE_ARG_POINTER(aData);
   *aData = nullptr;
 
-  // Deserialize to a jsval.
-  jsval jsStateObj;
+  // Deserialize to a JS::Value.
+  JS::Rooted<JS::Value> jsStateObj(aCx);
+  JSBool hasTransferable = false;
   bool success = JS_ReadStructuredClone(aCx, mData, mSize, mVersion,
-                                          &jsStateObj, nullptr, nullptr);
-  NS_ENSURE_STATE(success);
+                                        jsStateObj.address(), nullptr, nullptr) &&
+                 JS_StructuredCloneHasTransferables(mData, mSize,
+                                                    &hasTransferable);
+  // We want to be sure that mData doesn't contain transferable objects
+  MOZ_ASSERT(!hasTransferable);
+  NS_ENSURE_STATE(success && !hasTransferable);
 
-  // Now wrap the jsval as an nsIVariant.
+  // Now wrap the JS::Value as an nsIVariant.
   nsCOMPtr<nsIVariant> varStateObj;
   nsCOMPtr<nsIXPConnect> xpconnect = do_GetService(nsIXPConnect::GetCID());
   NS_ENSURE_STATE(xpconnect);
-  xpconnect->JSValToVariant(aCx, &jsStateObj, getter_AddRefs(varStateObj));
+  xpconnect->JSValToVariant(aCx, jsStateObj.address(), getter_AddRefs(varStateObj));
   NS_ENSURE_STATE(varStateObj);
 
   NS_IF_ADDREF(*aData = varStateObj);
@@ -140,8 +138,8 @@ nsStructuredCloneContainer::GetDataAsBase64(nsAString &aOut)
   NS_ENSURE_STATE(mData);
   aOut.Truncate();
 
-  nsCAutoString binaryData(reinterpret_cast<char*>(mData), mSize);
-  nsCAutoString base64Data;
+  nsAutoCString binaryData(reinterpret_cast<char*>(mData), mSize);
+  nsAutoCString base64Data;
   nsresult rv = Base64Encode(binaryData, base64Data);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -156,7 +154,7 @@ nsStructuredCloneContainer::GetSerializedNBytes(uint64_t *aSize)
   NS_ENSURE_ARG_POINTER(aSize);
 
   // mSize is a size_t, while aSize is a uint64_t.  We rely on an implicit cast
-  // here so that we'll get a compile error if a size_t-to-uint64 cast is
+  // here so that we'll get a compile error if a size_t-to-uint64_t cast is
   // narrowing.
   *aSize = mSize;
 

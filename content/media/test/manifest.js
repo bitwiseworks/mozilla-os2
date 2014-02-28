@@ -6,11 +6,13 @@
 // really only need one test file per backend here.
 var gSmallTests = [
   { name:"small-shot.ogg", type:"audio/ogg", duration:0.276 },
+  { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
+  { name:"small-shot.mp3", type:"audio/mpeg", duration:0.27 },
   { name:"r11025_s16_c1.wav", type:"audio/x-wav", duration:1.0 },
   { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266 },
   { name:"seek.webm", type:"video/webm", width:320, height:240, duration:3.966 },
   { name:"detodos.opus", type:"audio/ogg; codecs=opus", duration:2.9135 },
-  { name:"gizmo.mp4", type:"video/mp4", duration:5.0 },
+  { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
@@ -22,7 +24,7 @@ var gProgressTests = [
   { name:"seek.ogv", type:"video/ogg", duration:3.966, size:285310 },
   { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266, size:28942 },
   { name:"seek.webm", type:"video/webm", duration:3.966, size:215529 },
-  { name:"gizmo.mp4", type:"video/mp4", duration:5.0, size:383631 },
+  { name:"gizmo.mp4", type:"video/mp4", duration:5.56, size:383631 },
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
@@ -32,7 +34,8 @@ var gPlayedTests = [
   { name:"sound.ogg", type:"audio/ogg", duration:4.0 },
   { name:"seek.ogv", type:"video/ogg", duration:3.966 },
   { name:"seek.webm", type:"video/webm", duration:3.966 },
-  { name:"gizmo.mp4", type:"video/mp4", duration:5.0 },
+  { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
+  { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
 ];
 
 // Used by test_mozLoadFrom.  Need one test file per decoder backend, plus
@@ -59,12 +62,13 @@ var gPausedAfterEndedTests = gSmallTests.concat([
   { name:"small-shot.ogg", type:"video/ogg", duration:0.276 }
 ]);
 
-// Test the mozHasAudio property
-var gMozHasAudioTests = [
-  { name:"big.wav", type:"audio/x-wav", duration:9.278981, size:102444, hasAudio:undefined },
-  { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266, size:28942, hasAudio:false },
-  { name:"short-video.ogv", type:"video/ogg", duration:1.081, hasAudio:true },
-  { name:"seek.webm", type:"video/webm", duration:3.966, size:215529, hasAudio:false },
+// Test the mozHasAudio property, and APIs that detect different kinds of
+// tracks
+var gTrackTests = [
+  { name:"big.wav", type:"audio/x-wav", duration:9.278981, size:102444, hasAudio:true, hasVideo:false },
+  { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266, size:28942, hasAudio:false, hasVideo:true },
+  { name:"short-video.ogv", type:"video/ogg", duration:1.081, hasAudio:true, hasVideo:true },
+  { name:"seek.webm", type:"video/webm", duration:3.966, size:215529, hasAudio:false, hasVideo:true },
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
@@ -150,10 +154,49 @@ var gPlayTests = [
   // Opus data in an ogg container
   { name:"detodos.opus", type:"audio/ogg; codecs=opus", duration:2.9135 },
 
-  { name:"gizmo.mp4", type:"video/mp4", duration:5.0 },
+  // Multichannel Opus in an ogg container
+  { name:"test-1-mono.opus", type:"audio/ogg; codecs=opus", duration:1.044 },
+  { name:"test-2-stereo.opus", type:"audio/ogg; codecs=opus", duration:2.925 },
+  { name:"test-3-LCR.opus", type:"audio/ogg; codecs=opus", duration:4.214 },
+  { name:"test-4-quad.opus", type:"audio/ogg; codecs=opus", duration:6.234 },
+  { name:"test-5-5.0.opus", type:"audio/ogg; codecs=opus", duration:7.558 },
+  { name:"test-6-5.1.opus", type:"audio/ogg; codecs=opus", duration:10.333 },
+  { name:"test-7-6.1.opus", type:"audio/ogg; codecs=opus", duration:11.690 },
+  { name:"test-8-7.1.opus", type:"audio/ogg; codecs=opus", duration:13.478 },
+
+  { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
+
+  { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
+  { name:"small-shot.mp3", type:"audio/mpeg", duration:0.27 },
+  { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
 
   // Invalid file
   { name:"bogus.duh", type:"bogus/duh", duration:Number.NaN }
+];
+
+// A file for each type we can support.
+var gSnifferTests = [
+  { name:"big.wav", type:"audio/x-wav", duration:9.278981, size:102444 },
+  { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.233, size:28942 },
+  { name:"seek.webm", type:"video/webm", duration:3.966, size:215529 },
+  { name:"gizmo.mp4", type:"video/mp4", duration:5.56, size:383631 },
+  // A mp3 file with id3 tags.
+  { name:"id3tags.mp3", type:"audio/mpeg", duration:0.28, size:3530},
+  { name:"bogus.duh", type:"bogus/duh" }
+];
+
+// Files we must reject as invalid.
+var gInvalidTests = [
+  { name:"invalid-m0c0.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-m0c3.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-m1c0.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-m1c9.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-m2c0.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-m2c1.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-cmap-short.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-cmap-s0c0.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-cmap-s0c2.opus", type:"audio/ogg; codecs=opus"},
+  { name:"invalid-cmap-s1c2.opus", type:"audio/ogg; codecs=opus"},
 ];
 
 // Converts a path/filename to a file:// URI which we can load from disk.
@@ -164,9 +207,9 @@ function fileUriToSrc(path, mustExist) {
   if (navigator.appVersion.indexOf("Android") != -1)
     return path;
 
-  const Ci = Components.interfaces;
-  const Cc = SpecialPowers.wrap(Components).classes;
-  const Cr = SpecialPowers.wrap(Components).results;
+  const Ci = SpecialPowers.Ci;
+  const Cc = SpecialPowers.Cc;
+  const Cr = SpecialPowers.Cr;
   var dirSvc = Cc["@mozilla.org/file/directory_service;1"].
                getService(Ci.nsIProperties);
   var f = dirSvc.get("CurWorkD", Ci.nsILocalFile);
@@ -180,7 +223,7 @@ function fileUriToSrc(path, mustExist) {
   return f.path;
 }
 
-// Returns true if two nsTimeRanges are equal, false otherwise
+// Returns true if two TimeRanges are equal, false otherwise
 function range_equals(r1, r2) {
   if (r1.length != r2.length) {
     return false;
@@ -267,13 +310,38 @@ var gSeekTests = [
   { name:"bug516323.indexed.ogv", type:"video/ogg", duration:4.208 },
   { name:"split.webm", type:"video/webm", duration:1.967 },
   { name:"detodos.opus", type:"audio/ogg; codecs=opus", duration:2.9135 },
+  { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
+  { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
   { name:"bogus.duh", type:"bogus/duh", duration:123 }
 ];
+
+function IsWindows8OrLater() {
+  var re = /Windows NT (\d.\d)/;
+  var winver = navigator.userAgent.match(re);
+  return winver && winver.length == 2 && parseFloat(winver[1]) >= 6.2;
+}
+
+// These are files that are non seekable, due to problems with the media,
+// for example broken or missing indexes.
+var gUnseekableTests = [
+  { name:"no-cues.webm", type:"video/webm" },
+  { name:"bogus.duh", type:"bogus/duh"}
+];
+// Unfortunately big-buck-bunny-unseekable.mp4 is doesn't play on Windows 7, so
+// only include it in the unseekable tests if we're on later versions of Windows.
+if (navigator.userAgent.indexOf("Windows") == -1 ||
+    IsWindows8OrLater()) {
+  gUnseekableTests = gUnseekableTests.concat([
+    { name:"big-buck-bunny-unseekable.mp4", type:"video/mp4" }
+  ]);
+}
 
 // These are files suitable for using with a "new Audio" constructor.
 var gAudioTests = [
   { name:"r11025_s16_c1.wav", type:"audio/x-wav", duration:1.0 },
   { name:"sound.ogg", type:"audio/ogg" },
+  { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
+  { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
   { name:"bogus.duh", type:"bogus/duh", duration:123 }
 ];
 
@@ -306,6 +374,35 @@ var gFragmentTests = [
   { name:"big.wav", type:"audio/x-wav", duration:9.278981, size:102444 }
 ];
 
+// Used by test_chaining.html. The |links| attributes is the number of links in
+// this file that we should be able to play.
+var gChainingTests = [
+  // Vorbis and Opus chained file. They have user comments |index=n| where `n`
+  // is the index of this segment in the file, 0 indexed.
+  { name:"chain.ogg", type:"audio/ogg", links: 4},
+  { name:"chain.opus", type:"audio/ogg; codec=opus", links: 4},
+  // Those files are chained files with a different number of channels in each
+  // part. This is not supported and should stop playing after the first part.
+  { name:"variable-channel.ogg", type:"audio/ogg", links: 1 },
+  { name:"variable-channel.opus", type:"audio/ogg; codec=opus", links: 1 },
+  // Those files are chained files with a different sample rate in each
+  // part. This is not supported and should stop playing after the first part.
+  { name:"variable-samplerate.ogg", type:"audio/ogg", links: 1 },
+  // Opus decoding in Firefox outputs 48 kHz PCM despite having a different
+  // original sample rate, so we can safely play Opus chained media that have
+  // different samplerate accross links.
+  { name:"variable-samplerate.opus", type:"audio/ogg; codec=opus", links: 2 },
+  // A chained video file. We don't support those, so only one link should be
+  // reported.
+  { name:"chained-video.ogv", type:"video/ogg", links: 1 },
+  // A file that consist in 4 links of audio, then another link that has video.
+  // We should stop right after the 4 audio links.
+  { name:"chained-audio-video.ogg", type:"video/ogg", links: 4 },
+  // An opus file that has two links, with a different preskip value for each
+  // link. We should be able to play both links.
+  { name:"variable-preskip.opus", type:"audio/ogg; codec=opus", links: 2 },
+  { name:"bogus.duh", type:"bogus/duh" }
+];
 
 // These are files with non-trivial tag sets.
 // Used by test_metadata.html.
@@ -335,7 +432,66 @@ var gMetadataTests = [
       COMMENTS:"Audio Description"
     }
   },
-  { name:"sound.ogg", tags: { } }
+  { name:"detodos.opus", tags: {
+      title:"De todos. Para todos.",
+      artist:"Mozilla.org"
+    }
+  },
+  { name:"sound.ogg", tags: { } },
+  { name:"small-shot.ogg", tags: {
+      title:"Pew SFX"
+    }
+  },
+  { name:"badtags.ogg", tags: {
+      // We list only the valid tags here, and verify
+      // the invalid ones are filtered out.
+      title:"Invalid comments test file",
+      empty:"",
+      "":"empty",
+      "{- [(`!@\"#$%^&')] -}":"valid tag name, surprisingly"
+      // The file also includes the following invalid tags.
+      // "A description with no separator is a common problem.",
+      // "雨":"Likely, but an invalid key (non-ascii).",
+      // "not\nval\x1fid":"invalid tag name",
+      // "not~valid":"this isn't a valid name either",
+      // "not-utf-8":"invalid sequences: \xff\xfe\xfa\xfb\0eol"
+    }
+  },
+  { name:"wave_metadata.wav", tags: {
+      name:"Track Title",
+      artist:"Artist Name",
+      comments:"Comments",
+    }
+  },
+  { name:"wave_metadata_utf8.wav", tags: {
+      name:"歌曲名稱",
+      artist:"作曲者",
+      comments:"註解",
+    }
+  },
+  { name:"wave_metadata_unknown_tag.wav", tags: {
+      name:"Track Title",
+      comments:"Comments",
+    }
+  },
+  { name:"wave_metadata_bad_len.wav", tags: {
+      name:"Track Title",
+      artist:"Artist Name",
+    }
+  },
+  { name:"wave_metadata_bad_no_null.wav", tags: {
+      name:"Track Title",
+      artist:"Artist Name",
+      comments:"Comments!!",
+    }
+  },
+  { name:"wave_metadata_bad_utf8.wav", tags: {
+      name:"歌曲名稱",
+      comments:"註解",
+    }
+  },
+  { name:"wavedata_u8.wav", tags: { }
+  },
 ];
 
 function checkMetadata(msg, e, test) {
@@ -367,6 +523,15 @@ function getPlayableAudio(candidates) {
   if (resources.length > 0)
     return resources[0];
   return null;
+}
+
+// Returns the type of element that should be created for the given mimetype.
+function getMajorMimeType(mimetype) {
+  if (/^video/.test(mimetype)) {
+    return "video";
+  } else {
+    return "audio";
+  }
 }
 
 // Number of tests to run in parallel. Warning: Each media element requires
@@ -505,25 +670,31 @@ function mediaTestCleanup() {
 
 (function() {
   // Ensure that preload preferences are comsistent
-  var prefService = SpecialPowers.wrap(Components)
+  var prefService = SpecialPowers.wrap(SpecialPowers.Components)
                                  .classes["@mozilla.org/preferences-service;1"]
-                                 .getService(Components.interfaces.nsIPrefService);
+                                 .getService(SpecialPowers.Ci.nsIPrefService);
   var branch = prefService.getBranch("media.");
   var oldDefault = 2;
   var oldAuto = 3;
+  var oldGStreamer = undefined;
   var oldOpus = undefined;
-  try {
-    oldDefault = branch.getIntPref("preload.default");
-    oldAuto    = branch.getIntPref("preload.auto");
-    oldOpus    = branch.getBoolPref("opus.enabled");
-  } catch(ex) { }
+
+  try { oldGStreamer = branch.getBoolPref("gstreamer.enabled"); } catch(ex) { }
+  try { oldDefault   = branch.getIntPref("preload.default"); } catch(ex) { }
+  try { oldAuto      = branch.getIntPref("preload.auto"); } catch(ex) { }
+  try { oldOpus      = branch.getBoolPref("opus.enabled"); } catch(ex) { }
+
   branch.setIntPref("preload.default", 2); // preload_metadata
   branch.setIntPref("preload.auto", 3); // preload_enough
   // test opus playback iff the pref exists
   if (oldOpus !== undefined)
     branch.setBoolPref("opus.enabled", true);
+  if (oldGStreamer !== undefined)
+    branch.setBoolPref("gstreamer.enabled", true);
 
   window.addEventListener("unload", function() {
+    if (oldGStreamer !== undefined)
+      branch.setBoolPref("gstreamer.enabled", oldGStreamer);
     branch.setIntPref("preload.default", oldDefault);
     branch.setIntPref("preload.auto", oldAuto);
     if (oldOpus !== undefined)

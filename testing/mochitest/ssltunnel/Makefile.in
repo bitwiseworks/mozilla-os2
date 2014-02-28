@@ -14,14 +14,6 @@ include $(DEPTH)/config/autoconf.mk
 # wrappers
 STL_FLAGS =
 
-PROGRAM = ssltunnel$(BIN_SUFFIX)
-
-CPPSRCS = ssltunnel.cpp
-
-# Use local includes because they are inserted before INCLUDES
-# so that Mozilla's nss.h is used, not glibc's
-LOCAL_INCLUDES += $(NSPR_CFLAGS) $(NSS_CFLAGS)
-
 LIBS = \
   $(NSPR_LIBS) \
   $(NSS_LIBS) \

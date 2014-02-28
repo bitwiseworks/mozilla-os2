@@ -24,6 +24,7 @@ Browser context menu subtest.
 <textarea id="test-textarea">chssseesbbbie</textarea> <!-- a weird word which generates only one suggestion -->
 <div id="test-contenteditable" contenteditable="true">chssseefsbbbie</div> <!-- a more weird word which generates no suggestions -->
 <input id="test-input-spellcheck" type="text" spellcheck="true" autofocus value="prodkjfgigrty"> <!-- this one also generates one suggestion -->
+<div id="test-contenteditable-spellcheck-false" contenteditable="true" spellcheck="false">test</div> <!-- No Check Spelling menu item -->
 <div id="test-dom-full-screen">DOM full screen FTW</div>
 <div contextmenu="myMenu">
   <p id="test-pagemenu" hopeless="true">I've got a context menu!</p>
@@ -62,6 +63,9 @@ Browser context menu subtest.
 </div>
 <div id="test-select-text">Lorem ipsum dolor sit amet, consectetuer adipiscing elit.</div>
 <div id="test-select-text-link">http://mozilla.com</div>
-
+<a id="test-image-link" href="#"><img src="ctxmenu-image.png"></a>
+<input id="test-select-input-text" type="text" value="input">
+<input id="test-select-input-text-type-password" type="password" value="password">
+<embed id="test-plugin" style="width: 200px; height: 200px;" type="application/x-test"></embed>
 </body>
 </html>

@@ -14,13 +14,17 @@
 #include "nsIContent.h"
 #include "nsIDOMNode.h"
 #include "nsIDocument.h"
-#include "nsGenericElement.h"
+#include "mozilla/dom/Element.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsContentUtils.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsGkAtoms.h"
-
-#include "dombindings.h"
+#include "mozilla/dom/HTMLCollectionBinding.h"
+#include "mozilla/dom/NodeListBinding.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/Likely.h"
+#include "nsGenericHTMLElement.h"
+#include <algorithm>
 
 // Form related includes
 #include "nsIDOMHTMLFormElement.h"
@@ -40,22 +44,7 @@ nsBaseContentList::~nsBaseContentList()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsBaseContentList)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSTARRAY(mElements)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-  if (nsCCUncollectableMarker::sGeneration && tmp->IsBlack() &&
-      NS_LIKELY(!cb.WantAllTraces())) {
-    return NS_SUCCESS_INTERRUPTED_TRAVERSE;
-  }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSTARRAY_OF_NSCOMPTR(mElements)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsBaseContentList, mElements)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsBaseContentList)
   if (nsCCUncollectableMarker::sGeneration && tmp->IsBlack()) {
@@ -64,7 +53,7 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsBaseContentList)
       if (c->IsPurple()) {
         c->RemovePurple();
       }
-      nsGenericElement::MarkNodeChildren(c);
+      Element::MarkNodeChildren(c);
     }
     return true;
   }
@@ -82,17 +71,11 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
     NS_INTERFACE_TABLE_ENTRY(_class, nsINodeList)                             \
     NS_INTERFACE_TABLE_ENTRY(_class, nsIDOMNodeList)
 
-DOMCI_DATA(NodeList, nsBaseContentList)
-
 // QueryInterface implementation for nsBaseContentList
 NS_INTERFACE_TABLE_HEAD(nsBaseContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsBaseContentList)
-    NS_CONTENT_LIST_INTERFACES(nsBaseContentList)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsBaseContentList)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NodeList)
+  NS_INTERFACE_TABLE2(nsBaseContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsBaseContentList)
 NS_INTERFACE_MAP_END
 
 
@@ -111,7 +94,7 @@ nsBaseContentList::GetLength(uint32_t* aLength)
 NS_IMETHODIMP
 nsBaseContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 {
-  nsISupports *tmp = GetNodeAt(aIndex);
+  nsISupports *tmp = Item(aIndex);
 
   if (!tmp) {
     *aReturn = nullptr;
@@ -123,7 +106,7 @@ nsBaseContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 }
 
 nsIContent*
-nsBaseContentList::GetNodeAt(uint32_t aIndex)
+nsBaseContentList::Item(uint32_t aIndex)
 {
   return mElements.SafeElementAt(aIndex);
 }
@@ -141,15 +124,8 @@ nsBaseContentList::IndexOf(nsIContent* aContent)
   return IndexOf(aContent, true);
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsSimpleContentList)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsSimpleContentList,
-                                                  nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRoot)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsSimpleContentList,
-                                                nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRoot)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(nsSimpleContentList, nsBaseContentList,
+                                     mRoot)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsSimpleContentList)
 NS_INTERFACE_MAP_END_INHERITING(nsBaseContentList)
@@ -159,30 +135,9 @@ NS_IMPL_ADDREF_INHERITED(nsSimpleContentList, nsBaseContentList)
 NS_IMPL_RELEASE_INHERITED(nsSimpleContentList, nsBaseContentList)
 
 JSObject*
-nsSimpleContentList::WrapObject(JSContext *cx, JSObject *scope,
-                                bool *triedToWrap)
+nsSimpleContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-  return mozilla::dom::oldproxybindings::NodeList::create(cx, scope, this, triedToWrap);
-}
-
-// nsFormContentList
-
-nsFormContentList::nsFormContentList(nsIContent *aForm,
-                                     nsBaseContentList& aContentList)
-  : nsSimpleContentList(aForm)
-{
-
-  // move elements that belong to mForm into this content list
-
-  uint32_t i, length = 0;
-  aContentList.GetLength(&length);
-
-  for (i = 0; i < length; i++) {
-    nsIContent *c = aContentList.GetNodeAt(i);
-    if (c && nsContentUtils::BelongsInForm(aForm, c)) {
-      AppendElement(c);
-    }
-  }
+  return NodeListBinding::Wrap(cx, scope, this);
 }
 
 // Hashtable for storing nsContentLists
@@ -221,7 +176,7 @@ NS_GetContentList(nsINode* aRootNode,
 {
   NS_ASSERTION(aRootNode, "content list has to have a root");
 
-  nsContentList* list = nullptr;
+  nsRefPtr<nsContentList> list;
 
   static PLDHashTableOps hash_table_ops =
   {
@@ -280,9 +235,27 @@ NS_GetContentList(nsINode* aRootNode,
     }
   }
 
-  NS_ADDREF(list);
+  return list.forget();
+}
 
-  return list;
+#ifdef DEBUG
+const nsCacheableFuncStringContentList::ContentListType
+  nsCacheableFuncStringNodeList::sType = nsCacheableFuncStringContentList::eNodeList;
+const nsCacheableFuncStringContentList::ContentListType
+  nsCacheableFuncStringHTMLCollection::sType = nsCacheableFuncStringContentList::eHTMLCollection;
+#endif
+
+JSObject*
+nsCacheableFuncStringNodeList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+{
+  return NodeListBinding::Wrap(cx, scope, this);
+}
+
+
+JSObject*
+nsCacheableFuncStringHTMLCollection::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+{
+  return HTMLCollectionBinding::Wrap(cx, scope, this);
 }
 
 // Hashtable for storing nsCacheableFuncStringContentList
@@ -314,16 +287,17 @@ FuncStringContentListHashtableMatchEntry(PLDHashTable *table,
   return e->mContentList->Equals(ourKey);
 }
 
+template<class ListType>
 already_AddRefed<nsContentList>
-NS_GetFuncStringContentList(nsINode* aRootNode,
-                            nsContentListMatchFunc aFunc,
-                            nsContentListDestroyFunc aDestroyFunc,
-                            nsFuncStringContentListDataAllocator aDataAllocator,
-                            const nsAString& aString)
+GetFuncStringContentList(nsINode* aRootNode,
+                         nsContentListMatchFunc aFunc,
+                         nsContentListDestroyFunc aDestroyFunc,
+                         nsFuncStringContentListDataAllocator aDataAllocator,
+                         const nsAString& aString)
 {
   NS_ASSERTION(aRootNode, "content list has to have a root");
 
-  nsCacheableFuncStringContentList* list = nullptr;
+  nsRefPtr<nsCacheableFuncStringContentList> list;
 
   static PLDHashTableOps hash_table_ops =
   {
@@ -359,36 +333,55 @@ NS_GetFuncStringContentList(nsINode* aRootNode,
                        (PL_DHashTableOperate(&gFuncStringContentListHashTable,
                                              &hashKey,
                                              PL_DHASH_ADD));
-    if (entry)
+    if (entry) {
       list = entry->mContentList;
+#ifdef DEBUG
+      MOZ_ASSERT_IF(list, list->mType == ListType::sType);
+#endif
+    }
   }
 
   if (!list) {
     // We need to create a ContentList and add it to our new entry, if
     // we have an entry
-    list = new nsCacheableFuncStringContentList(aRootNode, aFunc, aDestroyFunc,
-                                                aDataAllocator, aString);
-    if (list && !list->AllocatedData()) {
-      // Failed to allocate the data
-      delete list;
-      list = nullptr;
-    }
-
+    list = new ListType(aRootNode, aFunc, aDestroyFunc, aDataAllocator,
+                        aString);
     if (entry) {
-      if (list)
-        entry->mContentList = list;
-      else
-        PL_DHashTableRawRemove(&gContentListHashTable, entry);
+      entry->mContentList = list;
     }
-
-    NS_ENSURE_TRUE(list, nullptr);
   }
-
-  NS_ADDREF(list);
 
   // Don't cache these lists globally
 
-  return list;
+  return list.forget();
+}
+
+already_AddRefed<nsContentList>
+NS_GetFuncStringNodeList(nsINode* aRootNode,
+                         nsContentListMatchFunc aFunc,
+                         nsContentListDestroyFunc aDestroyFunc,
+                         nsFuncStringContentListDataAllocator aDataAllocator,
+                         const nsAString& aString)
+{
+  return GetFuncStringContentList<nsCacheableFuncStringNodeList>(aRootNode,
+                                                                 aFunc,
+                                                                 aDestroyFunc,
+                                                                 aDataAllocator,
+                                                                 aString);
+}
+
+already_AddRefed<nsContentList>
+NS_GetFuncStringHTMLCollection(nsINode* aRootNode,
+                               nsContentListMatchFunc aFunc,
+                               nsContentListDestroyFunc aDestroyFunc,
+                               nsFuncStringContentListDataAllocator aDataAllocator,
+                               const nsAString& aString)
+{
+  return GetFuncStringContentList<nsCacheableFuncStringHTMLCollection>(aRootNode,
+                                                                       aFunc,
+                                                                       aDestroyFunc,
+                                                                       aDataAllocator,
+                                                                       aString);
 }
 
 // nsContentList implementation
@@ -476,29 +469,14 @@ nsContentList::~nsContentList()
 }
 
 JSObject*
-nsContentList::WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap)
+nsContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-  return mozilla::dom::oldproxybindings::HTMLCollection::create(cx, scope, this,
-                                                       triedToWrap);
+  return HTMLCollectionBinding::Wrap(cx, scope, this);
 }
 
-DOMCI_DATA(ContentList, nsContentList)
-
-// QueryInterface implementation for nsContentList
-NS_INTERFACE_TABLE_HEAD(nsContentList)
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsContentList)
-    NS_CONTENT_LIST_INTERFACES(nsContentList)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIHTMLCollection)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIDOMHTMLCollection)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIMutationObserver)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentList)
-NS_INTERFACE_MAP_END_INHERITING(nsBaseContentList)
-
-
-NS_IMPL_ADDREF_INHERITED(nsContentList, nsBaseContentList)
-NS_IMPL_RELEASE_INHERITED(nsContentList, nsBaseContentList)
+NS_IMPL_ISUPPORTS_INHERITED3(nsContentList, nsBaseContentList,
+                             nsIHTMLCollection, nsIDOMHTMLCollection,
+                             nsIMutationObserver)
 
 uint32_t
 nsContentList::Length(bool aDoFlush)
@@ -521,7 +499,7 @@ nsContentList::Item(uint32_t aIndex, bool aDoFlush)
   }
 
   if (mState != LIST_UP_TO_DATE)
-    PopulateSelf(NS_MIN(aIndex, PR_UINT32_MAX - 1) + 1);
+    PopulateSelf(std::min(aIndex, UINT32_MAX - 1) + 1);
 
   ASSERT_IN_SYNC;
   NS_ASSERTION(!mRootNode || mState != LIST_DIRTY,
@@ -534,7 +512,7 @@ nsIContent *
 nsContentList::NamedItem(const nsAString& aName, bool aDoFlush)
 {
   BringSelfUpToDate(aDoFlush);
-    
+
   uint32_t i, count = mElements.Length();
 
   // Typically IDs and names are atomized
@@ -554,6 +532,42 @@ nsContentList::NamedItem(const nsAString& aName, bool aDoFlush)
   }
 
   return nullptr;
+}
+
+void
+nsContentList::GetSupportedNames(nsTArray<nsString>& aNames)
+{
+  BringSelfUpToDate(true);
+
+  nsAutoTArray<nsIAtom*, 8> atoms;
+  for (uint32_t i = 0; i < mElements.Length(); ++i) {
+    nsIContent *content = mElements.ElementAt(i);
+    nsGenericHTMLElement* el = nsGenericHTMLElement::FromContent(content);
+    if (el) {
+      // XXXbz should we be checking for particular tags here?  How
+      // stable is this part of the spec?
+      // Note: nsINode::HasName means the name is exposed on the document,
+      // which is false for options, so we don't check it here.
+      const nsAttrValue* val = el->GetParsedAttr(nsGkAtoms::name);
+      if (val && val->Type() == nsAttrValue::eAtom) {
+        nsIAtom* name = val->GetAtomValue();
+        if (!atoms.Contains(name)) {
+          atoms.AppendElement(name);
+        }
+      }
+    }
+    if (content->HasID()) {
+      nsIAtom* id = content->GetID();
+      if (!atoms.Contains(id)) {
+        atoms.AppendElement(id);
+      }
+    }
+  }
+
+  aNames.SetCapacity(atoms.Length());
+  for (uint32_t i = 0; i < atoms.Length(); ++i) {
+    aNames.AppendElement(nsDependentAtomString(atoms[i]));
+  }
 }
 
 int32_t
@@ -594,7 +608,7 @@ nsContentList::GetLength(uint32_t* aLength)
 NS_IMETHODIMP
 nsContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 {
-  nsINode* node = GetNodeAt(aIndex);
+  nsINode* node = Item(aIndex);
 
   if (node) {
     return CallQueryInterface(node, aReturn);
@@ -619,18 +633,34 @@ nsContentList::NamedItem(const nsAString& aName, nsIDOMNode** aReturn)
   return NS_OK;
 }
 
-nsIContent*
-nsContentList::GetNodeAt(uint32_t aIndex)
+Element*
+nsContentList::GetElementAt(uint32_t aIndex)
 {
-  return Item(aIndex, true);
+  return static_cast<Element*>(Item(aIndex, true));
 }
 
-nsISupports*
-nsContentList::GetNamedItem(const nsAString& aName, nsWrapperCache **aCache)
+nsIContent*
+nsContentList::Item(uint32_t aIndex)
 {
-  nsIContent *item;
-  *aCache = item = NamedItem(aName, true);
-  return item;
+  return GetElementAt(aIndex);
+}
+
+JSObject*
+nsContentList::NamedItem(JSContext* cx, const nsAString& name,
+                         mozilla::ErrorResult& error)
+{
+  nsIContent *item = NamedItem(name, true);
+  if (!item) {
+    return nullptr;
+  }
+  JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
+  JSAutoCompartment ac(cx, wrapper);
+  JS::Rooted<JS::Value> v(cx);
+  if (!mozilla::dom::WrapObject(cx, wrapper, item, item, nullptr, &v)) {
+    error.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+  return &v.toObject();
 }
 
 void
@@ -641,7 +671,7 @@ nsContentList::AttributeChanged(nsIDocument *aDocument, Element* aElement,
   NS_PRECONDITION(aElement, "Must have a content node to work with");
   
   if (!mFunc || !mFuncMayDependOnAttr || mState == LIST_DIRTY ||
-      !MayContainRelevantNodes(aElement->GetNodeParent()) ||
+      !MayContainRelevantNodes(aElement->GetParentNode()) ||
       !nsContentUtils::IsInSameAnonymousTree(mRootNode, aElement)) {
     // Either we're already dirty or this notification doesn't affect
     // whether we might match aElement.
@@ -840,7 +870,7 @@ bool
 nsContentList::MatchSelf(nsIContent *aContent)
 {
   NS_PRECONDITION(aContent, "Can't match null stuff, you know");
-  NS_PRECONDITION(mDeep || aContent->GetNodeParent() == mRootNode,
+  NS_PRECONDITION(mDeep || aContent->GetParentNode() == mRootNode,
                   "MatchSelf called on a node that we can't possibly match");
 
   if (!aContent->IsElement()) {

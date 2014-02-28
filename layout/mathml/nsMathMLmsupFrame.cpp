@@ -10,6 +10,7 @@
 #include "nsStyleConsts.h"
 
 #include "nsMathMLmsupFrame.h"
+#include <algorithm>
 
 //
 // <msup> -- attach a superscript to a base - implementation
@@ -63,16 +64,14 @@ nsMathMLmsupFrame::Place(nsRenderingContext& aRenderingContext,
   // default: automatic
   //
   // We use 0 as the default value so unitless values can be ignored.
-  // XXXfredw Should we forbid negative values? (bug 411227)
+  // As a minimum, negative values can be ignored.
   //
   nsAutoString value;
   nscoord supScriptShift = 0;
   GetAttribute(mContent, mPresentationData.mstyle,
                nsGkAtoms::superscriptshift_, value);
   if (!value.IsEmpty()) {
-    ParseNumericValue(value, &supScriptShift,
-                      nsMathMLElement::PARSE_ALLOW_NEGATIVE,
-                      PresContext(), mStyleContext);
+    ParseNumericValue(value, &supScriptShift, 0, PresContext(), mStyleContext);
   }
 
   return nsMathMLmsupFrame::PlaceSuperScript(PresContext(), 
@@ -97,7 +96,7 @@ nsMathMLmsupFrame::PlaceSuperScript(nsPresContext*      aPresContext,
 {
   // force the scriptSpace to be at least 1 pixel 
   nscoord onePixel = nsPresContext::CSSPixelsToAppUnits(1);
-  aScriptSpace = NS_MAX(onePixel, aScriptSpace);
+  aScriptSpace = std::max(onePixel, aScriptSpace);
 
   ////////////////////////////////////
   // Get the children's desired sizes
@@ -111,6 +110,9 @@ nsMathMLmsupFrame::PlaceSuperScript(nsPresContext*      aPresContext,
     supScriptFrame = baseFrame->GetNextSibling();
   if (!baseFrame || !supScriptFrame || supScriptFrame->GetNextSibling()) {
     // report an error, encourage people to get their markups in order
+    if (aPlaceOrigin) {
+      aFrame->ReportChildCountError();
+    }
     return aFrame->ReflowError(aRenderingContext, aDesiredSize);
   }
   GetReflowAndBoundingMetricsFor(baseFrame, baseSize, bmBase);
@@ -152,7 +154,7 @@ nsMathMLmsupFrame::PlaceSuperScript(nsPresContext*      aPresContext,
     float scaler2 = ((float) supScriptShift2) / supScriptShift1;
     float scaler3 = ((float) supScriptShift3) / supScriptShift1;
     supScriptShift1 = 
-      NS_MAX(supScriptShift1, aUserSupScriptShift);
+      std::max(supScriptShift1, aUserSupScriptShift);
     supScriptShift2 = NSToCoordRound(scaler2 * supScriptShift1);
     supScriptShift3 = NSToCoordRound(scaler3 * supScriptShift1);
   }
@@ -162,7 +164,7 @@ nsMathMLmsupFrame::PlaceSuperScript(nsPresContext*      aPresContext,
   nscoord supScriptShift;
   nsPresentationData presentationData;
   aFrame->GetPresentationData (presentationData);
-  if ( aFrame->GetStyleFont()->mScriptLevel == 0 && 
+  if ( aFrame->StyleFont()->mScriptLevel == 0 && 
        NS_MATHML_IS_DISPLAYSTYLE(presentationData.flags) &&
       !NS_MATHML_IS_COMPRESSED(presentationData.flags)) {
     // Style D in TeXbook
@@ -180,14 +182,14 @@ nsMathMLmsupFrame::PlaceSuperScript(nsPresContext*      aPresContext,
   // get actual supscriptshift to be used
   // Rule 18c, App. G, TeXbook
   nscoord actualSupScriptShift = 
-    NS_MAX(minSupScriptShift,NS_MAX(supScriptShift,minShiftFromXHeight));
+    std::max(minSupScriptShift,std::max(supScriptShift,minShiftFromXHeight));
 
   // bounding box
   nsBoundingMetrics boundingMetrics;
   boundingMetrics.ascent =
-    NS_MAX(bmBase.ascent, (bmSupScript.ascent + actualSupScriptShift));
+    std::max(bmBase.ascent, (bmSupScript.ascent + actualSupScriptShift));
   boundingMetrics.descent =
-    NS_MAX(bmBase.descent, (bmSupScript.descent - actualSupScriptShift));
+    std::max(bmBase.descent, (bmSupScript.descent - actualSupScriptShift));
 
   // leave aScriptSpace after superscript
   // add italicCorrection between base and superscript
@@ -203,9 +205,9 @@ nsMathMLmsupFrame::PlaceSuperScript(nsPresContext*      aPresContext,
 
   // reflow metrics
   aDesiredSize.ascent =
-    NS_MAX(baseSize.ascent, (supScriptSize.ascent + actualSupScriptShift));
+    std::max(baseSize.ascent, (supScriptSize.ascent + actualSupScriptShift));
   aDesiredSize.height = aDesiredSize.ascent +
-    NS_MAX(baseSize.height - baseSize.ascent,
+    std::max(baseSize.height - baseSize.ascent,
            (supScriptSize.height - supScriptSize.ascent - actualSupScriptShift));
   aDesiredSize.width = boundingMetrics.width;
   aDesiredSize.mBoundingMetrics = boundingMetrics;

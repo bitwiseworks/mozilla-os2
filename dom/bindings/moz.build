@@ -1,0 +1,30 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'dom'
+
+EXPORTS.mozilla += [
+    'ErrorResult.h',
+]
+
+EXPORTS.mozilla.dom += [
+    'BindingDeclarations.h',
+    'BindingUtils.h',
+    'CallbackFunction.h',
+    'CallbackInterface.h',
+    'CallbackObject.h',
+    'DOMJSClass.h',
+    'DOMJSProxyHandler.h',
+    'Errors.msg',
+    'NonRefcountedDOMObject.h',
+    'Nullable.h',
+    'PrimitiveConversions.h',
+    'PrototypeList.h',
+    'RegisterBindings.h',
+    'TypedArray.h',
+    'UnionConversions.h',
+    'UnionTypes.h',
+]

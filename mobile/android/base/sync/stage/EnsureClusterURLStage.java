@@ -12,23 +12,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.GeneralSecurityException;
 
-import org.mozilla.gecko.sync.GlobalSession;
-import org.mozilla.gecko.sync.Logger;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.NodeAuthenticationException;
 import org.mozilla.gecko.sync.NullClusterURLException;
 import org.mozilla.gecko.sync.ThreadPool;
 import org.mozilla.gecko.sync.net.BaseResource;
-import org.mozilla.gecko.sync.net.SyncResourceDelegate;
+import org.mozilla.gecko.sync.net.BaseResourceDelegate;
 
 import ch.boye.httpclientandroidlib.HttpEntity;
 import ch.boye.httpclientandroidlib.HttpResponse;
 import ch.boye.httpclientandroidlib.client.ClientProtocolException;
 
 public class EnsureClusterURLStage extends AbstractNonRepositorySyncStage {
-  public EnsureClusterURLStage(GlobalSession session) {
-    super(session);
-  }
-
   public interface ClusterURLFetchDelegate {
     /**
      * 200 - Success.
@@ -72,7 +67,7 @@ public class EnsureClusterURLStage extends AbstractNonRepositorySyncStage {
     Logger.info(LOG_TAG, "In fetchClusterURL: node/weave is " + nodeWeaveURL);
 
     BaseResource resource = new BaseResource(nodeWeaveURL);
-    resource.delegate = new SyncResourceDelegate(resource) {
+    resource.delegate = new BaseResourceDelegate(resource) {
 
       /**
        * Handle the response for GET https://server/pathname/version/username/node/weave.

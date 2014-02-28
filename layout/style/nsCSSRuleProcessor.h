@@ -12,6 +12,7 @@
 #ifndef nsCSSRuleProcessor_h_
 #define nsCSSRuleProcessor_h_
 
+#include "mozilla/Attributes.h"
 #include "nsIStyleRuleProcessor.h"
 #include "nsCSSStyleSheet.h"
 #include "nsTArray.h"
@@ -42,7 +43,11 @@ class nsCSSRuleProcessor: public nsIStyleRuleProcessor {
 public:
   typedef nsTArray<nsRefPtr<nsCSSStyleSheet> > sheet_array_type;
 
-  nsCSSRuleProcessor(const sheet_array_type& aSheets, uint8_t aSheetType);
+  // aScopeElement must be non-null iff aSheetType is
+  // nsStyleSet::eScopedDocSheet.
+  nsCSSRuleProcessor(const sheet_array_type& aSheets,
+                     uint8_t aSheetType,
+                     mozilla::dom::Element* aScopeElement);
   virtual ~nsCSSRuleProcessor();
 
   NS_DECL_ISUPPORTS
@@ -88,37 +93,50 @@ public:
   static bool IsLink(mozilla::dom::Element* aElement);
 
   // nsIStyleRuleProcessor
-  virtual void RulesMatching(ElementRuleProcessorData* aData);
+  virtual void RulesMatching(ElementRuleProcessorData* aData) MOZ_OVERRIDE;
 
-  virtual void RulesMatching(PseudoElementRuleProcessorData* aData);
+  virtual void RulesMatching(PseudoElementRuleProcessorData* aData) MOZ_OVERRIDE;
 
-  virtual void RulesMatching(AnonBoxRuleProcessorData* aData);
+  virtual void RulesMatching(AnonBoxRuleProcessorData* aData) MOZ_OVERRIDE;
 
 #ifdef MOZ_XUL
-  virtual void RulesMatching(XULTreeRuleProcessorData* aData);
+  virtual void RulesMatching(XULTreeRuleProcessorData* aData) MOZ_OVERRIDE;
 #endif
 
-  virtual nsRestyleHint HasStateDependentStyle(StateRuleProcessorData* aData);
+  virtual nsRestyleHint HasStateDependentStyle(StateRuleProcessorData* aData) MOZ_OVERRIDE;
 
-  virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData);
+  virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData) MOZ_OVERRIDE;
 
   virtual nsRestyleHint
-    HasAttributeDependentStyle(AttributeRuleProcessorData* aData);
+    HasAttributeDependentStyle(AttributeRuleProcessorData* aData) MOZ_OVERRIDE;
 
-  virtual bool MediumFeaturesChanged(nsPresContext* aPresContext);
+  virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) MOZ_OVERRIDE;
 
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfExcludingThis(nsMallocSizeOfFun mallocSizeOf) const MOZ_OVERRIDE;
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun mallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
 
   // Append all the currently-active font face rules to aArray.  Return
   // true for success and false for failure.
   bool AppendFontFaceRules(nsPresContext* aPresContext,
                            nsTArray<nsFontFaceRuleContainer>& aArray);
 
-  bool AppendKeyframesRules(nsPresContext* aPresContext,
-                            nsTArray<nsCSSKeyframesRule*>& aArray);
+  nsCSSKeyframesRule* KeyframesRuleForName(nsPresContext* aPresContext,
+                                           const nsString& aName);
+
+  bool AppendPageRules(nsPresContext* aPresContext,
+                       nsTArray<nsCSSPageRule*>& aArray);
+
+  bool AppendFontFeatureValuesRules(nsPresContext* aPresContext,
+                              nsTArray<nsCSSFontFeatureValuesRule*>& aArray);
+
+  /**
+   * Returns the scope element for the scoped style sheets this rule
+   * processor is for.  If this is not a rule processor for scoped style
+   * sheets, it returns null.
+   */
+  mozilla::dom::Element* GetScopeElement() const { return mScopeElement; }
 
 #ifdef DEBUG
   void AssertQuirksChangeOK() {
@@ -159,7 +177,11 @@ private:
 
   // The last pres context for which GetRuleCascades was called.
   nsPresContext *mLastPresContext;
-  
+
+  // The scope element for this rule processor's scoped style sheets.
+  // Only used if mSheetType == nsStyleSet::eScopedDocSheet.
+  nsRefPtr<mozilla::dom::Element> mScopeElement;
+
   // type of stylesheet using this processor
   uint8_t mSheetType;  // == nsStyleSet::sheetType
 

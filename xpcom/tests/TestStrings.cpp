@@ -135,7 +135,7 @@ bool test_rfind_2()
 bool test_rfind_3()
   {
     const char text[] = "urn:mozilla:locale:en-US:necko";
-    nsCAutoString value(text);
+    nsAutoCString value(text);
     int32_t i = value.RFind(":");
     if (i == 24)
       return true;
@@ -160,7 +160,7 @@ bool test_rfind_4()
 bool test_findinreadable()
   {
     const char text[] = "jar:jar:file:///c:/software/mozilla/mozilla_2006_02_21.jar!/browser/chrome/classic.jar!/";
-    nsCAutoString value(text);
+    nsAutoCString value(text);
 
     nsACString::const_iterator begin, end;
     value.BeginReading(begin);
@@ -248,7 +248,7 @@ bool test_findinreadable()
 bool test_rfindinreadable()
   {
     const char text[] = "jar:jar:file:///c:/software/mozilla/mozilla_2006_02_21.jar!/browser/chrome/classic.jar!/";
-    nsCAutoString value(text);
+    nsAutoCString value(text);
 
     nsACString::const_iterator begin, end;
     value.BeginReading(begin);
@@ -512,7 +512,7 @@ bool test_concat_2()
     nsCString text("text");
     const nsACString& aText = text;
 
-    nsCAutoString result( fieldTextStr + aText );
+    nsAutoCString result( fieldTextStr + aText );
 
     if (strcmp(result.get(), "xyztext") == 0)
       return true;
@@ -686,32 +686,32 @@ bool test_appendint64()
   {
     nsCString str;
 
-    int64_t max = LL_MaxInt();
+    int64_t max = INT64_MAX;
     static const char max_expected[] = "9223372036854775807";
-    int64_t min = LL_MinInt();
+    int64_t min = INT64_MIN;
     static const char min_expected[] = "-9223372036854775808";
     static const char min_expected_oct[] = "1000000000000000000000";
-    int64_t maxint_plus1 = LL_INIT(1, 0);
+    int64_t maxint_plus1 = 1LL << 32;
     static const char maxint_plus1_expected[] = "4294967296";
     static const char maxint_plus1_expected_x[] = "100000000";
 
     str.AppendInt(max);
 
     if (!str.Equals(max_expected)) {
-      fprintf(stderr, "Error appending LL_MaxInt(): Got %s\n", str.get());
+      fprintf(stderr, "Error appending INT64_MAX: Got %s\n", str.get());
       return false;
     }
 
     str.Truncate();
     str.AppendInt(min);
     if (!str.Equals(min_expected)) {
-      fprintf(stderr, "Error appending LL_MinInt(): Got %s\n", str.get());
+      fprintf(stderr, "Error appending INT64_MIN: Got %s\n", str.get());
       return false;
     }
     str.Truncate();
     str.AppendInt(min, 8);
     if (!str.Equals(min_expected_oct)) {
-      fprintf(stderr, "Error appending LL_MinInt() (oct): Got %s\n", str.get());
+      fprintf(stderr, "Error appending INT64_MIN (oct): Got %s\n", str.get());
       return false;
     }
 
@@ -719,13 +719,13 @@ bool test_appendint64()
     str.Truncate();
     str.AppendInt(maxint_plus1);
     if (!str.Equals(maxint_plus1_expected)) {
-      fprintf(stderr, "Error appending PR_UINT32_MAX + 1: Got %s\n", str.get());
+      fprintf(stderr, "Error appending UINT32_MAX + 1: Got %s\n", str.get());
       return false;
     }
     str.Truncate();
     str.AppendInt(maxint_plus1, 16);
     if (!str.Equals(maxint_plus1_expected_x)) {
-      fprintf(stderr, "Error appending PR_UINT32_MAX + 1 (hex): Got %s\n", str.get());
+      fprintf(stderr, "Error appending UINT32_MAX + 1 (hex): Got %s\n", str.get());
       return false;
     }
 
@@ -891,7 +891,7 @@ bool test_voided_autostr()
   {
     const char kData[] = "hello world";
 
-    nsCAutoString str;
+    nsAutoCString str;
     if (str.IsVoid())
       return false;
     if (!str.IsEmpty())
@@ -953,10 +953,10 @@ bool test_string_tointeger()
   int32_t i;
   nsresult rv;
   for (const ToIntegerTest* t = kToIntegerTests; t->str; ++t) {
-    int32_t result = nsCAutoString(t->str).ToInteger(&rv, t->radix);
+    int32_t result = nsAutoCString(t->str).ToInteger(&rv, t->radix);
     if (rv != t->rv || result != t->result)
       return false;
-    result = nsCAutoString(t->str).ToInteger(&i, t->radix);
+    result = nsAutoCString(t->str).ToInteger(&i, t->radix);
     if ((nsresult)i != t->rv || result != t->result)
       return false;
   }

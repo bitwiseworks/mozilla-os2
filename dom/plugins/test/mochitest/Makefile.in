@@ -7,7 +7,7 @@ DEPTH		= @DEPTH@
 topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
-relativesrcdir  = dom/plugins/test
+relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
@@ -64,8 +64,10 @@ MOCHITEST_FILES = \
   test_bug771202.html \
   file_bug771202.html \
   test_bug777098.html \
-  test_bug751809.html \
   test_bug813906.html \
+  test_bug784131.html \
+  test_bug854082.html \
+  test_bug863792.html \
   test_enumerate.html \
   test_npruntime_construct.html \
   307-xo-redirect.sjs \
@@ -100,14 +102,18 @@ MOCHITEST_CHROME_FILES = \
   utils.js \
   test_clear_site_data.html \
   test_npruntime.xul   \
-  test_privatemode.xul \
   test_wmode.xul \
   test_bug479979.xul \
+  test_bug751809.html \
+  test_refresh_navigator_plugins.html \
+  test_plugin_tag_clicktoplay.html \
+  privatemode_perwindowpb.xul \
+  test_privatemode_perwindowpb.xul \
   $(NULL)
 
 ifneq ($(MOZ_WIDGET_TOOLKIT),cocoa)
 MOCHITEST_FILES += \
-  test_instance_re-parent-windowed.html \
+  file_bug863792.html \
   test_visibility.html \
   $(NULL)
 
@@ -123,7 +129,7 @@ endif
 ifdef MOZ_CRASHREPORTER
 MOCHITEST_FILES += \
   test_crashing.html \
-  $(warning test_crashing2.html disabled due to random orange; see bug 566049) \
+  $(filter disabled-for-random-orange--bug-566049, test_crashing2.html) \
   test_hanging.html \
   $(NULL)
 
@@ -131,6 +137,7 @@ MOCHITEST_CHROME_FILES += \
   test_crash_notify.xul \
   test_crash_notify_no_report.xul \
   test_crash_submit.xul \
+  test_hang_submit.xul \
   $(NULL)
   ifeq ($(OS_ARCH),WINNT)
     MOCHITEST_CHROME_FILES += \
@@ -151,10 +158,11 @@ MOCHITEST_FILES += \
   cocoa_window_focus.html \
   test_cocoa_focus.html \
   cocoa_focus.html \
+  test_queryContentsScaleFactor.html \
   $(NULL)
 endif
 
-ifeq (gtk2,$(MOZ_WIDGET_TOOLKIT))
+ifeq (,$(filter-out gtk2 gtk3,$(MOZ_WIDGET_TOOLKIT)))
 MOCHITEST_FILES += \
 		test_copyText.html \
 		test_crash_nested_loop.html \

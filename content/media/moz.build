@@ -1,0 +1,119 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+PARALLEL_DIRS += ['encoder']
+
+PARALLEL_DIRS += ['webaudio']
+
+if CONFIG['MOZ_RAW']:
+    PARALLEL_DIRS += ['raw']
+
+if CONFIG['MOZ_OGG']:
+    PARALLEL_DIRS += ['ogg']
+
+if CONFIG['MOZ_WAVE']:
+    PARALLEL_DIRS += ['wave']
+
+if CONFIG['MOZ_WEBM']:
+    PARALLEL_DIRS += ['webm']
+
+if CONFIG['MOZ_GSTREAMER']:
+    PARALLEL_DIRS += ['gstreamer']
+
+if CONFIG['MOZ_DASH']:
+    PARALLEL_DIRS += ['dash']
+
+if CONFIG['MOZ_MEDIA_PLUGINS']:
+    PARALLEL_DIRS += ['plugins']
+
+if CONFIG['MOZ_WMF']:
+    PARALLEL_DIRS += ['wmf']
+
+PARALLEL_DIRS += ['webrtc']
+
+if CONFIG['MOZ_OMX_DECODER']:
+    PARALLEL_DIRS += ['omx']
+    PARALLEL_DIRS += ['omx/mediaresourcemanager']
+
+if CONFIG['MOZ_WEBSPEECH']:
+    PARALLEL_DIRS += ['webspeech']
+
+TEST_DIRS += ['test']
+
+MODULE = 'content'
+
+EXPORTS += [
+    'AbstractMediaDecoder.h',
+    'AudioAvailableEventManager.h',
+    'AudioChannelFormat.h',
+    'AudioEventTimeline.h',
+    'AudioNodeEngine.h',
+    'AudioNodeStream.h',
+    'AudioSampleFormat.h',
+    'AudioSegment.h',
+    'AudioStream.h',
+    'BufferMediaResource.h',
+    'DOMMediaStream.h',
+    'DecoderTraits.h',
+    'FileBlockCache.h',
+    'MediaCache.h',
+    'MediaDecoder.h',
+    'MediaDecoderOwner.h',
+    'MediaDecoderReader.h',
+    'MediaDecoderStateMachine.h',
+    'MediaMetadataManager.h',
+    'MediaResource.h',
+    'MediaSegment.h',
+    'MediaStreamGraph.h',
+    'SharedBuffer.h',
+    'StreamBuffer.h',
+    'TimeVarying.h',
+    'TrackUnionStream.h',
+    'VideoFrameContainer.h',
+    'VideoSegment.h',
+    'VideoUtils.h',
+    'VorbisUtils.h',
+]
+
+EXPORTS.mozilla.dom += [
+    'AudioStreamTrack.h',
+    'MediaStreamTrack.h',
+    'TextTrack.h',
+    'TextTrackCue.h',
+    'TextTrackCueList.h',
+    'TextTrackList.h',
+    'VideoStreamTrack.h',
+]
+
+CPP_SOURCES += [
+    'AudioAvailableEventManager.cpp',
+    'AudioChannelFormat.cpp',
+    'AudioNodeEngine.cpp',
+    'AudioNodeStream.cpp',
+    'AudioSegment.cpp',
+    'AudioStream.cpp',
+    'AudioStreamTrack.cpp',
+    'DOMMediaStream.cpp',
+    'DecoderTraits.cpp',
+    'FileBlockCache.cpp',
+    'MediaCache.cpp',
+    'MediaDecoder.cpp',
+    'MediaDecoderReader.cpp',
+    'MediaDecoderStateMachine.cpp',
+    'MediaResource.cpp',
+    'MediaStreamGraph.cpp',
+    'MediaStreamTrack.cpp',
+    'StreamBuffer.cpp',
+    'TextTrack.cpp',
+    'TextTrackCue.cpp',
+    'TextTrackCueList.cpp',
+    'TextTrackList.cpp',
+    'VideoFrameContainer.cpp',
+    'VideoSegment.cpp',
+    'VideoStreamTrack.cpp',
+    'VideoUtils.cpp',
+    'WebVTTLoadListener.cpp',
+]

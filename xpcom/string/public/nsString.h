@@ -48,14 +48,16 @@
 #include "nsTString.h"
 #include "string-template-undef.h"
 
-PR_STATIC_ASSERT(sizeof(PRUnichar) == 2);
-PR_STATIC_ASSERT(sizeof(nsString::char_type) == 2);
-PR_STATIC_ASSERT(sizeof(nsCString::char_type) == 1);
+MOZ_STATIC_ASSERT(sizeof(PRUnichar) == 2, "size of PRUnichar must be 2");
+MOZ_STATIC_ASSERT(sizeof(nsString::char_type) == 2,
+                  "size of nsString::char_type must be 2");
+MOZ_STATIC_ASSERT(sizeof(nsCString::char_type) == 1,
+                  "size of nsCString::char_type must be 1");
 
   /**
    * A helper class that converts a UTF-16 string to ASCII in a lossy manner
    */
-class NS_LossyConvertUTF16toASCII : public nsCAutoString
+class NS_LossyConvertUTF16toASCII : public nsAutoCString
   {
     public:
       explicit
@@ -110,7 +112,7 @@ class NS_ConvertASCIItoUTF16 : public nsAutoString
   /**
    * A helper class that converts a UTF-16 string to UTF-8
    */
-class NS_ConvertUTF16toUTF8 : public nsCAutoString
+class NS_ConvertUTF16toUTF8 : public nsAutoCString
   {
     public:
       explicit
@@ -185,12 +187,12 @@ typedef nsAutoString nsVoidableString;
 
 inline int32_t MinInt(int32_t x, int32_t y)
   {
-    return NS_MIN(x, y);
+    return XPCOM_MIN(x, y);
   }
 
 inline int32_t MaxInt(int32_t x, int32_t y)
   {
-    return NS_MAX(x, y);
+    return XPCOM_MAX(x, y);
   }
 
 /**

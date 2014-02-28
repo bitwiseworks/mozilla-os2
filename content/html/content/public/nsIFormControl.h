@@ -48,6 +48,8 @@ enum ButtonElementTypes {
 enum InputElementTypes {
   NS_FORM_INPUT_BUTTON = NS_FORM_INPUT_ELEMENT + 1,
   NS_FORM_INPUT_CHECKBOX,
+  NS_FORM_INPUT_COLOR,
+  NS_FORM_INPUT_DATE,
   NS_FORM_INPUT_EMAIL,
   NS_FORM_INPUT_FILE,
   NS_FORM_INPUT_HIDDEN,
@@ -60,7 +62,9 @@ enum InputElementTypes {
   NS_FORM_INPUT_SUBMIT,
   NS_FORM_INPUT_TEL,
   NS_FORM_INPUT_TEXT,
+  NS_FORM_INPUT_TIME,
   NS_FORM_INPUT_URL,
+  NS_FORM_INPUT_RANGE,
   eInputElementTypesMax
 };
 
@@ -69,8 +73,8 @@ PR_STATIC_ASSERT((uint32_t)eButtonElementTypesMax < (uint32_t)NS_FORM_INPUT_ELEM
 PR_STATIC_ASSERT((uint32_t)eInputElementTypesMax  < 1<<8);
 
 #define NS_IFORMCONTROL_IID   \
-{ 0xbc53dcf5, 0xbd4f, 0x4991, \
- { 0xa1, 0x87, 0xc4, 0x57, 0x98, 0x54, 0xda, 0x6e } }
+{ 0x4b89980c, 0x4dcd, 0x428f, \
+  { 0xb7, 0xad, 0x43, 0x5b, 0x93, 0x29, 0x79, 0xec } }
 
 /**
  * Interface which all form controls (e.g. buttons, checkboxes, text,
@@ -181,6 +185,10 @@ public:
    */
   inline bool AllowDraggableChildren() const;
 
+  virtual bool IsDisabledForEvents(uint32_t aMessage)
+  {
+    return false;
+  }
 protected:
 
   /**
@@ -232,6 +240,9 @@ nsIFormControl::IsSingleLineTextControl(bool aExcludePassword, uint32_t aType)
          aType == NS_FORM_INPUT_URL ||
          // TODO: this is temporary until bug 635240 is fixed.
          aType == NS_FORM_INPUT_NUMBER ||
+         // TODO: those are temporary until bug 773205 is fixed.
+         aType == NS_FORM_INPUT_DATE ||
+         aType == NS_FORM_INPUT_TIME ||
          (!aExcludePassword && aType == NS_FORM_INPUT_PASSWORD);
 }
 

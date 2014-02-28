@@ -65,7 +65,7 @@ nsStackLayout::GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 
   nsIFrame* child = aBox->GetChildBox();
   while (child) {
-    if (child->GetStyleXUL()->mStretchStack) {
+    if (child->StyleXUL()->mStretchStack) {
       nsSize pref = child->GetPrefSize(aState);
 
       AddMargin(child, pref);
@@ -91,7 +91,7 @@ nsStackLayout::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 
   nsIFrame* child = aBox->GetChildBox();
   while (child) {
-    if (child->GetStyleXUL()->mStretchStack) {
+    if (child->StyleXUL()->mStretchStack) {
       nsSize min = child->GetMinSize(aState);
 
       AddMargin(child, min);
@@ -117,7 +117,7 @@ nsStackLayout::GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
 
   nsIFrame* child = aBox->GetChildBox();
   while (child) {
-    if (child->GetStyleXUL()->mStretchStack) {
+    if (child->StyleXUL()->mStretchStack) {
       nsSize min = child->GetMinSize(aState);
       nsSize max = child->GetMaxSize(aState);
 
@@ -176,7 +176,7 @@ nsStackLayout::GetOffset(nsBoxLayoutState& aState, nsIFrame* aChild, nsMargin& a
   uint8_t offsetSpecified = 0;
   nsIContent* content = aChild->GetContent();
   if (content) {
-    bool ltr = aChild->GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR;
+    bool ltr = aChild->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR;
     nsAutoString value;
     nsresult error;
 
@@ -340,11 +340,10 @@ nsStackLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
           child->Layout(aState);
 
           // Get the child's new rect.
-          nsRect childRectNoMargin;
-          childRectNoMargin = childRect = child->GetRect();
+          childRect = child->GetRect();
           childRect.Inflate(margin);
 
-          if (child->GetStyleXUL()->mStretchStack) {
+          if (child->StyleXUL()->mStretchStack) {
             // Did the child push back on us and get bigger?
             if (offset.LeftRight() + childRect.width > clientRect.width) {
               clientRect.width = childRect.width + offset.LeftRight();
@@ -354,23 +353,6 @@ nsStackLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
             if (offset.TopBottom() + childRect.height > clientRect.height) {
               clientRect.height = childRect.height + offset.TopBottom();
               grow = true;
-            }
-          }
-
-          if (!childRectNoMargin.IsEqualInterior(oldRect))
-          {
-            // redraw the new and old positions if the 
-            // child moved or resized.
-            // if the new and old rect intersect meaning we just moved a little
-            // then just redraw the union. If they don't intersect (meaning
-            // we moved a good distance) redraw both separately.
-            if (childRectNoMargin.Intersects(oldRect)) {
-              nsRect u;
-              u.UnionRect(oldRect, childRectNoMargin);
-              aBox->Redraw(aState, &u);
-            } else {
-              aBox->Redraw(aState, &oldRect);
-              aBox->Redraw(aState, &childRectNoMargin);
             }
           }
        }

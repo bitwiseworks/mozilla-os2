@@ -89,11 +89,7 @@ nsScreenManagerGtk :: EnsureInit()
   if (mCachedScreenArray.Count() > 0)
     return NS_OK;
 
-#if GTK_CHECK_VERSION(2,2,0)
   mRootWindow = gdk_get_default_root_window();
-#else
-  mRootWindow = GDK_ROOT_PARENT();
-#endif // GTK_CHECK_VERSION(2,2,0)
   g_object_ref(mRootWindow);
 
   // GDK_STRUCTURE_MASK ==> StructureNotifyMask, for ConfigureNotify
@@ -132,9 +128,9 @@ nsScreenManagerGtk :: Init()
         PR_FindFunctionSymbol(mXineramalib, "XineramaQueryScreens");
         
     // get the number of screens via xinerama
-    if (_XnrmIsActive && _XnrmQueryScreens &&
-        _XnrmIsActive(GDK_DISPLAY())) {
-      screenInfo = _XnrmQueryScreens(GDK_DISPLAY(), &numScreens);
+    Display *display = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+    if (_XnrmIsActive && _XnrmQueryScreens && _XnrmIsActive(display)) {
+      screenInfo = _XnrmQueryScreens(display, &numScreens);
     }
   }
 
@@ -285,6 +281,13 @@ nsScreenManagerGtk :: GetNumberOfScreens(uint32_t *aNumberOfScreens)
 } // GetNumberOfScreens
 
 NS_IMETHODIMP
+nsScreenManagerGtk::GetSystemDefaultScale(float *aDefaultScale)
+{
+  *aDefaultScale = 1.0f;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsScreenManagerGtk :: ScreenForNativeWidget (void *aWidget, nsIScreen **outScreen)
 {
   nsresult rv;
@@ -297,11 +300,18 @@ nsScreenManagerGtk :: ScreenForNativeWidget (void *aWidget, nsIScreen **outScree
   if (mCachedScreenArray.Count() > 1) {
     // I don't know how to go from GtkWindow to nsIScreen, especially
     // given xinerama and stuff, so let's just do this
-    gint x, y, width, height, depth;
+    gint x, y, width, height;
+#if (MOZ_WIDGET_GTK == 2)
+    gint depth;
+#endif
     x = y = width = height = 0;
 
+#if (MOZ_WIDGET_GTK == 2)
     gdk_window_get_geometry(GDK_WINDOW(aWidget), &x, &y, &width, &height,
                             &depth);
+#else
+    gdk_window_get_geometry(GDK_WINDOW(aWidget), &x, &y, &width, &height);
+#endif
     gdk_window_get_origin(GDK_WINDOW(aWidget), &x, &y);
     rv = ScreenForRect(x, y, width, height, outScreen);
   } else {

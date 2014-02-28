@@ -98,7 +98,7 @@ public:
                 spacecolon + lowerKey;
     }
     else {
-      nsCAutoString clause;
+      nsAutoCString clause;
 
       if (!Lower().IsUnset()) {
         // Lower key is set.
@@ -150,13 +150,15 @@ public:
   template <class T>
   void ToSerializedKeyRange(T& aKeyRange);
 
+  void DropJSObjects();
+
 private:
   ~IDBKeyRange();
 
   Key mLower;
   Key mUpper;
-  jsval mCachedLowerVal;
-  jsval mCachedUpperVal;
+  JS::Heap<JS::Value> mCachedLowerVal;
+  JS::Heap<JS::Value> mCachedUpperVal;
   bool mLowerOpen;
   bool mUpperOpen;
   bool mIsOnly;

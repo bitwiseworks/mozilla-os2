@@ -10,15 +10,16 @@
 #include "nsColor.h"
 #include "nsStyleConsts.h"
 
-class HyperTextAccessible;
 class nsIFrame;
 class nsIPersistentProperties;
 class nsIContent;
-class Accessible;
 class nsDeviceContext;
 
 namespace mozilla {
 namespace a11y {
+
+class Accessible;
+class HyperTextAccessible;
 
 /**
  * Used to expose text attributes for the hyper text accessible (see
@@ -208,6 +209,38 @@ protected:
 
   private:
     nsCOMPtr<nsIContent> mRootContent;
+  };
+
+
+  /**
+   * Class is used for the 'invalid' text attribute. Note, it calculated
+   * the attribute from aria-invalid attribute only; invalid:spelling attribute
+   * calculated from misspelled text in the editor is managed by
+   * HyperTextAccessible and applied on top of the value from aria-invalid.
+   */
+  class InvalidTextAttr : public TTextAttr<uint32_t>
+  {
+  public:
+    InvalidTextAttr(nsIContent* aRootElm, nsIContent* aElm);
+    virtual ~InvalidTextAttr() { };
+
+  protected:
+
+    enum {
+      eFalse,
+      eGrammar,
+      eSpelling,
+      eTrue
+    };
+
+    // TextAttr
+    virtual bool GetValueFor(Accessible* aAccessible, uint32_t* aValue);
+    virtual void ExposeValue(nsIPersistentProperties* aAttributes,
+                             const uint32_t& aValue);
+
+  private:
+    bool GetValue(nsIContent* aElm, uint32_t* aValue);
+    nsIContent* mRootElm;
   };
 
 

@@ -24,7 +24,7 @@ interface nsIStreamListener;
  *
  * This interface must be used only from the XPCOM main thread.
  */
-[scriptable, uuid(06f6ada3-7729-4e72-8d3f-bf8ba630ff9b)]
+[scriptable, uuid(2a8a7237-c1e2-4de7-b669-2002af29e42d)]
 interface nsIChannel : nsIRequest
 {
     /**
@@ -119,13 +119,11 @@ interface nsIChannel : nsIRequest
 
     /**
      * The length of the data associated with the channel if available.  A value
-     * of -1 indicates that the content length is unknown.
-     *
-     * Callers should prefer getting the "content-length" property
-     * as 64-bit value by QIing the channel to nsIPropertyBag2,
-     * if that interface is exposed by the channel.
+     * of -1 indicates that the content length is unknown. Note that this is a
+     * 64-bit value and obsoletes the "content-length" property used on some
+     * channels.
      */
-    attribute long contentLength;
+    attribute int64_t contentLength;
 
     /**
      * Synchronously open the channel.
@@ -250,15 +248,31 @@ interface nsIChannel : nsIRequest
     const unsigned long LOAD_TREAT_APPLICATION_OCTET_STREAM_AS_UNKNOWN = 1 << 23;
 
     /**
+     * Set to let explicitely provided credentials be used over credentials
+     * we have cached previously. In some situations like form login using HTTP
+     * auth via XMLHttpRequest we need to let consumers override the cached
+     * credentials explicitely. For form login 403 response instead of 401 is
+     * usually used to prevent an auth dialog. But any code other then 401/7
+     * will leave original credentials in the cache and there is then no way
+     * to override them for the same user name.
+     */
+    const unsigned long LOAD_EXPLICIT_CREDENTIALS = 1 << 24;
+
+    /**
      * Access to the type implied or stated by the Content-Disposition header
      * if available and if applicable. This allows determining inline versus
      * attachment.
      *
+     * Setting contentDisposition provides a hint to the channel about the
+     * disposition.  If a normal Content-Disposition header is present its
+     * value will always be used.  If it is missing the hinted value will
+     * be used if set.
+     *
      * Implementations should throw NS_ERROR_NOT_AVAILABLE if the header either
-     * doesn't exist for this type of channel or is empty, and
+     * doesn't exist for this type of channel or is empty, and return
      * DISPOSITION_ATTACHMENT if an invalid/noncompliant value is present.
      */
-    readonly attribute unsigned long contentDisposition;
+    attribute unsigned long contentDisposition;
     const unsigned long DISPOSITION_INLINE = 0;
     const unsigned long DISPOSITION_ATTACHMENT = 1;
 
@@ -267,12 +281,17 @@ interface nsIChannel : nsIRequest
      * available and if applicable. This allows getting the preferred filename
      * without having to parse it out yourself.
      *
+     * Setting contentDispositionFilename provides a hint to the channel about
+     * the disposition.  If a normal Content-Disposition header is present its
+     * value will always be used.  If it is missing the hinted value will be
+     * used if set.
+     *
      * Implementations should throw NS_ERROR_NOT_AVAILABLE if the header doesn't
      * exist for this type of channel, if the header is empty, if the header
      * doesn't contain a filename portion, or the value of the filename
      * attribute is empty/missing.
      */
-    readonly attribute AString contentDispositionFilename;
+    attribute AString contentDispositionFilename;
 
     /**
      * Access to the raw Content-Disposition header if available and applicable.

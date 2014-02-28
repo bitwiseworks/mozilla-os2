@@ -5,7 +5,6 @@
 #ifndef nsContentIndexCache_h__
 #define nsContentIndexCache_h__
 
-#include "nscore.h"
 #include "js/HashTable.h"
 #include "mozilla/dom/Element.h"
 
@@ -55,6 +54,7 @@ private:
   class SystemAllocPolicy {
   public:
     void *malloc_(size_t bytes) { return ::malloc(bytes); }
+    void *calloc_(size_t bytes) { return ::calloc(bytes, 1); }
     void *realloc_(void *p, size_t bytes) { return ::realloc(p, bytes); }
     void free_(void *p) { ::free(p); }
     void reportAllocOverflow() const {}

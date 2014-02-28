@@ -25,20 +25,7 @@ else ifdef MOZ_DEBUG
 DEFINES += -DMOZ_EM_DEBUG=1
 endif
 
-MODULE = extensions
-
-XPIDLSRCS = \
-  amIInstallTrigger.idl \
-  amIWebInstallListener.idl \
-  amIWebInstaller.idl \
-  $(NULL)
-
-EXTRA_PP_COMPONENTS = \
-  nsBlocklistService.js \
-  $(NULL)
-
-EXTRA_COMPONENTS = \
-  extensions.manifest \
+DISABLED_EXTRA_COMPONENTS = \
   addonManager.js \
   amContentHandler.js \
   amWebInstallListener.js \
@@ -55,12 +42,11 @@ EXTRA_JS_MODULES = \
   AddonRepository.jsm \
   AddonUpdateChecker.jsm \
   ChromeManifestParser.jsm \
+  LightweightThemeImageOptimizer.jsm \
   LightweightThemeManager.jsm \
   PluginProvider.jsm \
   SpellCheckDictionaryBootstrap.js \
   $(NULL)
-
-TEST_DIRS += test
 
 EXTRA_DSO_LDOPTS = \
   $(MOZ_JS_LIBS) \

@@ -5,6 +5,7 @@
 #ifndef nsPageFrame_h___
 #define nsPageFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsContainerFrame.h"
 #include "nsLeafFrame.h"
 
@@ -21,21 +22,21 @@ public:
   NS_IMETHOD  Reflow(nsPresContext*      aPresContext,
                      nsHTMLReflowMetrics& aDesiredSize,
                      const nsHTMLReflowState& aMaxSize,
-                     nsReflowStatus&      aStatus);
+                     nsReflowStatus&      aStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   /**
    * Get the "type" of the frame
    *
    * @see nsGkAtoms::pageFrame
    */
-  virtual nsIAtom* GetType() const;
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
   
 #ifdef DEBUG
-  NS_IMETHOD  GetFrameName(nsAString& aResult) const;
+  NS_IMETHOD  GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   //////////////////
@@ -49,13 +50,10 @@ public:
 
   // We must allow Print Preview UI to have a background, no matter what the
   // user's settings
-  virtual bool HonorPrintBackgroundSettings() { return false; }
+  virtual bool HonorPrintBackgroundSettings() MOZ_OVERRIDE { return false; }
 
   void PaintHeaderFooter(nsRenderingContext& aRenderingContext,
                          nsPoint aPt);
-  void PaintPageContent(nsRenderingContext& aRenderingContext,
-                        const nsRect&        aDirtyRect,
-                        nsPoint              aPt);
 
 protected:
   nsPageFrame(nsStyleContext* aContext);
@@ -108,18 +106,18 @@ class nsPageBreakFrame : public nsLeafFrame
   NS_IMETHOD Reflow(nsPresContext*          aPresContext,
                     nsHTMLReflowMetrics&     aDesiredSize,
                     const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus);
+                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  virtual nsIAtom* GetType() const;
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
 #ifdef DEBUG
-  NS_IMETHOD  GetFrameName(nsAString& aResult) const;
+  NS_IMETHOD  GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
 protected:
 
-  virtual nscoord GetIntrinsicWidth();
-  virtual nscoord GetIntrinsicHeight();
+  virtual nscoord GetIntrinsicWidth() MOZ_OVERRIDE;
+  virtual nscoord GetIntrinsicHeight() MOZ_OVERRIDE;
 
     bool mHaveReflowed;
 

@@ -9,26 +9,23 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = ipc
-
-include $(topsrcdir)/ipc/app/defs.mk
-PROGRAM = $(MOZ_CHILD_PROCESS_NAME)
-
 ifneq ($(dir $(PROGRAM)),./)
   GENERATED_DIRS = $(dir $(PROGRAM))
 endif
 
-CPPSRCS = \
-  MozillaRuntimeMain.cpp \
-  $(NULL)
-
 ifeq (android,$(MOZ_WIDGET_TOOLKIT))
 WRAP_LDFLAGS =
-CPPSRCS = MozillaRuntimeMainAndroid.cpp
 else
 LIBS += \
   $(XPCOM_LIBS) \
   $(NSPR_LIBS) \
+  $(NULL)
+endif
+
+ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+LIBS += \
+  -lbinder \
+  -lutils \
   $(NULL)
 endif
 
@@ -65,6 +62,7 @@ include $(topsrcdir)/config/rules.mk
 LDFLAGS += $(MOZ_ALLOW_HEAP_EXECUTE_FLAGS)
 
 ifeq ($(OS_ARCH),WINNT) #{
+EXTRA_DEPS += $(PROGRAM).manifest
 #
 # Control the default heap size.
 # This is the heap returned by GetProcessHeap().
@@ -77,10 +75,6 @@ ifeq ($(OS_ARCH),WINNT) #{
 #
 ifndef GNU_CC #{
 LDFLAGS += /HEAP:0x40000
-ifeq ($(OS_TEST),x86_64) #{
-# set stack to 2MB on x64 build.  See bug 582910
-LDFLAGS += -STACK:2097152
-endif #}
 endif #}
 endif #}
 

@@ -9,8 +9,7 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= breakpad_dwarf
-HOST_LIBRARY_NAME = host_breakpad_dwarf_s
+ifdef MOZ_CRASHREPORTER
 
 LOCAL_INCLUDES 	= -I$(srcdir)/../..
 
@@ -20,6 +19,7 @@ HOST_CPPSRCS = \
   dwarf2reader.cc \
   functioninfo.cc \
   $(NULL)
+endif
 
 # This code is only compiled for build-time tools,
 # so enabling RTTI should be fine.

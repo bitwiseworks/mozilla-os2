@@ -5,36 +5,41 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsIDOMEventTarget.idl"
-#include "nsIDOMDOMError.idl"
 
 interface nsIDOMEventListener;
 
-[scriptable, builtinclass, uuid(d902afb1-2e1d-412e-bfa3-cb6a9453a4db)]
+[scriptable, builtinclass, uuid(22e44e8c-cb74-44f2-abe6-b37e9f42ea79)]
 interface nsIDOMTelephonyCall : nsIDOMEventTarget
 {
   readonly attribute DOMString number;
 
   readonly attribute DOMString state;
 
-  readonly attribute nsIDOMDOMError error;
+  // The property "emergency" indicate whether the call number is an emergency
+  // number. Only the outgoing call could have a value with true and it is
+  // available after dialing state.
+  readonly attribute boolean emergency;
+
+  // This is a DOMError
+  readonly attribute nsISupports error;
 
   void answer();
   void hangUp();
   void hold();
   void resume();
 
-  attribute nsIDOMEventListener onstatechange;
+  [implicit_jscontext] attribute jsval onstatechange;
 
-  attribute nsIDOMEventListener ondialing;
-  attribute nsIDOMEventListener onalerting;
-  attribute nsIDOMEventListener onbusy;
-  attribute nsIDOMEventListener onconnecting;
-  attribute nsIDOMEventListener onconnected;
-  attribute nsIDOMEventListener ondisconnecting;
-  attribute nsIDOMEventListener ondisconnected;
-  attribute nsIDOMEventListener onholding;
-  attribute nsIDOMEventListener onheld;
-  attribute nsIDOMEventListener onresuming;
+  [implicit_jscontext] attribute jsval ondialing;
+  [implicit_jscontext] attribute jsval onalerting;
+  [implicit_jscontext] attribute jsval onbusy;
+  [implicit_jscontext] attribute jsval onconnecting;
+  [implicit_jscontext] attribute jsval onconnected;
+  [implicit_jscontext] attribute jsval ondisconnecting;
+  [implicit_jscontext] attribute jsval ondisconnected;
+  [implicit_jscontext] attribute jsval onholding;
+  [implicit_jscontext] attribute jsval onheld;
+  [implicit_jscontext] attribute jsval onresuming;
 
-  attribute nsIDOMEventListener onerror;
+  [implicit_jscontext] attribute jsval onerror;
 };

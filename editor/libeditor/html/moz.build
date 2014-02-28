@@ -1,0 +1,37 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+TEST_DIRS += ['tests']
+
+MODULE = 'editor'
+
+CPP_SOURCES += [
+    'TextEditorTest.cpp',
+    'TypeInState.cpp',
+    'nsEditProperty.cpp',
+    'nsHTMLAbsPosition.cpp',
+    'nsHTMLAnonymousUtils.cpp',
+    'nsHTMLCSSUtils.cpp',
+    'nsHTMLDataTransfer.cpp',
+    'nsHTMLEditRules.cpp',
+    'nsHTMLEditUtils.cpp',
+    'nsHTMLEditor.cpp',
+    'nsHTMLEditorEventListener.cpp',
+    'nsHTMLEditorStyle.cpp',
+    'nsHTMLInlineTableEditor.cpp',
+    'nsHTMLObjectResizer.cpp',
+    'nsHTMLURIRefObject.cpp',
+    'nsTableEditor.cpp',
+    'nsWSRunObject.cpp',
+]
+
+if CONFIG['ENABLE_EDITOR_API_LOG']:
+    CPP_SOURCES += [
+        'nsEditorTxnLog.cpp',
+    ]
+
+LIBRARY_NAME = 'htmleditor_s'
+

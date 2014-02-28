@@ -11,6 +11,12 @@
 
 using mozilla::dom::Nullable;
 
+namespace mozilla {
+namespace dom {
+class EventTarget;
+} // namespace dom
+} // namespace mozilla
+
 class nsPresContext;
 class nsEventChainPreVisitor;
 class nsEventChainPostVisitor;
@@ -33,12 +39,13 @@ class nsEventListenerManager;
 [ptr] native nsEventStatusPtr(nsEventStatus);
 [ptr] native JSContextPtr(JSContext);
 [ptr] native nsEventListenerManagerPtr(nsEventListenerManager);
+[ptr] native EventTargetPtr(mozilla::dom::EventTarget);
 
 interface nsIScriptContext;
 interface nsIDOMEventListener;
 interface nsIDOMEvent;
 
-[scriptable, builtinclass, uuid(8e375931-298d-4d0a-9cb4-5668f0cdc5a8)]
+[scriptable, builtinclass, uuid(31e92e56-4d23-4a4a-9cfe-a6d12cf434bc)]
 interface nsIDOMEventTarget : nsISupports
 {
   /**
@@ -103,7 +110,7 @@ interface nsIDOMEventTarget : nsISupports
                             nsIDOMEventListener* aListener,
                             bool aUseCapture)
   {
-    return AddEventListener(aType, aListener, aUseCapture, PR_FALSE, 1);
+    return AddEventListener(aType, aListener, aUseCapture, false, 1);
   }
   // non-virtual so it won't affect the vtable
   nsresult AddEventListener(const nsAString& aType,
@@ -118,7 +125,7 @@ interface nsIDOMEventTarget : nsISupports
                                   nsIDOMEventListener* aListener,
                                   bool aUseCapture)
   {
-    return AddSystemEventListener(aType, aListener, aUseCapture, PR_FALSE, 1);
+    return AddSystemEventListener(aType, aListener, aUseCapture, false, 1);
   }
   // non-virtual so it won't affect the vtable
   nsresult AddSystemEventListener(const nsAString& aType,
@@ -186,20 +193,20 @@ interface nsIDOMEventTarget : nsISupports
                                                raises(DOMException);
 
   /**
-   * Returns the nsPIDOMEventTarget object which should be used as the target
+   * Returns the nsIDOMEventTarget object which should be used as the target
    * of DOMEvents.
    * Usually |this| is returned, but for example global object returns
    * the outer object.
    */
-   [notxpcom, nostdcall] nsIDOMEventTarget GetTargetForDOMEvent();
+   [notxpcom, nostdcall] EventTargetPtr GetTargetForDOMEvent();
 
   /**
-   * Returns the nsPIDOMEventTarget object which should be used as the target
+   * Returns the nsIDOMEventTarget object which should be used as the target
    * of the event and when constructing event target chain.
    * Usually |this| is returned, but for example global object returns
    * the inner object.
    */
-   [notxpcom, nostdcall] nsIDOMEventTarget GetTargetForEventTargetChain();
+   [notxpcom, nostdcall] EventTargetPtr GetTargetForEventTargetChain();
 
   /**
    * Called before the capture phase of the event flow.
@@ -286,11 +293,9 @@ interface nsIDOMEventTarget : nsISupports
 
 %{C++
 
-typedef nsIDOMEventTarget nsPIDOMEventTarget;
-
 #define NS_IMPL_DOMTARGET_DEFAULTS(_class) \
-nsPIDOMEventTarget* _class::GetTargetForDOMEvent() { return this; } \
-nsPIDOMEventTarget* _class::GetTargetForEventTargetChain() { return this; } \
+mozilla::dom::EventTarget* _class::GetTargetForDOMEvent() { return this; } \
+mozilla::dom::EventTarget* _class::GetTargetForEventTargetChain() { return this; } \
 nsresult _class::WillHandleEvent(nsEventChainPostVisitor& aVisitor) { return NS_OK; } \
 JSContext* _class::GetJSContextForEventHandlers() { return nullptr; }
 
@@ -304,8 +309,9 @@ aClass::RemoveSystemEventListener(const nsAString& aType, \
   if (!listenerManager) { \
     return NS_OK; \
   } \
-  uint32_t flags = NS_EVENT_FLAG_SYSTEM_EVENT; \
-  flags |= aUseCapture ? NS_EVENT_FLAG_CAPTURE : NS_EVENT_FLAG_BUBBLE; \
+  mozilla::dom::EventListenerFlags flags; \
+  flags.mInSystemGroup = true; \
+  flags.mCapture = aUseCapture; \
   listenerManager->RemoveEventListenerByType(aListener, aType, flags); \
   return NS_OK; \
 }

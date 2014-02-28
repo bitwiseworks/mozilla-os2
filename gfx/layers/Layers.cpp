@@ -5,8 +5,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/PLayers.h"
-#include "mozilla/layers/ShadowLayers.h"
+#include "mozilla/DebugOnly.h"
+
+#include "mozilla/layers/PLayerTransaction.h"
+#include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/Telemetry.h"
+#include "CompositableHost.h"
 
 #include "ImageLayers.h"
 #include "ImageContainer.h"
@@ -15,9 +19,10 @@
 #include "ReadbackLayer.h"
 #include "gfxUtils.h"
 #include "nsPrintfCString.h"
-#include "mozilla/Util.h"
 #include "LayerSorter.h"
 #include "AnimationCommon.h"
+#include "mozilla/layers/Compositor.h"
+#include "LayersLogging.h"
 
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
@@ -37,155 +42,72 @@ FILEOrDefault(FILE* aFile)
 }
 #endif // MOZ_LAYERS_HAVE_LOG
 
-namespace {
-
-// XXX pretty general utilities, could centralize
-
-nsACString&
-AppendToString(nsACString& s, const void* p,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  s += nsPrintfCString("%p", p);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const gfxPattern::GraphicsFilter& f,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  switch (f) {
-  case gfxPattern::FILTER_FAST:      s += "fast"; break;
-  case gfxPattern::FILTER_GOOD:      s += "good"; break;
-  case gfxPattern::FILTER_BEST:      s += "best"; break;
-  case gfxPattern::FILTER_NEAREST:   s += "nearest"; break;
-  case gfxPattern::FILTER_BILINEAR:  s += "bilinear"; break;
-  case gfxPattern::FILTER_GAUSSIAN:  s += "gaussian"; break;
-  default:
-    NS_ERROR("unknown filter type");
-    s += "???";
-  }
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, ViewID n,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  s.AppendInt(n);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const gfxRGBA& c,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  s += nsPrintfCString(
-    "rgba(%d, %d, %d, %g)",
-    uint8_t(c.r*255.0), uint8_t(c.g*255.0), uint8_t(c.b*255.0), c.a);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const gfx3DMatrix& m,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  if (m.IsIdentity())
-    s += "[ I ]";
-  else {
-    gfxMatrix matrix;
-    if (m.Is2D(&matrix)) {
-      s += nsPrintfCString(
-        "[ %g %g; %g %g; %g %g; ]",
-        matrix.xx, matrix.yx, matrix.xy, matrix.yy, matrix.x0, matrix.y0);
-    } else {
-      s += nsPrintfCString(
-        "[ %g %g %g %g; %g %g %g %g; %g %g %g %g; %g %g %g %g; ]",
-        m._11, m._12, m._13, m._14,
-        m._21, m._22, m._23, m._24,
-        m._31, m._32, m._33, m._34,
-        m._41, m._42, m._43, m._44);
-    }
-  }
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const nsIntPoint& p,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  s += nsPrintfCString("(x=%d, y=%d)", p.x, p.y);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const Point& p,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  s += nsPrintfCString("(x=%f, y=%f)", p.x, p.y);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const nsIntRect& r,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  s += nsPrintfCString(
-    "(x=%d, y=%d, w=%d, h=%d)",
-    r.x, r.y, r.width, r.height);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const nsIntRegion& r,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-
-  nsIntRegionRectIterator it(r);
-  s += "< ";
-  while (const nsIntRect* sr = it.Next())
-    AppendToString(s, *sr) += "; ";
-  s += ">";
-
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const nsIntSize& sz,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  s += nsPrintfCString("(w=%d, h=%d)", sz.width, sz.height);
-  return s += sfx;
-}
-
-nsACString&
-AppendToString(nsACString& s, const FrameMetrics& m,
-               const char* pfx="", const char* sfx="")
-{
-  s += pfx;
-  AppendToString(s, m.mViewport, "{ viewport=");
-  AppendToString(s, m.mViewportScrollOffset, " viewportScroll=");
-  AppendToString(s, m.mDisplayPort, " displayport=");
-  AppendToString(s, m.mScrollId, " scrollId=", " }");
-  return s += sfx;
-}
-
-} // namespace <anon>
-
 namespace mozilla {
 namespace layers {
 
 //--------------------------------------------------
 // LayerManager
+Layer*
+LayerManager::GetPrimaryScrollableLayer()
+{
+  if (!mRoot) {
+    return nullptr;
+  }
+
+  nsTArray<Layer*> queue;
+  queue.AppendElement(mRoot);
+  while (queue.Length()) {
+    ContainerLayer* containerLayer = queue[0]->AsContainerLayer();
+    queue.RemoveElementAt(0);
+    if (!containerLayer) {
+      continue;
+    }
+
+    const FrameMetrics& frameMetrics = containerLayer->GetFrameMetrics();
+    if (frameMetrics.IsScrollable()) {
+      return containerLayer;
+    }
+
+    Layer* child = containerLayer->GetFirstChild();
+    while (child) {
+      queue.AppendElement(child);
+      child = child->GetNextSibling();
+    }
+  }
+
+  return mRoot;
+}
+
+void
+LayerManager::GetScrollableLayers(nsTArray<Layer*>& aArray)
+{
+  if (!mRoot) {
+    return;
+  }
+
+  nsTArray<Layer*> queue;
+  queue.AppendElement(mRoot);
+  while (!queue.IsEmpty()) {
+    ContainerLayer* containerLayer = queue.LastElement()->AsContainerLayer();
+    queue.RemoveElementAt(queue.Length() - 1);
+    if (!containerLayer) {
+      continue;
+    }
+
+    const FrameMetrics& frameMetrics = containerLayer->GetFrameMetrics();
+    if (frameMetrics.IsScrollable()) {
+      aArray.AppendElement(containerLayer);
+      continue;
+    }
+
+    Layer* child = containerLayer->GetFirstChild();
+    while (child) {
+      queue.AppendElement(child);
+      child = child->GetNextSibling();
+    }
+  }
+}
+
 already_AddRefed<gfxASurface>
 LayerManager::CreateOptimalSurface(const gfxIntSize &aSize,
                                    gfxASurface::gfxImageFormat aFormat)
@@ -207,6 +129,15 @@ LayerManager::CreateDrawTarget(const IntSize &aSize,
   return gfxPlatform::GetPlatform()->
     CreateOffscreenDrawTarget(aSize, aFormat);
 }
+
+TextureFactoryIdentifier
+LayerManager::GetTextureFactoryIdentifier()
+{
+  //TODO[nrc] make pure virtual when all layer managers use Compositor
+  NS_ERROR("Should have been overridden");
+  return TextureFactoryIdentifier();
+}
+
 
 #ifdef DEBUG
 void
@@ -246,7 +177,9 @@ Layer::Layer(LayerManager* aManager, void* aImplData) :
   mUseClipRect(false),
   mUseTileSourceRect(false),
   mIsFixedPosition(false),
-  mDebugColorIndex(0)
+  mMargins(0, 0, 0, 0),
+  mDebugColorIndex(0),
+  mAnimationGeneration(0)
 {}
 
 Layer::~Layer()
@@ -256,6 +189,8 @@ Animation*
 Layer::AddAnimation(TimeStamp aStart, TimeDuration aDuration, float aIterations,
                     int aDirection, nsCSSProperty aProperty, const AnimationData& aData)
 {
+  MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) AddAnimation", this));
+
   Animation* anim = mAnimations.AppendElement();
   anim->startTime() = aStart;
   anim->duration() = aDuration;
@@ -271,6 +206,11 @@ Layer::AddAnimation(TimeStamp aStart, TimeDuration aDuration, float aIterations,
 void
 Layer::ClearAnimations()
 {
+  if (mAnimations.IsEmpty() && mAnimationData.IsEmpty()) {
+    return;
+  }
+
+  MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ClearAnimations", this));
   mAnimations.Clear();
   mAnimationData.Clear();
   Mutated();
@@ -345,14 +285,21 @@ CreateCSSValueList(const InfallibleTArray<TransformFunction>& aFunctions)
       {
         float x = aFunctions[i].get_SkewX().x();
         arr = nsStyleAnimation::AppendTransformFunction(eCSSKeyword_skewx, resultTail);
-        arr->Item(1).SetFloatValue(x, eCSSUnit_Number);
+        arr->Item(1).SetFloatValue(x, eCSSUnit_Radian);
         break;
       }
       case TransformFunction::TSkewY:
       {
         float y = aFunctions[i].get_SkewY().y();
         arr = nsStyleAnimation::AppendTransformFunction(eCSSKeyword_skewy, resultTail);
-        arr->Item(1).SetFloatValue(y, eCSSUnit_Number);
+        arr->Item(1).SetFloatValue(y, eCSSUnit_Radian);
+        break;
+      }
+      case TransformFunction::TSkew:
+      {
+        arr = nsStyleAnimation::AppendTransformFunction(eCSSKeyword_skew, resultTail);
+        arr->Item(1).SetFloatValue(aFunctions[i].get_Skew().x(), eCSSUnit_Radian);
+        arr->Item(2).SetFloatValue(aFunctions[i].get_Skew().y(), eCSSUnit_Radian);
         break;
       }
       case TransformFunction::TTransformMatrix:
@@ -398,12 +345,15 @@ CreateCSSValueList(const InfallibleTArray<TransformFunction>& aFunctions)
 void
 Layer::SetAnimations(const AnimationArray& aAnimations)
 {
+  MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) SetAnimations", this));
+
   mAnimations = aAnimations;
   mAnimationData.Clear();
   for (uint32_t i = 0; i < mAnimations.Length(); i++) {
     AnimData* data = mAnimationData.AppendElement();
-    InfallibleTArray<css::ComputedTimingFunction*>& functions = data->mFunctions;
-    nsTArray<AnimationSegment> segments = mAnimations.ElementAt(i).segments();
+    InfallibleTArray<nsAutoPtr<css::ComputedTimingFunction> >& functions = data->mFunctions;
+    const InfallibleTArray<AnimationSegment>& segments =
+      mAnimations.ElementAt(i).segments();
     for (uint32_t j = 0; j < segments.Length(); j++) {
       TimingFunction tf = segments.ElementAt(j).sampleFn();
       css::ComputedTimingFunction* ctf = new css::ComputedTimingFunction();
@@ -456,6 +406,47 @@ Layer::SetAnimations(const AnimationArray& aAnimations)
   Mutated();
 }
 
+static uint8_t sPanZoomUserDataKey;
+struct PanZoomUserData : public LayerUserData {
+  PanZoomUserData(AsyncPanZoomController* aController)
+    : mController(aController)
+  { }
+
+  // We don't keep a strong ref here because PanZoomUserData is only
+  // set transiently, and APZC is thread-safe refcounted so
+  // AddRef/Release is expensive.
+  AsyncPanZoomController* mController;
+};
+
+void
+Layer::SetAsyncPanZoomController(AsyncPanZoomController *controller)
+{
+  if (controller) {
+    SetUserData(&sPanZoomUserDataKey, new PanZoomUserData(controller));
+  } else {
+    RemoveUserData(&sPanZoomUserDataKey);
+  }
+}
+
+AsyncPanZoomController*
+Layer::GetAsyncPanZoomController()
+{
+  LayerUserData* data = GetUserData(&sPanZoomUserDataKey);
+  if (!data) {
+    return nullptr;
+  }
+  return static_cast<PanZoomUserData*>(data)->mController;
+}
+
+void
+Layer::ApplyPendingUpdatesToSubtree()
+{
+  ApplyPendingUpdatesForThisTransaction();
+  for (Layer* child = GetFirstChild(); child; child = child->GetNextSibling()) {
+    child->ApplyPendingUpdatesToSubtree();
+  }
+}
+
 bool
 Layer::CanUseOpaqueSurface()
 {
@@ -477,7 +468,7 @@ Layer::CanUseOpaqueSurface()
 const nsIntRect*
 Layer::GetEffectiveClipRect()
 {
-  if (ShadowLayer* shadow = AsShadowLayer()) {
+  if (LayerComposite* shadow = AsLayerComposite()) {
     return shadow->GetShadowClipRect();
   }
   return GetClipRect();
@@ -486,10 +477,41 @@ Layer::GetEffectiveClipRect()
 const nsIntRegion&
 Layer::GetEffectiveVisibleRegion()
 {
-  if (ShadowLayer* shadow = AsShadowLayer()) {
+  if (LayerComposite* shadow = AsLayerComposite()) {
     return shadow->GetShadowVisibleRegion();
   }
   return GetVisibleRegion();
+}
+
+gfx3DMatrix
+Layer::SnapTransformTranslation(const gfx3DMatrix& aTransform,
+                                gfxMatrix* aResidualTransform)
+{
+  if (aResidualTransform) {
+    *aResidualTransform = gfxMatrix();
+  }
+
+  gfxMatrix matrix2D;
+  gfx3DMatrix result;
+  if (mManager->IsSnappingEffectiveTransforms() &&
+      aTransform.Is2D(&matrix2D) &&
+      !matrix2D.HasNonTranslation() &&
+      matrix2D.HasNonIntegerTranslation()) {
+    gfxPoint snappedTranslation(matrix2D.GetTranslation());
+    snappedTranslation.Round();
+    gfxMatrix snappedMatrix = gfxMatrix().Translate(snappedTranslation);
+    result = gfx3DMatrix::From2D(snappedMatrix);
+    if (aResidualTransform) {
+      // set aResidualTransform so that aResidual * snappedMatrix == matrix2D.
+      // (I.e., appying snappedMatrix after aResidualTransform gives the
+      // ideal transform.)
+      *aResidualTransform =
+        gfxMatrix().Translate(matrix2D.GetTranslation() - snappedTranslation);
+    }
+  } else {
+    result = aTransform;
+  }
+  return result;
 }
 
 gfx3DMatrix
@@ -505,26 +527,18 @@ Layer::SnapTransform(const gfx3DMatrix& aTransform,
   gfx3DMatrix result;
   if (mManager->IsSnappingEffectiveTransforms() &&
       aTransform.Is2D(&matrix2D) &&
-      matrix2D.HasNonIntegerTranslation() &&
-      !matrix2D.IsSingular() &&
-      !matrix2D.HasNonAxisAlignedTransform()) {
-    gfxMatrix snappedMatrix;
-    gfxPoint topLeft = matrix2D.Transform(aSnapRect.TopLeft());
-    topLeft.Round();
-    // first compute scale factors that scale aSnapRect to the snapped rect
-    if (aSnapRect.IsEmpty()) {
-      snappedMatrix.xx = matrix2D.xx;
-      snappedMatrix.yy = matrix2D.yy;
-    } else {
-      gfxPoint bottomRight = matrix2D.Transform(aSnapRect.BottomRight());
-      bottomRight.Round();
-      snappedMatrix.xx = (bottomRight.x - topLeft.x)/aSnapRect.Width();
-      snappedMatrix.yy = (bottomRight.y - topLeft.y)/aSnapRect.Height();
-    }
-    // compute translation factors that will move aSnapRect to the snapped rect
-    // given those scale factors
-    snappedMatrix.x0 = topLeft.x - aSnapRect.X()*snappedMatrix.xx;
-    snappedMatrix.y0 = topLeft.y - aSnapRect.Y()*snappedMatrix.yy;
+      gfxSize(1.0, 1.0) <= aSnapRect.Size() &&
+      matrix2D.PreservesAxisAlignedRectangles()) {
+    gfxPoint transformedTopLeft = matrix2D.Transform(aSnapRect.TopLeft());
+    transformedTopLeft.Round();
+    gfxPoint transformedTopRight = matrix2D.Transform(aSnapRect.TopRight());
+    transformedTopRight.Round();
+    gfxPoint transformedBottomRight = matrix2D.Transform(aSnapRect.BottomRight());
+    transformedBottomRight.Round();
+
+    gfxMatrix snappedMatrix = gfxUtils::TransformRectToRect(aSnapRect,
+      transformedTopLeft, transformedTopRight, transformedBottomRight);
+
     result = gfx3DMatrix::From2D(snappedMatrix);
     if (aResidualTransform && !snappedMatrix.IsSingular()) {
       // set aResidualTransform so that aResidual * snappedMatrix == matrix2D.
@@ -538,6 +552,26 @@ Layer::SnapTransform(const gfx3DMatrix& aTransform,
     result = aTransform;
   }
   return result;
+}
+
+static bool
+AncestorLayerMayChangeTransform(Layer* aLayer)
+{
+  for (Layer* l = aLayer; l; l = l->GetParent()) {
+    if (l->GetContentFlags() & Layer::CONTENT_MAY_CHANGE_TRANSFORM) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
+Layer::MayResample()
+{
+  gfxMatrix transform2d;
+  return !GetEffectiveTransform().Is2D(&transform2d) ||
+         transform2d.HasNonIntegerTranslation() ||
+         AncestorLayerMayChangeTransform(this);
 }
 
 nsIntRect
@@ -612,7 +646,7 @@ const gfx3DMatrix
 Layer::GetLocalTransform()
 {
   gfx3DMatrix transform;
-  if (ShadowLayer* shadow = AsShadowLayer())
+  if (LayerComposite* shadow = AsLayerComposite())
     transform = shadow->GetShadowTransform();
   else
     transform = mTransform;
@@ -623,10 +657,21 @@ Layer::GetLocalTransform()
   return transform;
 }
 
+void
+Layer::ApplyPendingUpdatesForThisTransaction()
+{
+  if (mPendingTransform && *mPendingTransform != mTransform) {
+    MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) PendingUpdatesForThisTransaction", this));
+    mTransform = *mPendingTransform;
+    Mutated();
+  }
+  mPendingTransform = nullptr;
+}
+
 const float
 Layer::GetLocalOpacity()
 {
-   if (ShadowLayer* shadow = AsShadowLayer())
+   if (LayerComposite* shadow = AsLayerComposite())
     return shadow->GetShadowOpacity();
   return mOpacity;
 }
@@ -660,7 +705,8 @@ Layer::ComputeEffectiveTransformForMaskLayer(const gfx3DMatrix& aTransformToSurf
 void
 ContainerLayer::FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
 {
-  aAttrs = ContainerLayerAttributes(GetFrameMetrics(), mPreXScale, mPreYScale);
+  aAttrs = ContainerLayerAttributes(GetFrameMetrics(), mPreXScale, mPreYScale,
+                                    mInheritedXScale, mInheritedYScale);
 }
 
 bool
@@ -710,7 +756,7 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const gfx3DMatrix& aTransformT
   gfxMatrix residual;
   gfx3DMatrix idealTransform = GetLocalTransform()*aTransformToSurface;
   idealTransform.ProjectTo2D();
-  mEffectiveTransform = SnapTransform(idealTransform, gfxRect(0, 0, 0, 0), &residual);
+  mEffectiveTransform = SnapTransformTranslation(idealTransform, &residual);
 
   bool useIntermediateSurface;
   if (GetMaskLayer()) {
@@ -801,41 +847,149 @@ RefLayer::FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
   aAttrs = RefLayerAttributes(GetReferentId());
 }
 
-void
+/** 
+ * StartFrameTimeRecording, together with StopFrameTimeRecording
+ * enable recording of frame intrvals and paint times.
+ * (Paint start time is set from the refresh driver right before starting
+ * flush/paint and ends at PostPresent. Intervals are measured at PostPresent).
+ *
+ * To allow concurrent consumers, 2 cyclic arrays are used (for intervals, paints)
+ * which serve all consumers, practically stateless with regard to consumers.
+ *
+ * To save resources, the buffers are allocated on first call to StartFrameTimeRecording
+ * and recording is paused if no consumer which called StartFrameTimeRecording is able
+ * to get valid results (because the cyclic buffers were overwritten since that call).
+ *
+ * To determine availability of the data upon StopFrameTimeRecording:
+ * - mRecording.mNextIndex increases on each PostPresent, and never resets.
+ * - Cyclic buffer position is realized as mNextIndex % bufferSize.
+ * - StartFrameTimeRecording returns mNextIndex. When StopFrameTimeRecording is called,
+ *   the required start index is passed as an arg, and we're able to calculate the required
+ *   length. If this length is bigger than bufferSize, it means data was overwritten.
+ *   otherwise, we can return the entire sequence.
+ * - To determine if we need to pause, mLatestStartIndex is updated to mNextIndex
+ *   on each call to StartFrameTimeRecording. If this index gets overwritten,
+ *   it means that all earlier start indices obtained via StartFrameTimeRecording
+ *   were also overwritten, hence, no point in recording, so pause.
+ * - mCurrentRunStartIndex indicates the oldest index of the recording after which
+ *   the recording was not paused. If StopFrameTimeRecording is invoked with a start index
+ *   older than this, it means that some frames were not recorded, so data is invalid.
+ */
+uint32_t
 LayerManager::StartFrameTimeRecording()
 {
-  mLastFrameTime = TimeStamp::Now();
+  if (mRecording.mIsPaused) {
+    mRecording.mIsPaused = false;
+
+    if (!mRecording.mIntervals.Length()) { // Initialize recording buffers
+      const uint32_t kRecordingMinSize = 60 * 10; // 10 seconds @60 fps.
+      const uint32_t kRecordingMaxSize = 60 * 60 * 60; // One hour
+      uint32_t bufferSize = Preferences::GetUint("toolkit.framesRecording.bufferSize",
+                                                 kRecordingMinSize);
+      bufferSize = std::min(bufferSize, kRecordingMaxSize);
+      bufferSize = std::max(bufferSize, kRecordingMinSize);
+
+      if (!mRecording.mIntervals.SetLength(bufferSize) || !mRecording.mPaints.SetLength(bufferSize)) {
+        mRecording.mIsPaused = true; // OOM
+        mRecording.mIntervals.Clear();
+        mRecording.mPaints.Clear();
+      }
+    }
+
+    // After being paused, recent values got invalid. Update them to now.
+    mRecording.mLastFrameTime = TimeStamp::Now();
+    mRecording.mPaintStartTime = mRecording.mLastFrameTime;
+
+    // Any recording which started before this is invalid, since we were paused.
+    mRecording.mCurrentRunStartIndex = mRecording.mNextIndex;
+  }
+
+  // If we'll overwrite this index, there are no more consumers with aStartIndex
+  // for which we're able to provide the full recording, so no point in keep recording.
+  mRecording.mLatestStartIndex = mRecording.mNextIndex;
+  return mRecording.mNextIndex;
+}
+
+void
+LayerManager::SetPaintStartTime(TimeStamp& aTime)
+{
+  if (!mRecording.mIsPaused) {
+    mRecording.mPaintStartTime = aTime;
+  }
 }
 
 void
 LayerManager::PostPresent()
 {
-  if (!mLastFrameTime.IsNull()) {
+  if (!mRecording.mIsPaused) {
     TimeStamp now = TimeStamp::Now();
-    mFrameTimes.AppendElement((now - mLastFrameTime).ToMilliseconds());
-    mLastFrameTime = now;
+    uint32_t i = mRecording.mNextIndex % mRecording.mIntervals.Length();
+    mRecording.mIntervals[i] = static_cast<float>((now - mRecording.mLastFrameTime)
+                                                  .ToMilliseconds());
+    mRecording.mPaints[i]    = static_cast<float>((now - mRecording.mPaintStartTime)
+                                                  .ToMilliseconds());
+    mRecording.mNextIndex++;
+    mRecording.mLastFrameTime = now;
+
+    if (mRecording.mNextIndex > (mRecording.mLatestStartIndex + mRecording.mIntervals.Length())) {
+      // We've just overwritten the most recent recording start -> pause.
+      mRecording.mIsPaused = true;
+    }
+  }
+  if (!mTabSwitchStart.IsNull()) {
+    Telemetry::Accumulate(Telemetry::FX_TAB_SWITCH_TOTAL_MS,
+                          uint32_t((TimeStamp::Now() - mTabSwitchStart).ToMilliseconds()));
+    mTabSwitchStart = TimeStamp();
   }
 }
 
-nsTArray<float>
-LayerManager::StopFrameTimeRecording()
+void
+LayerManager::StopFrameTimeRecording(uint32_t         aStartIndex,
+                                     nsTArray<float>& aFrameIntervals,
+                                     nsTArray<float>& aPaintTimes)
 {
-  mLastFrameTime = TimeStamp();
-  nsTArray<float> result = mFrameTimes;
-  mFrameTimes.Clear();
-  return result;
+  uint32_t bufferSize = mRecording.mIntervals.Length();
+  uint32_t length = mRecording.mNextIndex - aStartIndex;
+  if (mRecording.mIsPaused || length > bufferSize || aStartIndex < mRecording.mCurrentRunStartIndex) {
+    // aStartIndex is too old. Also if aStartIndex was issued before mRecordingNextIndex overflowed (uint32_t)
+    //   and stopped after the overflow (would happen once every 828 days of constant 60fps).
+    length = 0;
+  }
+
+  // Set length in advance to avoid possibly repeated reallocations (and OOM checks).
+  if (!length || !aFrameIntervals.SetLength(length) || !aPaintTimes.SetLength(length)) {
+    aFrameIntervals.Clear();
+    aPaintTimes.Clear();
+    return; // empty recording or OOM, return empty arrays.
+  }
+
+  uint32_t cyclicPos = aStartIndex % bufferSize;
+  for (uint32_t i = 0; i < length; i++, cyclicPos++) {
+    if (cyclicPos == bufferSize) {
+      cyclicPos = 0;
+    }
+    aFrameIntervals[i] = mRecording.mIntervals[cyclicPos];
+    aPaintTimes[i]     = mRecording.mPaints[cyclicPos];
+  }
 }
 
-
+void
+LayerManager::BeginTabSwitch()
+{
+  mTabSwitchStart = TimeStamp::Now();
+}
 
 #ifdef MOZ_LAYERS_HAVE_LOG
 
-static nsACString& PrintInfo(nsACString& aTo, ShadowLayer* aShadowLayer);
+static nsACString& PrintInfo(nsACString& aTo, LayerComposite* aLayerComposite);
 
 #ifdef MOZ_DUMP_PAINTING
 template <typename T>
 void WriteSnapshotLinkToDumpFile(T* aObj, FILE* aFile)
 {
+  if (!aObj) {
+    return;
+  }
   nsCString string(aObj->Name());
   string.Append("-");
   string.AppendInt((uint64_t)aObj);
@@ -864,6 +1018,11 @@ void WriteSnapshotToDumpFile(LayerManager* aManager, gfxASurface* aSurf)
 {
   WriteSnapshotToDumpFile_internal(aManager, aSurf);
 }
+
+void WriteSnapshotToDumpFile(Compositor* aCompositor, gfxASurface* aSurf)
+{
+  WriteSnapshotToDumpFile_internal(aCompositor, aSurf);
+}
 #endif
 
 void
@@ -879,23 +1038,26 @@ Layer::Dump(FILE* aFile, const char* aPrefix, bool aDumpHtml)
     fprintf(aFile, ">");
   }
   DumpSelf(aFile, aPrefix);
+  if (AsLayerComposite() && AsLayerComposite()->GetCompositableHost()) {
+    AsLayerComposite()->GetCompositableHost()->Dump(aFile, aPrefix, aDumpHtml);
+  }
   if (aDumpHtml) {
     fprintf(aFile, "</a>");
   }
 
   if (Layer* mask = GetMaskLayer()) {
-    nsCAutoString pfx(aPrefix);
+    nsAutoCString pfx(aPrefix);
     pfx += "  Mask layer: ";
-    mask->Dump(aFile, pfx.get());
+    mask->Dump(aFile, pfx.get(), aDumpHtml);
   }
 
   if (Layer* kid = GetFirstChild()) {
-    nsCAutoString pfx(aPrefix);
+    nsAutoCString pfx(aPrefix);
     pfx += "  ";
     if (aDumpHtml) {
       fprintf(aFile, "<ul>");
     }
-    kid->Dump(aFile, pfx.get());
+    kid->Dump(aFile, pfx.get(), aDumpHtml);
     if (aDumpHtml) {
       fprintf(aFile, "</ul>");
     }
@@ -911,7 +1073,7 @@ Layer::Dump(FILE* aFile, const char* aPrefix, bool aDumpHtml)
 void
 Layer::DumpSelf(FILE* aFile, const char* aPrefix)
 {
-  nsCAutoString str;
+  nsAutoCString str;
   PrintInfo(str, aPrefix);
   fprintf(FILEOrDefault(aFile), "%s\n", str.get());
 }
@@ -925,7 +1087,7 @@ Layer::Log(const char* aPrefix)
   LogSelf(aPrefix);
 
   if (Layer* kid = GetFirstChild()) {
-    nsCAutoString pfx(aPrefix);
+    nsAutoCString pfx(aPrefix);
     pfx += "  ";
     kid->Log(pfx.get());
   }
@@ -940,7 +1102,7 @@ Layer::LogSelf(const char* aPrefix)
   if (!IsLogEnabled())
     return;
 
-  nsCAutoString str;
+  nsAutoCString str;
   PrintInfo(str, aPrefix);
   MOZ_LAYERS_LOG(("%s", str.get()));
 }
@@ -951,7 +1113,7 @@ Layer::PrintInfo(nsACString& aTo, const char* aPrefix)
   aTo += aPrefix;
   aTo += nsPrintfCString("%s%s (0x%p)", mManager->Name(), Name(), this);
 
-  ::PrintInfo(aTo, AsShadowLayer());
+  ::PrintInfo(aTo, AsLayerComposite());
 
   if (mUseClipRect) {
     AppendToString(aTo, mClipRect, " [clip=", "]");
@@ -964,6 +1126,8 @@ Layer::PrintInfo(nsACString& aTo, const char* aPrefix)
   }
   if (!mVisibleRegion.IsEmpty()) {
     AppendToString(aTo, mVisibleRegion, " [visible=", "]");
+  } else {
+    aTo += " [not visible]";
   }
   if (1.0 != mOpacity) {
     aTo.AppendPrintf(" [opacity=%g]", mOpacity);
@@ -1083,7 +1247,7 @@ LayerManager::Dump(FILE* aFile, const char* aPrefix, bool aDumpHtml)
   }
 #endif
 
-  nsCAutoString pfx(aPrefix);
+  nsAutoCString pfx(aPrefix);
   pfx += "  ";
   if (!GetRoot()) {
     fprintf(file, "%s(null)", pfx.get());
@@ -1106,7 +1270,7 @@ LayerManager::Dump(FILE* aFile, const char* aPrefix, bool aDumpHtml)
 void
 LayerManager::DumpSelf(FILE* aFile, const char* aPrefix)
 {
-  nsCAutoString str;
+  nsAutoCString str;
   PrintInfo(str, aPrefix);
   fprintf(FILEOrDefault(aFile), "%s\n", str.get());
 }
@@ -1119,7 +1283,7 @@ LayerManager::Log(const char* aPrefix)
 
   LogSelf(aPrefix);
 
-  nsCAutoString pfx(aPrefix);
+  nsAutoCString pfx(aPrefix);
   pfx += "  ";
   if (!GetRoot()) {
     MOZ_LAYERS_LOG(("%s(null)", pfx.get()));
@@ -1132,7 +1296,7 @@ LayerManager::Log(const char* aPrefix)
 void
 LayerManager::LogSelf(const char* aPrefix)
 {
-  nsCAutoString str;
+  nsAutoCString str;
   PrintInfo(str, aPrefix);
   MOZ_LAYERS_LOG(("%s", str.get()));
 }
@@ -1160,19 +1324,19 @@ LayerManager::IsLogEnabled()
 }
 
 static nsACString&
-PrintInfo(nsACString& aTo, ShadowLayer* aShadowLayer)
+PrintInfo(nsACString& aTo, LayerComposite* aLayerComposite)
 {
-  if (!aShadowLayer) {
+  if (!aLayerComposite) {
     return aTo;
   }
-  if (const nsIntRect* clipRect = aShadowLayer->GetShadowClipRect()) {
+  if (const nsIntRect* clipRect = aLayerComposite->GetShadowClipRect()) {
     AppendToString(aTo, *clipRect, " [shadow-clip=", "]");
   }
-  if (!aShadowLayer->GetShadowTransform().IsIdentity()) {
-    AppendToString(aTo, aShadowLayer->GetShadowTransform(), " [shadow-transform=", "]");
+  if (!aLayerComposite->GetShadowTransform().IsIdentity()) {
+    AppendToString(aTo, aLayerComposite->GetShadowTransform(), " [shadow-transform=", "]");
   }
-  if (!aShadowLayer->GetShadowVisibleRegion().IsEmpty()) {
-    AppendToString(aTo, aShadowLayer->GetShadowVisibleRegion(), " [shadow-visible=", "]");
+  if (!aLayerComposite->GetShadowVisibleRegion().IsEmpty()) {
+    AppendToString(aTo, aLayerComposite->GetShadowVisibleRegion(), " [shadow-visible=", "]");
   }
   return aTo;
 }

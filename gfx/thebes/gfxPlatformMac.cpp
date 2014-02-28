@@ -9,6 +9,7 @@
 #include "gfxQuartzSurface.h"
 #include "gfxQuartzImageSurface.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/QuartzSupport.h"
 
 #include "gfxMacPlatformFontList.h"
 #include "gfxMacFont.h"
@@ -65,13 +66,13 @@ gfxPlatformMac::gfxPlatformMac()
 {
     mOSXVersion = 0;
     OSXVersion();
-    if (mOSXVersion >= MAC_OS_X_VERSION_10_6_HEX) {
-        DisableFontActivation();
-    }
+
+    DisableFontActivation();
     mFontAntiAliasingThreshold = ReadAntiAliasingThreshold();
 
-    uint32_t backendMask = (1 << BACKEND_CAIRO) | (1 << BACKEND_SKIA) | (1 << BACKEND_COREGRAPHICS);
-    InitCanvasBackend(backendMask);
+    uint32_t canvasMask = (1 << BACKEND_CAIRO) | (1 << BACKEND_SKIA) | (1 << BACKEND_COREGRAPHICS);
+    uint32_t contentMask = 0;
+    InitBackendPrefs(canvasMask, contentMask);
 }
 
 gfxPlatformMac::~gfxPlatformMac()
@@ -94,12 +95,9 @@ already_AddRefed<gfxASurface>
 gfxPlatformMac::CreateOffscreenSurface(const gfxIntSize& size,
                                        gfxASurface::gfxContentType contentType)
 {
-    gfxASurface *newSurface = nullptr;
-
-    newSurface = new gfxQuartzSurface(size, OptimalFormatForContent(contentType));
-
-    NS_IF_ADDREF(newSurface);
-    return newSurface;
+    nsRefPtr<gfxASurface> newSurface =
+      new gfxQuartzSurface(size, OptimalFormatForContent(contentType));
+    return newSurface.forget();
 }
 
 already_AddRefed<gfxASurface>
@@ -126,8 +124,8 @@ gfxPlatformMac::OptimizeImage(gfxImageSurface *aSurface,
         isurf = new gfxImageSurface (surfaceSize, format);
         if (!isurf->CopyFrom (aSurface)) {
             // don't even bother doing anything more
-            NS_ADDREF(aSurface);
-            return aSurface;
+            nsRefPtr<gfxASurface> ret = aSurface;
+            return ret.forget();
         }
     }
 
@@ -135,11 +133,11 @@ gfxPlatformMac::OptimizeImage(gfxImageSurface *aSurface,
     return ret.forget();
 }
 
-RefPtr<ScaledFont>
+TemporaryRef<ScaledFont>
 gfxPlatformMac::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 {
     gfxMacFont *font = static_cast<gfxMacFont*>(aFont);
-    return font->GetScaledFont();
+    return font->GetScaledFont(aTarget);
 }
 
 nsresult
@@ -377,6 +375,27 @@ gfxPlatformMac::ReadAntiAliasingThreshold()
 }
 
 already_AddRefed<gfxASurface>
+gfxPlatformMac::CreateThebesSurfaceAliasForDrawTarget_hack(mozilla::gfx::DrawTarget *aTarget)
+{
+  if (aTarget->GetType() == BACKEND_COREGRAPHICS) {
+    CGContextRef cg = static_cast<CGContextRef>(aTarget->GetNativeSurface(NATIVE_SURFACE_CGCONTEXT));
+    unsigned char* data = (unsigned char*)CGBitmapContextGetData(cg);
+    size_t bpp = CGBitmapContextGetBitsPerPixel(cg);
+    size_t stride = CGBitmapContextGetBytesPerRow(cg);
+    gfxIntSize size(aTarget->GetSize().width, aTarget->GetSize().height);
+    nsRefPtr<gfxImageSurface> imageSurface = new gfxImageSurface(data, size, stride, bpp == 2
+                                                                                     ? gfxASurface::ImageFormatRGB16_565
+                                                                                     : gfxASurface::ImageFormatARGB32);
+    // Here we should return a gfxQuartzImageSurface but quartz will assumes that image surfaces
+    // don't change which wont create a proper alias to the draw target, therefore we have to
+    // return a plain image surface.
+    return imageSurface.forget();
+  } else {
+    return GetThebesSurfaceForDrawTarget(aTarget);
+  }
+}
+
+already_AddRefed<gfxASurface>
 gfxPlatformMac::GetThebesSurfaceForDrawTarget(DrawTarget *aTarget)
 {
   if (aTarget->GetType() == BACKEND_COREGRAPHICS_ACCELERATED) {
@@ -409,7 +428,18 @@ bool
 gfxPlatformMac::UseAcceleratedCanvas()
 {
   // Lion or later is required
-  return false && OSXVersion() >= 0x1070 && Preferences::GetBool("gfx.canvas.azure.accelerated", false);
+  return OSXVersion() >= 0x1070 && Preferences::GetBool("gfx.canvas.azure.accelerated", false);
+}
+
+bool
+gfxPlatformMac::SupportsOffMainThreadCompositing()
+{
+  // 10.6.X has crashes on tinderbox with OMTC, so disable it
+  // for now.
+  if (OSXVersion() >= 0x1070) {
+    return true;
+  }
+  return GetPrefLayersOffMainThreadCompositionForceEnabled();
 }
 
 qcms_profile *

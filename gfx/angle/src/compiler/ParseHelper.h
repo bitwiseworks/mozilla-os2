@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2002-2010 The ANGLE Project Authors. All rights reserved.
+// Copyright (c) 2002-2012 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,7 +9,7 @@
 #include "compiler/Diagnostics.h"
 #include "compiler/DirectiveHandler.h"
 #include "compiler/localintermediate.h"
-#include "compiler/preprocessor/new/Preprocessor.h"
+#include "compiler/preprocessor/Preprocessor.h"
 #include "compiler/ShHandle.h"
 #include "compiler/SymbolTable.h"
 
@@ -58,6 +58,7 @@ struct TParseContext {
     const TType* currentFunctionType;  // the return type of the function that's currently being parsed
     bool functionReturnsValue;   // true if a non-void function has a return
     bool checksPrecisionErrors;  // true if an error will be generated when a variable is declared without precision, explicit or implicit.
+    bool fragmentPrecisionHigh;  // true if highp precision is supported in the fragment language.
     TString HashErrMsg;
     bool AfterEOF;
     TDiagnostics diagnostics;
@@ -97,7 +98,7 @@ struct TParseContext {
     bool samplerErrorCheck(int line, const TPublicType& pType, const char* reason);
     bool structQualifierErrorCheck(int line, const TPublicType& pType);
     bool parameterSamplerErrorCheck(int line, TQualifier qualifier, const TType& type);
-    bool nonInitConstErrorCheck(int line, TString& identifier, TPublicType& type);
+    bool nonInitConstErrorCheck(int line, TString& identifier, TPublicType& type, bool array);
     bool nonInitErrorCheck(int line, TString& identifier, TPublicType& type, TVariable*& variable);
     bool paramErrorCheck(int line, TQualifier qualifier, TQualifier paramQualifier, TType* type);
     bool extensionErrorCheck(int line, const TString&);
@@ -134,7 +135,7 @@ struct TParseContext {
     bool structNestingErrorCheck(TSourceLoc line, const TType& fieldType);
 };
 
-int PaParseStrings(int count, const char* const string[], const int length[],
+int PaParseStrings(size_t count, const char* const string[], const int length[],
                    TParseContext* context);
 
 #endif // _PARSER_HELPER_INCLUDED_

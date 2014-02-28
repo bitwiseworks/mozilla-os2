@@ -6,27 +6,26 @@
 #ifndef nsAccUtils_h_
 #define nsAccUtils_h_
 
-#include "nsIAccessible.h"
-#include "nsIAccessibleRole.h"
+#include "mozilla/a11y/Accessible.h"
 #include "nsIAccessibleText.h"
-#include "nsIAccessibleTable.h"
 
 #include "nsAccessibilityService.h"
 #include "nsCoreUtils.h"
 
 #include "mozilla/dom/Element.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
-#include "nsIDOMNode.h"
 #include "nsIPersistentProperties2.h"
 #include "nsIPresShell.h"
 #include "nsPoint.h"
 
-class nsAccessNode;
+struct nsRoleMapEntry;
+
+namespace mozilla {
+namespace a11y {
+
 class Accessible;
 class HyperTextAccessible;
 class DocAccessible;
-struct nsRoleMapEntry;
 
 class nsAccUtils
 {
@@ -116,9 +115,7 @@ public:
   static DocAccessible* GetDocAccessibleFor(nsIDocShellTreeItem* aContainer)
   {
     nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(aContainer));
-    nsCOMPtr<nsIPresShell> presShell;
-    docShell->GetPresShell(getter_AddRefs(presShell));
-    return GetAccService()->GetDocAccessible(presShell);
+    return GetAccService()->GetDocAccessible(docShell->GetPresShell());
   }
 
   /**
@@ -164,14 +161,13 @@ public:
    * @param aY               [in] the given y coord
    * @param aCoordinateType  [in] specifies coordinates origin (refer to
    *                         nsIAccessibleCoordinateType)
-   * @param aAccessNode      [in] the accessible if coordinates are given
+   * @param aAccessible      [in] the accessible if coordinates are given
    *                         relative it.
-   * @param aCoords          [out] converted coordinates
+   * @return converted coordinates
    */
-  static nsresult ConvertToScreenCoords(int32_t aX, int32_t aY,
-                                        uint32_t aCoordinateType,
-                                        nsAccessNode *aAccessNode,
-                                        nsIntPoint *aCoords);
+  static nsIntPoint ConvertToScreenCoords(int32_t aX, int32_t aY,
+                                          uint32_t aCoordinateType,
+                                          Accessible* aAccessible);
 
   /**
    * Converts the given coordinates relative screen to another coordinate
@@ -181,47 +177,19 @@ public:
    * @param aY               [in, out] the given y coord
    * @param aCoordinateType  [in] specifies coordinates origin (refer to
    *                         nsIAccessibleCoordinateType)
-   * @param aAccessNode      [in] the accessible if coordinates are given
+   * @param aAccessible      [in] the accessible if coordinates are given
    *                         relative it
    */
-  static nsresult ConvertScreenCoordsTo(int32_t *aX, int32_t *aY,
-                                        uint32_t aCoordinateType,
-                                        nsAccessNode *aAccessNode);
-
-  /**
-   * Returns coordinates relative screen for the top level window.
-   *
-   * @param aAccessNode  the accessible hosted in the window
-   */
-  static nsIntPoint GetScreenCoordsForWindow(nsAccessNode *aAccessNode);
+  static void ConvertScreenCoordsTo(int32_t* aX, int32_t* aY,
+                                    uint32_t aCoordinateType,
+                                    Accessible* aAccessible);
 
   /**
    * Returns coordinates relative screen for the parent of the given accessible.
    *
-   * @param aAccessNode  the accessible
+   * @param [in] aAccessible  the accessible
    */
-  static nsIntPoint GetScreenCoordsForParent(nsAccessNode *aAccessNode);
-
-  /**
-   * Return the role of the given accessible.
-   */
-  static uint32_t Role(nsIAccessible *aAcc)
-  {
-    uint32_t role = nsIAccessibleRole::ROLE_NOTHING;
-    if (aAcc)
-      aAcc->GetRole(&role);
-
-    return role;
-  }
-
-  /**
-   * Get the ARIA attribute characteristics for a given ARIA attribute.
-   * 
-   * @param aAtom  ARIA attribute
-   * @return       A bitflag representing the attribute characteristics
-   *               (see nsARIAMap.h for possible bit masks, prefixed "ARIA_")
-   */
-  static uint8_t GetAttributeCharacteristics(nsIAtom* aAtom);
+  static nsIntPoint GetScreenCoordsForParent(Accessible* aAccessible);
 
   /**
    * Get the 'live' or 'container-live' object attribute value from the given
@@ -243,16 +211,6 @@ public:
 #endif
 
   /**
-   * Return true if the given accessible has text role.
-   */
-  static bool IsText(nsIAccessible *aAcc)
-  {
-    uint32_t role = Role(aAcc);
-    return role == nsIAccessibleRole::ROLE_TEXT_LEAF ||
-           role == nsIAccessibleRole::ROLE_STATICTEXT;
-  }
-
-  /**
    * Return text length of the given accessible, return 0 on failure.
    */
   static uint32_t TextLength(Accessible* aAccessible);
@@ -260,12 +218,12 @@ public:
   /**
    * Return true if the given accessible is embedded object.
    */
-  static bool IsEmbeddedObject(nsIAccessible *aAcc)
+  static bool IsEmbeddedObject(Accessible* aAcc)
   {
-    uint32_t role = Role(aAcc);
-    return role != nsIAccessibleRole::ROLE_TEXT_LEAF &&
-           role != nsIAccessibleRole::ROLE_WHITESPACE &&
-           role != nsIAccessibleRole::ROLE_STATICTEXT;
+    uint32_t role = aAcc->Role();
+    return role != roles::TEXT_LEAF &&
+           role != roles::WHITESPACE &&
+           role != roles::STATICTEXT;
   }
 
   /**
@@ -288,37 +246,21 @@ public:
       *aState2 = static_cast<uint32_t>(aState64 >> 31);
   }
 
+  static uint32_t To32States(uint64_t aState, bool* aIsExtra)
+  {
+    uint32_t extraState = aState >> 31;
+    *aIsExtra = !!extraState;
+    return aState | extraState;
+  }
+
   /**
    * Return true if the given accessible can't have children. Used when exposing
    * to platform accessibility APIs, should the children be pruned off?
    */
   static bool MustPrune(Accessible* aAccessible);
-
-  /**
-   * Search hint enum constants. Used by GetHeaderCellsFor() method.
-   */
-  enum {
-    // search for row header cells, left direction
-    eRowHeaderCells,
-    // search for column header cells, top direction
-    eColumnHeaderCells
-  };
-
-  /**
-   * Return an array of row or column header cells for the given cell.
-   *
-   * @param aTable                [in] table accessible
-   * @param aCell                 [in] cell accessible within the given table to
-   *                               get header cells
-   * @param aRowOrColHeaderCells  [in] specifies whether column or row header
-   *                               cells are returned (see enum constants
-   *                               above)
-   * @param aCells                [out] array of header cell accessibles
-   */
-  static nsresult GetHeaderCellsFor(nsIAccessibleTable *aTable,
-                                    nsIAccessibleTableCell *aCell,
-                                    int32_t aRowOrColHeaderCells,
-                                    nsIArray **aCells);
 };
+
+} // namespace a11y
+} // namespace mozilla
 
 #endif

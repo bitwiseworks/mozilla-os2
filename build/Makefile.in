@@ -9,31 +9,8 @@ srcdir		= @srcdir@
 VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
-
-MODULE = build
-
-ifeq (,$(filter WINNT OS2,$(OS_ARCH)))
-DIRS		= unix
-endif
-
-ifeq (WINNT,$(OS_ARCH))
-DIRS = win32
-endif
-
-ifdef STLPORT_SOURCES
-DIRS += stlport
-endif
-
-DIRS += pgo
-
-ifeq (android,$(MOZ_WIDGET_TOOLKIT))
-TEST_DIRS += mobile/sutagent/android \
-          mobile/sutagent/android/watcher \
-          mobile/sutagent/android/ffxcp \
-          mobile/sutagent/android/fencp \
-          mobile/robocop \
-          $(NULL)
-endif
+USE_RCS_MK := 1
+include $(topsrcdir)/config/makefiles/makeutils.mk
 
 ifdef MOZ_APP_BASENAME
 DIST_FILES = $(srcdir)/application.ini
@@ -45,10 +22,8 @@ endif
 endif
 
 ifdef LIBXUL_SDK
-GRE_MILESTONE = $(shell $(PYTHON) $(topsrcdir)/config/printconfigsetting.py $(LIBXUL_DIST)/bin/platform.ini Build Milestone)
 APP_INI_DEPS = $(LIBXUL_DIST)/bin/platform.ini
 else
-GRE_MILESTONE = $(shell tail -n 1 $(topsrcdir)/config/milestone.txt 2>/dev/null || tail -1 $(topsrcdir)/config/milestone.txt)
 APP_INI_DEPS = $(topsrcdir)/config/milestone.txt
 endif
 
@@ -65,10 +40,9 @@ ifdef MOZ_SOURCE_STAMP
 DEFINES += -DMOZ_SOURCE_STAMP="$(MOZ_SOURCE_STAMP)"
 endif
 
-_dollar=$$
-SOURCE_REPO := $(shell cd $(topsrcdir)/$(MOZ_BUILD_APP)/.. && hg showconfig paths.default 2>/dev/null | head -n1 | sed -e "s/^ssh:/http:/" -e "s/\/$(_dollar)//" )
-ifdef SOURCE_REPO
-DEFINES += -DMOZ_SOURCE_REPO="$(SOURCE_REPO)"
+source_repo ?= $(call getSourceRepo,$(topsrcdir)/$(MOZ_BUILD_APP)/..)
+ifneq (,$(source_repo))
+  DEFINES += -DMOZ_SOURCE_REPO="$(source_repo)"
 endif
 
 DEFINES += \
@@ -78,6 +52,10 @@ DEFINES += \
   -DMAR_CHANNEL_ID="$(MAR_CHANNEL_ID)" \
   -DACCEPTED_MAR_CHANNEL_IDS="$(ACCEPTED_MAR_CHANNEL_IDS)" \
   $(NULL)
+
+ifeq ($(MOZ_BUILD_APP),browser)
+DEFINES += -DMOZ_BUILD_APP_IS_BROWSER
+endif
 
 ifdef MOZ_APP_PROFILE
 DEFINES += -DMOZ_APP_PROFILE="$(MOZ_APP_PROFILE)"
@@ -97,6 +75,13 @@ endif
 
 endif
 
+# Put a useful .gdbinit in the bin directory, to be picked up automatically
+# by GDB when we debug executables there.
+# NOTE: Keep .gdbinit in the topsrcdir for people who run gdb from the topsrcdir.
+GDBINIT_FILES := $(topsrcdir)/.gdbinit
+GDBINIT_DEST = $(FINAL_TARGET)
+INSTALL_TARGETS += GDBINIT
+
 include $(topsrcdir)/config/rules.mk
 
 # we install to _leaktest/
@@ -104,11 +89,11 @@ TARGET_DEPTH = ..
 include $(srcdir)/automation-build.mk
 
 _LEAKTEST_DIR = $(DEPTH)/_leaktest
-GARBAGE_DIRS += $(_LEAKTEST_DIR)
 
 _LEAKTEST_FILES =    \
 		automation.py \
 		automationutils.py \
+		$(topsrcdir)/testing/profiles/prefs_general.js \
 		leaktest.py \
 		bloatcycle.html \
 		$(topsrcdir)/build/pgo/server-locations.txt \
@@ -135,6 +120,8 @@ ifdef MOZ_APP_BASENAME
 $(FINAL_TARGET)/application.ini: $(APP_INI_DEPS)
 
 ifdef MOZ_APP_STATIC_INI
+DEFINES += -DMOZ_APP_STATIC_INI
+
 application.ini.h: appini_header.py $(FINAL_TARGET)/application.ini
 	$(PYTHON) $^ > $@
 export:: application.ini.h
@@ -150,7 +137,8 @@ _VALGRIND_DIR = $(DEPTH)/_valgrind
 GARBAGE_DIRS += $(_VALGRIND_DIR)
 
 _VALGRIND_FILES = \
-		$(topsrcdir)/build/valgrind/i686-redhat-linux-gnu.sup \
+		$(topsrcdir)/build/valgrind/cross-architecture.sup \
+		$(topsrcdir)/build/valgrind/i386-redhat-linux-gnu.sup \
 		$(topsrcdir)/build/valgrind/x86_64-redhat-linux-gnu.sup \
 		$(NULL)
 
@@ -162,96 +150,9 @@ ifdef ENABLE_TESTS
 libs:: $(topsrcdir)/tools/rb/fix_stack_using_bpsyms.py
 	$(INSTALL) $< $(DIST)/bin
 
-# Unit tests for ManifestParser
-check::
-	$(PYTHON) $(topsrcdir)/config/pythonpath.py -I$(srcdir) \
-	  $(srcdir)/tests/test.py
-
 ifeq ($(OS_ARCH),Darwin)
-libs:: $(topsrcdir)/tools/rb/fix-macosx-stack.pl
-	$(INSTALL) $< $(DIST)/bin
 libs:: $(topsrcdir)/tools/rb/fix_macosx_stack.py
 	$(INSTALL) $< $(DIST)/bin
-
-# Basic unit tests for some stuff in the unify script
-check::
-# build x64/i386 binaries, and unify them
-	rm -f unify-test-x64 unify-test-i386 unify-test-universal
-	$(HOST_CC) -arch x86_64 $(srcdir)/unify-test.c -o unify-test-x64
-	$(HOST_CC) -arch i386 $(srcdir)/unify-test.c -o unify-test-i386
-	@if ! $(srcdir)/macosx/universal/unify ./unify-test-x64 ./unify-test-i386 \
-          ./unify-test-universal; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary!"; \
-          false; \
-        fi
-	@if test ! -f ./unify-test-universal; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary!"; \
-          false; \
-        fi
-	@if ! file -b ./unify-test-universal | head -n1 | grep -q "^Mach-O universal binary"; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary!"; \
-          false; \
-        else \
-          echo "TEST-PASS | build/ | unify produced a universal binary!"; \
-        fi
-# try building an x86-64 binary. if that succeeds, try unifying it
-# with an i386 binary
-	rm -f unify-test-x86_64 unify-test-universal-64
-	-$(HOST_CC) -arch x86_64 $(srcdir)/unify-test.c -o unify-test-x86_64
-	@if test -f ./unify-test-x86_64; then \
-          if ! $(srcdir)/macosx/universal/unify ./unify-test-x86_64 ./unify-test-i386 \
-            ./unify-test-universal-64; then \
-            echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary with a 64-bit input!"; \
-            false; \
-          fi; \
-          if test ! -f ./unify-test-universal-64; then \
-            echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary with a 64-bit input!"; \
-            false; \
-          fi; \
-          if ! file -b ./unify-test-universal-64 | head -n1 | grep -q "^Mach-O universal binary"; then \
-            echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to produce a universal binary with a 64-bit input!"; \
-            false; \
-          else \
-            echo "TEST-PASS | build/ | unify produced a universal binary with a 64-bit input!"; \
-          fi \
-        fi
-# try unifying two identical Java class files
-	rm -f unifytesta.class unifytestb.class unifytestc.class
-	cp $(srcdir)/unifytest.class ./unifytesta.class
-	cp $(srcdir)/unifytest.class ./unifytestb.class
-	@if ! $(srcdir)/macosx/universal/unify ./unifytesta.class ./unifytestb.class \
-          ./unifytestc.class; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify a Java class file!"; \
-          false; \
-        fi
-	@if test ! -f ./unifytestc.class; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify a Java class file!"; \
-          false; \
-        fi
-	@if ! diff -q ./unifytesta.class ./unifytestc.class; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify a Java class file!"; \
-          false; \
-        else \
-          echo "TEST-PASS | build/ | unify unified a Java class file!"; \
-        fi
-# try unifying some files that differ only in line ordering
-	rm -rf unify-sort-test
-	mkdir unify-sort-test unify-sort-test/a unify-sort-test/b
-	printf "lmn\nabc\nxyz\n" > unify-sort-test/a/file.foo
-	printf "xyz\nlmn\nabc" > unify-sort-test/b/file.foo
-	printf "lmn\nabc\nxyz\n" > unify-sort-test/expected-result
-	@if ! $(srcdir)/macosx/universal/unify --unify-with-sort "\.foo$$" \
-          ./unify-sort-test/a ./unify-sort-test/b \
-          ./unify-sort-test/c; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify files with differing line ordering!"; \
-          false; \
-        fi
-	@if ! diff -q ./unify-sort-test/expected-result ./unify-sort-test/c/file.foo; then \
-          echo "TEST-UNEXPECTED-FAIL | build/ | unify failed to unify files with differing line ordering!"; \
-          false; \
-        else \
-          echo "TEST-PASS | build/ | unify unified files with differing line ordering!"; \
-        fi
 endif
 
 ifeq ($(OS_ARCH),Linux)
@@ -261,7 +162,4 @@ endif
 
 GARBAGE += $(srcdir)/automationutils.pyc
 
-# Test for ConfigStatus.py
-check::
-	$(PYTHON) $(srcdir)/tests/unit-ConfigStatus.py
 endif # ENABLE_TESTS

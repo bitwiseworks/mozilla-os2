@@ -8,16 +8,15 @@
 #include "Accessible-inl.h"
 #include "HTMLFormControlAccessible.h"
 #include "nsAccUtils.h"
-#include "nsAccTreeWalker.h"
 #include "nsCoreUtils.h"
 #include "DocAccessible.h"
 #include "nsIAccessibleRelation.h"
 #include "Relation.h"
 #include "Role.h"
 #include "States.h"
+#include "TreeWalker.h"
 #include "XULMenuAccessible.h"
 
-#include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMNSEditableElement.h"
 #include "nsIDOMXULButtonElement.h"
 #include "nsIDOMXULCheckboxElement.h"
@@ -41,7 +40,7 @@ XULButtonAccessible::
   AccessibleWrap(aContent, aDoc)
 {
   if (ContainsMenu())
-    mFlags |= eMenuButtonAccessible;
+    mGenericTypes |= eMenuButton;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,28 +167,18 @@ XULButtonAccessible::CacheChildren()
 {
   // In general XUL button has not accessible children. Nevertheless menu
   // buttons can have button (@type="menu-button") and popup accessibles
-  // (@type="menu-button" or @type="menu").
+  // (@type="menu-button", @type="menu" or columnpicker.
 
   // XXX: no children until the button is menu button. Probably it's not
   // totally correct but in general AT wants to have leaf buttons.
-  bool isMenu = mContent->AttrValueIs(kNameSpaceID_None,
-                                       nsGkAtoms::type,
-                                       nsGkAtoms::menu,
-                                       eCaseMatters);
 
-  bool isMenuButton = isMenu ?
-    false :
-    mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                          nsGkAtoms::menuButton, eCaseMatters);
-
-  NS_ENSURE_TRUE(mDoc,);
-  if (!isMenu && !isMenuButton)
-    return;
+  bool isMenuButton = mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                                            nsGkAtoms::menuButton, eCaseMatters);
 
   Accessible* menupopup = nullptr;
   Accessible* button = nullptr;
 
-  nsAccTreeWalker walker(mDoc, mContent, true);
+  TreeWalker walker(this, mContent);
 
   Accessible* child = nullptr;
   while ((child = walker.NextChild())) {
@@ -414,16 +403,16 @@ XULGroupboxAccessible::NativeRole()
   return roles::GROUPING;
 }
 
-nsresult
-XULGroupboxAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+XULGroupboxAccessible::NativeName(nsString& aName)
 {
   // XXX: we use the first related accessible only.
   Accessible* label =
     RelationByType(nsIAccessibleRelation::RELATION_LABELLED_BY).Next();
   if (label)
-    return label->GetName(aName);
+    return label->Name(aName);
 
-  return NS_OK;
+  return eNameOK;
 }
 
 Relation
@@ -640,16 +629,13 @@ XULToolbarAccessible::NativeRole()
   return roles::TOOLBAR;
 }
 
-nsresult
-XULToolbarAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+XULToolbarAccessible::NativeName(nsString& aName)
 {
-  nsAutoString name;
-  if (mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::toolbarname, name)) {
-    name.CompressWhitespace();
-    aName = name;
-  }
+  if (mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::toolbarname, aName))
+    aName.CompressWhitespace();
 
-  return NS_OK;
+  return eNameOK;
 }
 
 
@@ -824,14 +810,14 @@ XULTextFieldAccessible::GetEditor() const
 void
 XULTextFieldAccessible::CacheChildren()
 {
-  NS_ENSURE_TRUE(mDoc,);
+  NS_ENSURE_TRUE_VOID(mDoc);
   // Create child accessibles for native anonymous content of underlying HTML
   // input element.
   nsCOMPtr<nsIContent> inputContent(GetInputField());
   if (!inputContent)
     return;
 
-  nsAccTreeWalker walker(mDoc, inputContent, false);
+  TreeWalker walker(this, inputContent);
 
   Accessible* child = nullptr;
   while ((child = walker.NextChild()) && AppendChild(child));
@@ -868,9 +854,6 @@ XULTextFieldAccessible::GetInputField() const
 
   NS_ASSERTION(inputFieldDOMNode, "No input field for XULTextFieldAccessible");
 
-  nsIContent* inputField = nullptr;
-  if (inputFieldDOMNode)
-    CallQueryInterface(inputFieldDOMNode, &inputField);
-
-  return inputField;
+  nsCOMPtr<nsIContent> inputField = do_QueryInterface(inputFieldDOMNode);
+  return inputField.forget();
 }

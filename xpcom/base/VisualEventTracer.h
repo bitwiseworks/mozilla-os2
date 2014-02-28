@@ -20,9 +20,9 @@
  * to record in the log.
  */
 
-#include "prlock.h"
 #include "nscore.h"
 #include "mozilla/GuardObjects.h"
+#include "nsIVisualEventTracer.h"
 
 #ifdef MOZ_VISUAL_EVENT_TRACER
 
@@ -116,7 +116,8 @@
 #endif
 
 
-namespace mozilla { namespace eventtracer {
+namespace mozilla {
+namespace eventtracer {
 
 // Initialize the event tracer engine, called automatically on XPCOM startup.
 void Init();
@@ -168,7 +169,7 @@ void Mark(uint32_t aType, void * aItem,
 //
 //    do_something_taking_a_long_time();
 // }
-class NS_STACK_CLASS AutoEventTracer
+class MOZ_STACK_CLASS AutoEventTracer
 {
 public:
   AutoEventTracer(void * aInstance, 
@@ -202,6 +203,24 @@ private:
 
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
+
+#ifdef MOZ_VISUAL_EVENT_TRACER
+
+// The scriptable class that drives the event tracer
+
+class VisualEventTracer : public nsIVisualEventTracer
+{
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIVISUALEVENTTRACER
+};
+
+#define NS_VISUALEVENTTRACER_CID \
+  { 0xb9e5e102, 0xc2f4, 0x497a,  \
+    { 0xa6, 0xe4, 0x54, 0xde, 0xf3, 0x71, 0xf3, 0x9d } }
+#define NS_VISUALEVENTTRACER_CONTRACTID "@mozilla.org/base/visual-event-tracer;1"
+#define NS_VISUALEVENTTRACER_CLASSNAME "Visual Event Tracer"
+
+#endif
 
 } // eventtracer 
 } // mozilla

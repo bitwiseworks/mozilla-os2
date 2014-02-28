@@ -77,14 +77,14 @@ GSETTINGS_FUNCTIONS
 
 static PRLibrary *gioLib = nullptr;
 
-class nsGSettingsCollection : public nsIGSettingsCollection
+class nsGSettingsCollection MOZ_FINAL : public nsIGSettingsCollection
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIGSETTINGSCOLLECTION
 
   nsGSettingsCollection(GSettings* aSettings) : mSettings(aSettings),
-                                                mKeys(NULL) {};
+                                                mKeys(NULL) {}
   ~nsGSettingsCollection();
 
 private:
@@ -312,7 +312,6 @@ nsGSettingsService::Init()
     *kGSettingsSymbols[i].function =
       PR_FindFunctionSymbol(gioLib, kGSettingsSymbols[i].functionName);
     if (!*kGSettingsSymbols[i].function) {
-      PR_UnloadLibrary(gioLib);
       return NS_ERROR_FAILURE;
     }
   }

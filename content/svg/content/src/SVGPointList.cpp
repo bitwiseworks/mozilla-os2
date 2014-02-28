@@ -6,16 +6,13 @@
 #include "mozilla/Util.h"
 
 #include "SVGPointList.h"
-#include "SVGAnimatedPointList.h"
-#include "nsSVGElement.h"
 #include "nsError.h"
-#include "nsString.h"
-#include "nsSVGUtils.h"
-#include "string.h"
-#include "prdtoa.h"
-#include "nsTextFormatter.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsMathUtils.h"
+#include "nsString.h"
+#include "nsTextFormatter.h"
+#include "prdtoa.h"
+#include "SVGContentUtils.h"
 
 namespace mozilla {
 
@@ -72,7 +69,7 @@ SVGPointList::SetValueFromString(const nsAString& aValue)
   nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
     tokenizer(aValue, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
 
-  nsCAutoString str1, str2;  // outside loop to minimize memory churn
+  nsAutoCString str1, str2;  // outside loop to minimize memory churn
 
   while (tokenizer.hasMoreTokens()) {
     CopyUTF16toUTF8(tokenizer.nextToken(), str1);

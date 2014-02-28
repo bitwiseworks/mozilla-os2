@@ -14,7 +14,9 @@
 #include "xpt_arena.h"
 #include "mozilla/StandardInteger.h"
 
-PR_BEGIN_EXTERN_C
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * Originally, I was going to have structures that exactly matched the on-disk
@@ -204,11 +206,16 @@ XPT_DestroyInterfaceDirectoryEntry(XPTArena *arena,
  * single XPCOM interface, including all of its methods. 
  */
 struct XPTInterfaceDescriptor {
+    /* This field ordering minimizes the size of this struct.
+    *  The fields are serialized on disk in a different order.
+    *  See DoInterfaceDescriptor().
+    */
+    XPTMethodDescriptor     *method_descriptors;
+    XPTConstDescriptor      *const_descriptors;
+    XPTTypeDescriptor       *additional_types;
     uint16_t                parent_interface;
     uint16_t                num_methods;
-    XPTMethodDescriptor     *method_descriptors;
     uint16_t                num_constants;
-    XPTConstDescriptor      *const_descriptors;
     uint8_t                 flags;
 
     /* additional_types are used for arrays where we may need multiple
@@ -227,7 +234,6 @@ struct XPTInterfaceDescriptor {
     *  for that.
     */
 
-    XPTTypeDescriptor       *additional_types;
     uint16_t                num_additional_types;
 };
 
@@ -374,12 +380,12 @@ struct XPTTypeDescriptor {
  * The types of the method parameter are restricted to the following subset 
  * of TypeDescriptors: 
  *
- * int8, uint8, int16, uint16, int32, uint32, 
- * int64, uint64, wchar_t, char, string
+ * int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, 
+ * int64_t, uint64_t, wchar_t, char, string
  * 
  * The type (and thus the size) of the value record is determined by the 
  * contents of the associated TypeDescriptor record. For instance, if type 
- * corresponds to int16, then value is a two-byte record consisting of a 
+ * corresponds to int16_t, then value is a two-byte record consisting of a 
  * 16-bit signed integer.  For a ConstDescriptor type of string, the value 
  * record is of type String*, i.e. an offset within the data pool to a 
  * String record containing the constant string.
@@ -447,7 +453,7 @@ XPT_FillParamDescriptor(XPTArena *arena,
 struct XPTMethodDescriptor {
     char                *name;
     XPTParamDescriptor  *params;
-    XPTParamDescriptor  *result;
+    XPTParamDescriptor  result;
     uint8_t             flags;
     uint8_t             num_args;
 };
@@ -511,6 +517,8 @@ extern XPT_PUBLIC_API(XPTAnnotation *)
 XPT_NewAnnotation(XPTArena *arena, uint8_t flags, XPTString *creator, 
                   XPTString *private_data);
 
-PR_END_EXTERN_C
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __xpt_struct_h__ */

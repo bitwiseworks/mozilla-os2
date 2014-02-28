@@ -9,6 +9,7 @@
 #include "nsIPresShell.h"
 #include "nsIObjectFrame.h"
 #include "nsNPAPIPluginInstance.h"
+#include "nsIDocumentInlines.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
@@ -16,7 +17,7 @@
 #include "nsIPropertyBag2.h"
 #include "mozilla/dom/Element.h"
 #include "nsObjectLoadingContent.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 namespace mozilla {
 namespace dom {
@@ -45,10 +46,6 @@ public:
   const nsCString& GetType() const { return mMimeType; }
   nsIContent*      GetPluginContent() { return mPluginContent; }
 
-  void AllowNormalInstantiation() {
-    mWillHandleInstantiation = false;
-  }
-
   void StartLayout() { MediaDocument::StartLayout(); }
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(PluginDocument, MediaDocument)
@@ -58,11 +55,6 @@ protected:
   nsCOMPtr<nsIContent>                     mPluginContent;
   nsRefPtr<MediaDocumentStreamListener>    mStreamListener;
   nsCString                                mMimeType;
-
-  // Hack to handle the fact that plug-in loading lives in frames and that the
-  // frames may not be around when we need to instantiate.  Once plug-in
-  // loading moves to content, this can all go away.
-  bool                                     mWillHandleInstantiation;
 };
 
 class PluginStreamListener : public MediaDocumentStreamListener
@@ -74,8 +66,6 @@ public:
   {}
   NS_IMETHOD OnStartRequest(nsIRequest* request, nsISupports *ctxt);
 private:
-  nsresult SetupPlugin();
-
   nsRefPtr<PluginDocument> mPluginDoc;
 };
 
@@ -83,77 +73,44 @@ private:
 NS_IMETHODIMP
 PluginStreamListener::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
 {
-  SAMPLE_LABEL("PluginStreamListener", "OnStartRequest");
-  // Have to set up our plugin stuff before we call OnStartRequest, so
-  // that the plugin listener can get that call.
-  nsresult rv = SetupPlugin();
-
-  NS_ASSERTION(NS_FAILED(rv) || mNextStream,
-               "We should have a listener by now");
-  nsresult rv2 = MediaDocumentStreamListener::OnStartRequest(request, ctxt);
-  return NS_SUCCEEDED(rv) ? rv2 : rv;
-}
-
-nsresult
-PluginStreamListener::SetupPlugin()
-{
-  NS_ENSURE_TRUE(mDocument, NS_ERROR_FAILURE);
-  mPluginDoc->StartLayout();
+  PROFILER_LABEL("PluginStreamListener", "OnStartRequest");
 
   nsCOMPtr<nsIContent> embed = mPluginDoc->GetPluginContent();
+  nsCOMPtr<nsIObjectLoadingContent> objlc = do_QueryInterface(embed);
+  nsCOMPtr<nsIStreamListener> objListener = do_QueryInterface(objlc);
 
-  // Now we have a frame for our <embed>, start the load
-  nsCOMPtr<nsIPresShell> shell = mDocument->GetShell();
-  if (!shell) {
-    // Can't instantiate w/o a shell
-    mPluginDoc->AllowNormalInstantiation();
+  if (!objListener) {
+    NS_NOTREACHED("PluginStreamListener without appropriate content node");
     return NS_BINDING_ABORTED;
   }
 
-  // Flush out layout before we go to instantiate, because some
-  // plug-ins depend on NPP_SetWindow() being called early enough and
-  // nsObjectFrame does that at the end of reflow.
-  shell->FlushPendingNotifications(Flush_Layout);
+  SetStreamListener(objListener);
 
-  nsCOMPtr<nsIObjectLoadingContent> olc(do_QueryInterface(embed));
-  if (!olc) {
-    return NS_ERROR_UNEXPECTED;
-  }
-  nsObjectLoadingContent* olcc = static_cast<nsObjectLoadingContent*>(olc.get());
-  nsresult rv = olcc->InstantiatePluginInstance();
+  // Sets up the ObjectLoadingContent tag as if it is waiting for a
+  // channel, so it can proceed with a load normally once it gets OnStartRequest
+  nsresult rv = objlc->InitializeFromChannel(request);
   if (NS_FAILED(rv)) {
+    NS_NOTREACHED("InitializeFromChannel failed");
     return rv;
   }
 
-  // Now that we're done, allow normal instantiation in the future
-  // (say if there's a reframe of this entire presentation).
-  mPluginDoc->AllowNormalInstantiation();
-
-  return NS_OK;
+  // Note that because we're now hooked up to a plugin listener, this will
+  // likely spawn a plugin, which may re-enter.
+  return MediaDocumentStreamListener::OnStartRequest(request, ctxt);
 }
-
 
   // NOTE! nsDocument::operator new() zeroes out all members, so don't
   // bother initializing members to 0.
 
 PluginDocument::PluginDocument()
-  : mWillHandleInstantiation(true)
-{
-}
+{}
 
 PluginDocument::~PluginDocument()
-{
-}
+{}
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(PluginDocument)
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(PluginDocument, MediaDocument)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mPluginContent)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(PluginDocument, MediaDocument)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mPluginContent)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(PluginDocument, MediaDocument,
+                                     mPluginContent)
 
 NS_IMPL_ADDREF_INHERITED(PluginDocument, MediaDocument)
 NS_IMPL_RELEASE_INHERITED(PluginDocument, MediaDocument)
@@ -226,6 +183,8 @@ PluginDocument::StartDocumentLoad(const char*         aCommand,
     return rv;
   }
 
+  MediaDocument::UpdateTitleAndCharset(mMimeType);
+
   mStreamListener = new PluginStreamListener(this);
   if (!mStreamListener) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -239,7 +198,7 @@ PluginDocument::StartDocumentLoad(const char*         aCommand,
 nsresult
 PluginDocument::CreateSyntheticPluginDocument()
 {
-  NS_ASSERTION(!GetShell() || !GetShell()->DidInitialReflow(),
+  NS_ASSERTION(!GetShell() || !GetShell()->DidInitialize(),
                "Creating synthetic plugin document content too late");
 
   // make our generic document
@@ -264,7 +223,6 @@ PluginDocument::CreateSyntheticPluginDocument()
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::embed, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
   rv = NS_NewHTMLElement(getter_AddRefs(mPluginContent), nodeInfo.forget(),
                          NOT_FROM_PARSER);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -281,7 +239,7 @@ PluginDocument::CreateSyntheticPluginDocument()
                           false);
 
   // set URL
-  nsCAutoString src;
+  nsAutoCString src;
   mDocumentURI->GetSpec(src);
   mPluginContent->SetAttr(kNameSpaceID_None, nsGkAtoms::src,
                           NS_ConvertUTF8toUTF16(src), false);
@@ -290,25 +248,13 @@ PluginDocument::CreateSyntheticPluginDocument()
   mPluginContent->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
                           NS_ConvertUTF8toUTF16(mMimeType), false);
 
-  // This will not start the load because nsObjectLoadingContent checks whether
-  // its document is an nsIPluginDocument
+  // nsHTML(Shared)ObjectElement does not kick off a load on BindToTree if it is
+  // to a PluginDocument
   body->AppendChildTo(mPluginContent, false);
 
   return NS_OK;
 
 
-}
-
-NS_IMETHODIMP
-PluginDocument::SetStreamListener(nsIStreamListener *aListener)
-{
-  if (mStreamListener) {
-    mStreamListener->SetStreamListener(aListener);
-  }
-
-  MediaDocument::UpdateTitleAndCharset(mMimeType);
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -332,13 +278,6 @@ PluginDocument::Print()
     }
   }
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-PluginDocument::GetWillHandleInstantiation(bool* aWillHandle)
-{
-  *aWillHandle = mWillHandleInstantiation;
   return NS_OK;
 }
 

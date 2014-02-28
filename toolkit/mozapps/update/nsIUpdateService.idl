@@ -19,7 +19,7 @@ interface nsIFile;
  * be downloaded and applied to a version of this application so that it
  * can be updated.
  */
-[scriptable, uuid(1134957d-9449-481b-a515-4d88b9998278)]
+[scriptable, uuid(dc8fb8a9-3a53-4031-9469-2a5197ea30e7)]
 interface nsIUpdatePatch : nsISupports
 {
   /**
@@ -87,7 +87,7 @@ interface nsIUpdatePatch : nsISupports
  * that the front end and other application services can use to learn more
  * about what is going on.
  */
-[scriptable, uuid(2379e2e1-8eab-4084-8d8c-94ffeee56804)]
+[scriptable, uuid(6b0b7721-6746-443d-8cb0-c6199d7f28a6)]
 interface nsIUpdate : nsISupports
 {
   /**
@@ -178,10 +178,16 @@ interface nsIUpdate : nsISupports
   attribute boolean showNeverForVersion;
 
   /**
-   * Whether to show the survey link in the update prompt. The url must also be
-   * present in the app.update.surveyURL preference.
+   * Whether the update is no longer supported on this system.
    */
-  attribute boolean showSurvey;
+  attribute boolean unsupported;
+  
+  /**
+   * Allows overriding the default amount of time in seconds before prompting the
+   * user to apply an update. If not specified, the value of
+   * app.update.promptWaitTime will be used.
+   */
+  attribute long long promptWaitTime;
 
   /**
    * Whether or not the update being downloaded is a complete replacement of
@@ -196,6 +202,12 @@ interface nsIUpdate : nsISupports
    * user.
    */
   attribute boolean isSecurityUpdate;
+
+  /**
+   * Whether or not the update being downloaded is an OS update. This is
+   * generally only possible in Gonk right now.
+   */
+  attribute boolean isOSUpdate;
 
   /**
    * When the update was installed.
@@ -264,23 +276,9 @@ interface nsIUpdate : nsISupports
  * check operation. This object is notified as the check continues, finishes
  * and if it has an error.
  */
-[scriptable, uuid(8cbceb6e-8e27-46f2-8808-444c6499f836)]
+[scriptable, uuid(4aa2b4bb-39ea-407b-98ff-89f19134d4c0)]
 interface nsIUpdateCheckListener : nsISupports
 {
-  /**
-   * Called every time there is a progress notification loading the Update
-   * Service file.
-   * @param   request
-   *          The nsIXMLHttpRequest handling the update check.
-   * @param   position
-   *          The current byte downloaded
-   * @param   totalSize
-   *          The total number of bytes that have to be downloaded
-   */
-  void onProgress(in nsIXMLHttpRequest request,
-                  in unsigned long position,
-                  in unsigned long totalSize);
-
   /**
    * The update check was completed.
    * @param   request
@@ -353,7 +351,7 @@ interface nsIUpdateChecker : nsISupports
  * background update checks and provides utilities for selecting and
  * downloading update patches.
  */
-[scriptable, uuid(900b4a18-3bef-4f3e-bcf5-84dce0021c6d)]
+[scriptable, uuid(814f185b-cac6-494b-8fd6-63cf7380d857)]
 interface nsIApplicationUpdateService : nsISupports
 {
   /**
@@ -396,13 +394,8 @@ interface nsIApplicationUpdateService : nsISupports
   AString downloadUpdate(in nsIUpdate update, in boolean background);
 
   /**
-   * Apply an update in the background.
-   */
-  void applyUpdateInBackground(in nsIUpdate update);
-
-  /**
    * Get the Active Updates directory
-   * @returns The active updates directory.
+   * @returns An nsIFile for the active updates directory.
    */
   nsIFile getUpdatesDirectory();
 
@@ -431,6 +424,15 @@ interface nsIApplicationUpdateService : nsISupports
   readonly attribute boolean canApplyUpdates;
 
   /**
+   * Whether or not a different instance is handling updates of this
+   * installation.  This currently only ever returns true on Windows
+   * when 2 instances of an application are open or when both the Metro
+   * and Desktop browsers are open.  Only one of the instances will actually
+   * handle updates for the installation.
+   */
+  readonly attribute boolean isOtherInstanceHandlingUpdates;
+
+  /**
    * Whether the Update Service is able to stage updates.
    */
   readonly attribute boolean canStageUpdates;
@@ -446,6 +448,10 @@ interface nsIUpdateProcessor : nsISupports
   /**
    * Processes the update which has been downloaded.
    * This happens without restarting the application.
+   * On Windows, this can also be used for switching to an applied
+   * update request.
+   * @param update The update being applied, or null if this is a switch
+   *               to updated application request.  Must be non-null on GONK.
    */
   void processUpdate(in nsIUpdate update);
 };

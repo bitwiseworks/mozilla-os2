@@ -8,66 +8,170 @@
 
 namespace mozilla {
 
-class WebGLExtensionLoseContext :
-    public nsIWebGLExtensionLoseContext,
-    public WebGLExtension
+class WebGLContext;
+
+class WebGLExtensionBase
+    : public nsISupports
+    , public WebGLContextBoundObject
+    , public nsWrapperCache
+{
+public:
+    WebGLExtensionBase(WebGLContext*);
+    virtual ~WebGLExtensionBase();
+
+    WebGLContext *GetParentObject() const {
+        return Context();
+    }
+
+    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(WebGLExtensionBase)
+};
+
+#define DECL_WEBGL_EXTENSION_GOOP                                           \
+    virtual JSObject* WrapObject(JSContext *cx,                             \
+                                 JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+
+#define IMPL_WEBGL_EXTENSION_GOOP(WebGLExtensionType) \
+    JSObject* \
+    WebGLExtensionType::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope) { \
+        return dom::WebGLExtensionType##Binding::Wrap(cx, scope, this); \
+    }
+
+class WebGLExtensionCompressedTextureATC
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionCompressedTextureATC(WebGLContext*);
+    virtual ~WebGLExtensionCompressedTextureATC();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionCompressedTexturePVRTC
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionCompressedTexturePVRTC(WebGLContext*);
+    virtual ~WebGLExtensionCompressedTexturePVRTC();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionCompressedTextureS3TC
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionCompressedTextureS3TC(WebGLContext*);
+    virtual ~WebGLExtensionCompressedTextureS3TC();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionDebugRendererInfo
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionDebugRendererInfo(WebGLContext*);
+    virtual ~WebGLExtensionDebugRendererInfo();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionDepthTexture
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionDepthTexture(WebGLContext*);
+    virtual ~WebGLExtensionDepthTexture();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionElementIndexUint
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionElementIndexUint(WebGLContext*);
+    virtual ~WebGLExtensionElementIndexUint();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionLoseContext
+    : public WebGLExtensionBase
 {
 public:
     WebGLExtensionLoseContext(WebGLContext*);
     virtual ~WebGLExtensionLoseContext();
 
-    NS_DECL_ISUPPORTS_INHERITED
-    NS_DECL_NSIWEBGLEXTENSIONLOSECONTEXT
+    void LoseContext();
+    void RestoreContext();
+
+    DECL_WEBGL_EXTENSION_GOOP
 };
 
-class WebGLExtensionStandardDerivatives :
-    public nsIWebGLExtensionStandardDerivatives,
-    public WebGLExtension
+class WebGLExtensionStandardDerivatives
+    : public WebGLExtensionBase
 {
 public:
-    WebGLExtensionStandardDerivatives(WebGLContext* context);
+    WebGLExtensionStandardDerivatives(WebGLContext*);
     virtual ~WebGLExtensionStandardDerivatives();
 
-    NS_DECL_ISUPPORTS_INHERITED
-    NS_DECL_NSIWEBGLEXTENSION
+    DECL_WEBGL_EXTENSION_GOOP
 };
 
-class WebGLExtensionTextureFilterAnisotropic :
-    public nsIWebGLExtensionTextureFilterAnisotropic,
-    public WebGLExtension
+class WebGLExtensionTextureFilterAnisotropic
+    : public WebGLExtensionBase
 {
 public:
-    WebGLExtensionTextureFilterAnisotropic(WebGLContext* context);
+    WebGLExtensionTextureFilterAnisotropic(WebGLContext*);
     virtual ~WebGLExtensionTextureFilterAnisotropic();
 
-    NS_DECL_ISUPPORTS_INHERITED
-    NS_DECL_NSIWEBGLEXTENSION
+    DECL_WEBGL_EXTENSION_GOOP
 };
 
-class WebGLExtensionCompressedTextureS3TC :
-    public nsIWebGLExtensionCompressedTextureS3TC,
-    public WebGLExtension
+class WebGLExtensionTextureFloat
+    : public WebGLExtensionBase
 {
 public:
-    WebGLExtensionCompressedTextureS3TC(WebGLContext* context);
-    virtual ~WebGLExtensionCompressedTextureS3TC();
+    WebGLExtensionTextureFloat(WebGLContext*);
+    virtual ~WebGLExtensionTextureFloat();
 
-    NS_DECL_ISUPPORTS_INHERITED
-    NS_DECL_NSIWEBGLEXTENSION
+    DECL_WEBGL_EXTENSION_GOOP
 };
 
-class WebGLExtensionDepthTexture :
-    public nsIWebGLExtensionDepthTexture,
-    public WebGLExtension
+class WebGLExtensionTextureFloatLinear
+    : public WebGLExtensionBase
 {
 public:
-    WebGLExtensionDepthTexture(WebGLContext* context);
-    virtual ~WebGLExtensionDepthTexture();
+    WebGLExtensionTextureFloatLinear(WebGLContext*);
+    virtual ~WebGLExtensionTextureFloatLinear();
 
-    NS_DECL_ISUPPORTS_INHERITED
-    NS_DECL_NSIWEBGLEXTENSION
+    DECL_WEBGL_EXTENSION_GOOP
 };
 
-}
+class WebGLExtensionDrawBuffers
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionDrawBuffers(WebGLContext*);
+    virtual ~WebGLExtensionDrawBuffers();
+
+    void DrawBuffersWEBGL(const dom::Sequence<GLenum>& buffers);
+
+    static bool IsSupported(const WebGLContext*);
+
+    static const size_t sMinColorAttachments = 4;
+    static const size_t sMinDrawBuffers = 4;
+    /*
+     WEBGL_draw_buffers does not give a minal value for GL_MAX_DRAW_BUFFERS. But, we request
+     for GL_MAX_DRAW_BUFFERS = 4 at least to be able to use all requested color attachements.
+     See DrawBuffersWEBGL in WebGLExtensionDrawBuffers.cpp inner comments for more informations.
+     */
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+} // namespace mozilla
 
 #endif // WEBGLEXTENSIONS_H_

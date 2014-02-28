@@ -55,6 +55,7 @@ gfxPattern::gfxPattern(SourceSurface *aSurface, const Matrix &aTransform)
   , mGfxPattern(NULL)
   , mSourceSurface(aSurface)
   , mTransform(aTransform)
+  , mExtend(EXTEND_NONE)
 {
 }
 
@@ -95,6 +96,12 @@ gfxPattern::AddColorStop(gfxFloat offset, const gfxRGBA& c)
 }
 
 void
+gfxPattern::SetColorStops(mozilla::RefPtr<mozilla::gfx::GradientStops> aStops)
+{
+  mStops = aStops;
+}
+
+void
 gfxPattern::SetMatrix(const gfxMatrix& matrix)
 {
   if (mPattern) {
@@ -115,6 +122,23 @@ gfxPattern::GetMatrix() const
   if (mPattern) {
     cairo_matrix_t mat;
     cairo_pattern_get_matrix(mPattern, &mat);
+    return gfxMatrix(*reinterpret_cast<gfxMatrix*>(&mat));
+  } else {
+    // invert at the higher precision of gfxMatrix
+    // cause we need to convert at some point anyways
+    gfxMatrix mat = ThebesMatrix(mTransform);
+    mat.Invert();
+    return mat;
+  }
+}
+
+gfxMatrix
+gfxPattern::GetInverseMatrix() const
+{
+  if (mPattern) {
+    cairo_matrix_t mat;
+    cairo_pattern_get_matrix(mPattern, &mat);
+    cairo_matrix_invert(&mat);
     return gfxMatrix(*reinterpret_cast<gfxMatrix*>(&mat));
   } else {
     return ThebesMatrix(mTransform);
@@ -300,7 +324,7 @@ gfxPattern::SetExtend(GraphicsExtend extend)
   } else {
     // This is always a surface pattern and will default to EXTEND_PAD
     // for EXTEND_PAD_EDGE.
-    mExtend = ToExtendMode(extend);
+    mExtend = extend;
   }
 }
 
@@ -335,7 +359,7 @@ gfxPattern::Extend() const
   if (mPattern) {
     return (GraphicsExtend)cairo_pattern_get_extend(mPattern);
   } else {
-    return ThebesExtend(mExtend);
+    return mExtend;
   }
 }
 
@@ -382,7 +406,7 @@ gfxPattern::GetSurface()
   } else {
     // We should never be trying to get the surface off an Azure gfx Pattern.
     NS_ERROR("Attempt to get surface off an Azure gfxPattern!");
-    return NULL;
+    return nullptr;
   }
 }
 
@@ -416,11 +440,21 @@ gfxPattern::AdjustTransformForPattern(Matrix &aPatternTransform,
 {
   aPatternTransform.Invert();
   if (!aOriginalTransform) {
+    // User space is unchanged, so to get from pattern space to user space,
+    // just invert the cairo matrix.
+    aPatternTransform.NudgeToIntegers();
     return;
   }
+  // aPatternTransform now maps from pattern space to the user space defined
+  // by *aOriginalTransform.
 
   Matrix mat = aCurrentTransform;
   mat.Invert();
+  // mat maps from device space to current user space
 
+  // First, transform from pattern space to original user space. Then transform
+  // from original user space to device space. Then transform from
+  // device space to current user space.
   aPatternTransform = aPatternTransform * *aOriginalTransform * mat;
+  aPatternTransform.NudgeToIntegers();
 }

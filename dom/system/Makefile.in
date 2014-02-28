@@ -9,37 +9,11 @@ VPATH       = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE          = dom
-XPIDL_MODULE    = dom_system
 LIBRARY_NAME    = domsystem_s
 LIBXUL_LIBRARY  = 1
-
-ifneq (,$(filter qt gtk2,$(MOZ_WIDGET_TOOLKIT)))
-DIRS = unix
-endif
-
-ifneq (,$(filter windows,$(MOZ_WIDGET_TOOLKIT)))
-DIRS = windows
-endif
-
-ifneq (,$(filter android,$(MOZ_WIDGET_TOOLKIT)))
-DIRS = android
-endif
-
-ifdef MOZ_B2G_RIL
-DIRS += gonk
-endif
+FAIL_ON_WARNINGS := 1
 
 DEFINES += -DDLL_PREFIX=\"$(DLL_PREFIX)\" -DDLL_SUFFIX=\"$(DLL_SUFFIX)\"
-
-XPIDLSRCS = \
-  nsIOSFileConstantsService.idl \
-  $(NULL)
-
-CPPSRCS     = \
-  nsDeviceSensors.cpp \
-  OSFileConstants.cpp \
-  $(NULL)
 
 # We fire the nsDOMDeviceAcceleration
 LOCAL_INCLUDES += \
@@ -54,27 +28,20 @@ ifneq (Android,$(OS_TARGET))
 EXTRA_COMPONENTS = \
   NetworkGeolocationProvider.js \
   NetworkGeolocationProvider.manifest \
-  GPSDGeolocationProvider.js \
-  GPSDGeolocationProvider.manifest \
   $(NULL)
 endif
 
-EXPORTS_NAMESPACES = mozilla
-
-EXPORTS     = \
-  nsDeviceSensors.h \
+ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+EXTRA_COMPONENTS = \
+  NetworkGeolocationProvider.js \
+  NetworkGeolocationProvider.manifest \
   $(NULL)
-
-EXPORTS_mozilla = \
-  OSFileConstants.h \
-  $(NULL)
-
-# We fire the nsDOMDeviceAcceleration
-LOCAL_INCLUDES += -I$(topsrcdir)/content/events/src
-
-ifdef ENABLE_TESTS
-DIRS += tests
 endif
+
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/content/events/src \
+  -I$(topsrcdir)/js/xpconnect/loader \
+  $(NULL)
 
 include $(topsrcdir)/config/config.mk
 
@@ -84,4 +51,3 @@ FORCE_STATIC_LIB = 1
 EXPORT_LIBRARY = 1
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
-

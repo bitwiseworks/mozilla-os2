@@ -199,7 +199,7 @@ nsresult nsProfileLock::LockWithFcntl(nsIFile *aLockFile)
 {
     nsresult rv = NS_OK;
 
-    nsCAutoString lockFilePath;
+    nsAutoCString lockFilePath;
     rv = aLockFile->GetNativePath(lockFilePath);
     if (NS_FAILED(rv)) {
         NS_ERROR("Could not get native path");
@@ -208,8 +208,7 @@ nsresult nsProfileLock::LockWithFcntl(nsIFile *aLockFile)
 
     aLockFile->GetLastModifiedTime(&mReplacedLockTime);
 
-    mLockFileDesc = open(PromiseFlatCString(lockFilePath).get(),
-                          O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    mLockFileDesc = open(lockFilePath.get(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (mLockFileDesc != -1)
     {
         struct flock lock;
@@ -308,7 +307,7 @@ static bool IsSymlinkStaleLock(struct in_addr* aAddr, const char* aFileName,
 nsresult nsProfileLock::LockWithSymlink(nsIFile *aLockFile, bool aHaveFcntlLock)
 {
     nsresult rv;
-    nsCAutoString lockFilePath;
+    nsAutoCString lockFilePath;
     rv = aLockFile->GetNativePath(lockFilePath);
     if (NS_FAILED(rv)) {
         NS_ERROR("Could not get native path");
@@ -336,8 +335,7 @@ nsresult nsProfileLock::LockWithSymlink(nsIFile *aLockFile, bool aHaveFcntlLock)
     char *signature =
         PR_smprintf("%s:%s%lu", inet_ntoa(inaddr), aHaveFcntlLock ? "+" : "",
                     (unsigned long)getpid());
-    const nsPromiseFlatCString& flat = PromiseFlatCString(lockFilePath);
-    const char *fileName = flat.get();
+    const char *fileName = lockFilePath.get();
     int symlink_rv, symlink_errno = 0, tries = 0;
 
     // use ns4.x-compatible symlinks if the FS supports them
@@ -586,7 +584,7 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
         return NS_ERROR_FILE_ACCESS_DENIED;
     }
 #elif defined(XP_OS2)
-    nsCAutoString filePath;
+    nsAutoCString filePath;
     rv = lockFile->GetNativePath(filePath);
     if (NS_FAILED(rv))
         return rv;
@@ -609,7 +607,7 @@ nsresult nsProfileLock::Lock(nsIFile* aProfileDir,
         return NS_ERROR_FILE_ACCESS_DENIED;
     }
 #elif defined(VMS)
-    nsCAutoString filePath;
+    nsAutoCString filePath;
     rv = lockFile->GetNativePath(filePath);
     if (NS_FAILED(rv))
         return rv;

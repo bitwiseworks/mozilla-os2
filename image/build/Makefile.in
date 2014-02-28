@@ -10,17 +10,11 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= imglib2
-LIBRARY_NAME	= imglib2
 EXPORT_LIBRARY = 1
 IS_COMPONENT	= 1
 MODULE_NAME	= nsImageLib2Module
-GRE_MODULE	= 1
 LIBXUL_LIBRARY = 1
-
-CPPSRCS = \
-		nsImageModule.cpp \
-		$(NULL)
+FAIL_ON_WARNINGS = 1
 
 LOCAL_INCLUDES	= \
 		-I. \

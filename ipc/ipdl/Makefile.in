@@ -12,7 +12,6 @@ include $(DEPTH)/config/autoconf.mk
 GARBAGE_DIRS += _ipdlheaders
 GARBAGE += ipdl_lextab.py ipdl_yacctab.py $(wildcard *.pyc $(srcdir)/ipdl/*.pyc $(srcdir)/ipdl/cxx/*.pyc)
 
-MODULE = ipdlgen
 LIBRARY_NAME = mozipdlgen_s
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
@@ -23,13 +22,15 @@ EXPORT_LIBRARY = 1
 ##
 IPDLDIRS =  \
   uriloader/exthandler \
+  content/media/webspeech/synth/ipc \
   dom/devicestorage \
   dom/indexedDB/ipc \
   dom/bluetooth/ipc \
   dom/plugins/ipc  \
   dom/ipc \
-  dom/sms/src/ipc \
+  dom/mobilemessage/src/ipc \
   dom/src/storage \
+  dom/network/src \
   gfx/layers/ipc \
   hal/sandbox \
   ipc/glue  \
@@ -50,10 +51,6 @@ IPDLDIRS += ipc/ipdl/test/cxx
 endif #}
 ##-----------------------------------------------------------------------------
 
-ifdef MOZ_IPDL_TESTS
-DIRS += test
-endif
-
 vpath %.ipdl $(topsrcdir)
 vpath %.ipdlh $(topsrcdir)
 
@@ -68,13 +65,6 @@ PROTOCOLS :=
 
 $(foreach IPDLDIR,$(IPDLDIRS),$(eval $(ADD_IPDLDIR)))
 
-
-CPPSRCS =					\
-  $(PROTOCOLS:%.ipdl=%Parent.cpp)		\
-  $(PROTOCOLS:%.ipdl=%Child.cpp)		\
-  $(PROTOCOLS:%.ipdl=%.cpp)			\
-  $(PROTOCOLS:%.ipdlh=%.cpp)			\
-  $(NULL)
 
 GARBAGE += $(CPPSRCS)
 

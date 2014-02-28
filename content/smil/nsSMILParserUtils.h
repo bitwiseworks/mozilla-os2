@@ -11,11 +11,16 @@
 #include "nsString.h"
 
 class nsISMILAttr;
-class nsISMILAnimationElement;
 class nsSMILTimeValue;
 class nsSMILValue;
 class nsSMILRepeatCount;
 class nsSMILTimeValueSpecParams;
+
+namespace mozilla {
+namespace dom {
+class SVGAnimationElement;
+}
+}
 
 /**
  * Common parsing utilities for the SMIL module. There is little re-use here; it
@@ -40,7 +45,7 @@ public:
                                                       nsTArray<double>& aArray);
 
   static nsresult ParseValues(const nsAString& aSpec,
-                              const nsISMILAnimationElement* aSrcElement,
+                              const mozilla::dom::SVGAnimationElement* aSrcElement,
                               const nsISMILAttr& aAttribute,
                               nsTArray<nsSMILValue>& aValuesArray,
                               bool& aPreventCachingOfSandwich);
@@ -75,7 +80,7 @@ public:
    * media attribute is not allowed).
    *
    * @param aSpec    The string containing a clock value, e.g. "10s"
-   * @param aResult  The parsed result. May be NULL (e.g. if this method is
+   * @param aResult  The parsed result. May be nullptr (e.g. if this method is
    *                 being called just to test if aSpec is a valid clock value).
    *                 [OUT]
    * @param aFlags   A combination of the kClockValue* bit flags OR'ed together

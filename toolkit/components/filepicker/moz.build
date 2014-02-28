@@ -1,0 +1,22 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+if CONFIG['MOZ_XUL'] and \
+    CONFIG['MOZ_WIDGET_TOOLKIT'] not in ('android', 'qt', 'os2', 'cocoa', 'windows'):
+        MODULE = 'filepicker'
+        LIBRARY_NAME = 'fileview'
+        XPIDL_SOURCES += [
+            'nsIFileView.idl',
+        ]
+        CPP_SOURCES += [
+            'nsFileView.cpp',
+        ]
+        EXTRA_COMPONENTS += [
+            'nsFilePicker.js',
+        ]
+        EXTRA_PP_COMPONENTS += [
+            'nsFilePicker.manifest',
+        ]

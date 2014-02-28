@@ -1,0 +1,113 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+TEST_DIRS += ['tests']
+
+XPIDL_SOURCES += [
+    'nsIStyleSheetService.idl',
+]
+
+if not CONFIG['MOZ_XUL']:
+    XPIDL_SOURCES += [
+        'nsIBoxObject.idl',
+    ]
+    EXPORTS    += [
+        'nsPIBoxObject.h',
+    ]
+    CPP_SOURCES += [
+        'nsBoxObject.cpp',
+    ]
+
+if CONFIG['IBMBIDI']:
+    CPP_SOURCES += [
+        'nsBidiPresUtils.cpp',
+        'nsBidi.cpp',
+    ]
+
+if CONFIG['MOZ_DEBUG']:
+    CPP_SOURCES += [
+        'nsAutoLayoutPhase.cpp',
+    ]
+
+XPIDL_MODULE = 'layout_base'
+
+MODULE = 'layout'
+
+EXPORTS += [
+    'DisplayItemClip.h',
+    'DisplayListClipState.h',
+    'FrameLayerBuilder.h',
+    'FramePropertyTable.h',
+    'StackArena.h',
+    'Units.h',
+    'nsArenaMemoryStats.h',
+    'nsBidi.h',
+    'nsBidiPresUtils.h',
+    'nsCSSFrameConstructor.h',
+    'nsCaret.h',
+    'nsChangeHint.h',
+    'nsCompatibility.h',
+    'nsDisplayItemTypes.h',
+    'nsDisplayItemTypesList.h',
+    'nsDisplayList.h',
+    'nsDisplayListInvalidation.h',
+    'nsFrameManager.h',
+    'nsFrameManagerBase.h',
+    'nsFrameTraversal.h',
+    'nsIFrameTraversal.h',
+    'nsILayoutDebugger.h',
+    'nsILayoutHistoryState.h',
+    'nsIPercentHeightObserver.h',
+    'nsIPresShell.h',
+    'nsIReflowCallback.h',
+    'nsLayoutUtils.h',
+    'nsPresArena.h',
+    'nsPresContext.h',
+    'nsPresState.h',
+    'nsRefreshDriver.h',
+    'nsStyleChangeList.h',
+    'nsStyleConsts.h',
+]
+
+EXPORTS.mozilla += [
+    'PaintTracker.h',
+]
+
+CPP_SOURCES += [
+    'DisplayItemClip.cpp',
+    'DisplayListClipState.cpp',
+    'FrameLayerBuilder.cpp',
+    'FramePropertyTable.cpp',
+    'MaskLayerImageCache.cpp',
+    'PaintTracker.cpp',
+    'PositionedEventTargeting.cpp',
+    'RestyleTracker.cpp',
+    'StackArena.cpp',
+    'nsCSSColorUtils.cpp',
+    'nsCSSFrameConstructor.cpp',
+    'nsCSSRendering.cpp',
+    'nsCSSRenderingBorders.cpp',
+    'nsCaret.cpp',
+    'nsChildIterator.cpp',
+    'nsCounterManager.cpp',
+    'nsDisplayList.cpp',
+    'nsDisplayListInvalidation.cpp',
+    'nsDocumentViewer.cpp',
+    'nsFrameManager.cpp',
+    'nsFrameTraversal.cpp',
+    'nsGenConList.cpp',
+    'nsLayoutDebugger.cpp',
+    'nsLayoutHistoryState.cpp',
+    'nsLayoutUtils.cpp',
+    'nsPresArena.cpp',
+    'nsPresContext.cpp',
+    'nsPresShell.cpp',
+    'nsQuoteList.cpp',
+    'nsRefreshDriver.cpp',
+    'nsStyleChangeList.cpp',
+    'nsStyleSheetService.cpp',
+]
+

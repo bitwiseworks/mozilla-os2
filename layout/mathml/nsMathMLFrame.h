@@ -6,6 +6,7 @@
 #ifndef nsMathMLFrame_h___
 #define nsMathMLFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsPresContext.h"
 #include "nsFontMetrics.h"
@@ -27,69 +28,69 @@ public:
   // nsIMathMLFrame ---
 
   virtual bool
-  IsSpaceLike() {
+  IsSpaceLike() MOZ_OVERRIDE {
     return NS_MATHML_IS_SPACE_LIKE(mPresentationData.flags);
   }
 
   NS_IMETHOD
-  GetBoundingMetrics(nsBoundingMetrics& aBoundingMetrics) {
+  GetBoundingMetrics(nsBoundingMetrics& aBoundingMetrics) MOZ_OVERRIDE {
     aBoundingMetrics = mBoundingMetrics;
     return NS_OK;
   }
 
   NS_IMETHOD
-  SetBoundingMetrics(const nsBoundingMetrics& aBoundingMetrics) {
+  SetBoundingMetrics(const nsBoundingMetrics& aBoundingMetrics) MOZ_OVERRIDE {
     mBoundingMetrics = aBoundingMetrics;
     return NS_OK;
   }
 
   NS_IMETHOD
-  SetReference(const nsPoint& aReference) {
+  SetReference(const nsPoint& aReference) MOZ_OVERRIDE {
     mReference = aReference;
     return NS_OK;
   }
 
-  virtual eMathMLFrameType GetMathMLFrameType();
+  virtual eMathMLFrameType GetMathMLFrameType() MOZ_OVERRIDE;
 
   NS_IMETHOD
   Stretch(nsRenderingContext& aRenderingContext,
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
-          nsHTMLReflowMetrics& aDesiredStretchSize)
+          nsHTMLReflowMetrics& aDesiredStretchSize) MOZ_OVERRIDE
   {
     return NS_OK;
   }
 
   NS_IMETHOD
-  GetEmbellishData(nsEmbellishData& aEmbellishData) {
+  GetEmbellishData(nsEmbellishData& aEmbellishData) MOZ_OVERRIDE {
     aEmbellishData = mEmbellishData;
     return NS_OK;
   }
 
   NS_IMETHOD
-  GetPresentationData(nsPresentationData& aPresentationData) {
+  GetPresentationData(nsPresentationData& aPresentationData) MOZ_OVERRIDE {
     aPresentationData = mPresentationData;
     return NS_OK;
   }
 
   NS_IMETHOD
-  InheritAutomaticData(nsIFrame* aParent);
+  InheritAutomaticData(nsIFrame* aParent) MOZ_OVERRIDE;
 
   NS_IMETHOD
-  TransmitAutomaticData()
+  TransmitAutomaticData() MOZ_OVERRIDE
   {
     return NS_OK;
   }
 
   NS_IMETHOD
   UpdatePresentationData(uint32_t        aFlagsValues,
-                         uint32_t        aFlagsToUpdate);
+                         uint32_t        aFlagsToUpdate) MOZ_OVERRIDE;
 
   NS_IMETHOD
   UpdatePresentationDataFromChildAt(int32_t         aFirstIndex,
                                     int32_t         aLastIndex,
                                     uint32_t        aFlagsValues,
-                                    uint32_t        aFlagsToUpdate)
+                                    uint32_t        aFlagsToUpdate) MOZ_OVERRIDE
   {
     return NS_OK;
   }
@@ -134,11 +135,6 @@ public:
   static void
   FindAttrDisplaystyle(nsIContent*         aContent,
                        nsPresentationData& aPresentationData);
-
-  // helper used to see if an element has a dir attribute 
-  static void
-  FindAttrDirectionality(nsIContent*         aContent,
-                         nsPresentationData& aPresentationData);
 
   // helper to check if a content has an attribute. If content is nullptr or if
   // the attribute is not there, check if the attribute is on the mstyle hierarchy
@@ -362,9 +358,9 @@ protected:
    * Display a solid rectangle in the frame's text color. Used for drawing
    * fraction separators and root/sqrt overbars.
    */
-  nsresult DisplayBar(nsDisplayListBuilder* aBuilder,
-                      nsIFrame* aFrame, const nsRect& aRect,
-                      const nsDisplayListSet& aLists);
+  void DisplayBar(nsDisplayListBuilder* aBuilder,
+                  nsIFrame* aFrame, const nsRect& aRect,
+                  const nsDisplayListSet& aLists);
 
   // information about the presentation policy of the frame
   nsPresentationData mPresentationData;

@@ -35,9 +35,9 @@ var gProps = [
   [ "border-left-width", "border-right-width", "-moz-border-start-width", "-moz-border-end-width" ],
 ];
 
-var gLengthValues = [ "inherit", "-moz-initial", "2px", "1em" ];
-var gColorValues = [ "inherit", "-moz-initial", "currentColor", "green" ];
-var gStyleValues = [ "inherit", "-moz-initial", "double", "dashed" ];
+var gLengthValues = [ "inherit", "initial", "2px", "1em" ];
+var gColorValues = [ "inherit", "initial", "currentColor", "green" ];
+var gStyleValues = [ "inherit", "initial", "double", "dashed" ];
 
 function values_for(set) {
   var values;
@@ -54,15 +54,15 @@ var e = document.getElementById("display");
 var s = e.style;
 var c = window.getComputedStyle(e, "");
 
-for each (var set in gProps) {
+for (var set of gProps) {
   var values = values_for(set);
-  for each (var val in values) {
+  for (var val of values) {
     function check(dir, plogical, pvisual) {
       var v0 = c.getPropertyValue(pvisual);
       s.setProperty("direction", dir, "");
       s.setProperty(pvisual, val, "");
       var v1 = c.getPropertyValue(pvisual);
-      if (val != "-moz-initial" && val != "currentColor")
+      if (val != "initial" && val != "currentColor")
         isnot(v1, v0, "setProperty set the property " + pvisual + ": " + val);
       s.removeProperty(pvisual);
       is(c.getPropertyValue(pvisual), v0, "removeProperty worked for " + pvisual);

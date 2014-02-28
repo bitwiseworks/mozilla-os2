@@ -16,9 +16,6 @@
 
     throw new Error("osfile_unix_front.jsm cannot be used from the main thread yet");
   }
-  importScripts("resource://gre/modules/osfile/osfile_unix_back.jsm");
-  importScripts("resource://gre/modules/osfile/ospath_unix_back.jsm");
-  importScripts("resource://gre/modules/osfile/osfile_shared_front.jsm");
   (function(exports) {
      "use strict";
 
@@ -80,7 +77,7 @@
      /**
       * Read some bytes from a file.
       *
-      * @param {ArrayBuffer} buffer A buffer for holding the data
+      * @param {C pointer} buffer A buffer for holding the data
       * once it is read.
       * @param {number} nbytes The number of bytes to read. It must not
       * exceed the size of |buffer| in bytes but it may exceed the number
@@ -92,7 +89,7 @@
       * the end of the file has been reached.
       * @throws {OS.File.Error} In case of I/O error.
       */
-     File.prototype.read = function read(buffer, nbytes, options) {
+     File.prototype._read = function _read(buffer, nbytes, options) {
        return throw_on_negative("read",
          UnixFile.read(this.fd, buffer, nbytes)
        );
@@ -101,7 +98,7 @@
      /**
       * Write some bytes to a file.
       *
-      * @param {ArrayBuffer} buffer A buffer holding the data that must be
+      * @param {C pointer} buffer A buffer holding the data that must be
       * written.
       * @param {number} nbytes The number of bytes to write. It must not
       * exceed the size of |buffer| in bytes.
@@ -111,7 +108,7 @@
       * @return {number} The number of bytes effectively written.
       * @throws {OS.File.Error} In case of I/O error.
       */
-     File.prototype.write = function write(buffer, nbytes, options) {
+     File.prototype._write = function _write(buffer, nbytes, options) {
        return throw_on_negative("write",
          UnixFile.write(this.fd, buffer, nbytes)
        );
@@ -142,7 +139,7 @@
       */
      File.prototype.setPosition = function setPosition(pos, whence) {
        if (whence === undefined) {
-         whence = Const.SEEK_START;
+         whence = Const.SEEK_SET;
        }
        return throw_on_negative("setPosition",
          UnixFile.lseek(this.fd, pos, whence)
@@ -159,9 +156,15 @@
          return new File.Info(gStatData);
      };
 
-
-     // Constant used to normalize options.
-     const noOptions = {};
+     /**
+      * Flushes the file's buffers and causes all buffered data
+      * to be written.
+      *
+      * @throws {OS.File.Error} In case of I/O error.
+      */
+     File.prototype.flush = function flush() {
+       throw_on_negative("flush", UnixFile.fsync(this.fd));
+     };
 
      // The default unix mode for opening (0600)
      const DEFAULT_UNIX_MODE = 384;
@@ -209,8 +212,7 @@
       * @return {File} A file object.
       * @throws {OS.File.Error} If the file could not be opened.
       */
-     File.open = function Unix_open(path, mode, options) {
-       options = options || noOptions;
+     File.open = function Unix_open(path, mode, options = {}) {
        let omode = options.unixMode || DEFAULT_UNIX_MODE;
        let flags;
        if (options.unixFlags) {
@@ -248,6 +250,21 @@
      };
 
      /**
+      * Checks if a file exists
+      *
+      * @param {string} path The path to the file.
+      *
+      * @return {bool} true if the file exists, false otherwise.
+      */
+     File.exists = function Unix_exists(path) {
+       if (UnixFile.access(path, OS.Constants.libc.F_OK) == -1) {
+         return false;
+       } else {
+         return true;
+       }
+     };
+
+     /**
       * Remove an existing file.
       *
       * @param {string} path The name of the file.
@@ -266,8 +283,7 @@
       *   - {bool} ignoreAbsent If |true|, do not fail if the
       *     directory does not exist yet.
       */
-     File.removeEmptyDir = function removeEmptyDir(path, options) {
-       options = options || noOptions;
+     File.removeEmptyDir = function removeEmptyDir(path, options = {}) {
        let result = UnixFile.rmdir(path);
        if (result == -1) {
          if (options.ignoreAbsent && ctypes.errno == Const.ENOENT) {
@@ -293,12 +309,17 @@
       * as per libc function |mkdir|. If unspecified, dirs are
       * created with a default mode of 0700 (dir is private to
       * the user, the user can read, write and execute).
+      * - {bool} ignoreExisting If |true|, do not fail if the
+      * directory already exists.
       */
-     File.makeDir = function makeDir(path, options) {
-       options = options || noOptions;
+     File.makeDir = function makeDir(path, options = {}) {
        let omode = options.unixMode || DEFAULT_UNIX_MODE_DIR;
-       throw_on_negative("makeDir",
-         UnixFile.mkdir(path, omode));
+       let result = UnixFile.mkdir(path, omode);
+       if (result != -1 ||
+           options.ignoreExisting && ctypes.errno == OS.Constants.libc.EEXIST) {
+        return;
+       }
+       throw new File.Error("makeDir");
      };
 
      /**
@@ -338,6 +359,9 @@
       * @option {bool} noOverwrite - If set, this function will fail if
       * a file already exists at |destPath|. Otherwise, if this file exists,
       * it will be erased silently.
+      * @option {bool} noCopy - If set, this function will fail if the
+      * operation is more sophisticated than a simple renaming, i.e. if
+      * |sourcePath| and |destPath| are not situated on the same device.
       *
       * @throws {OS.File.Error} In case of any error.
       *
@@ -355,8 +379,7 @@
        // This implementation uses |copyfile(3)|, from the BSD library.
        // Adding copying of hierarchies and/or attributes is just a flag
        // away.
-       File.copy = function copyfile(sourcePath, destPath, options) {
-         options = options || noOptions;
+       File.copy = function copyfile(sourcePath, destPath, options = {}) {
          let flags = Const.COPYFILE_DATA;
          if (options.noOverwrite) {
            flags |= Const.COPYFILE_EXCL;
@@ -394,15 +417,14 @@
        let pump_buffer = null;
 
        // An implementation of |pump| using |read|/|write|
-       let pump_userland = function pump_userland(source, dest, options) {
-         let options = options || noOptions;
+       let pump_userland = function pump_userland(source, dest, options = {}) {
          let bufSize = options.bufSize || 4096;
          let nbytes = options.nbytes || Infinity;
          if (!pump_buffer || pump_buffer.length < bufSize) {
            pump_buffer = new (ctypes.ArrayType(ctypes.char))(bufSize);
          }
-         let read = source.read.bind(source);
-         let write = dest.write.bind(dest);
+         let read = source._read.bind(source);
+         let write = dest._write.bind(dest);
          // Perform actual copy
          let total_read = 0;
          while (true) {
@@ -431,8 +453,7 @@
          const BUFSIZE = 1 << 17;
 
          // An implementation of |pump| using |splice| (for Linux/Android)
-         pump = function pump_splice(source, dest, options) {
-           let options = options || noOptions;
+         pump = function pump_splice(source, dest, options = {}) {
            let nbytes = options.nbytes || Infinity;
            let pipe = [];
            throw_on_negative("pump", UnixFile.pipe(pipe));
@@ -496,8 +517,7 @@
        // Implement |copy| using |pump|.
        // This implementation would require some work before being able to
        // copy directories
-       File.copy = function copy(sourcePath, destPath, options) {
-         options = options || noOptions;
+       File.copy = function copy(sourcePath, destPath, options = {}) {
          let source, dest;
          let result;
          try {
@@ -505,7 +525,7 @@
            if (options.noOverwrite) {
              dest = File.open(destPath, {create:true});
            } else {
-             dest = File.open(destPath, {write:true});
+             dest = File.open(destPath, {trunc:true});
            }
            result = pump(source, dest, options);
          } catch (x) {
@@ -522,13 +542,11 @@
 
      // Implement |move| using |rename| (wherever possible) or |copy|
      // (if files are on distinct devices).
-     File.move = function move(sourcePath, destPath, options) {
+     File.move = function move(sourcePath, destPath, options = {}) {
        // An implementation using |rename| whenever possible or
        // |File.pump| when required, for other Unices.
        // It can move directories on one file system, not
        // across file systems
-
-       options = options || noOptions;
 
        // If necessary, fail if the destination file exists
        if (options.noOverwrite) {
@@ -549,9 +567,11 @@
          return;
 
        // If the error is not EXDEV ("not on the same device"),
-       // throw it.
-       if (ctypes.errno != Const.EXDEV) {
-         throw new File.Error();
+       // or if the error is EXDEV and we have passed an option
+       // that prevents us from crossing devices, throw the
+       // error.
+       if (ctypes.errno != Const.EXDEV || options.noCopy) {
+         throw new File.Error("move");
        }
 
        // Otherwise, copy and remove.
@@ -573,98 +593,107 @@
       * @constructor
       */
      File.DirectoryIterator = function DirectoryIterator(path, options) {
-       let dir = throw_on_null("DirectoryIterator", UnixFile.opendir(path));
-       this._dir = dir;
+       exports.OS.Shared.AbstractFile.AbstractIterator.call(this);
        this._path = path;
-     };
-     File.DirectoryIterator.prototype = {
-       __iterator__: function __iterator__() {
-         return this;
-       },
-       /**
-        * Return the next entry in the directory, if any such entry is
-        * available.
-        *
-        * Skip special directories "." and "..".
-        *
-        * @return {File.Entry} The next entry in the directory.
-        * @throws {StopIteration} Once all files in the directory have been
-        * encountered.
-        */
-       next: function next() {
-         if (!this._dir) {
-           throw StopIteration;
+       this._dir = UnixFile.opendir(this._path);
+       if (this._dir == null) {
+         let error = ctypes.errno;
+         if (error != OS.Constants.libc.ENOENT) {
+           throw new File.Error("DirectoryIterator", error);
          }
-         for (let entry = UnixFile.readdir(this._dir);
-              entry != null && !entry.isNull();
-              entry = UnixFile.readdir(this._dir)) {
-           let contents = entry.contents;
-           if (contents.d_type == OS.Constants.libc.DT_DIR) {
-             let name = contents.d_name.readString();
-             if (name == "." || name == "..") {
-               continue;
-             }
-           }
-           return new File.DirectoryIterator.Entry(contents, this._path);
-         }
-         this.close();
-         throw StopIteration;
-       },
-
-       /**
-        * Close the iterator and recover all resources.
-        * You should call this once you have finished iterating on a directory.
-        */
-       close: function close() {
-         if (!this._dir) return;
-         UnixFile.closedir(this._dir);
-         this._dir = null;
+         this._exists = false;
+         this._closed = true;
+       } else {
+         this._exists = true;
+         this._closed = false;
        }
+     };
+     File.DirectoryIterator.prototype = Object.create(exports.OS.Shared.AbstractFile.AbstractIterator.prototype);
+
+     /**
+      * Return the next entry in the directory, if any such entry is
+      * available.
+      *
+      * Skip special directories "." and "..".
+      *
+      * @return {File.Entry} The next entry in the directory.
+      * @throws {StopIteration} Once all files in the directory have been
+      * encountered.
+      */
+     File.DirectoryIterator.prototype.next = function next() {
+       if (!this._exists) {
+         throw File.Error.noSuchFile("DirectoryIterator.prototype.next");
+       }
+       if (this._closed) {
+         throw StopIteration;
+       }
+       for (let entry = UnixFile.readdir(this._dir);
+            entry != null && !entry.isNull();
+            entry = UnixFile.readdir(this._dir)) {
+         let contents = entry.contents;
+         let name = contents.d_name.readString();
+         if (name == "." || name == "..") {
+           continue;
+         }
+
+         let isDir, isSymLink;
+         if (!("d_type" in contents)) {
+           // |dirent| doesn't have d_type on some platforms (e.g. Solaris).
+           let path = OS.Unix.Path.join(this._path, name);
+           throw_on_negative("lstat", UnixFile.lstat(path, gStatDataPtr));
+           isDir = (gStatData.st_mode & OS.Constants.libc.S_IFMT) == OS.Constants.libc.S_IFDIR;
+           isSymLink = (gStatData.st_mode & OS.Constants.libc.S_IFMT) == OS.Constants.libc.S_IFLNK;
+         } else {
+           isDir = contents.d_type == OS.Constants.libc.DT_DIR;
+           isSymLink = contents.d_type == OS.Constants.libc.DT_LNK;
+         }
+
+         return new File.DirectoryIterator.Entry(isDir, isSymLink, name, this._path);
+       }
+       this.close();
+       throw StopIteration;
+     };
+
+     /**
+      * Close the iterator and recover all resources.
+      * You should call this once you have finished iterating on a directory.
+      */
+     File.DirectoryIterator.prototype.close = function close() {
+       if (this._closed) return;
+       this._closed = true;
+       UnixFile.closedir(this._dir);
+       this._dir = null;
+     };
+
+    /**
+     * Determine whether the directory exists.
+     *
+     * @return {boolean}
+     */
+     File.DirectoryIterator.prototype.exists = function exists() {
+       return this._exists;
+     };
+
+     /**
+      * Return directory as |File|
+      */
+     File.DirectoryIterator.prototype.unixAsFile = function unixAsFile() {
+       if (!this._dir) throw File.Error.closed();
+       return error_or_file(UnixFile.dirfd(this._dir));
      };
 
      /**
       * An entry in a directory.
       */
-     File.DirectoryIterator.Entry = function Entry(unix_entry, parent) {
+     File.DirectoryIterator.Entry = function Entry(isDir, isSymLink, name, parent) {
        // Copy the relevant part of |unix_entry| to ensure that
        // our data is not overwritten prematurely.
-       this._d_type = unix_entry.d_type;
-       this._name = unix_entry.d_name.readString();
        this._parent = parent;
+       let path = OS.Unix.Path.join(this._parent, name);
+
+       exports.OS.Shared.Unix.AbstractEntry.call(this, isDir, isSymLink, name, path);
      };
-     File.DirectoryIterator.Entry.prototype = {
-       /**
-        * |true| if the entry is a directory, |false| otherwise
-        */
-       get isDir() {
-         return this._d_type == OS.Constants.libc.DT_DIR;
-       },
-
-       /**
-        * |true| if the entry is a symbolic link, |false| otherwise
-        */
-       get isSymLink() {
-         return this._d_type == OS.Constants.libc.DT_LNK;
-       },
-
-       /**
-        * The name of the entry.
-        * @type {string}
-        */
-       get name() {
-         return this._name;
-       },
-
-       /**
-        * The full path to the entry.
-        */
-       get path() {
-         delete this.path;
-         let path = OS.Unix.Path.join(this._parent, this.name);
-         Object.defineProperty(this, "path", {value: path});
-         return path;
-       }
-     };
+     File.DirectoryIterator.Entry.prototype = Object.create(exports.OS.Shared.Unix.AbstractEntry.prototype);
 
      /**
       * Return a version of an instance of
@@ -690,91 +719,49 @@
      let gStatDataPtr = gStatData.address();
      let MODE_MASK = 4095 /*= 07777*/;
      File.Info = function Info(stat) {
-       this._st_mode = stat.st_mode;
-       this._st_uid = stat.st_uid;
-       this._st_gid = stat.st_gid;
-       this._st_atime = stat.st_atime;
-       this._st_mtime = stat.st_mtime;
-       this._st_ctime = stat.st_ctime;
-       this._st_size = stat.st_size;
-     };
-     File.Info.prototype = {
-       /**
-        * |true| if this file is a directory, |false| otherwise
-        */
-       get isDir() {
-         return (this._st_mode & OS.Constants.libc.S_IFMT) == OS.Constants.libc.S_IFDIR;
-       },
-       /**
-        * |true| if this file is a symbolink link, |false| otherwise
-        */
-       get isSymLink() {
-         return (this._st_mode & OS.Constants.libc.S_IFMT) == OS.Constants.libc.S_IFLNK;
-       },
-       /**
-        * The size of the file, in bytes.
-        *
-        * Note that the result may be |NaN| if the size of the file cannot be
-        * represented in JavaScript.
-        *
-        * @type {number}
-        */
-       get size() {
-         return exports.OS.Shared.Type.size_t.importFromC(this._st_size);
-       },
-       /**
-        * The date of creation of this file
-        *
-        * @type {Date}
-        */
-       get creationDate() {
-         delete this.creationDate;
-         let date = new Date(this._st_ctime * 1000);
-         Object.defineProperty(this, "creationDate", { value: date });
-         return date;
-       },
-       /**
-        * The date of last access to this file.
-        *
-        * Note that the definition of last access may depend on the
-        * underlying operating system and file system.
-        *
-        * @type {Date}
-        */
-       get lastAccessDate() {
-         delete this.lastAccessDate;
-         let date = new Date(this._st_atime * 1000);
-         Object.defineProperty(this, "lastAccessDate", {value: date});
-         return date;
-       },
-       /**
-        * Return the date of last modification of this file.
-        */
-       get lastModificationDate() {
-         delete this.lastModificationDate;
-         let date = new Date(this._st_mtime * 1000);
-         Object.defineProperty(this, "lastModificationDate", {value: date});
-         return date;
-       },
-       /**
-        * Return the Unix owner of this file.
-        */
-       get unixOwner() {
-         return exports.OS.Shared.Type.uid_t.importFromC(this._st_uid);
-       },
-       /**
-        * Return the Unix group of this file.
-        */
-       get unixGroup() {
-         return exports.OS.Shared.Type.gid_t.importFromC(this._st_gid);
-       },
-       /**
-        * Return the Unix mode of this file.
-        */
-       get unixMode() {
-         return exports.OS.Shared.Type.mode_t.importFromC(this._st_mode & MODE_MASK);
+       let isDir = (stat.st_mode & OS.Constants.libc.S_IFMT) == OS.Constants.libc.S_IFDIR;
+       let isSymLink = (stat.st_mode & OS.Constants.libc.S_IFMT) == OS.Constants.libc.S_IFLNK;
+       let size = exports.OS.Shared.Type.size_t.importFromC(stat.st_size);
+
+       let lastAccessDate = new Date(stat.st_atime * 1000);
+       let lastModificationDate = new Date(stat.st_mtime * 1000);
+       let unixLastStatusChangeDate = new Date(stat.st_ctime * 1000);
+
+       let unixOwner = exports.OS.Shared.Type.uid_t.importFromC(stat.st_uid);
+       let unixGroup = exports.OS.Shared.Type.gid_t.importFromC(stat.st_gid);
+       let unixMode = exports.OS.Shared.Type.mode_t.importFromC(stat.st_mode & MODE_MASK);
+
+       exports.OS.Shared.Unix.AbstractInfo.call(this, isDir, isSymLink, size, lastAccessDate,
+                                                lastModificationDate, unixLastStatusChangeDate,
+                                                unixOwner, unixGroup, unixMode);
+
+       // Some platforms (e.g. MacOS X, some BSDs) store a file creation date
+       if ("OSFILE_OFFSETOF_STAT_ST_BIRTHTIME" in OS.Constants.libc) {
+         let date = new Date(stat.st_birthtime * 1000);
+
+        /**
+         * The date of creation of this file.
+         *
+         * Note that the date returned by this method is not always
+         * reliable. Not all file systems are able to provide this
+         * information.
+         *
+         * @type {Date}
+         */
+         this.macBirthDate = date;
        }
      };
+     File.Info.prototype = Object.create(exports.OS.Shared.Unix.AbstractInfo.prototype);
+
+     // Deprecated, use macBirthDate/winBirthDate instead
+     Object.defineProperty(File.Info.prototype, "creationDate", {
+      get: function creationDate() {
+        // On the Macintosh, returns the birth date if available.
+        // On other Unix, as the birth date is not available,
+        // returns the epoch.
+        return this.macBirthDate || new Date(0);
+      }
+     });
 
      /**
       * Return a version of an instance of File.Info that can be sent
@@ -804,8 +791,7 @@
       *
       * @return {File.Information}
       */
-     File.stat = function stat(path, options) {
-       options = options || noOptions;
+     File.stat = function stat(path, options = {}) {
        if (options.unixNoFollowingLinks) {
          throw_on_negative("stat", UnixFile.lstat(path, gStatDataPtr));
        } else {
@@ -814,20 +800,37 @@
        return new File.Info(gStatData);
      };
 
+     File.read = exports.OS.Shared.AbstractFile.read;
+     File.writeAtomic = exports.OS.Shared.AbstractFile.writeAtomic;
+
+     /**
+      * Get the current directory by getCurrentDirectory.
+      */
+     File.getCurrentDirectory = function getCurrentDirectory() {
+       let path = UnixFile.get_current_dir_name?UnixFile.get_current_dir_name():
+         UnixFile.getwd_auto(null);
+       throw_on_null("getCurrentDirectory",path);
+       return path.readString();
+     };
+
+     /**
+      * Set the current directory by setCurrentDirectory.
+      */
+     File.setCurrentDirectory = function setCurrentDirectory(path) {
+       throw_on_negative("setCurrentDirectory",
+         UnixFile.chdir(path)
+       );
+     };
+
      /**
       * Get/set the current directory.
       */
      Object.defineProperty(File, "curDir", {
          set: function(path) {
-           throw_on_negative("curDir",
-             UnixFile.chdir(path)
-           );
+           this.setCurrentDirectory(path);
          },
          get: function() {
-           let path = UnixFile.get_current_dir_name?UnixFile.get_current_dir_name():
-             UnixFile.getwd_auto(null);
-           throw_on_null("curDir",path);
-           return path.readString();
+           return this.getCurrentDirectory();
          }
        }
      );

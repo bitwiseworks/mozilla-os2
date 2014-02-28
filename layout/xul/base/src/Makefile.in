@@ -1,4 +1,3 @@
-#
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -10,65 +9,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= layout
 LIBRARY_NAME	= gkxulbase_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY	= 1
-
-
-
-ifdef MOZ_XUL
-PARALLEL_DIRS = tree/public tree/src grid
-endif
-
-CPPSRCS		= \
-		nsScrollBoxFrame.cpp \
-		nsRootBoxFrame.cpp \
-		nsBox.cpp \
-		nsBoxFrame.cpp \
-		nsBoxLayoutState.cpp \
-		nsSprocketLayout.cpp \
-		nsStackFrame.cpp \
-		nsStackLayout.cpp \
-		nsBoxLayout.cpp \
-		nsScrollbarFrame.cpp \
-		nsScrollbarButtonFrame.cpp \
-		nsButtonBoxFrame.cpp \
-		nsSliderFrame.cpp \
-		nsRepeatService.cpp \
-		nsXULTooltipListener.cpp \
-		$(NULL)
-
-ifdef MOZ_XUL
-CPPSRCS		+= \
-		nsScrollBoxObject.cpp \
-		nsContainerBoxObject.cpp \
-		nsMenuBoxObject.cpp \
-		nsPopupBoxObject.cpp \
-		nsListBoxObject.cpp \
-		nsBoxObject.cpp \
-		nsImageBoxFrame.cpp \
-		nsDocElementBoxFrame.cpp \
-		nsLeafBoxFrame.cpp \
-		nsTextBoxFrame.cpp \
-		nsGroupBoxFrame.cpp \
-		nsSplitterFrame.cpp \
-		nsDeckFrame.cpp \
-		nsProgressMeterFrame.cpp \
-		nsMenuPopupFrame.cpp \
-		nsMenuFrame.cpp \
-		nsMenuBarFrame.cpp \
-		nsMenuBarListener.cpp \
-		nsPopupSetFrame.cpp \
-		nsTitleBarFrame.cpp \
-		nsResizerFrame.cpp \
-		nsListBoxBodyFrame.cpp \
-		nsListItemFrame.cpp \
-		nsListBoxLayout.cpp \
-		nsXULLabelFrame.cpp \
-		nsXULPopupManager.cpp \
-		$(NULL)
-
-endif
+FAIL_ON_WARNINGS = 1
 
 include $(topsrcdir)/config/config.mk
 

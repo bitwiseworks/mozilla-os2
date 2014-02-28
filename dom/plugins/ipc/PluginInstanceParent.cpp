@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+#include "mozilla/StandardInteger.h" // for intptr_t
+
 #include "PluginInstanceParent.h"
 #include "BrowserStreamParent.h"
 #include "PluginBackgroundDestroyer.h"
@@ -17,7 +20,6 @@
 #include "gfxPlatform.h"
 #include "gfxSharedImageSurface.h"
 #include "nsNPAPIPluginInstance.h"
-#include "mozilla/StandardInteger.h" // for intptr_t
 #ifdef MOZ_X11
 #include "gfxXlibSurface.h"
 #endif
@@ -26,6 +28,9 @@
 #include "gfxUtils.h"
 #include "nsNPAPIPluginInstance.h"
 #include "Layers.h"
+#include "SharedTextureImage.h"
+#include "GLContext.h"
+#include "GLContextProvider.h"
 
 #if defined(OS_WIN)
 #include <windowsx.h>
@@ -44,6 +49,8 @@ extern const PRUnichar* kFlashFullscreenClass;
 #endif // defined(XP_MACOSX)
 
 using namespace mozilla::plugins;
+using namespace mozilla::layers;
+using namespace mozilla::gl;
 
 bool
 StreamNotifyParent::RecvRedirectNotifyResponse(const bool& allow)
@@ -95,14 +102,11 @@ PluginInstanceParent::~PluginInstanceParent()
         ::CGColorSpaceRelease(mShColorSpace);
 #endif
     if (mRemoteImageDataShmem.IsWritable()) {
-        ImageContainer *container =
-            GetImageContainer();
-
-        if (container) {
-            container->SetRemoteImageData(nullptr, nullptr);
-            container->SetCompositionNotifySink(nullptr);
-            DeallocShmem(mRemoteImageDataShmem);
+        if (mImageContainer) {
+            mImageContainer->SetRemoteImageData(nullptr, nullptr);
+            mImageContainer->SetCompositionNotifySink(nullptr);
         }
+        DeallocShmem(mRemoteImageDataShmem);
     }
 }
 
@@ -125,14 +129,13 @@ PluginInstanceParent::ActorDestroy(ActorDestroyReason why)
     }
 #endif
     // After this method, the data backing the remote surface may no
-    // longer be calid. The X surface may be destroyed, or the shared
-    // memory backing this surface may no longer be valid. The right
-    // way to inform the nsObjectFrame that the surface is no longer
-    // valid is with an invalidate call.
+    // longer be valid. The X surface may be destroyed, or the shared
+    // memory backing this surface may no longer be valid.
     if (mFrontSurface) {
         mFrontSurface = NULL;
-        const NPRect rect = {0, 0, 0, 0};
-        RecvNPN_InvalidateRect(rect);
+        if (mImageContainer) {
+            mImageContainer->SetCurrentImage(nullptr);
+        }
 #ifdef MOZ_X11
         FinishX(DefaultXDisplay());
 #endif
@@ -188,27 +191,6 @@ bool
 PluginInstanceParent::DeallocPPluginStream(PPluginStreamParent* stream)
 {
     delete stream;
-    return true;
-}
-
-bool
-PluginInstanceParent::AnswerNPN_GetValue_NPNVjavascriptEnabledBool(
-                                                       bool* value,
-                                                       NPError* result)
-{
-    NPBool v;
-    *result = mNPNIface->getvalue(mNPP, NPNVjavascriptEnabledBool, &v);
-    *value = v;
-    return true;
-}
-
-bool
-PluginInstanceParent::AnswerNPN_GetValue_NPNVisOfflineBool(bool* value,
-                                                           NPError* result)
-{
-    NPBool v;
-    *result = mNPNIface->getvalue(mNPP, NPNVisOfflineBool, &v);
-    *value = v;
     return true;
 }
 
@@ -430,9 +412,6 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
 #if defined(XP_WIN)
                drawingModel == NPDrawingModelSyncWin
 #elif defined(XP_MACOSX)
-#ifndef NP_NO_QUICKDRAW
-               drawingModel == NPDrawingModelQuickDraw ||
-#endif
                drawingModel == NPDrawingModelOpenGL ||
                drawingModel == NPDrawingModelCoreGraphics
 #elif defined(MOZ_X11)
@@ -443,19 +422,15 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginDrawingModel(
                ) {
         *shmem = null_t();
 
-        ImageContainer *container = GetImageContainer();
-        if (!container) {
-            *result = NPERR_GENERIC_ERROR;
-            return true;
-        }
-
         mDrawingModel = drawingModel;
         *result = mNPNIface->setvalue(mNPP, NPPVpluginDrawingModel,
                                       (void*)(intptr_t)drawingModel);
 
         if (mRemoteImageDataShmem.IsWritable()) {
-            container->SetRemoteImageData(nullptr, nullptr);
-            container->SetCompositionNotifySink(nullptr);
+            if (mImageContainer) {
+                mImageContainer->SetRemoteImageData(nullptr, nullptr);
+                mImageContainer->SetCompositionNotifySink(nullptr);
+            }
             DeallocShmem(mRemoteImageDataShmem);
             mRemoteImageDataMutex = NULL;
         }
@@ -471,7 +446,7 @@ PluginInstanceParent::AnswerNPN_SetValue_NPPVpluginEventModel(
 {
 #ifdef XP_MACOSX
     *result = mNPNIface->setvalue(mNPP, NPPVpluginEventModel,
-                                  (void*)eventModel);
+                                  (void*)(intptr_t)eventModel);
     return true;
 #else
     *result = NPERR_GENERIC_ERROR;
@@ -592,8 +567,10 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
 #ifdef XP_MACOSX
     else if (newSurface.type() == SurfaceDescriptor::TIOSurfaceDescriptor) {
         IOSurfaceDescriptor iodesc = newSurface.get_IOSurfaceDescriptor();
-    
-        RefPtr<MacIOSurface> newIOSurface = MacIOSurface::LookupSurface(iodesc.surfaceId());
+
+        RefPtr<MacIOSurface> newIOSurface =
+          MacIOSurface::LookupSurface(iodesc.surfaceId(),
+                                      iodesc.contentsScaleFactor());
 
         if (!newIOSurface) {
             NS_WARNING("Got bad IOSurfaceDescriptor in RecvShow");
@@ -601,7 +578,8 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
         }
       
         if (mFrontIOSurface)
-            *prevSurface = IOSurfaceDescriptor(mFrontIOSurface->GetIOSurfaceID());
+            *prevSurface = IOSurfaceDescriptor(mFrontIOSurface->GetIOSurfaceID(),
+                                               mFrontIOSurface->GetContentsScaleFactor());
         else
             *prevSurface = null_t();
 
@@ -628,16 +606,23 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
     }
 #endif
 
-#ifdef MOZ_X11
-    if (mFrontSurface &&
-        mFrontSurface->GetType() == gfxASurface::SurfaceTypeXlib)
+    if (mFrontSurface) {
         // This is the "old front buffer" we're about to hand back to
         // the plugin.  We might still have drawing operations
-        // referencing it, so we XSync here to let them finish before
-        // the plugin starts scribbling on it again, or worse,
-        // destroys it.
-        FinishX(DefaultXDisplay());
+        // referencing it.
+#ifdef MOZ_X11
+        if (mFrontSurface->GetType() == gfxASurface::SurfaceTypeXlib) {
+            // Finish with the surface and XSync here to ensure the server has
+            // finished operations on the surface before the plugin starts
+            // scribbling on it again, or worse, destroys it.
+            mFrontSurface->Finish();
+            FinishX(DefaultXDisplay());
+        } else 
 #endif
+        {
+            mFrontSurface->Flush();
+        }
+    }
 
     if (mFrontSurface && gfxSharedImageSurface::IsSharedImage(mFrontSurface))
         *prevSurface = static_cast<gfxSharedImageSurface*>(mFrontSurface.get())->GetShmem();
@@ -651,16 +636,24 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
                    updatedRect.right - updatedRect.left,
                    updatedRect.bottom - updatedRect.top);
         surface->MarkDirty(ur);
-        surface->Flush();
+
+        ImageContainer *container = GetImageContainer();
+        ImageFormat format = CAIRO_SURFACE;
+        nsRefPtr<Image> image = container->CreateImage(&format, 1);
+        NS_ASSERTION(image->GetFormat() == CAIRO_SURFACE, "Wrong format?");
+        CairoImage* cairoImage = static_cast<CairoImage*>(image.get());
+        CairoImage::Data cairoData;
+        cairoData.mSurface = surface;
+        cairoData.mSize = surface->GetSize();
+        cairoImage->SetData(cairoData);
+
+        container->SetCurrentImage(cairoImage);
+    }
+    else if (mImageContainer) {
+        mImageContainer->SetCurrentImage(nullptr);
     }
 
     mFrontSurface = surface;
-    if (!surface) {
-      ImageContainer* container = GetImageContainer();
-      if (container) {
-        container->SetCurrentImage(nullptr);
-      }
-    }
     RecvNPN_InvalidateRect(updatedRect);
 
     PLUGIN_LOG_DEBUG(("   (RecvShow invalidated for surface %p)",
@@ -681,6 +674,11 @@ PluginInstanceParent::AsyncSetWindow(NPWindow* aWindow)
     window.height = aWindow->height;
     window.clipRect = aWindow->clipRect;
     window.type = aWindow->type;
+#ifdef XP_MACOSX
+    double scaleFactor = 1.0;
+    mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &scaleFactor);
+    window.contentsScaleFactor = scaleFactor;
+#endif
     if (!SendAsyncSetWindow(gfxPlatform::GetPlatform()->ScreenReferenceSurface()->GetType(),
                             window))
         return NS_ERROR_FAILURE;
@@ -731,13 +729,6 @@ PluginInstanceParent::GetImageContainer(ImageContainer** aContainer)
 #endif
         return NS_ERROR_NOT_AVAILABLE;
 
-    ImageFormat format = CAIRO_SURFACE;
-#ifdef XP_MACOSX
-    if (ioSurface) {
-        format = MAC_IO_SURFACE;
-    }
-#endif
-
     ImageContainer *container = GetImageContainer();
 
     if (!container) {
@@ -750,35 +741,36 @@ PluginInstanceParent::GetImageContainer(ImageContainer** aContainer)
       return NS_OK;
     }
 
-    nsRefPtr<Image> image;
-    image = container->CreateImage(&format, 1);
-    if (!image) {
-        return NS_ERROR_FAILURE;
-    }
-
 #ifdef XP_MACOSX
     if (ioSurface) {
-        NS_ASSERTION(image->GetFormat() == MAC_IO_SURFACE, "Wrong format?");
-        MacIOSurfaceImage* ioImage = static_cast<MacIOSurfaceImage*>(image.get());
-        MacIOSurfaceImage::Data ioData;
-        ioData.mIOSurface = ioSurface;
-        ioImage->SetData(ioData);
-        container->SetCurrentImageInTransaction(ioImage);
+        ImageFormat format = SHARED_TEXTURE;
+        nsRefPtr<Image> image = container->CreateImage(&format, 1);
+        if (!image) {
+            return NS_ERROR_FAILURE;
+        }
+
+        NS_ASSERTION(image->GetFormat() == SHARED_TEXTURE, "Wrong format?");
+
+        SharedTextureImage::Data data;
+        data.mShareType = GLContext::SameProcess;
+        data.mHandle = GLContextProviderCGL::CreateSharedHandle(data.mShareType,
+                                                                ioSurface,
+                                                                GLContext::IOSurface);
+        data.mInverted = false;
+        // Use the device pixel size of the IOSurface, since layers handles resolution scaling
+        // already.
+        data.mSize = gfxIntSize(ioSurface->GetDevicePixelWidth(), ioSurface->GetDevicePixelHeight());
+
+        SharedTextureImage* pluginImage = static_cast<SharedTextureImage*>(image.get());
+        pluginImage->SetData(data);
+
+        container->SetCurrentImageInTransaction(pluginImage);
 
         NS_IF_ADDREF(container);
         *aContainer = container;
         return NS_OK;
     }
 #endif
-
-    NS_ASSERTION(image->GetFormat() == CAIRO_SURFACE, "Wrong format?");
-    CairoImage* pluginImage = static_cast<CairoImage*>(image.get());
-    CairoImage::Data cairoData;
-    cairoData.mSurface = mFrontSurface;
-    cairoData.mSize = mFrontSurface->GetSize();
-    pluginImage->SetData(cairoData);
-
-    container->SetCurrentImageInTransaction(pluginImage);
 
     NS_IF_ADDREF(container);
     *aContainer = container;
@@ -815,7 +807,14 @@ PluginInstanceParent::IsRemoteDrawingCoreAnimation(bool *aDrawing)
                  NPDrawingModelInvalidatingCoreAnimation == (NPDrawingModel)mDrawingModel);
     return NS_OK;
 }
-#endif
+
+nsresult
+PluginInstanceParent::ContentsScaleFactorChanged(double aContentsScaleFactor)
+{
+    bool rv = SendContentsScaleFactorChanged(aContentsScaleFactor);
+    return rv ? NS_OK : NS_ERROR_FAILURE;
+}
+#endif // #ifdef XP_MACOSX
 
 nsresult
 PluginInstanceParent::SetBackgroundUnknown()
@@ -934,7 +933,7 @@ PluginInstanceParent::DestroyBackground()
     unused << SendPPluginBackgroundDestroyerConstructor(pbd);
 }
 
-SurfaceDescriptor
+mozilla::plugins::SurfaceDescriptor
 PluginInstanceParent::BackgroundDescriptor()
 {
     NS_ABORT_IF_FALSE(mBackground, "Need a background here");
@@ -956,7 +955,7 @@ PluginInstanceParent::BackgroundDescriptor()
 
     // If this is ever used, which it shouldn't be, it will trigger a
     // hard assertion in IPDL-generated code.
-    return SurfaceDescriptor();
+    return mozilla::plugins::SurfaceDescriptor();
 }
 
 ImageContainer*
@@ -1024,11 +1023,18 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
 #endif
 
 #if defined(XP_MACOSX)
-    if (mShWidth != window.width || mShHeight != window.height) {
+    double floatScaleFactor = 1.0;
+    mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &floatScaleFactor);
+    int scaleFactor = ceil(floatScaleFactor);
+    window.contentsScaleFactor = floatScaleFactor;
+
+    if (mShWidth != window.width * scaleFactor || mShHeight != window.height * scaleFactor) {
         if (mDrawingModel == NPDrawingModelCoreAnimation || 
             mDrawingModel == NPDrawingModelInvalidatingCoreAnimation) {
-            mIOSurface = MacIOSurface::CreateIOSurface(window.width, window.height);
-        } else if (uint32_t(mShWidth * mShHeight) != window.width * window.height) {
+            mIOSurface = MacIOSurface::CreateIOSurface(window.width, window.height,
+                                                       floatScaleFactor);
+        } else if (uint32_t(mShWidth * mShHeight) !=
+                   window.width * scaleFactor * window.height * scaleFactor) {
             if (mShWidth != 0 && mShHeight != 0) {
                 DeallocShmem(mShSurface);
                 mShWidth = 0;
@@ -1036,15 +1042,15 @@ PluginInstanceParent::NPP_SetWindow(const NPWindow* aWindow)
             }
 
             if (window.width != 0 && window.height != 0) {
-                if (!AllocShmem(window.width * window.height*4, 
+                if (!AllocShmem(window.width * scaleFactor * window.height*4 * scaleFactor,
                                 SharedMemory::TYPE_BASIC, &mShSurface)) {
                     PLUGIN_LOG_DEBUG(("Shared memory could not be allocated."));
                     return NPERR_GENERIC_ERROR;
                 } 
             }
         }
-        mShWidth = window.width;
-        mShHeight = window.height;
+        mShWidth = window.width * scaleFactor;
+        mShHeight = window.height * scaleFactor;
     }
 #endif
 
@@ -1149,7 +1155,7 @@ PluginInstanceParent::NPP_GetValue(NPPVariable aVariable,
 #endif
 
     default:
-        PR_LOG(gPluginLog, PR_LOG_WARNING,
+        PR_LOG(GetPluginLog(), PR_LOG_WARNING,
                ("In PluginInstanceParent::NPP_GetValue: Unhandled NPPVariable %i (%s)",
                 (int) aVariable, NPPVariableToString(aVariable)));
         return NPERR_GENERIC_ERROR;
@@ -1170,7 +1176,7 @@ PluginInstanceParent::NPP_SetValue(NPNVariable variable, void* value)
 
     default:
         NS_ERROR("Unhandled NPNVariable in NPP_SetValue");
-        PR_LOG(gPluginLog, PR_LOG_WARNING,
+        PR_LOG(GetPluginLog(), PR_LOG_WARNING,
                ("In PluginInstanceParent::NPP_SetValue: Unhandled NPNVariable %i (%s)",
                 (int) variable, NPNVariableToString(variable)));
         return NPERR_GENERIC_ERROR;
@@ -1200,6 +1206,11 @@ PluginInstanceParent::NPP_HandleEvent(void* event)
 #endif
     NPRemoteEvent npremoteevent;
     npremoteevent.event = *npevent;
+#if defined(XP_MACOSX)
+    double scaleFactor = 1.0;
+    mNPNIface->getvalue(mNPP, NPNVcontentsScaleFactor, &scaleFactor);
+    npremoteevent.contentsScaleFactor = scaleFactor;
+#endif
     int16_t handled = 0;
 
 #if defined(OS_WIN)

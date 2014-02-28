@@ -278,7 +278,7 @@ static int cvt_ll(SprintfState *ss, int64_t num, int width, int prec,
     int64_t rad;
 
     /* according to the man page this needs to happen */
-    if ((prec == 0) && (LL_IS_ZERO(num))) {
+    if (prec == 0 && num == 0) {
 	return 0;
     }
 
@@ -287,17 +287,13 @@ static int cvt_ll(SprintfState *ss, int64_t num, int width, int prec,
     ** need to stop when we hit 10 digits. In the signed case, we can
     ** stop when the number is zero.
     */
-    LL_I2L(rad, radix);
+    rad = radix;
     cvt = &cvtbuf[0] + ELEMENTS_OF(cvtbuf);
     digits = 0;
-    while (!LL_IS_ZERO(num)) {
-	int32_t digit;
-	int64_t quot, rem;
-	LL_UDIVMOD(&quot, &rem, num, rad);
-	LL_L2I(digit, rem);
-	*--cvt = hexp[digit & 0xf];
+    while (num != 0) {
+	*--cvt = hexp[int32_t(num % rad) & 0xf];
 	digits++;
-	num = quot;
+	num /= rad;
     }
     if (digits == 0) {
 	*--cvt = '0';
@@ -819,7 +815,6 @@ static int dosprintf(SprintfState *ss, const PRUnichar *fmt, va_list ap)
 	int *ip;
     } u;
     PRUnichar space = ' ';
-    const PRUnichar *fmt0;
 
     nsAutoString hex;
     hex.AssignLiteral("0123456789abcdef");
@@ -831,8 +826,6 @@ static int dosprintf(SprintfState *ss, const PRUnichar *fmt, va_list ap)
     int rv, i;
     struct NumArgState* nas = NULL;
     struct NumArgState  nasArray[NAS_DEFAULT_NUM];
-    /* in "%4$.2f" dolPt will point to . */
-    const PRUnichar* dolPt = NULL;
 
 
     /*
@@ -854,7 +847,6 @@ static int dosprintf(SprintfState *ss, const PRUnichar *fmt, va_list ap)
 	    }
 	    continue;
 	}
-	fmt0 = fmt - 1;
 
 	/*
 	** Gobble up the % format string. Hopefully we have handled all
@@ -888,7 +880,6 @@ static int dosprintf(SprintfState *ss, const PRUnichar *fmt, va_list ap)
 	    }
 
 	    VARARGS_ASSIGN(ap, nas[i-1].ap);
-	    dolPt = fmt;
 	    c = *fmt++;
 	}
 
@@ -1025,8 +1016,8 @@ static int dosprintf(SprintfState *ss, const PRUnichar *fmt, va_list ap)
 
             case TYPE_INT64:
 		u.ll = va_arg(ap, int64_t);
-		if (!LL_GE_ZERO(u.ll)) {
-		    LL_NEG(u.ll, u.ll);
+		if (u.ll < 0) {
+		    u.ll = -u.ll;
 		    flags |= _NEG;
 		}
 		goto do_longlong;

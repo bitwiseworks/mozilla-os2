@@ -10,12 +10,16 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= widget
+ifdef MOZ_ENABLE_GTK2
+MODULE_NAME	= nsWidgetGtk2Module
 LIBRARY_NAME	= widget_gtk2
+else
+MODULE_NAME	= nsWidgetGtk3Module
+LIBRARY_NAME	= widget_gtk3
+endif
+
 EXPORT_LIBRARY	= 1
 IS_COMPONENT	= 1
-MODULE_NAME	= nsWidgetGtk2Module
-GRE_MODULE	= 1
 LIBXUL_LIBRARY = 1
 
 NATIVE_THEME_SUPPORT = 1
@@ -29,60 +33,16 @@ CSRCS		= \
 ifdef ACCESSIBILITY
 CSRCS += maiRedundantObjectFactory.c
 endif
-
-CPPSRCS = \
-  nsWindow.cpp \
-  nsAppShell.cpp \
-  nsWidgetFactory.cpp \
-  nsToolkit.cpp \
-  nsBidiKeyboard.cpp \
-  nsLookAndFeel.cpp \
-  nsGtkKeyUtils.cpp \
-  nsFilePicker.cpp \
-  nsSound.cpp \
-  nsNativeKeyBindings.cpp \
-  nsScreenGtk.cpp \
-  nsScreenManagerGtk.cpp \
-  nsImageToPixbuf.cpp \
-  nsGtkIMModule.cpp \
-  WidgetTraceEvent.cpp \
-  $(NULL)
-
-ifdef MOZ_X11
-CPPSRCS         += nsIdleServiceGTK.cpp
-endif
-
-ifdef NS_PRINTING
-CPPSRCS		+= \
-		nsDeviceContextSpecG.cpp \
-		nsPrintOptionsGTK.cpp \
-		nsPrintDialogGTK.cpp \
-		nsPrintSettingsGTK.cpp \
-		nsCUPSShim.cpp \
-		nsPaperPS.cpp \
-		nsPSPrinters.cpp \
-		$(NULL)
-endif
-
-ifdef MOZ_X11
-CPPSRCS += 	nsClipboard.cpp \
-		nsDragService.cpp \
-		$(NULL)
-endif
-
 # build our subdirs, too
 
 SHARED_LIBRARY_LIBS = ../xpwidgets/libxpwidgets_s.a
 
-EXPORTS		= \
-                nsGTKToolkit.h \
-		nsIImageToPixbuf.h \
-		mozcontainer.h \
-		$(NULL)
-
 ifdef NATIVE_THEME_SUPPORT
+ifdef MOZ_ENABLE_GTK2
 CSRCS		+= gtk2drawing.c
-CPPSRCS		+= nsNativeThemeGTK.cpp
+else
+CSRCS		+= gtk3drawing.c
+endif
 DEFINES		+= -DNATIVE_THEME_SUPPORT
 endif
 
@@ -90,9 +50,12 @@ include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
-CFLAGS          += $(MOZ_GTK2_CFLAGS) $(MOZ_STARTUP_NOTIFICATION_CFLAGS)
+CFLAGS          += $(MOZ_STARTUP_NOTIFICATION_CFLAGS)
 CXXFLAGS        += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS) \
-		$(MOZ_GTK2_CFLAGS) $(MOZ_STARTUP_NOTIFICATION_CFLAGS)
+		               $(MOZ_STARTUP_NOTIFICATION_CFLAGS)
+
+CFLAGS          += $(TK_CFLAGS)
+CXXFLAGS        += $(TK_CFLAGS)
 
 ifdef MOZ_PLATFORM_MAEMO
 ifdef MOZ_ENABLE_GCONF

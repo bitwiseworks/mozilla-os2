@@ -7,6 +7,7 @@
 #include "nsCacheSession.h"
 #include "nsCacheService.h"
 #include "nsCRT.h"
+#include "nsThreadUtils.h"
 
 NS_IMPL_ISUPPORTS1(nsCacheSession, nsICacheSession)
 
@@ -20,6 +21,8 @@ nsCacheSession::nsCacheSession(const char *         clientID,
 
   if (streamBased) MarkStreamBased();
   else SetStoragePolicy(nsICache::STORE_IN_MEMORY);
+
+  MarkPublic();
 
   MarkDoomEntriesIfExpired();
 }
@@ -79,12 +82,16 @@ nsCacheSession::OpenCacheEntry(const nsACString &         key,
                                nsICacheEntryDescriptor ** result)
 {
     nsresult rv;
-    rv =  nsCacheService::OpenCacheEntry(this,
-                                         key,
-                                         accessRequested,
-                                         blockingMode,
-                                         nullptr, // no listener
-                                         result);
+
+    if (NS_IsMainThread())
+        rv = NS_ERROR_NOT_AVAILABLE;
+    else
+        rv = nsCacheService::OpenCacheEntry(this,
+                                            key,
+                                            accessRequested,
+                                            blockingMode,
+                                            nullptr, // no listener
+                                            result);
     return rv;
 }
 
@@ -122,4 +129,19 @@ NS_IMETHODIMP nsCacheSession::DoomEntry(const nsACString &key,
                                         nsICacheListener *listener)
 {
     return nsCacheService::DoomEntry(this, key, listener);
+}
+
+NS_IMETHODIMP nsCacheSession::GetIsPrivate(bool* aPrivate)
+{
+    *aPrivate = IsPrivate();
+    return NS_OK;
+}
+
+NS_IMETHODIMP nsCacheSession::SetIsPrivate(bool aPrivate)
+{
+    if (aPrivate)
+        MarkPrivate();
+    else
+        MarkPublic();
+    return NS_OK;
 }

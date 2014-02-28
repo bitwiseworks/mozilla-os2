@@ -1,0 +1,89 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+TEST_DIRS += ['test']
+
+MODULE = 'layout'
+
+EXPORTS += [
+    'ScrollbarActivity.h',
+    'Selection.h',
+    'nsCanvasFrame.h',
+    'nsFrameIdList.h',
+    'nsFrameList.h',
+    'nsFrameSelection.h',
+    'nsHTMLParts.h',
+    'nsHTMLReflowMetrics.h',
+    'nsHTMLReflowState.h',
+    'nsIAnonymousContentCreator.h',
+    'nsIFrame.h',
+    'nsIFrameUtil.h',
+    'nsILineIterator.h',
+    'nsIObjectFrame.h',
+    'nsIPageSequenceFrame.h',
+    'nsIScrollPositionListener.h',
+    'nsIScrollableFrame.h',
+    'nsIScrollbarOwner.h',
+    'nsIStatefulFrame.h',
+    'nsObjectFrame.h',
+    'nsQueryFrame.h',
+    'nsSubDocumentFrame.h',
+]
+
+EXPORTS.mozilla += [
+    'Selection.h',
+]
+
+EXPORTS.mozilla.layout += [
+    'FrameChildList.h',
+]
+
+CPP_SOURCES += [
+    'FrameChildList.cpp',
+    'ScrollbarActivity.cpp',
+    'TextOverflow.cpp',
+    'nsAbsoluteContainingBlock.cpp',
+    'nsBRFrame.cpp',
+    'nsBlockFrame.cpp',
+    'nsBlockReflowContext.cpp',
+    'nsBlockReflowState.cpp',
+    'nsBulletFrame.cpp',
+    'nsCanvasFrame.cpp',
+    'nsColumnSetFrame.cpp',
+    'nsContainerFrame.cpp',
+    'nsFirstLetterFrame.cpp',
+    'nsFlexContainerFrame.cpp',
+    'nsFloatManager.cpp',
+    'nsFontInflationData.cpp',
+    'nsFrame.cpp',
+    'nsFrameList.cpp',
+    'nsFrameSetFrame.cpp',
+    'nsFrameUtil.cpp',
+    'nsGfxScrollFrame.cpp',
+    'nsHTMLCanvasFrame.cpp',
+    'nsHTMLReflowMetrics.cpp',
+    'nsHTMLReflowState.cpp',
+    'nsImageFrame.cpp',
+    'nsImageMap.cpp',
+    'nsInlineFrame.cpp',
+    'nsIntervalSet.cpp',
+    'nsLeafFrame.cpp',
+    'nsLineBox.cpp',
+    'nsLineLayout.cpp',
+    'nsObjectFrame.cpp',
+    'nsPageContentFrame.cpp',
+    'nsPageFrame.cpp',
+    'nsPlaceholderFrame.cpp',
+    'nsSelection.cpp',
+    'nsSimplePageSequence.cpp',
+    'nsSplittableFrame.cpp',
+    'nsSubDocumentFrame.cpp',
+    'nsTextFrameThebes.cpp',
+    'nsTextFrameUtils.cpp',
+    'nsTextRunTransformations.cpp',
+    'nsVideoFrame.cpp',
+    'nsViewportFrame.cpp',
+]

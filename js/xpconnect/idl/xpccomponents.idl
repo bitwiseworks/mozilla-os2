@@ -13,6 +13,7 @@
 %}
 
 interface xpcIJSWeakReference;
+interface nsIClassInfo;
 
 /**
 * interface of Components.interfacesByID
@@ -118,7 +119,7 @@ interface ScheduledGCCallback : nsISupports
 /**
 * interface of Components.utils
 */
-[scriptable, uuid(25442383-a1f5-440c-9e18-a2a1cdb8a638)]
+[scriptable, uuid(fdd32d38-9341-4067-9000-d781075a60c9)]
 interface nsIXPCComponents_Utils : nsISupports
 {
 
@@ -303,6 +304,14 @@ interface nsIXPCComponents_Utils : nsISupports
     /*
      * To be called from JS only.
      *
+     * Returns a date given timestamp |msec| created in |vobj|'s compartment.
+     */
+    [implicit_jscontext]
+    jsval createDateIn(in jsval vobj, in long long msec);
+
+    /*
+     * To be called from JS only.
+     *
      * Ensures that all functions come from vobj's scope (and aren't cross
      * compartment wrappers).
      */
@@ -323,11 +332,30 @@ interface nsIXPCComponents_Utils : nsISupports
      * disappear at any moment.
      *
      * Forces a recomputation of all wrappers in and out of the compartment
-     * containing |obj|. If |obj| is not an object, all wrappers system-wide
+     * containing |vobj|. If |vobj| is not an object, all wrappers system-wide
      * are recomputed.
      */
     [implicit_jscontext]
     void recomputeWrappers([optional] in jsval vobj);
+
+    /*
+     * To be called from JS only. This is for Gecko internal use only, and may
+     * disappear at any moment.
+     *
+     * Enables Xray vision for same-compartment access for the compartment
+     * indicated by |vscope|. All outgoing wrappers are recomputed.
+     */
+    [implicit_jscontext]
+    void setWantXrays(in jsval vscope);
+
+    /*
+     * This seemingly-paradoxical API allows privileged code to explicitly give
+     * unprivileged code a reference to its own Components object (whereas it's
+     * normally hidden away on a scope chain visible only to XBL methods). See
+     * also SpecialPowers.getComponents.
+     */
+    [implicit_jscontext]
+    jsval getComponentsForScope(in jsval vscope);
 
     /*
      * Dispatches a runnable to the current/main thread. If |scope| is passed,
@@ -355,28 +383,49 @@ interface nsIXPCComponents_Utils : nsISupports
     attribute boolean werror;
 
     [implicit_jscontext]
-    attribute boolean atline;
-
-    [implicit_jscontext]
-    attribute boolean xml;
-
-    [implicit_jscontext]
-    attribute boolean relimit;
-
-    [implicit_jscontext]
-    attribute boolean methodjit;
-
-    [implicit_jscontext]
-    attribute boolean methodjit_always;
-
-    [implicit_jscontext]
     attribute boolean strict_mode;
+
+    [implicit_jscontext]
+    attribute boolean ion;
 
     [implicit_jscontext]
     void setGCZeal(in long zeal);
 
     [implicit_jscontext]
     void nukeSandbox(in jsval obj);
+
+    /**
+     * Check whether the given object is an XrayWrapper.
+     */
+    bool isXrayWrapper(in jsval obj);
+
+    /**
+     * Waive Xray on a given value. Identity op for primitives.
+     */
+    [implicit_jscontext]
+    jsval waiveXrays(in jsval aVal);
+
+    /**
+     * Strip off Xray waivers on a given value. Identity op for primitives.
+     */
+    [implicit_jscontext]
+    jsval unwaiveXrays(in jsval aVal);
+
+    /**
+     * Gets the name of the JSClass of the object.
+     *
+     * if |aUnwrap| is true, all wrappers are unwrapped first. Unless you're
+     * specifically trying to detect whether the object is a proxy, this is
+     * probably what you want.
+     */
+    [implicit_jscontext]
+    string getClassName(in jsval aObj, in bool aUnwrap);
+
+    /**
+     * Get a DOM classinfo for the given classname.  Only some class
+     * names are supported.
+     */
+    nsIClassInfo getDOMClassInfo(in AString aClassName);
 };
 
 /**

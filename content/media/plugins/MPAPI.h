@@ -10,7 +10,31 @@
 
 namespace MPAPI {
 
+enum ColorFormat {
+  YCbCr,
+  RGB565
+};
+
+/*
+ * A callback for the plugin to use to request a buffer owned by gecko. This can
+ * save us a copy or two down the line.
+ */
+class BufferCallback {
+public:
+  virtual void *operator()(size_t aWidth, size_t aHeight,
+                           ColorFormat aColorFormat) = 0;
+};
+
 struct VideoPlane {
+  VideoPlane() :
+    mData(0),
+    mStride(0),
+    mWidth(0),
+    mHeight(0),
+    mOffset(0),
+    mSkip(0)
+  {}
+
   void *mData;
   int32_t mStride;
   int32_t mWidth;
@@ -30,6 +54,16 @@ struct VideoFrame {
   VideoPlane Y;
   VideoPlane Cb;
   VideoPlane Cr;
+
+  VideoFrame() :
+    mTimeUs(0),
+    mKeyFrame(false),
+    mData(0),
+    mSize(0),
+    mStride(0),
+    mSliceHeight(0),
+    mRotation(0)
+  {}
 
   void Set(int64_t aTimeUs, bool aKeyFrame,
            void *aData, size_t aSize, int32_t aStride, int32_t aSliceHeight, int32_t aRotation,
@@ -114,7 +148,7 @@ struct Decoder {
   void (*GetAudioParameters)(Decoder *aDecoder, int32_t *aNumChannels, int32_t *aSampleRate);
   bool (*HasVideo)(Decoder *aDecoder);
   bool (*HasAudio)(Decoder *aDecoder);
-  bool (*ReadVideo)(Decoder *aDecoder, VideoFrame *aFrame, int64_t aSeekTimeUs);
+  bool (*ReadVideo)(Decoder *aDecoder, VideoFrame *aFrame, int64_t aSeekTimeUs, BufferCallback *aBufferCallback);
   bool (*ReadAudio)(Decoder *aDecoder, AudioFrame *aFrame, int64_t aSeekTimeUs);
   void (*DestroyDecoder)(Decoder *);
 };

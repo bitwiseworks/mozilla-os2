@@ -5,14 +5,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/PLayers.h"
+#include "mozilla/layers/PLayerTransaction.h"
+#include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/ISurfaceAllocator.h"
 #include "mozilla/layers/ShadowLayers.h"
- 
+
 #include "gfxPlatform.h"
 
 #include "gfxXlibSurface.h"
 #include "mozilla/X11Util.h"
 #include "cairo-xlib.h"
+
+using namespace mozilla::gl;
 
 namespace mozilla {
 namespace layers {
@@ -89,11 +94,14 @@ SurfaceDescriptorX11::OpenForeign() const
 }
 
 bool
-ShadowLayerForwarder::PlatformAllocBuffer(const gfxIntSize& aSize,
-                                          gfxASurface::gfxContentType aContent,
-                                          uint32_t aCaps,
-                                          SurfaceDescriptor* aBuffer)
+ISurfaceAllocator::PlatformAllocSurfaceDescriptor(const gfxIntSize& aSize,
+                                                  gfxASurface::gfxContentType aContent,
+                                                  uint32_t aCaps,
+                                                  SurfaceDescriptor* aBuffer)
 {
+  if (!PR_GetEnv("MOZ_LAYERS_ENABLE_XLIB_SURFACES")) {
+      return false;
+  }
   if (!UsingXCompositing()) {
     // If we're not using X compositing, we're probably compositing on
     // the client side, in which case X surfaces would just slow
@@ -174,12 +182,12 @@ ShadowLayerForwarder::PlatformSyncBeforeUpdate()
     // operations on the back buffers before handing them to the
     // parent, otherwise the surface might be used by the parent's
     // Display in between two operations queued by our Display.
-    XSync(DefaultXDisplay(), False);
+    FinishX(DefaultXDisplay());
   }
 }
 
 /*static*/ void
-ShadowLayerManager::PlatformSyncBeforeReplyUpdate()
+LayerManagerComposite::PlatformSyncBeforeReplyUpdate()
 {
   if (UsingXCompositing()) {
     // If we're using X surfaces, we need to finish all pending
@@ -192,16 +200,22 @@ ShadowLayerManager::PlatformSyncBeforeReplyUpdate()
 }
 
 /*static*/ already_AddRefed<TextureImage>
-ShadowLayerManager::OpenDescriptorForDirectTexturing(GLContext*,
-                                                     const SurfaceDescriptor&,
-                                                     GLenum)
+LayerManagerComposite::OpenDescriptorForDirectTexturing(GLContext*,
+                                                        const SurfaceDescriptor&,
+                                                        GLenum)
 {
   // FIXME/bug XXXXXX: implement this using texture-from-pixmap
   return nullptr;
 }
 
+/*static*/ bool
+LayerManagerComposite::SupportsDirectTexturing()
+{
+  return false;
+}
+
 bool
-ShadowLayerManager::PlatformDestroySharedSurface(SurfaceDescriptor* aSurface)
+ISurfaceAllocator::PlatformDestroySharedSurface(SurfaceDescriptor* aSurface)
 {
   if (SurfaceDescriptor::TSurfaceDescriptorX11 != aSurface->type()) {
     return false;

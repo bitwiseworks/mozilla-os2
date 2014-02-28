@@ -117,7 +117,7 @@ PR_STATIC_ASSERT((NS_VK_HOME == NS_VK_END + 1) &&
 extern const nsNavigationDirection DirectionFromKeyCodeTable[2][6];
 
 #define NS_DIRECTION_FROM_KEY_CODE(frame, keycode)                     \
-  (DirectionFromKeyCodeTable[frame->GetStyleVisibility()->mDirection]  \
+  (DirectionFromKeyCodeTable[frame->StyleVisibility()->mDirection]  \
                             [keycode - NS_VK_END])
 
 // nsMenuChainItem holds info about an open popup. Items are stored in a
@@ -191,7 +191,7 @@ public:
     NS_ASSERTION(aPopup, "null popup supplied to nsXULPopupShowingEvent constructor");
   }
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() MOZ_OVERRIDE;
 
 private:
   nsCOMPtr<nsIContent> mPopup;
@@ -218,7 +218,7 @@ public:
     // aNextPopup and aLastPopup may be null
   }
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() MOZ_OVERRIDE;
 
 private:
   nsCOMPtr<nsIContent> mPopup;
@@ -253,7 +253,7 @@ public:
     NS_ASSERTION(aMenu, "null menu supplied to nsXULMenuCommandEvent constructor");
   }
 
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() MOZ_OVERRIDE;
 
   void SetCloseMenuMode(CloseMenuMode aCloseMenuMode) { mCloseMenuMode = aCloseMenuMode; }
 
@@ -286,11 +286,13 @@ public:
   NS_DECL_NSIDOMEVENTLISTENER
 
   // nsIRollupListener
-  virtual nsIContent* Rollup(uint32_t aCount, bool aGetLastRolledUp = false);
-  virtual bool ShouldRollupOnMouseWheelEvent();
-  virtual bool ShouldRollupOnMouseActivate();
-  virtual uint32_t GetSubmenuWidgetChain(nsTArray<nsIWidget*> *aWidgetChain);
-  virtual void NotifyGeometryChange() {}
+  virtual bool Rollup(uint32_t aCount, nsIContent** aLastRolledUp) MOZ_OVERRIDE;
+  virtual bool ShouldRollupOnMouseWheelEvent() MOZ_OVERRIDE;
+  virtual bool ShouldConsumeOnMouseWheelEvent() MOZ_OVERRIDE;
+  virtual bool ShouldRollupOnMouseActivate() MOZ_OVERRIDE;
+  virtual uint32_t GetSubmenuWidgetChain(nsTArray<nsIWidget*> *aWidgetChain) MOZ_OVERRIDE;
+  virtual void NotifyGeometryChange() MOZ_OVERRIDE {}
+  virtual nsIWidget* GetRollupWidget() MOZ_OVERRIDE;
 
   static nsXULPopupManager* sInstance;
 
@@ -489,7 +491,7 @@ public:
    * Return an array of all the open and visible popup frames for
    * menus, in order from top to bottom.
    */
-  nsTArray<nsIFrame *> GetVisiblePopups();
+  void GetVisiblePopups(nsTArray<nsIFrame *>& aPopups);
 
   /**
    * Get the node that last triggered a popup or tooltip in the document
@@ -714,7 +716,7 @@ protected:
   bool IsChildOfDocShell(nsIDocument* aDoc, nsIDocShellTreeItem* aExpected);
 
   // the document the key event listener is attached to
-  nsCOMPtr<nsIDOMEventTarget> mKeyListener;
+  nsCOMPtr<mozilla::dom::EventTarget> mKeyListener;
 
   // widget that is currently listening to rollup events
   nsCOMPtr<nsIWidget> mWidget;

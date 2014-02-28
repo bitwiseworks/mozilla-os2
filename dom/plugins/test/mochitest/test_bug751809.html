@@ -1,14 +1,36 @@
 <html>
 <head>
   <title>Bug 751809</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
-  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
+  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/paint_listener.js"></script>
+  <script type="application/javascript;version=1.7">
+  function getTestPlugin() {
+    let ph = Components.classes["@mozilla.org/plugin/host;1"]
+               .getService(Components.interfaces.nsIPluginHost);
+    let tags = ph.getPluginTags();
+
+    // Find the test plugin
+    for (let i = 0; i < tags.length; i++) {
+      if (tags[i].name == "Test Plug-in")
+        return tags[i];
+    }
+      ok(false, "Unable to find plugin");
+      return null;
+    }
+
+  Components.utils.import("resource://gre/modules/Services.jsm");
+  Services.prefs.setBoolPref("plugins.click_to_play", true);
+  let plugin = getTestPlugin();
+  plugin.enabledState = Components.interfaces.nsIPluginTag.STATE_CLICKTOPLAY;
+  </script>
 </head>
 
-<body>
-  <script type="application/javascript">
-  
+<body onload="go();">
+  <embed id="plugin" type="application/x-test" width="400" height="400" drawmode="solid" color="FF00FFFF"></embed>
+
+  <script type="application/javascript;version=1.7">
+
   SimpleTest.waitForExplicitFinish();
   netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
 
@@ -30,47 +52,49 @@
     }, 100);
     var moveOn = function() { clearInterval(interval); nextTest(); };
   }
-    
-  function startFocusTest() {
+
+  function go() {
     var plugin = document.getElementById('plugin');
-    ok(plugin, "Got plugin element.");
-    
-    var condition = function() plugin.getBoundingClientRect().width == 400;
-    waitForCondition(condition, afterPluginInsertion, "Waited too long for plugin to show up in page");
-  }
-    
-  function afterPluginInsertion() {
-    var plugin = document.getElementById('plugin');
-    var objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
+    var objLoadingContent = SpecialPowers.wrap(plugin);
     ok(!objLoadingContent.activated, "plugin should not be activated");
     
     SimpleTest.waitForFocus(afterWindowFocus);
   }
-    
+
   function afterWindowFocus() {
     var plugin = document.getElementById('plugin');
-    var objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
-    
-    synthesizeMouseAtCenter(plugin, {}, window);
-    var condition = function() objLoadingContent.activated;
+    var objLoadingContent = SpecialPowers.wrap(plugin);
+
+    objLoadingContent.playPlugin();
+    var condition = function() plugin.setColor !== undefined;
     waitForCondition(condition, afterPluginActivation, "Waited too long for plugin to activate");
   }
     
-  function afterPluginActivation() { 
+  function afterPluginActivation() {
     var plugin = document.getElementById('plugin');
-    var objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
+    var objLoadingContent = SpecialPowers.wrap(plugin);
     ok(objLoadingContent.activated, "plugin should be activated now");
+
+    // Triggering a paint and waiting for it to be flushed makes sure
+    // that both plugin and platform see the plugin element as visible.
+    // See bug 805330 for details.
+    plugin.setColor("FF000088");
+    waitForAllPaintsFlushed(afterPaintsFlushed);
+  }
+
+  function afterPaintsFlushed() {
+    var plugin = document.getElementById('plugin');
     try {
       is(plugin.getMouseUpEventCount(), 0, "Plugin should not have received mouse events yet.");
     } catch(e) {
       ok(false, "plugin.getMouseUpEventCount() shouldn't throw");
     }
 
-    synthesizeMouseAtCenter(plugin, {}, window);
+    synthesizeMouseAtCenter(plugin, {});
     var condition = function() plugin.getMouseUpEventCount() > 0;
     waitForCondition(condition, afterFirstClick, "Waited too long for plugin to receive the mouse click");
   }
-  
+
   function afterFirstClick() {
     var plugin = document.getElementById('plugin');
     try {
@@ -79,14 +103,12 @@
       ok(false, "plugin.getMouseUpEventCount() shouldn't throw");
     }
 
-    SpecialPowers.clearUserPref("plugins.click_to_play");
+    Services.prefs.clearUserPref("plugins.click_to_play");
+    let plugin = getTestPlugin();
+    plugin.enabledState = Components.interfaces.nsIPluginTag.STATE_ENABLED;
     SimpleTest.finish();
   }
 
-  SpecialPowers.setBoolPref("plugins.click_to_play", true);
-  document.write('<embed id="plugin" type="application/x-test" width="400" height="400" drawmode="solid" color="FF00FFFF"></embed>');
-  SimpleTest.executeSoon(startFocusTest);
-                   
   </script>
 </body>
 </html>

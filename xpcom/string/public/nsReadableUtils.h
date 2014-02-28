@@ -14,7 +14,8 @@
 #ifndef nsAString_h___
 #include "nsAString.h"
 #endif
-#include "nsTArray.h"
+
+template<class E> class nsTArray;
 
 inline size_t Distance( const nsReadingIterator<PRUnichar>& start, const nsReadingIterator<PRUnichar>& end )
   {
@@ -45,6 +46,8 @@ void AppendASCIItoUTF16( const char* aSource, nsAString& aDest );
 
 void AppendUTF16toUTF8( const nsAString& aSource, nsACString& aDest );
 void AppendUTF8toUTF16( const nsACString& aSource, nsAString& aDest );
+bool AppendUTF8toUTF16( const nsACString& aSource, nsAString& aDest,
+                        const mozilla::fallible_t& ) NS_WARN_UNUSED_RESULT;
 
 void AppendUTF16toUTF8( const PRUnichar* aSource, nsACString& aDest );
 void AppendUTF8toUTF16( const char* aSource, nsAString& aDest );
@@ -119,6 +122,38 @@ PRUnichar* ToNewUnicode( const nsAString& aSource );
    * @return a new |PRUnichar| buffer you must free with |nsMemory::Free|.
    */
 PRUnichar* ToNewUnicode( const nsACString& aSource );
+
+  /**
+   * Returns the required length for a PRUnichar buffer holding
+   * a copy of aSource, using UTF-8 to UTF-16 conversion.
+   * The length does NOT include any space for zero-termination.
+   *
+   * @param aSource an 8-bit wide string, UTF-8 encoded
+   * @return length of UTF-16 encoded string copy, not zero-terminated
+   */
+uint32_t CalcUTF8ToUnicodeLength( const nsACString& aSource );
+
+  /**
+   * Copies the source string into the specified buffer, converting UTF-8 to
+   * UTF-16 in the process. The conversion is well defined for valid UTF-8
+   * strings.
+   * The copied string will be zero-terminated! Any embedded nulls will be
+   * copied nonetheless. It is the caller's responsiblity to ensure the buffer
+   * is large enough to hold the string copy plus one PRUnichar for
+   * zero-termination!
+   *
+   * @see CalcUTF8ToUnicodeLength( const nsACString& )
+   * @see UTF8ToNewUnicode( const nsACString&, uint32_t* )
+   *
+   * @param aSource an 8-bit wide string, UTF-8 encoded
+   * @param aBuffer the buffer holding the converted string copy
+   * @param aUTF16Count receiving optionally the number of 16-bit units that
+   *                    were copied
+   * @return aBuffer pointer, for convenience 
+   */
+PRUnichar* UTF8ToUnicodeBuffer( const nsACString& aSource,
+                                PRUnichar *aBuffer,
+                                uint32_t *aUTF16Count = nullptr );
 
   /**
    * Returns a new |PRUnichar| buffer containing a zero-terminated copy
@@ -343,7 +378,7 @@ const nsAFlatCString& NullCString();
    * Returns 0 if the strings are equal, -1 if aUTF8String is less
    * than aUTF16Count, and 1 in the reverse case.  In case of fatal
    * error (eg the strings are not valid UTF8 and UTF16 respectively),
-   * this method will return PR_INT32_MIN.
+   * this method will return INT32_MIN.
    */
 int32_t
 CompareUTF8toUTF16(const nsASingleFragmentCString& aUTF8String,

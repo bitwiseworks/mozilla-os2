@@ -14,7 +14,6 @@
  *              Used table UnicodeToGBK[] to speed up the mapping.
  */
 #include "nsUnicodeToHZ.h"
-#include "nsUCvCnDll.h"
 #include "gbku.h"
 //----------------------------------------------------------------------
 // Class nsUnicodeToGBK [implementation]
@@ -27,7 +26,6 @@
 #define UNICODE_TILD	0x007E
 nsUnicodeToHZ::nsUnicodeToHZ() : nsEncoderSupport(6)
 {
-  mUtil.InitToGBKTable();
   mHZState = HZ_STATE_ASCII;	// per HZ spec, default to HZ mode
 }
 NS_IMETHODIMP nsUnicodeToHZ::ConvertNoBuff(

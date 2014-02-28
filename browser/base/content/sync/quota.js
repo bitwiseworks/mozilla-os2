@@ -70,7 +70,7 @@ let gSyncQuota = {
   onAccept: function onAccept() {
     let engines = gUsageTreeView.getEnginesToDisable();
     for each (let engine in engines) {
-      Weave.Engines.get(engine).enabled = false;
+      Weave.Service.engineManager.get(engine).enabled = false;
     }
     if (engines.length) {
       // The 'Weave' object will disappear once the window closes.
@@ -100,7 +100,7 @@ let gUsageTreeView = {
 
   init: function init() {
     let retrievingLabel = gSyncQuota.bundle.getString("quota.retrieving.label");
-    for each (let engine in Weave.Engines.getEnabled()) {
+    for each (let engine in Weave.Service.engineManager.getEnabled()) {
       if (this._ignored[engine.name])
         continue;
 
@@ -218,9 +218,9 @@ let gUsageTreeView = {
     return this._collections.length;
   },
 
-  getRowProperties: function(index, properties) {},
-  getCellProperties: function(row, col, properties) {},
-  getColumnProperties: function(col, properties) {},
+  getRowProperties: function(index) { return ""; },
+  getCellProperties: function(row, col) { return ""; },
+  getColumnProperties: function(col) { return ""; },
   isContainer: function(index) { return false; },
   isContainerOpen: function(index) { return false; },
   isContainerEmpty: function(index) { return false; },

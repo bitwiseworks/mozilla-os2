@@ -10,17 +10,11 @@ VPATH=@srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = toolkitcomps
 LIBRARY_NAME = toolkitcomps
-SHORT_LIBNAME = tkitcmps
 EXPORT_LIBRARY = 1
 IS_COMPONENT = 1
 MODULE_NAME = nsToolkitCompsModule
 LIBXUL_LIBRARY = 1
-
-EXPORTS = nsToolkitCompsCID.h
-
-CPPSRCS = nsToolkitCompsModule.cpp
 
 include $(topsrcdir)/config/config.mk
 
@@ -30,6 +24,7 @@ LOCAL_INCLUDES = \
   -I$(srcdir)/../feeds \
   -I$(srcdir)/../find \
   -I$(srcdir)/../intl \
+  -I$(srcdir)/../protobuf \
   -I$(srcdir)/../startup \
   -I$(srcdir)/../statusfilter \
   -I$(srcdir)/../typeaheadfind \
@@ -44,6 +39,7 @@ SHARED_LIBRARY_LIBS = \
   ../startup/$(LIB_PREFIX)appstartup_s.$(LIB_SUFFIX) \
   ../statusfilter/$(LIB_PREFIX)mozbrwsr_s.$(LIB_SUFFIX) \
   ../downloads/$(LIB_PREFIX)download_s.$(LIB_SUFFIX) \
+  ../protobuf/$(LIB_PREFIX)protobuf_s.$(LIB_SUFFIX) \
   ../intl/$(LIB_PREFIX)intl_s.$(LIB_SUFFIX) \
   $(NULL)
 

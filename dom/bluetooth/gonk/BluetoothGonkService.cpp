@@ -15,11 +15,13 @@
  * limitations under the License.
  */
 
+#include "base/basictypes.h"
 #include "BluetoothGonkService.h"
 #include "BluetoothDBusService.h"
 
 #include "nsDebug.h"
 #include "nsError.h"
+#include "nsThreadUtils.h"
 #include <dlfcn.h>
 
 USING_BLUETOOTH_NAMESPACE
@@ -27,11 +29,9 @@ USING_BLUETOOTH_NAMESPACE
 static struct BluedroidFunctions
 {
   bool initialized;
-  bool tried_initialization;
 
   BluedroidFunctions() :
-    initialized(false),
-    tried_initialization(false)
+    initialized(false)
   {
   }
 
@@ -40,17 +40,13 @@ static struct BluedroidFunctions
   int (* bt_is_enabled)();
 } sBluedroidFunctions;
 
-bool
+static bool
 EnsureBluetoothInit()
 {
-  if (sBluedroidFunctions.tried_initialization)
-  {
-    return sBluedroidFunctions.initialized;
+  if (sBluedroidFunctions.initialized) {
+    return true;
   }
 
-  sBluedroidFunctions.initialized = false;
-  sBluedroidFunctions.tried_initialization = true;
-  
   void* handle = dlopen("libbluedroid.so", RTLD_LAZY);
 
   if (!handle) {
@@ -73,29 +69,12 @@ EnsureBluetoothInit()
     NS_ERROR("Failed to attach bt_is_enabled function");
     return false;
   }
+
   sBluedroidFunctions.initialized = true;
   return true;
 }
 
-int
-IsBluetoothEnabled()
-{
-  return sBluedroidFunctions.bt_is_enabled();
-}
-
-int
-EnableBluetooth()
-{
-  return sBluedroidFunctions.bt_enable();
-}
-
-int
-DisableBluetooth()
-{
-  return sBluedroidFunctions.bt_disable();
-}
-
-nsresult
+static nsresult
 StartStopGonkBluetooth(bool aShouldEnable)
 {
   bool result;
@@ -109,16 +88,26 @@ StartStopGonkBluetooth(bool aShouldEnable)
   }
 
   // return 1 if it's enabled, 0 if it's disabled, and -1 on error
-  int isEnabled = IsBluetoothEnabled();
+  int isEnabled = sBluedroidFunctions.bt_is_enabled();
 
   if ((isEnabled == 1 && aShouldEnable) || (isEnabled == 0 && !aShouldEnable)) {
-    result = true;
-  } else if (isEnabled < 0) {
-    result = false;
-  } else if (aShouldEnable) {
-    result = (EnableBluetooth() == 0) ? true : false;
+    return NS_OK;
+  }
+  if (aShouldEnable) {
+    result = (sBluedroidFunctions.bt_enable() == 0) ? true : false;
+    if (sBluedroidFunctions.bt_is_enabled() < 0) {
+      // if isEnabled < 0, this means we brought up the firmware, but something
+      // went wrong with bluetoothd. Post a warning message, but try to proceed
+      // with firmware unloading if that was requested, so we can retry later.
+      NS_WARNING("Bluetooth firmware up, but cannot connect to HCI socket! Check bluetoothd and try stopping/starting bluetooth again.");
+      // Just disable now, return an error.
+      if (sBluedroidFunctions.bt_disable() != 0) {
+        NS_WARNING("Problem shutting down bluetooth after error in bringup!");
+      }
+      return NS_ERROR_FAILURE;
+    }
   } else {
-    result = (DisableBluetooth() == 0) ? true : false;
+    result = (sBluedroidFunctions.bt_disable() == 0) ? true : false;
   }
   if (!result) {
     NS_WARNING("Could not set gonk bluetooth firmware!");
@@ -131,14 +120,14 @@ StartStopGonkBluetooth(bool aShouldEnable)
 nsresult
 BluetoothGonkService::StartInternal()
 {
-  NS_ASSERTION(!NS_IsMainThread(), "This should not run on the main thread!");
+  MOZ_ASSERT(!NS_IsMainThread());
 
   nsresult ret;
 
   ret = StartStopGonkBluetooth(true);
 
   if (NS_FAILED(ret)) {
-    return ret;    
+    return ret;
   }
 
   return BluetoothDBusService::StartInternal();
@@ -147,15 +136,29 @@ BluetoothGonkService::StartInternal()
 nsresult
 BluetoothGonkService::StopInternal()
 {
-  NS_ASSERTION(!NS_IsMainThread(), "This should not run on the main thread!");
+  MOZ_ASSERT(!NS_IsMainThread());
+
   nsresult ret;
 
-  ret = StartStopGonkBluetooth(false);
+  ret = BluetoothDBusService::StopInternal();
 
   if (NS_FAILED(ret)) {
-    return ret;    
+    return ret;
   }
 
-  return BluetoothDBusService::StopInternal();
+  return StartStopGonkBluetooth(false);
+}
+
+bool
+BluetoothGonkService::IsEnabledInternal()
+{
+  MOZ_ASSERT(!NS_IsMainThread());
+
+  if (!EnsureBluetoothInit()) {
+    NS_ERROR("Failed to load bluedroid library.\n");
+    return false;
+  }
+
+  return (sBluedroidFunctions.bt_is_enabled() == 1);
 }
 

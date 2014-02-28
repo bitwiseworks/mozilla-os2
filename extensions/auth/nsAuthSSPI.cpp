@@ -20,6 +20,7 @@
 #include "nsNetCID.h"
 #include "nsCOMPtr.h"
 #include "nsICryptoHash.h"
+#include "mozilla/Telemetry.h"
 
 #include <windows.h>
 
@@ -96,12 +97,12 @@ MakeSN(const char *principal, nsCString &result)
 {
     nsresult rv;
 
-    nsCAutoString buf(principal);
+    nsAutoCString buf(principal);
 
     // The service name looks like "protocol@hostname", we need to map
     // this to a value that SSPI expects.  To be consistent with IE, we
     // need to map '@' to '/' and canonicalize the hostname.
-    PRInt32 index = buf.FindChar('@');
+    int32_t index = buf.FindChar('@');
     if (index == kNotFound)
         return NS_ERROR_UNEXPECTED;
     
@@ -124,7 +125,7 @@ MakeSN(const char *principal, nsCString &result)
     if (NS_FAILED(rv))
         return rv;
 
-    nsCAutoString cname;
+    nsAutoCString cname;
     rv = record->GetCanonicalName(cname);
     if (NS_SUCCEEDED(rv)) {
         result = StringHead(buf, index) + NS_LITERAL_CSTRING("/") + cname;
@@ -239,7 +240,7 @@ nsAuthSSPI::Init(const char *serviceName,
     mMaxTokenLen = pinfo->cbMaxToken;
     (sspi->FreeContextBuffer)(pinfo);
 
-    TimeStamp useBefore;
+    MS_TimeStamp useBefore;
 
     SEC_WINNT_AUTH_IDENTITY_W ai;
     SEC_WINNT_AUTH_IDENTITY_W *pai = nullptr;
@@ -262,17 +263,28 @@ nsAuthSSPI::Init(const char *serviceName,
         pai = &ai;
     }
 
-    rc = (sspi->AcquireCredentialsHandleW)(NULL,
+    rc = (sspi->AcquireCredentialsHandleW)(nullptr,
                                            package,
                                            SECPKG_CRED_OUTBOUND,
-                                           NULL,
+                                           nullptr,
                                            pai,
-                                           NULL,
-                                           NULL,
+                                           nullptr,
+                                           nullptr,
                                            &mCred,
                                            &useBefore);
     if (rc != SEC_E_OK)
         return NS_ERROR_UNEXPECTED;
+
+    static bool sTelemetrySent = false;
+    if (!sTelemetrySent) {
+        mozilla::Telemetry::Accumulate(
+            mozilla::Telemetry::NTLM_MODULE_USED,
+            serviceFlags | nsIAuthModule::REQ_PROXY_AUTH
+                ? NTLM_MODULE_WIN_API_PROXY
+                : NTLM_MODULE_WIN_API_DIRECT);
+        sTelemetrySent = true;
+    }
+
     LOG(("AcquireCredentialsHandle() succeeded.\n"));
     return NS_OK;
 }
@@ -293,7 +305,7 @@ nsAuthSSPI::GetNextToken(const void *inToken,
     const int cbt_size = hash_size + end_point_length;
 	
     SECURITY_STATUS rc;
-    TimeStamp ignored;
+    MS_TimeStamp ignored;
 
     DWORD ctxAttr, ctxReq = 0;
     CtxtHandle *ctxIn;
@@ -386,7 +398,7 @@ nsAuthSSPI::GetNextToken(const void *inToken,
           
                 // Start hashing. We are always doing SHA256, but depending
                 // on the certificate, a different alogirthm might be needed.
-                nsCAutoString hashString;
+                nsAutoCString hashString;
 
                 nsresult rv;
                 nsCOMPtr<nsICryptoHash> crypto;
@@ -432,7 +444,7 @@ nsAuthSSPI::GetNextToken(const void *inToken,
             LOG(("Cannot restart authentication sequence!"));
             return NS_ERROR_UNEXPECTED;
         }
-        ctxIn = NULL;
+        ctxIn = nullptr;
         mIsFirst = false;
     }
 
@@ -458,7 +470,7 @@ nsAuthSSPI::GetNextToken(const void *inToken,
                                             ctxReq,
                                             0,
                                             SECURITY_NATIVE_DREP,
-                                            inToken ? &ibd : NULL,
+                                            inToken ? &ibd : nullptr,
                                             0,
                                             &mCtxt,
                                             &obd,
@@ -477,7 +489,7 @@ nsAuthSSPI::GetNextToken(const void *inToken,
             
         if (!ob.cbBuffer) {
             nsMemory::Free(ob.pvBuffer);
-            ob.pvBuffer = NULL;
+            ob.pvBuffer = nullptr;
         }
         *outToken = ob.pvBuffer;
         *outTokenLen = ob.cbBuffer;
@@ -520,13 +532,13 @@ nsAuthSSPI::Unwrap(const void *inToken,
     // app data
     ib[1].BufferType = SECBUFFER_DATA;
     ib[1].cbBuffer = 0;
-    ib[1].pvBuffer = NULL;
+    ib[1].pvBuffer = nullptr;
 
     rc = (sspi->DecryptMessage)(
                                 &mCtxt,
                                 &ibd,
                                 0, // no sequence numbers
-                                NULL
+                                nullptr
                                 );
 
     if (SEC_SUCCESS(rc)) {

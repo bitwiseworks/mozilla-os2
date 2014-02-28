@@ -5,7 +5,7 @@
 #include "build/build_config.h"
 #include "base/debug_util.h"
 
-#define MOZ_HAVE_EXECINFO_H (!defined(ANDROID) && !defined(__OpenBSD__))
+#define MOZ_HAVE_EXECINFO_H (defined(OS_LINUX) && !defined(ANDROID))
 
 #include <errno.h>
 #include <fcntl.h>
@@ -17,7 +17,17 @@
 #include <unistd.h>
 #if MOZ_HAVE_EXECINFO_H
 #include <execinfo.h>
+#endif
+
+#if defined(OS_MACOSX) || defined(OS_BSD)
+#if defined(OS_OPENBSD)
+#include <sys/proc.h>
+#endif
 #include <sys/sysctl.h>
+#endif
+
+#if defined(OS_DRAGONFLY) || defined(OS_FREEBSD)
+#include <sys/user.h>
 #endif
 
 #include "base/basictypes.h"
@@ -26,13 +36,31 @@
 #include "base/scoped_ptr.h"
 #include "base/string_piece.h"
 
+#if defined(OS_NETBSD)
+#undef KERN_PROC
+#define KERN_PROC KERN_PROC2
+#define KINFO_PROC struct kinfo_proc2
+#else
+#define KINFO_PROC struct kinfo_proc
+#endif
+
+#if defined(OS_MACOSX)
+#define KP_FLAGS kp_proc.p_flag
+#elif defined(OS_DRAGONFLY)
+#define KP_FLAGS kp_flags
+#elif defined(OS_FREEBSD)
+#define KP_FLAGS ki_flag
+#else
+#define KP_FLAGS p_flag
+#endif
+
 // static
 bool DebugUtil::SpawnDebuggerOnProcess(unsigned /* process_id */) {
   NOTIMPLEMENTED();
   return false;
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_BSD)
 
 // Based on Apple's recommended method as described in
 // http://developer.apple.com/qa/qa2004/qa1361.html
@@ -53,12 +81,16 @@ bool DebugUtil::BeingDebugged() {
     CTL_KERN,
     KERN_PROC,
     KERN_PROC_PID,
-    getpid()
+    getpid(),
+#if defined(OS_NETBSD) || defined(OS_OPENBSD)
+    sizeof(KINFO_PROC),
+    1,
+#endif
   };
 
   // Caution: struct kinfo_proc is marked __APPLE_API_UNSTABLE.  The source and
   // binary interfaces may change.
-  struct kinfo_proc info;
+  KINFO_PROC info;
   size_t info_size = sizeof(info);
 
   int sysctl_result = sysctl(mib, arraysize(mib), &info, &info_size, NULL, 0);
@@ -71,7 +103,7 @@ bool DebugUtil::BeingDebugged() {
 
   // This process is being debugged if the P_TRACED flag is set.
   is_set = true;
-  being_debugged = (info.kp_proc.p_flag & P_TRACED) != 0;
+  being_debugged = (info.KP_FLAGS & P_TRACED) != 0;
   return being_debugged;
 }
 

@@ -241,6 +241,8 @@ ContainerLayerD3D10::RenderLayer()
     effect()->GetVariableByName("vRenderTargetOffset")->
       GetRawValue(previousRenderTargetOffset, 0, 8);
 
+    previousViewportSize = mD3DManager->GetViewport();
+
     if (mVisibleRegion.GetNumRects() != 1 || !(GetContentFlags() & CONTENT_OPAQUE)) {
       const gfx3DMatrix& transform3D = GetEffectiveTransform();
       gfxMatrix transform;
@@ -256,10 +258,10 @@ ContainerLayerD3D10::RenderLayer()
         // applied to use relative to our parent, and compensates for the offset
         // that was applied on our parent's rendering.
         D3D10_BOX srcBox;
-        srcBox.left = visibleRect.x + int32_t(transform.x0) - int32_t(previousRenderTargetOffset[0]);
-        srcBox.top = visibleRect.y + int32_t(transform.y0) - int32_t(previousRenderTargetOffset[1]);
-        srcBox.right = srcBox.left + visibleRect.width;
-        srcBox.bottom = srcBox.top + visibleRect.height;
+        srcBox.left = std::max<int32_t>(visibleRect.x + int32_t(transform.x0) - int32_t(previousRenderTargetOffset[0]), 0);
+        srcBox.top = std::max<int32_t>(visibleRect.y + int32_t(transform.y0) - int32_t(previousRenderTargetOffset[1]), 0);
+        srcBox.right = std::min<int32_t>(srcBox.left + visibleRect.width, previousViewportSize.width);
+        srcBox.bottom = std::min<int32_t>(srcBox.top + visibleRect.height, previousViewportSize.height);
         srcBox.back = 1;
         srcBox.front = 0;
 
@@ -284,7 +286,6 @@ ContainerLayerD3D10::RenderLayer()
     effect()->GetVariableByName("vRenderTargetOffset")->
       SetRawValue(renderTargetOffset, 0, 8);
 
-    previousViewportSize = mD3DManager->GetViewport();
     mD3DManager->SetViewport(nsIntSize(visibleRect.Size()));
   }
     
@@ -415,71 +416,6 @@ ContainerLayerD3D10::Validate()
       static_cast<LayerD3D10*>(layer->ImplData())->Validate();
     }
     layer = layer->GetNextSibling();
-  }
-}
-
-ShadowContainerLayerD3D10::ShadowContainerLayerD3D10(LayerManagerD3D10 *aManager) 
-  : ShadowContainerLayer(aManager, NULL)
-  , LayerD3D10(aManager)
-{
-  mImplData = static_cast<LayerD3D10*>(this);
-}
-
-ShadowContainerLayerD3D10::~ShadowContainerLayerD3D10() 
-{
-  while (mFirstChild) {
-    RemoveChild(mFirstChild);
-  }  
-}
-
-void
-ShadowContainerLayerD3D10::InsertAfter(Layer* aChild, Layer* aAfter)
-{
-  ContainerInsertAfter(this, aChild, aAfter);
-}
-
-void
-ShadowContainerLayerD3D10::RemoveChild(Layer* aChild)
-{
-  ContainerRemoveChild(this, aChild);
-}
-
-void
-ShadowContainerLayerD3D10::RepositionChild(Layer* aChild, Layer* aAfter)
-{
-  ContainerRepositionChild(this, aChild, aAfter);
-}
-
-void
-ShadowContainerLayerD3D10::ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
-{
-  DefaultComputeEffectiveTransforms(aTransformToSurface);
-}
-
-LayerD3D10*
-ShadowContainerLayerD3D10::GetFirstChildD3D10()
-{
-  return static_cast<LayerD3D10*>(mFirstChild->ImplData());
-}
-
-void
-ShadowContainerLayerD3D10::RenderLayer()
-{
-  LayerD3D10* layerToRender = GetFirstChildD3D10();
-  layerToRender->RenderLayer();
-}
-
-void
-ShadowContainerLayerD3D10::Validate()
-{
-}
- 
-void
-ShadowContainerLayerD3D10::LayerManagerDestroyed()
-{
-  while (mFirstChild) {
-    GetFirstChildD3D10()->LayerManagerDestroyed();
-    RemoveChild(mFirstChild);
   }
 }
 

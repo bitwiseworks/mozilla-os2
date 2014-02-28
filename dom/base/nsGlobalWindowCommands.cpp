@@ -19,7 +19,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsIPresShell.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsISelectionController.h"
 #include "nsIWebNavigation.h"
 #include "nsIContentViewerEdit.h"
@@ -173,7 +172,8 @@ nsSelectionCommandsBase::GetPresShellFromWindow(nsPIDOMWindow *aWindow, nsIPresS
   nsIDocShell *docShell = aWindow->GetDocShell();
   NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
 
-  return docShell->GetPresShell(aPresShell);
+  NS_IF_ADDREF(*aPresShell = docShell->GetPresShell());
+  return NS_OK;
 }
 
 nsresult
@@ -242,10 +242,10 @@ nsSelectMoveScrollCommand::DoCommand(const char *aCommandName, nsISupports *aCom
   if (!caretOn) {
     caretOn = Preferences::GetBool("accessibility.browsewithcaret");
     if (caretOn) {
-      nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(piWindow->GetDocShell());
-      if (dsti) {
+      nsCOMPtr<nsIDocShell> docShell = piWindow->GetDocShell();
+      if (docShell) {
         int32_t itemType;
-        dsti->GetItemType(&itemType);
+        docShell->GetItemType(&itemType);
         if (itemType == nsIDocShellTreeItem::typeChrome) {
           caretOn = false;
         }
@@ -345,7 +345,7 @@ nsClipboardCommand::IsCommandEnabled(const char* aCommandName, nsISupports *aCon
   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aContext);
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(window->GetExtantDocument());
+  nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
   *outCmdEnabled = nsCopySupport::CanCopy(doc);
   return NS_OK;
 }
@@ -362,8 +362,7 @@ nsClipboardCommand::DoCommand(const char *aCommandName, nsISupports *aContext)
   nsIDocShell *docShell = window->GetDocShell();
   NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIPresShell> presShell;
-  docShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
   NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
 
   nsCopySupport::FireClipboardEvent(NS_COPY, presShell, nullptr);
@@ -577,7 +576,7 @@ nsClipboardGetContentsCommand::DoClipboardCommand(const char *aCommandName, nsIC
 {
   NS_ENSURE_ARG(aParams);
 
-  nsCAutoString mimeType("text/plain");
+  nsAutoCString mimeType("text/plain");
 
   nsXPIDLCString format;    // nsICommandParams needs to use nsACString
   if (NS_SUCCEEDED(aParams->GetCStringValue("format", getter_Copies(format))))

@@ -39,7 +39,7 @@ nsIAtom*
 nsLanguageAtomService::LookupLanguage(const nsACString &aLanguage,
                                       nsresult *aError)
 {
-  nsCAutoString lowered(aLanguage);
+  nsAutoCString lowered(aLanguage);
   ToLowerCase(lowered);
 
   nsCOMPtr<nsIAtom> lang = do_GetAtom(lowered);
@@ -68,14 +68,10 @@ nsLanguageAtomService::LookupCharSet(const char *aCharSet, nsresult *aError)
     return nullptr;
   }
 
-  // transfer reference to raw pointer
-  nsIAtom *raw = nullptr;
-  langGroup.swap(raw);
-
   if (aError)
     *aError = NS_OK;
 
-  return raw;
+  return langGroup.forget();
 }
 
 nsIAtom*

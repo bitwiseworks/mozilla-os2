@@ -20,6 +20,7 @@
 #include <richedit.h>
 
 #include "TestHarness.h"
+#include <algorithm>
 
 #define WM_USER_TSF_TEXTCHANGE  (WM_USER + 0x100)
 
@@ -59,13 +60,13 @@ template<class T> class nsReadingIterator;
 #include "nsIWebProgressListener.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIDOMHTMLDocument.h"
-#include "nsIDOMHTMLBodyElement.h"
+#include "mozilla/dom/HTMLBodyElement.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsIDOMElement.h"
 #include "nsISelectionController.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsTArray.h"
 #include "nsGUIEvent.h"
 
@@ -700,8 +701,8 @@ public: // ITfReadOnlyProperty
         if (targetStart > end || targetEnd < start)
           continue;
         // Otherwise, shrink to the target range.
-        start = NS_MAX(targetStart, start);
-        end = NS_MIN(targetEnd, end);
+        start = std::max(targetStart, start);
+        end = std::min(targetEnd, end);
       }
       nsRefPtr<TSFRangeImpl> range = new TSFRangeImpl(start, end - start);
       NS_ENSURE_TRUE(range, E_OUTOFMEMORY);
@@ -920,8 +921,8 @@ public: // ITfCompositionView
       LONG tmpStart, tmpEnd;
       HRESULT hr = GetRegularExtent(mAttrProp->mRanges[i], tmpStart, tmpEnd);
       NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-      start = NS_MIN(start, tmpStart);
-      end = NS_MAX(end, tmpEnd);
+      start = std::min(start, tmpStart);
+      end = std::max(end, tmpEnd);
     }
     nsRefPtr<TSFRangeImpl> range = new TSFRangeImpl();
     NS_ENSURE_TRUE(range, E_OUTOFMEMORY);
@@ -1575,7 +1576,7 @@ TestApp::Init(void)
 
   // set a background color manually,
   // otherwise the window might be transparent
-  nsCOMPtr<nsIDOMHTMLBodyElement>(do_QueryInterface(htmlBody))->
+  static_cast<HTMLBodyElement*>(htmlBody)->
       SetBgColor(NS_LITERAL_STRING("white"));
 
   widget->Show(true);
@@ -2901,7 +2902,7 @@ TestApp::TestScrollMessages(void)
 
 #define DO_CHECK(aFailureCondition, aDescription) \
   if (aFailureCondition) { \
-    nsCAutoString str(aDescription); \
+    nsAutoCString str(aDescription); \
     str.Append(": "); \
     str.Append(#aFailureCondition); \
     fail(str.get()); \
@@ -3144,7 +3145,7 @@ TestApp::GetWidget(nsIWidget** aWidget)
     return false;
   }
 
-  nsCOMPtr<nsIViewManager> viewManager = presShell->GetViewManager();
+  nsRefPtr<nsViewManager> viewManager = presShell->GetViewManager();
   if (!viewManager) {
     return false;
   }

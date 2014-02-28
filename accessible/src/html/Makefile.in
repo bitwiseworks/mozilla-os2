@@ -10,22 +10,7 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = accessibility
-LIBRARY_NAME = accessibility_html_s
 LIBXUL_LIBRARY = 1
-
-
-
-CPPSRCS = \
-  HTMLCanvasAccessible.cpp \
-  HTMLElementAccessibles.cpp \
-  HTMLFormControlAccessible.cpp \
-  HTMLImageMapAccessible.cpp \
-  HTMLLinkAccessible.cpp \
-  HTMLListAccessible.cpp \
-  HTMLSelectAccessible.cpp \
-  HTMLTableAccessible.cpp \
-  $(NULL)
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -36,19 +21,22 @@ LOCAL_INCLUDES = \
   -I$(srcdir)/../base \
   -I$(srcdir)/../generic \
   -I$(srcdir)/../xpcom \
+  -I$(srcdir)/../../../content/base/src \
   -I$(srcdir)/../../../content/html/content/src \
   -I$(srcdir)/../../../layout/generic \
+  -I$(srcdir)/../../../layout/tables \
   -I$(srcdir)/../../../layout/xul/base/src \
   $(NULL)
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+ifdef MOZ_ENABLE_GTK
 LOCAL_INCLUDES += \
   -I$(srcdir)/../atk \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 LOCAL_INCLUDES += \
-  -I$(srcdir)/../msaa \
+  -I$(srcdir)/../windows/msaa \
+  -I$(srcdir)/../windows/ia2 \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
@@ -61,4 +49,8 @@ LOCAL_INCLUDES += \
   $(NULL)
 endif
 endif
+endif
+
+ifneq ($(A11Y_LOG),0)
+  DEFINES += -DA11Y_LOG
 endif

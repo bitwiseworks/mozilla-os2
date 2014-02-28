@@ -10,14 +10,13 @@
 // http://dev.chromium.org/spdy/spdy-protocol/spdy-protocol-draft3
 
 #include "ASpdySession.h"
+#include "mozilla/Attributes.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
 #include "nsDeque.h"
 #include "nsHashKeys.h"
 #include "zlib.h"
-#include "mozilla/Attributes.h"
 
-class nsHttpConnection;
 class nsISocketTransport;
 
 namespace mozilla { namespace net {
@@ -45,11 +44,12 @@ public:
 
   // When the connection is active this is called every 1 second
   void ReadTimeoutTick(PRIntervalTime now);
-  
+
   // Idle time represents time since "goodput".. e.g. a data or header frame
   PRIntervalTime IdleTime();
 
-  uint32_t RegisterStreamID(SpdyStream3 *);
+  // Registering with a newID of 0 means pick the next available odd ID
+  uint32_t RegisterStreamID(SpdyStream3 *, uint32_t aNewID = 0);
 
   const static uint8_t kVersion        = 3;
 
@@ -57,7 +57,7 @@ public:
 
   const static uint8_t kFlag_Data_FIN  = 0x01;
   const static uint8_t kFlag_Data_UNI  = 0x02;
-  
+
   enum
   {
     CONTROL_TYPE_FIRST = 0,
@@ -89,6 +89,20 @@ public:
     RST_FRAME_TOO_LARGE = 11
   };
 
+  enum goawayReason
+  {
+    OK = 0,
+    PROTOCOL_ERROR = 1,
+    INTERNAL_ERROR = 2,    // sometimes misdocumented as 11
+    NUM_STATUS_CODES = 3   // reserved by chromium but undocumented
+  };
+
+  enum settingsFlags
+  {
+    PERSIST_VALUE = 1,
+    PERSISTED_VALUE = 2
+  };
+
   enum
   {
     SETTINGS_TYPE_UPLOAD_BW = 1, // kb/s
@@ -97,19 +111,19 @@ public:
     SETTINGS_TYPE_MAX_CONCURRENT = 4, // streams
     SETTINGS_TYPE_CWND = 5, // packets
     SETTINGS_TYPE_DOWNLOAD_RETRANS_RATE = 6, // percentage
-    SETTINGS_TYPE_INITIAL_WINDOW = 7,  // bytes
+    SETTINGS_TYPE_INITIAL_WINDOW = 7,  // bytes for flow control
     SETTINGS_CLIENT_CERTIFICATE_VECTOR_SIZE = 8
   };
 
   // This should be big enough to hold all of your control packets,
   // but if it needs to grow for huge headers it can do so dynamically.
-  // About 1% of requests to SPDY google services seem to be > 1000
-  // with all less than 2000.
+  // About 1% of responses from SPDY google services seem to be > 1000
+  // with all less than 2000 when compression is enabled.
   const static uint32_t kDefaultBufferSize = 2048;
 
   // kDefaultQueueSize must be >= other queue size constants
-  const static uint32_t kDefaultQueueSize =  16384;
-  const static uint32_t kQueueMinimumCleanup = 8192;
+  const static uint32_t kDefaultQueueSize =  32768;
+  const static uint32_t kQueueMinimumCleanup = 24576;
   const static uint32_t kQueueTailRoom    =  4096;
   const static uint32_t kQueueReserved    =  1024;
 
@@ -120,11 +134,9 @@ public:
   // 31 bit stream ID.
   const static uint32_t kDeadStreamID = 0xffffdead;
 
-  // until we have an API that can push back on receiving data (right now
-  // WriteSegments is obligated to accept data and buffer) there is no
-  // reason to throttle with the rwin other than in server push
-  // scenarios.
-  const static uint32_t kInitialRwin = 256 * 1024 * 1024;
+  // below the emergency threshold of local window we ack every received
+  // byte. Above that we coalesce bytes into the MinimumToAck size.
+  const static int32_t  kEmergencyWindowThreshold = 1024 * 1024;
   const static uint32_t kMinimumToAck = 64 * 1024;
 
   // The default peer rwin is 64KB unless updated by a settings frame
@@ -139,8 +151,10 @@ public:
   static nsresult HandleGoAway(SpdySession3 *);
   static nsresult HandleHeaders(SpdySession3 *);
   static nsresult HandleWindowUpdate(SpdySession3 *);
+  static nsresult HandleCredential(SpdySession3 *);
 
-  static void EnsureBuffer(nsAutoArrayPtr<char> &,
+  template<typename T>
+  static void EnsureBuffer(nsAutoArrayPtr<T> &,
                            uint32_t, uint32_t, uint32_t &);
 
   // For writing the SPDY data stream to LOG4
@@ -154,11 +168,21 @@ public:
   void TransactionHasDataToWrite(SpdyStream3 *);
 
   // an overload of nsAHttpSegementReader
-  virtual nsresult CommitToSegmentSize(uint32_t size);
-  
+  virtual nsresult CommitToSegmentSize(uint32_t size, bool forceCommitment);
+
   uint32_t GetServerInitialWindow() { return mServerInitialWindow; }
 
+  void ConnectPushedStream(SpdyStream3 *stream);
+
+  uint64_t Serial() { return mSerial; }
+
   void     PrintDiagnostics (nsCString &log);
+
+  // Streams need access to these
+  uint32_t SendingChunkSize() { return mSendingChunkSize; }
+  uint32_t PushAllowance() { return mPushAllowance; }
+  z_stream *UpstreamZlib() { return &mUpstreamZlib; }
+  nsISocketTransport *SocketTransport() { return mSocketTransport; }
 
 private:
 
@@ -171,23 +195,24 @@ private:
     PROCESSING_CONTROL_RST_STREAM
   };
 
-  void        DeterminePingThreshold();
   nsresult    ResponseHeadersComplete();
   uint32_t    GetWriteQueueSize();
   void        ChangeDownstreamState(enum stateType);
   void        ResetDownstreamState();
   nsresult    UncompressAndDiscard(uint32_t, uint32_t);
+  void        DecrementConcurrent(SpdyStream3 *);
   void        zlibInit();
   void        GeneratePing(uint32_t);
-  void        ClearPing(bool);
   void        GenerateRstStream(uint32_t, uint32_t);
-  void        GenerateGoAway();
+  void        GenerateGoAway(uint32_t);
   void        CleanupStream(SpdyStream3 *, nsresult, rstReason);
   void        CloseStream(SpdyStream3 *, nsresult);
   void        GenerateSettings();
+  void        RemoveStreamFromQueues(SpdyStream3 *);
 
   void        SetWriteCallbacks();
   void        FlushOutputQueue();
+  void        RealignOutputQueue();
 
   bool        RoomForMoreConcurrent();
   void        ActivateStream(SpdyStream3 *);
@@ -201,16 +226,20 @@ private:
   // a wrapper for all calls to the nshttpconnection level segment writer. Used
   // to track network I/O for timeout purposes
   nsresult   NetworkRead(nsAHttpSegmentWriter *, char *, uint32_t, uint32_t *);
-  
+
   static PLDHashOperator ShutdownEnumerator(nsAHttpTransaction *,
                                             nsAutoPtr<SpdyStream3> &,
                                             void *);
+
+  static PLDHashOperator GoAwayEnumerator(nsAHttpTransaction *,
+                                          nsAutoPtr<SpdyStream3> &,
+                                          void *);
 
   static PLDHashOperator UpdateServerRwinEnumerator(nsAHttpTransaction *,
                                                     nsAutoPtr<SpdyStream3> &,
                                                     void *);
 
-  // This is intended to be nsHttpConnectionMgr:nsHttpConnectionHandle taken
+  // This is intended to be nsHttpConnectionMgr:nsConnectionHandle taken
   // from the first transaction on this session. That object contains the
   // pointer to the real network-level nsHttpConnection object.
   nsRefPtr<nsAHttpConnection> mConnection;
@@ -227,20 +256,25 @@ private:
   uint32_t          mSendingChunkSize;        /* the transmission chunk size */
   uint32_t          mNextStreamID;            /* 24 bits */
   uint32_t          mConcurrentHighWater;     /* max parallelism on session */
+  uint32_t          mPushAllowance;           /* rwin for unmatched pushes */
 
   stateType         mDownstreamState; /* in frame, between frames, etc..  */
 
-  // Maintain 4 indexes - one by stream ID, one by transaction ptr,
-  // one list of streams ready to write, one list of streams that are queued
-  // due to max parallelism settings. The objects
-  // are not ref counted - they get destroyed
+  // Maintain 2 indexes - one by stream ID, one by transaction pointer.
+  // There are also several lists of streams: ready to write, queued due to
+  // max parallelism, streams that need to force a read for push, and the full
+  // set of pushed streams.
+  // The objects are not ref counted - they get destroyed
   // by the nsClassHashtable implementation when they are removed from
   // the transaction hash.
   nsDataHashtable<nsUint32HashKey, SpdyStream3 *>     mStreamIDHash;
   nsClassHashtable<nsPtrHashKey<nsAHttpTransaction>,
                    SpdyStream3>                       mStreamTransactionHash;
+
   nsDeque                                             mReadyForWrite;
   nsDeque                                             mQueuedStreams;
+  nsDeque                                             mReadyForRead;
+  nsTArray<SpdyPushedStream3 *>                       mPushedStreams;
 
   // Compression contexts for header transport using deflate.
   // SPDY compresses only HTTP headers and does not reset zlib in between
@@ -255,7 +289,7 @@ private:
   uint32_t             mInputFrameBufferSize;
   uint32_t             mInputFrameBufferUsed;
   nsAutoArrayPtr<char> mInputFrameBuffer;
-  
+
   // mInputFrameDataSize/Read are used for tracking the amount of data consumed
   // in a data frame. the data itself is not buffered in spdy
   // The frame size is mInputFrameDataSize + the constant 8 byte header
@@ -267,7 +301,7 @@ private:
   // (e.g. a data frame after the stream-id has been decoded), this points
   // to the stream.
   SpdyStream3          *mInputFrameDataStream;
-  
+
   // mNeedsCleanup is a state variable to defer cleanup of a closed stream
   // If needed, It is set in session::OnWriteSegments() and acted on and
   // cleared when the stack returns to session::WriteSegments(). The stream
@@ -339,7 +373,14 @@ private:
   PRIntervalTime       mLastDataReadEpoch; // used for IdleTime()
   PRIntervalTime       mPingSentEpoch;
   uint32_t             mNextPingID;
-  bool                 mPingThresholdExperiment;
+
+  // used as a temporary buffer while enumerating the stream hash during GoAway
+  nsDeque  mGoAwayStreamsToRestart;
+
+  // Each session gets a unique serial number because the push cache is correlated
+  // by the load group and the serial number can be used as part of the cache key
+  // to make sure streams aren't shared across sessions.
+  uint64_t        mSerial;
 };
 
 }} // namespace mozilla::net

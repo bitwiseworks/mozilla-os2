@@ -11,19 +11,10 @@ relativesrcdir	= @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-PARALLEL_DIRS += \
-  chrome \
-  $(NULL)
-
-TOOL_DIRS := \
-  cpp-tests \
-  $(NULL)
-
 MOCHITEST_FILES =	\
 		border_radius_hit_testing_iframe.html \
 		test_preserve3d_sorting_hit_testing.html \
 		preserve3d_sorting_hit_testing_iframe.html \
-		test_image_layers.html \
 		image_rgrg-256x256.png \
 		image_rrgg-256x256.png \
 		bug369950-subframe.xml \
@@ -37,7 +28,7 @@ MOCHITEST_FILES =	\
 		test_bug93077-5.html \
 		test_bug93077-6.html \
 		test_bug114649.html \
-		$(warning test_bug369950.html disabled due to random orange; see bug 492575) \
+		$(filter disabled-for-random-orange--bug-492575, test_bug369950.html) \
 		test_bug386575.xhtml \
 		test_bug388019.html \
 		test_bug394057.html \
@@ -48,6 +39,7 @@ MOCHITEST_FILES =	\
 		test_bug423523.html \
 		test_bug449781.html \
 		test_bug450930.xhtml \
+		bug450930.xhtml \
 		test_bug458898.html \
 		test_bug465448.xul \
 		test_bug469170.html \
@@ -131,7 +123,9 @@ MOCHITEST_FILES =	\
 		test_bug667512.html \
 		test_bug677878.html \
 		test_bug696020.html \
+		test_event_target_radius.html \
 		test_mozPaintCount.html \
+		test_scroll_event_ordering.html \
 		test_scroll_selection_into_view.html \
 		test_bug583889.html \
 		bug583889_inner1.html \
@@ -144,7 +138,26 @@ MOCHITEST_FILES =	\
 		test_bug725426.html \
 		test_bug731777.html \
 		test_bug761572.html \
+		test_bug770106.html \
+		test_maxLineBoxWidth.html \
+		test_remote_frame.html \
+		test_bug842853.html \
+		test_bug842853-2.html \
+		  file_bug842853.sjs \
+		  file_bug842853.html \
+		test_bug849219.html \
+		test_bug851485.html \
+		test_bug851445.html \
+		  bug851445_helper.html \
 		$(NULL)
+
+ifeq (,$(filter gonk,$(MOZ_WIDGET_TOOLKIT)))
+# THESE TESTS (BELOW) DO NOT RUN ON B2G
+MOCHITEST_FILES += \
+		test_bug858459.html \
+		$(NULL)
+# THESE TESTS (ABOVE) DO NOT RUN ON B2G
+endif
 
 # Tests for bugs 441782, 467672 and 570378 don't pass reliably on Windows, because of bug 469208
 ifeq (,$(filter windows,$(MOZ_WIDGET_TOOLKIT)))
@@ -342,7 +355,7 @@ endif
 ifeq (,$(filter cocoa,$(MOZ_WIDGET_TOOLKIT)))
 # THESE TESTS (BELOW) DO NOT RUN ON MAC
 MOCHITEST_FILES += \
-		test_flush_on_paint.html \
+		$(filter disabled-for-random-orange--bug-539356, test_flush_on_paint.html) \
 		$(NULL)
 # THESE TESTS (ABOVE) DO NOT RUN ON MAC
 endif

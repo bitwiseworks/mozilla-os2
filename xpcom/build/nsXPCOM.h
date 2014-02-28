@@ -6,36 +6,6 @@
 #ifndef nsXPCOM_h__
 #define nsXPCOM_h__
 
-/* Map frozen functions to private symbol names if not using strict API. */
-#ifdef MOZILLA_INTERNAL_API
-# define NS_InitXPCOM2               NS_InitXPCOM2_P
-# define NS_ShutdownXPCOM            NS_ShutdownXPCOM_P
-# define NS_GetServiceManager        NS_GetServiceManager_P
-# define NS_GetComponentManager      NS_GetComponentManager_P
-# define NS_GetComponentRegistrar    NS_GetComponentRegistrar_P
-# define NS_GetMemoryManager         NS_GetMemoryManager_P
-# define NS_NewLocalFile             NS_NewLocalFile_P
-# define NS_NewNativeLocalFile       NS_NewNativeLocalFile_P
-# define NS_GetDebug                 NS_GetDebug_P
-# define NS_GetTraceRefcnt           NS_GetTraceRefcnt_P
-# define NS_Alloc                    NS_Alloc_P
-# define NS_Realloc                  NS_Realloc_P
-# define NS_Free                     NS_Free_P
-# define NS_DebugBreak               NS_DebugBreak_P
-# define NS_LogInit                  NS_LogInit_P
-# define NS_LogTerm                  NS_LogTerm_P
-# define NS_LogAddRef                NS_LogAddRef_P
-# define NS_LogRelease               NS_LogRelease_P
-# define NS_LogCtor                  NS_LogCtor_P
-# define NS_LogDtor                  NS_LogDtor_P
-# define NS_LogCOMPtrAddRef          NS_LogCOMPtrAddRef_P
-# define NS_LogCOMPtrRelease         NS_LogCOMPtrRelease_P
-# define NS_CycleCollectorSuspect    NS_CycleCollectorSuspect_P
-# define NS_CycleCollectorForget     NS_CycleCollectorForget_P
-# define NS_CycleCollectorSuspect2   NS_CycleCollectorSuspect2_P
-# define NS_CycleCollectorForget2    NS_CycleCollectorForget2_P
-#endif
-
 #include "nscore.h"
 #include "nsXPCOMCID.h"
 
@@ -351,26 +321,14 @@ NS_LogCOMPtrRelease(void *aCOMPtr, nsISupports *aObject);
  * The XPCOM cycle collector analyzes and breaks reference cycles between
  * participating XPCOM objects. All objects in the cycle must implement
  * nsCycleCollectionParticipant to break cycles correctly.
- *
- * The first two functions below exist only to support binary components
- * that were compiled for older XPCOM versions.
  */
 
 #ifdef __cplusplus
 
 class nsCycleCollectionParticipant;
 
-XPCOM_API(bool)
-NS_CycleCollectorSuspect(nsISupports *n);
-
-XPCOM_API(bool)
-NS_CycleCollectorForget(nsISupports *n);
-
 XPCOM_API(nsPurpleBufferEntry*)
 NS_CycleCollectorSuspect2(void *n, nsCycleCollectionParticipant *p);
-
-XPCOM_API(bool)
-NS_CycleCollectorForget2(nsPurpleBufferEntry *e);
 
 #endif
 

@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_bluetooth_bluetoothdevice_h__
 #define mozilla_dom_bluetooth_bluetoothdevice_h__
 
+#include "mozilla/Attributes.h"
 #include "BluetoothCommon.h"
 #include "BluetoothPropertyContainer.h"
 #include "nsDOMEventTargetHelper.h"
@@ -20,6 +21,7 @@ BEGIN_BLUETOOTH_NAMESPACE
 class BluetoothNamedValue;
 class BluetoothValue;
 class BluetoothSignal;
+class BluetoothSocket;
 
 class BluetoothDevice : public nsDOMEventTargetHelper
                       , public nsIDOMBluetoothDevice
@@ -30,7 +32,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMBLUETOOTHDEVICE
 
-  NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
 
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(BluetoothDevice,
                                                          nsDOMEventTargetHelper)
@@ -41,20 +43,13 @@ public:
 
   void Notify(const BluetoothSignal& aParam);
 
-  nsIDOMEventTarget*
-  ToIDOMEventTarget() const
-  {
-    return static_cast<nsDOMEventTargetHelper*>(
-      const_cast<BluetoothDevice*>(this));
-  }
-
   nsISupports*
-  ToISupports() const
+  ToISupports()
   {
-    return ToIDOMEventTarget();
+    return static_cast<EventTarget*>(this);
   }
 
-  void SetPropertyByValue(const BluetoothNamedValue& aValue);
+  void SetPropertyByValue(const BluetoothNamedValue& aValue) MOZ_OVERRIDE;
 
   void Unroot();
 private:
@@ -62,21 +57,21 @@ private:
                   const BluetoothValue& aValue);
   ~BluetoothDevice();
   void Root();
-  
-  JSObject* mJsUuids;
+
+  JS::Heap<JSObject*> mJsUuids;
+  JS::Heap<JSObject*> mJsServices;
 
   nsString mAdapterPath;
   nsString mAddress;
   nsString mName;
+  nsString mIcon;
   uint32_t mClass;
   bool mConnected;
   bool mPaired;
   bool mIsRooted;
   nsTArray<nsString> mUuids;
+  nsTArray<nsString> mServices;
 
-  NS_DECL_EVENT_HANDLER(propertychanged)
-  NS_DECL_EVENT_HANDLER(connected)
-  NS_DECL_EVENT_HANDLER(disconnected)
 };
 
 END_BLUETOOTH_NAMESPACE

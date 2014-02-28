@@ -1,0 +1,117 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+XPIDL_SOURCES += [
+    'nsIArray.idl',
+    'nsIAtom.idl',
+    'nsIAtomService.idl',
+    'nsICollection.idl',
+    'nsIEnumerator.idl',
+    'nsIHashable.idl',
+    'nsIINIParser.idl',
+    'nsIMutableArray.idl',
+    'nsIObserver.idl',
+    'nsIObserverService.idl',
+    'nsIPersistentProperties2.idl',
+    'nsIProperties.idl',
+    'nsIProperty.idl',
+    'nsIPropertyBag.idl',
+    'nsIPropertyBag2.idl',
+    'nsISerializable.idl',
+    'nsISimpleEnumerator.idl',
+    'nsIStringEnumerator.idl',
+    'nsISupportsArray.idl',
+    'nsISupportsIterators.idl',
+    'nsISupportsPrimitives.idl',
+    'nsIVariant.idl',
+    'nsIWritablePropertyBag.idl',
+    'nsIWritablePropertyBag2.idl',
+]
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+    XPIDL_SOURCES += [
+        'nsIWindowsRegKey.idl',
+    ]
+    EXPORTS += ['nsWindowsRegKey.h']
+    EXPORTS.mozilla += ['TimeStamp_windows.h']
+    CPP_SOURCES += [
+        'nsWindowsRegKey.cpp'
+    ]
+
+XPIDL_MODULE = 'xpcom_ds'
+
+MODULE = 'xpcom'
+
+EXPORTS += [
+    'nsArray.h',
+    'nsAtomService.h',
+    'nsCRT.h',
+    'nsCharSeparatedTokenizer.h',
+    'nsCheapSets.h',
+    'nsCppSharedAllocator.h',
+    'nsExpirationTracker.h',
+    'nsHashPropertyBag.h',
+    'nsHashtable.h',
+    'nsIByteBuffer.h',
+    'nsIUnicharBuffer.h',
+    'nsMathUtils.h',
+    'nsObserverList.h',
+    'nsObserverService.h',
+    'nsStaticAtom.h',
+    'nsStaticNameTable.h',
+    'nsStringEnumerator.h',
+    'nsSupportsArray.h',
+    'nsSupportsPrimitives.h',
+    'nsVariant.h',
+    'nsWhitespaceTokenizer.h',
+]
+
+EXPORTS.mozilla += [
+    'CharTokenizer.h',
+    'StringBuilder.h',
+    'TimeStamp.h',
+]
+
+CPP_SOURCES += [
+    'nsArray.cpp',
+    'nsAtomService.cpp',
+    'nsAtomTable.cpp',
+    'nsByteBuffer.cpp',
+    'nsCRT.cpp',
+    'nsHashPropertyBag.cpp',
+    'nsHashtable.cpp',
+    'nsINIParserImpl.cpp',
+    'nsObserverList.cpp',
+    'nsObserverService.cpp',
+    'nsPersistentProperties.cpp',
+    'nsProperties.cpp',
+    'nsStaticNameTable.cpp',
+    'nsStringEnumerator.cpp',
+    'nsSupportsArray.cpp',
+    'nsSupportsArrayEnumerator.cpp',
+    'nsSupportsPrimitives.cpp',
+    'nsUnicharBuffer.cpp',
+    'nsVariant.cpp',
+    'TimeStamp.cpp',
+]
+
+if CONFIG['HAVE_CLOCK_MONOTONIC']:
+    CPP_SOURCES += [
+        'TimeStamp_posix.cpp',
+    ]
+elif CONFIG['OS_ARCH'] == 'Darwin':
+    CPP_SOURCES += [
+        'TimeStamp_darwin.cpp',
+    ]
+elif CONFIG['OS_ARCH'] == 'WINNT':
+    CPP_SOURCES += [
+        'TimeStamp_windows.cpp',
+    ]
+else:
+    error('No TimeStamp implementation on this platform.  Build will not succeed')
+
+LIBRARY_NAME = 'xpcomds_s'
+

@@ -1,0 +1,40 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<!-- ## Sync Flyout Panel ## -->
+<!-- see sync.dtd -->
+
+<!-- ## Options Flyout Panel ## -->
+<!ENTITY optionsHeader.title                                     "Options">
+<!ENTITY optionsHeader.startup.title                             "Startup">
+<!ENTITY optionsHeader.homepage.title                            "When &brandShortName; starts, show">
+<!ENTITY optionsHeader.homepage.startPage.button                 "start page">
+<!ENTITY optionsHeader.homepage.sessionRestore.button            "tabs from last time">
+<!ENTITY optionsHeader.char.title                                "Character Encoding">
+<!ENTITY optionsHeader.char.autodetect.label                     "Auto-detect">
+<!ENTITY optionsHeader.char.options.label                        "Show encoding options on the App Bar">
+
+<!ENTITY clearPrivateData.title                                  "Clear Private Data">
+<!ENTITY clearPrivateData.label                                  "Clear your browsing history, passwords, cookies, and form data on this device">
+<!ENTITY clearPrivateData.button                                 "Clear">
+<!ENTITY clearPrivateData.done                                   "Done!">
+<!ENTITY clearPrivateData.history                                "Browsing history">
+<!ENTITY clearPrivateData.otherdata                              "Other data (passwords, cache, cookies, etc)">
+<!ENTITY clearPrivateData.downloadHist                           "Download history">
+<!ENTITY clearPrivateData.cookies                                "Cookies">
+<!ENTITY clearPrivateData.cache                                  "Cache">
+<!ENTITY clearPrivateData.sitePref                               "Site preferences">
+<!ENTITY clearPrivateData.formSearchHist                         "Form &amp; search history">
+<!ENTITY clearPrivateData.passwords                              "Saved passwords">
+<!ENTITY clearPrivateData.offline                                "Offline website data">
+<!ENTITY clearPrivateData.logins                                 "Active logins">
+
+<!ENTITY optionsHeader.privacy.passwords.label                   "Remember Passwords">
+<!ENTITY doNotTrack.title                                        "Do Not Track">
+<!ENTITY doNotTrack.desc                                         "Tell sites:">
+<!ENTITY doNotTrack.options.trackingNotOkay                      "I do not want to be tracked">
+<!ENTITY doNotTrack.options.noPreference                         "Nothing about my tracking preferences">
+<!ENTITY doNotTrack.options.trackingOkay                         "I want to be tracked">
+<!ENTITY optionsHeader.reporting.title                           "Crash Reporter">
+<!ENTITY optionsHeader.reporting.crashes.label                   "&brandShortName; submits crash reports to help Mozilla make your browser more stable and secure">

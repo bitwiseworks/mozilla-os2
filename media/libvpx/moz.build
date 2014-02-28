@@ -1,0 +1,40 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'vpx'
+
+EXPORTS.vpx += [
+    'arm.h',
+    'mem.h',
+    'scale_mode.h',
+    'vp8.h',
+    'vp8cx.h',
+    'vp8dx.h',
+    'vp8e.h',
+    'vpx_codec.h',
+    'vpx_codec_impl_bottom.h',
+    'vpx_codec_impl_top.h',
+    'vpx_decoder.h',
+    'vpx_decoder_compat.h',
+    'vpx_encoder.h',
+    'vpx_image.h',
+    'vpx_integer.h',
+    'vpx_mem.h',
+    'vpx_mem_intrnl.h',
+    'vpx_timer.h',
+    'vpxscale.h',
+    'x86.h',
+    'yv12config.h',
+    'yv12extend.h',
+]
+
+if CONFIG['VPX_NEED_OBJ_INT_EXTRACT']:
+    HOST_CSRCS += [
+        'obj_int_extract.c',
+    ]
+
+LIBRARY_NAME = 'vpx'
+

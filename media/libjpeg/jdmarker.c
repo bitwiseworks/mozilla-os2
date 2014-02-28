@@ -1,9 +1,10 @@
 /*
  * jdmarker.c
  *
+ * This file was part of the Independent JPEG Group's software:
  * Copyright (C) 1991-1998, Thomas G. Lane.
+ * Modifications:
  * Copyright (C) 2012, D. R. Commander.
- * This file is part of the Independent JPEG Group's software.
  * For conditions of distribution and use, see the accompanying README file.
  *
  * This file contains routines to decode JPEG datastream markers.
@@ -303,7 +304,7 @@ get_sos (j_decompress_ptr cinfo)
 /* Process a SOS marker */
 {
   INT32 length;
-  int i, ci, n, c, cc;
+  int i, ci, n, c, cc, pi;
   jpeg_component_info * compptr;
   INPUT_VARS(cinfo);
 
@@ -347,6 +348,13 @@ get_sos (j_decompress_ptr cinfo)
     
     TRACEMS3(cinfo, 1, JTRC_SOS_COMPONENT, cc,
 	     compptr->dc_tbl_no, compptr->ac_tbl_no);
+
+    /* This CSi (cc) should differ from the previous CSi */
+    for (pi = 0; pi < i; pi++) {
+      if (cinfo->cur_comp_info[pi] == compptr) {
+        ERREXIT1(cinfo, JERR_BAD_COMPONENT_ID, cc);
+      }
+    }
   }
 
   /* Collect the additional scan parameters Ss, Se, Ah/Al. */
@@ -463,6 +471,8 @@ get_dht (j_decompress_ptr cinfo)
 
     for (i = 0; i < count; i++)
       INPUT_BYTE(cinfo, huffval[i], return FALSE);
+
+    MEMZERO(&huffval[count], (256 - count) * SIZEOF(UINT8));
 
     length -= count;
 

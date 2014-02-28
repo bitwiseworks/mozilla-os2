@@ -1,6 +1,10 @@
-/* Copyright (c) 2010 Xiph.Org Foundation, Skype Limited
+/* Copyright (c) 2010-2012 IETF Trust, Xiph.Org Foundation, Skype Limited. All rights reserved.
    Written by Jean-Marc Valin and Koen Vos */
 /*
+
+   This file is extracted from RFC6716. Please see that RFC for additional
+   information.
+
    Redistribution and use in source and binary forms, with or without
    modification, are permitted provided that the following conditions
    are met:
@@ -591,16 +595,14 @@ static int opus_packet_parse_impl(const unsigned char *data, int len,
       /* Padding flag is bit 6 */
       if (ch&0x40)
       {
-         int padding=0;
          int p;
          do {
             if (len<=0)
                return OPUS_INVALID_PACKET;
             p = *data++;
             len--;
-            padding += p==255 ? 254: p;
+            len -= p==255 ? 254: p;
          } while (p==255);
-         len -= padding;
       }
       if (len<0)
          return OPUS_INVALID_PACKET;

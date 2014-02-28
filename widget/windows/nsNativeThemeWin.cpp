@@ -34,6 +34,7 @@
 
 #include "nsUXThemeData.h"
 #include "nsUXThemeConstants.h"
+#include <algorithm>
 
 using namespace mozilla::widget;
 
@@ -43,13 +44,22 @@ extern PRLogModuleInfo* gWindowsLog;
 
 NS_IMPL_ISUPPORTS_INHERITED1(nsNativeThemeWin, nsNativeTheme, nsITheme)
 
-static inline bool IsHTMLContent(nsIFrame *frame)
+nsNativeThemeWin::nsNativeThemeWin() :
+  mProgressDeterminateTimeStamp(TimeStamp::Now()),
+  mProgressIndeterminateTimeStamp(TimeStamp::Now())
 {
-  nsIContent* content = frame->GetContent();
-  return content && content->IsHTML();
+  // If there is a relevant change in forms.css for windows platform,
+  // static widget style variables (e.g. sButtonBorderSize) should be 
+  // reinitialized here.
 }
 
-static int32_t GetTopLevelWindowActiveState(nsIFrame *aFrame)
+nsNativeThemeWin::~nsNativeThemeWin()
+{
+  nsUXThemeData::Invalidate();
+}
+
+static int32_t
+GetTopLevelWindowActiveState(nsIFrame *aFrame)
 {
   // Get the widget. nsIFrame's GetNearestWidget walks up the view chain
   // until it finds a real window.
@@ -66,7 +76,8 @@ static int32_t GetTopLevelWindowActiveState(nsIFrame *aFrame)
   return mozilla::widget::themeconst::FS_INACTIVE;
 }
 
-static int32_t GetWindowFrameButtonState(nsIFrame *aFrame, nsEventStates eventState)
+static int32_t
+GetWindowFrameButtonState(nsIFrame *aFrame, nsEventStates eventState)
 {
   if (GetTopLevelWindowActiveState(aFrame) ==
       mozilla::widget::themeconst::FS_INACTIVE) {
@@ -83,7 +94,8 @@ static int32_t GetWindowFrameButtonState(nsIFrame *aFrame, nsEventStates eventSt
   return mozilla::widget::themeconst::BS_NORMAL;
 }
 
-static int32_t GetClassicWindowFrameButtonState(nsEventStates eventState)
+static int32_t
+GetClassicWindowFrameButtonState(nsEventStates eventState)
 {
   if (eventState.HasState(NS_EVENT_STATE_ACTIVE) &&
       eventState.HasState(NS_EVENT_STATE_HOVER))
@@ -91,32 +103,8 @@ static int32_t GetClassicWindowFrameButtonState(nsEventStates eventState)
   return DFCS_BUTTONPUSH;
 }
 
-static void QueryForButtonData(nsIFrame *aFrame)
-{
-  if (nsUXThemeData::sTitlebarInfoPopulatedThemed && nsUXThemeData::sTitlebarInfoPopulatedAero)
-    return;
-  nsIWidget* widget = aFrame->GetNearestWidget();
-  nsWindow * window = static_cast<nsWindow*>(widget);
-  if (!window)
-    return;
-  if (!window->IsTopLevelWidget() &&
-      !(window = window->GetParentWindow(false)))
-    return;
-
-  nsUXThemeData::UpdateTitlebarInfo(window->GetWindowHandle());
-}
-
-nsNativeThemeWin::nsNativeThemeWin() {
-  // If there is a relevant change in forms.css for windows platform,
-  // static widget style variables (e.g. sButtonBorderSize) should be 
-  // reinitialized here.
-}
-
-nsNativeThemeWin::~nsNativeThemeWin() {
-  nsUXThemeData::Invalidate();
-}
-
-static bool IsTopLevelMenu(nsIFrame *aFrame)
+static bool
+IsTopLevelMenu(nsIFrame *aFrame)
 {
   bool isTopLevel(false);
   nsMenuFrame *menuFrame = do_QueryFrame(aFrame);
@@ -126,16 +114,21 @@ static bool IsTopLevelMenu(nsIFrame *aFrame)
   return isTopLevel;
 }
 
-static MARGINS GetCheckboxMargins(HANDLE theme, HDC hdc)
+static MARGINS
+GetCheckboxMargins(HANDLE theme, HDC hdc)
 {
     MARGINS checkboxContent = {0};
-    GetThemeMargins(theme, hdc, MENU_POPUPCHECK, MCB_NORMAL, TMT_CONTENTMARGINS, NULL, &checkboxContent);
+    GetThemeMargins(theme, hdc, MENU_POPUPCHECK, MCB_NORMAL,
+                    TMT_CONTENTMARGINS, NULL, &checkboxContent);
     return checkboxContent;
 }
-static SIZE GetCheckboxBGSize(HANDLE theme, HDC hdc)
+
+static SIZE
+GetCheckboxBGSize(HANDLE theme, HDC hdc)
 {
     SIZE checkboxSize;
-    GetThemePartSize(theme, hdc, MENU_POPUPCHECK, MC_CHECKMARKNORMAL, NULL, TS_TRUE, &checkboxSize);
+    GetThemePartSize(theme, hdc, MENU_POPUPCHECK, MC_CHECKMARKNORMAL,
+                     NULL, TS_TRUE, &checkboxSize);
 
     MARGINS checkboxMargins = GetCheckboxMargins(theme, hdc);
 
@@ -151,17 +144,27 @@ static SIZE GetCheckboxBGSize(HANDLE theme, HDC hdc)
     ret.cy = height;
     return ret;
 }
-static SIZE GetCheckboxBGBounds(HANDLE theme, HDC hdc)
+
+static SIZE
+GetCheckboxBGBounds(HANDLE theme, HDC hdc)
 {
     MARGINS checkboxBGSizing = {0};
     MARGINS checkboxBGContent = {0};
-    GetThemeMargins(theme, hdc, MENU_POPUPCHECKBACKGROUND, MCB_NORMAL, TMT_SIZINGMARGINS, NULL, &checkboxBGSizing);
-    GetThemeMargins(theme, hdc, MENU_POPUPCHECKBACKGROUND, MCB_NORMAL, TMT_CONTENTMARGINS, NULL, &checkboxBGContent);
+    GetThemeMargins(theme, hdc, MENU_POPUPCHECKBACKGROUND, MCB_NORMAL,
+                    TMT_SIZINGMARGINS, NULL, &checkboxBGSizing);
+    GetThemeMargins(theme, hdc, MENU_POPUPCHECKBACKGROUND, MCB_NORMAL,
+                    TMT_CONTENTMARGINS, NULL, &checkboxBGContent);
 
 #define posdx(d) ((d) > 0 ? d : 0)
 
-    int dx = posdx(checkboxBGContent.cxRightWidth - checkboxBGSizing.cxRightWidth) + posdx(checkboxBGContent.cxLeftWidth - checkboxBGSizing.cxLeftWidth);
-    int dy = posdx(checkboxBGContent.cyTopHeight - checkboxBGSizing.cyTopHeight) + posdx(checkboxBGContent.cyBottomHeight - checkboxBGSizing.cyBottomHeight);
+    int dx = posdx(checkboxBGContent.cxRightWidth -
+                   checkboxBGSizing.cxRightWidth) +
+             posdx(checkboxBGContent.cxLeftWidth -
+                   checkboxBGSizing.cxLeftWidth);
+    int dy = posdx(checkboxBGContent.cyTopHeight -
+                   checkboxBGSizing.cyTopHeight) +
+             posdx(checkboxBGContent.cyBottomHeight -
+                   checkboxBGSizing.cyBottomHeight);
 
 #undef posdx
 
@@ -170,7 +173,9 @@ static SIZE GetCheckboxBGBounds(HANDLE theme, HDC hdc)
     ret.cy += dy;
     return ret;
 }
-static SIZE GetGutterSize(HANDLE theme, HDC hdc)
+
+static SIZE
+GetGutterSize(HANDLE theme, HDC hdc)
 {
     SIZE gutterSize;
     GetThemePartSize(theme, hdc, MENU_POPUPGUTTER, 0, NULL, TS_TRUE, &gutterSize);
@@ -180,111 +185,132 @@ static SIZE GetGutterSize(HANDLE theme, HDC hdc)
     SIZE itemSize;
     GetThemePartSize(theme, hdc, MENU_POPUPITEM, MPI_NORMAL, NULL, TS_TRUE, &itemSize);
 
-    int width = NS_MAX(itemSize.cx, checkboxBGSize.cx + gutterSize.cx);
-    int height = NS_MAX(itemSize.cy, checkboxBGSize.cy);
+    // Figure out how big the menuitem's icon will be (if present) at current DPI
+    double scaleFactor = nsIWidget::DefaultScaleOverride();
+    if (scaleFactor <= 0.0) {
+      scaleFactor = gfxWindowsPlatform::GetPlatform()->GetDPIScale();
+    }
+    int iconDevicePixels = NSToIntRound(16 * scaleFactor);
+    SIZE iconSize = {
+      iconDevicePixels, iconDevicePixels
+    };
+    // Not really sure what margins should be used here, but this seems to work in practice...
+    MARGINS margins = {0};
+    GetThemeMargins(theme, hdc, MENU_POPUPCHECKBACKGROUND, MCB_NORMAL,
+                    TMT_CONTENTMARGINS, NULL, &margins);
+    iconSize.cx += margins.cxLeftWidth + margins.cxRightWidth;
+    iconSize.cy += margins.cyTopHeight + margins.cyBottomHeight;
+
+    int width = std::max(itemSize.cx, std::max(iconSize.cx, checkboxBGSize.cx) + gutterSize.cx);
+    int height = std::max(itemSize.cy, std::max(iconSize.cy, checkboxBGSize.cy));
+
     SIZE ret;
     ret.cx = width;
     ret.cy = height;
     return ret;
 }
 
-static HRESULT DrawThemeBGRTLAware(HANDLE theme, HDC hdc, int part, int state,
-                                   const RECT *widgetRect, const RECT *clipRect,
-                                   bool isRTL)
+/* DrawThemeBGRTLAware - render a theme part based on rtl state.
+ * Some widgets are not direction-neutral and need to be drawn reversed for
+ * RTL.  Windows provides a way to do this with SetLayout, but this reverses
+ * the entire drawing area of a given device context, which means that its
+ * use will also affect the positioning of the widget.  There are two ways
+ * to work around this:
+ *
+ * Option 1: Alter the position of the rect that we send so that we cancel
+ *           out the positioning effects of SetLayout
+ * Option 2: Create a memory DC with the widgetRect's dimensions, draw onto
+ *           that, and then transfer the results back to our DC
+ *
+ * This function tries to implement option 1, under the assumption that the
+ * correct way to reverse the effects of SetLayout is to translate the rect
+ * such that the offset from the DC bitmap's left edge to the old rect's
+ * left edge is equal to the offset from the DC bitmap's right edge to the
+ * new rect's right edge.  In other words,
+ * (oldRect.left + vpOrg.x) == ((dcBMP.width - vpOrg.x) - newRect.right)
+ */
+static HRESULT
+DrawThemeBGRTLAware(HANDLE aTheme, HDC aHdc, int aPart, int aState,
+                    const RECT *aWidgetRect, const RECT *aClipRect,
+                    bool aIsRtl)
 {
-  /* Some widgets are not direction-neutral and need to be drawn reversed for
-   * RTL.  Windows provides a way to do this with SetLayout, but this reverses
-   * the entire drawing area of a given device context, which means that its
-   * use will also affect the positioning of the widget.  There are two ways
-   * to work around this:
-   *
-   * Option 1: Alter the position of the rect that we send so that we cancel
-   *           out the positioning effects of SetLayout
-   * Option 2: Create a memory DC with the widgetRect's dimensions, draw onto
-   *           that, and then transfer the results back to our DC
-   *
-   * This function tries to implement option 1, under the assumption that the
-   * correct way to reverse the effects of SetLayout is to translate the rect
-   * such that the offset from the DC bitmap's left edge to the old rect's
-   * left edge is equal to the offset from the DC bitmap's right edge to the
-   * new rect's right edge.  In other words,
-   * (oldRect.left + vpOrg.x) == ((dcBMP.width - vpOrg.x) - newRect.right)
-   *
-   * I am not 100% sure that this is the correct approach, but I have yet to
-   * find a problem with it.
-   */
+  NS_ASSERTION(aTheme, "Bad theme handle.");
+  NS_ASSERTION(aHdc, "Bad hdc.");
+  NS_ASSERTION(aWidgetRect, "Bad rect.");
+  NS_ASSERTION(aClipRect, "Bad clip rect.");
 
-  if (isRTL) {
-    HGDIOBJ hObj = GetCurrentObject(hdc, OBJ_BITMAP);
-    BITMAP bitmap;
-    POINT vpOrg;
-
-    if (hObj &&
-        GetObject(hObj, sizeof(bitmap), &bitmap) &&
-        GetViewportOrgEx(hdc, &vpOrg))
-    {
-      RECT newWRect(*widgetRect);
-      newWRect.left = bitmap.bmWidth - (widgetRect->right + 2*vpOrg.x);
-      newWRect.right = bitmap.bmWidth - (widgetRect->left + 2*vpOrg.x);
-
-      RECT newCRect;
-      RECT *newCRectPtr = NULL;
-
-      if (clipRect) {
-        newCRect.top = clipRect->top;
-        newCRect.bottom = clipRect->bottom;
-        newCRect.left = bitmap.bmWidth - (clipRect->right + 2*vpOrg.x);
-        newCRect.right = bitmap.bmWidth - (clipRect->left + 2*vpOrg.x);
-        newCRectPtr = &newCRect;
-      }
-
-      SetLayout(hdc, LAYOUT_RTL);
-      HRESULT hr = DrawThemeBackground(theme, hdc, part, state, &newWRect, newCRectPtr);
-      SetLayout(hdc, 0);
-
-      if (hr == S_OK)
-        return hr;
-    }
+  if (!aIsRtl) {
+    return DrawThemeBackground(aTheme, aHdc, aPart, aState,
+                               aWidgetRect, aClipRect);
   }
 
-  // Draw normally if LTR or if anything went wrong
-  return DrawThemeBackground(theme, hdc, part, state, widgetRect, clipRect);
+  HGDIOBJ hObj = GetCurrentObject(aHdc, OBJ_BITMAP);
+  BITMAP bitmap;
+  POINT vpOrg;
+
+  if (hObj && GetObject(hObj, sizeof(bitmap), &bitmap) &&
+      GetViewportOrgEx(aHdc, &vpOrg)) {
+    RECT newWRect(*aWidgetRect);
+    newWRect.left = bitmap.bmWidth - (aWidgetRect->right + 2*vpOrg.x);
+    newWRect.right = bitmap.bmWidth - (aWidgetRect->left + 2*vpOrg.x);
+
+    RECT newCRect;
+    RECT *newCRectPtr = NULL;
+
+    if (aClipRect) {
+      newCRect.top = aClipRect->top;
+      newCRect.bottom = aClipRect->bottom;
+      newCRect.left = bitmap.bmWidth - (aClipRect->right + 2*vpOrg.x);
+      newCRect.right = bitmap.bmWidth - (aClipRect->left + 2*vpOrg.x);
+      newCRectPtr = &newCRect;
+    }
+
+    SetLayout(aHdc, LAYOUT_RTL);
+    HRESULT hr = DrawThemeBackground(aTheme, aHdc, aPart, aState, &newWRect,
+                                     newCRectPtr);
+    SetLayout(aHdc, 0);
+    if (SUCCEEDED(hr)) {
+      return hr;
+    }
+  }
+  return DrawThemeBackground(aTheme, aHdc, aPart, aState,
+                             aWidgetRect, aClipRect);
 }
 
 /*
-  Caption button padding data - 'hot' button padding.
-  These areas are considered hot, in that they activate
-  a button when hovered or clicked. The button graphic
-  is drawn inside the padding border. Unrecognized themes
-  are treated as their recognized counterparts for now.
-                       left      top    right   bottom
-  classic min             1        2        0        1
-  classic max             0        2        1        1
-  classic close           1        2        2        1
-
-  aero basic min          1        2        0        2
-  aero basic max          0        2        1        2
-  aero basic close        1        2        1        2
-
-  xp theme min            0        2        0        2
-  xp theme max            0        2        1        2
-  xp theme close          1        2        2        2
-
-  'cold' button padding - generic button padding, should
-  be handled in css.
-                       left      top    right   bottom
-  classic min             0        0        0        0
-  classic max             0        0        0        0
-  classic close           0        0        0        0
-
-  aero basic min          0        0        1        0
-  aero basic max          1        0        0        0
-  aero basic close        0        0        0        0
-
-  xp theme min            0        0        1        0
-  xp theme max            1        0        0        0
-  xp theme close          0        0        0        0
-*/
+ *  Caption button padding data - 'hot' button padding.
+ *  These areas are considered hot, in that they activate
+ *  a button when hovered or clicked. The button graphic
+ *  is drawn inside the padding border. Unrecognized themes
+ *  are treated as their recognized counterparts for now.
+ *                       left      top    right   bottom
+ *  classic min             1        2        0        1
+ *  classic max             0        2        1        1
+ *  classic close           1        2        2        1
+ *
+ *  aero basic min          1        2        0        2
+ *  aero basic max          0        2        1        2
+ *  aero basic close        1        2        1        2
+ *
+ *  xp theme min            0        2        0        2
+ *  xp theme max            0        2        1        2
+ *  xp theme close          1        2        2        2
+ *
+ *  'cold' button padding - generic button padding, should
+ *  be handled in css.
+ *                       left      top    right   bottom
+ *  classic min             0        0        0        0
+ *  classic max             0        0        0        0
+ *  classic close           0        0        0        0
+ *
+ *  aero basic min          0        0        1        0
+ *  aero basic max          1        0        0        0
+ *  aero basic close        0        0        0        0
+ *
+ *  xp theme min            0        0        1        0
+ *  xp theme max            1        0        0        0
+ *  xp theme close          0        0        0        0
+ */
 
 enum CaptionDesktopTheme {
   CAPTION_CLASSIC = 0,
@@ -315,11 +341,74 @@ static CaptionButtonPadding buttonData[3] = {
   }
 };
 
-/**
- * Progress bar related constants.
- * These values are found by experimenting and comparing against native widgets
- * used by the system. They are very unlikely exact but try to not be too wrong.
+// Adds "hot" caption button padding to minimum widget size.
+static void
+AddPaddingRect(nsIntSize* aSize, CaptionButton button) {
+  if (!aSize)
+    return;
+  RECT offset;
+  if (!IsAppThemed())
+    offset = buttonData[CAPTION_CLASSIC].hotPadding[button];
+  else if (WinUtils::GetWindowsVersion() < WinUtils::VISTA_VERSION)
+    offset = buttonData[CAPTION_XPTHEME].hotPadding[button];
+  else
+    offset = buttonData[CAPTION_BASIC].hotPadding[button];
+  aSize->width += offset.left + offset.right;
+  aSize->height += offset.top + offset.bottom;
+}
+
+// If we've added padding to the minimum widget size, offset
+// the area we draw into to compensate.
+static void
+OffsetBackgroundRect(RECT& rect, CaptionButton button) {
+  RECT offset;
+  if (!IsAppThemed())
+    offset = buttonData[CAPTION_CLASSIC].hotPadding[button];
+  else if (WinUtils::GetWindowsVersion() < WinUtils::VISTA_VERSION)
+    offset = buttonData[CAPTION_XPTHEME].hotPadding[button];
+  else
+    offset = buttonData[CAPTION_BASIC].hotPadding[button];
+  rect.left += offset.left;
+  rect.top += offset.top;
+  rect.right -= offset.right;
+  rect.bottom -= offset.bottom;
+}
+
+/*
+ * Notes on progress track and meter part constants:
+ * xp and up:
+ * PP_BAR(_VERT)            - base progress track
+ * PP_TRANSPARENTBAR(_VERT) - transparent progress track. this only works if
+ *                            the underlying surface supports alpha. otherwise
+ *                            theme lib's DrawThemeBackground falls back on
+ *                            opaque PP_BAR. we currently don't use this.
+ * PP_CHUNK(_VERT)          - xp progress meter. this does not draw an xp style
+ *                            progress w/chunks, it draws fill using the chunk
+ *                            graphic.
+ * vista and up:
+ * PP_FILL(_VERT)           - progress meter. these have four states/colors.
+ * PP_PULSEOVERLAY(_VERT)   - white reflection - an overlay, not sure what this
+ *                            is used for.
+ * PP_MOVEOVERLAY(_VERT)    - green pulse - the pulse effect overlay on
+ *                            determined progress bars. we also use this for
+ *                            indeterminate chunk.
+ *
+ * Notes on state constants:
+ * PBBS_NORMAL               - green progress
+ * PBBVS_PARTIAL/PBFVS_ERROR - red error progress
+ * PBFS_PAUSED               - yellow paused progress
+ *
+ * There is no common controls style indeterminate part on vista and up.
  */
+
+/*
+ * Progress bar related constants. These values are found by experimenting and
+ * comparing against native widgets used by the system. They are very unlikely
+ * exact but try to not be too wrong.
+ */
+// The amount of time we animate progress meters parts across the frame.
+static const double kProgressDeterminateTimeSpan = 3.0;
+static const double kProgressIndeterminateTimeSpan = 5.0;
 // The width of the overlay used to animate the horizontal progress bar (Vista and later).
 static const int32_t kProgressHorizontalVistaOverlaySize = 120;
 // The width of the overlay used for the horizontal indeterminate progress bars on XP.
@@ -330,46 +419,297 @@ static const int32_t kProgressVerticalOverlaySize = 45;
 static const int32_t kProgressVerticalIndeterminateOverlaySize = 60;
 // The width of the overlay used to animate the indeterminate progress bar (Windows Classic).
 static const int32_t kProgressClassicOverlaySize = 40;
-// Speed (px per ms) of the animation for determined Vista and later progress bars.
-static const double kProgressDeterminedVistaSpeed = 0.225;
-// Speed (px per ms) of the animation for indeterminate progress bars.
-static const double kProgressIndeterminateSpeed = 0.175;
-// Speed (px per ms) of the animation for indeterminate progress bars (Windows Classic).
-static const double kProgressClassicIndeterminateSpeed = 0.0875;
-// Delay (in ms) between two indeterminate progress bar cycles.
-static const int32_t kProgressIndeterminateDelay = 500;
-// Delay (in ms) between two determinate progress bar animation on Vista/7.
-static const int32_t kProgressDeterminedVistaDelay = 1000;
 
-// Adds "hot" caption button padding to minimum widget size.
-static void AddPaddingRect(nsIntSize* aSize, CaptionButton button) {
-  if (!aSize)
-    return;
-  RECT offset;
-  if (!IsAppThemed())
-    offset = buttonData[CAPTION_CLASSIC].hotPadding[button];
-  else if (WinUtils::GetWindowsVersion() == WinUtils::WINXP_VERSION)
-    offset = buttonData[CAPTION_XPTHEME].hotPadding[button];
-  else
-    offset = buttonData[CAPTION_BASIC].hotPadding[button];
-  aSize->width += offset.left + offset.right;
-  aSize->height += offset.top + offset.bottom;
+/*
+ * GetProgressOverlayStyle - returns the proper overlay part for themed
+ * progress bars based on os and orientation.
+ */
+static int32_t
+GetProgressOverlayStyle(bool aIsVertical)
+{ 
+  if (aIsVertical) {
+    if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
+      return PP_MOVEOVERLAYVERT;
+    }
+    return PP_CHUNKVERT;
+  } else {
+    if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
+      return PP_MOVEOVERLAY;
+    }
+    return PP_CHUNK;
+  }
 }
 
-// If we've added padding to the minimum widget size, offset
-// the area we draw into to compensate.
-static void OffsetBackgroundRect(RECT& rect, CaptionButton button) {
-  RECT offset;
-  if (!IsAppThemed())
-    offset = buttonData[CAPTION_CLASSIC].hotPadding[button];
-  else if (WinUtils::GetWindowsVersion() == WinUtils::WINXP_VERSION)
-    offset = buttonData[CAPTION_XPTHEME].hotPadding[button];
-  else
-    offset = buttonData[CAPTION_BASIC].hotPadding[button];
-  rect.left += offset.left;
-  rect.top += offset.top;
-  rect.right -= offset.right;
-  rect.bottom -= offset.bottom;
+/*
+ * GetProgressOverlaySize - returns the minimum width or height for themed
+ * progress bar overlays. This includes the width of indeterminate chunks
+ * and vista pulse overlays.
+ */
+static int32_t
+GetProgressOverlaySize(bool aIsVertical, bool aIsIndeterminate)
+{
+  if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
+    if (aIsVertical) {
+      return aIsIndeterminate ? kProgressVerticalIndeterminateOverlaySize
+                              : kProgressVerticalOverlaySize;
+    }
+    return kProgressHorizontalVistaOverlaySize;
+  }
+  return kProgressHorizontalXPOverlaySize;
+}
+
+/*
+ * IsProgressMeterFilled - Determines if a progress meter is at 100% fill based
+ * on a comparison of the current value and maximum.
+ */
+static bool
+IsProgressMeterFilled(nsIFrame* aFrame)
+{
+  NS_ENSURE_TRUE(aFrame, false);
+  nsIFrame* parentFrame = aFrame->GetParent();
+  NS_ENSURE_TRUE(parentFrame, false);
+  return nsNativeTheme::GetProgressValue(parentFrame) ==
+         nsNativeTheme::GetProgressMaxValue(parentFrame);
+}
+
+/*
+ * CalculateProgressOverlayRect - returns the padded overlay animation rect
+ * used in rendering progress bars. Resulting rects are used in rendering
+ * vista+ pulse overlays and indeterminate progress meters. Graphics should
+ * be rendered at the origin.
+ */
+RECT
+nsNativeThemeWin::CalculateProgressOverlayRect(nsIFrame* aFrame,
+                                               RECT* aWidgetRect,
+                                               bool aIsVertical,
+                                               bool aIsIndeterminate,
+                                               bool aIsClassic)
+{
+  NS_ASSERTION(aFrame, "bad frame pointer");
+  NS_ASSERTION(aWidgetRect, "bad rect pointer");
+
+  int32_t frameSize = aIsVertical ? aWidgetRect->bottom - aWidgetRect->top
+                                  : aWidgetRect->right - aWidgetRect->left;
+
+  // Recycle a set of progress pulse timers - these timers control the position
+  // of all progress overlays and indeterminate chunks that get rendered.
+  double span = aIsIndeterminate ? kProgressIndeterminateTimeSpan
+                                 : kProgressDeterminateTimeSpan;
+  TimeDuration period;
+  if (!aIsIndeterminate) {
+    if (TimeStamp::Now() > (mProgressDeterminateTimeStamp +
+                            TimeDuration::FromSeconds(span))) {
+      mProgressDeterminateTimeStamp = TimeStamp::Now();
+    }
+    period = TimeStamp::Now() - mProgressDeterminateTimeStamp;
+  } else {
+    if (TimeStamp::Now() > (mProgressIndeterminateTimeStamp +
+                            TimeDuration::FromSeconds(span))) {
+      mProgressIndeterminateTimeStamp = TimeStamp::Now();
+    }
+    period = TimeStamp::Now() - mProgressIndeterminateTimeStamp;
+  }
+
+  double percent = period / TimeDuration::FromSeconds(span);
+
+  if (!aIsVertical && IsFrameRTL(aFrame))
+    percent = 1 - percent;
+
+  RECT overlayRect = *aWidgetRect;
+  int32_t overlaySize;
+  if (!aIsClassic) {
+    overlaySize = GetProgressOverlaySize(aIsVertical, aIsIndeterminate);
+  } else {
+    overlaySize = kProgressClassicOverlaySize;
+  } 
+
+  // Calculate a bounds that is larger than the meters frame such that the
+  // overlay starts and ends completely off the edge of the frame:
+  // [overlay][frame][overlay]
+  // This also yields a nice delay on rotation. Use overlaySize as the minimum
+  // size for [overlay] based on the graphics dims. If [frame] is larger, use
+  // the frame size instead.
+  int trackWidth = frameSize > overlaySize ? frameSize : overlaySize;
+  if (!aIsVertical) {
+    int xPos = aWidgetRect->left - trackWidth;
+    xPos += (int)ceil(((double)(trackWidth*2) * percent));
+    overlayRect.left = xPos;
+    overlayRect.right = xPos + overlaySize;
+  } else {
+    int yPos = aWidgetRect->bottom + trackWidth;
+    yPos -= (int)ceil(((double)(trackWidth*2) * percent));
+    overlayRect.bottom = yPos;
+    overlayRect.top = yPos - overlaySize;
+  }
+  return overlayRect;
+}
+
+/*
+ * DrawChunkProgressMeter - renders an xp style chunked progress meter. Called
+ * by DrawProgressMeter.
+ *
+ * @param aTheme       progress theme handle
+ * @param aHdc         hdc returned by gfxWindowsNativeDrawing
+ * @param aPart        the PP_X progress part
+ * @param aState       the theme state
+ * @param aFrame       the elements frame
+ * @param aWidgetRect  bounding rect for the widget
+ * @param aClipRect    dirty rect that needs drawing.
+ * @param aAppUnits    app units per device pixel
+ * @param aIsIndeterm  is an indeterminate progress?
+ * @param aIsVertical  render a vertical progress?
+ * @param aIsRtl       direction is rtl
+ */
+static void
+DrawChunkProgressMeter(HTHEME aTheme, HDC aHdc, int aPart,
+                       int aState, nsIFrame* aFrame, RECT* aWidgetRect,
+                       RECT* aClipRect, gfxFloat aAppUnits, bool aIsIndeterm,
+                       bool aIsVertical, bool aIsRtl)
+{
+  NS_ASSERTION(aTheme, "Bad theme.");
+  NS_ASSERTION(aHdc, "Bad hdc.");
+  NS_ASSERTION(aWidgetRect, "Bad rect.");
+  NS_ASSERTION(aClipRect, "Bad clip rect.");
+  NS_ASSERTION(aFrame, "Bad frame.");
+
+  // For horizontal meters, the theme lib paints the right graphic but doesn't
+  // paint the chunks, so we do that manually. For vertical meters, the theme
+  // library draws everything correctly.
+  if (aIsVertical) {
+    DrawThemeBackground(aTheme, aHdc, aPart, aState, aWidgetRect, aClipRect);
+    return;
+  }
+
+  // query for the proper chunk metrics
+  int chunkSize, spaceSize;
+  if (FAILED(GetThemeMetric(aTheme, aHdc, aPart, aState,
+                            TMT_PROGRESSCHUNKSIZE, &chunkSize)) ||
+      FAILED(GetThemeMetric(aTheme, aHdc, aPart, aState,
+                            TMT_PROGRESSSPACESIZE, &spaceSize))) {
+    DrawThemeBackground(aTheme, aHdc, aPart, aState, aWidgetRect, aClipRect);
+    return;
+  }
+
+  // render chunks
+  if (!aIsRtl || aIsIndeterm) {
+    for (int chunk = aWidgetRect->left; chunk <= aWidgetRect->right;
+         chunk += (chunkSize+spaceSize)) {
+      if (!aIsIndeterm && ((chunk + chunkSize) > aWidgetRect->right)) {
+        // aWidgetRect->right represents the end of the meter. Partial blocks
+        // don't get rendered with one exception, so exit here if we don't have
+        // a full chunk to draw.
+        // The above is true *except* when the meter is at 100% fill, in which
+        // case Windows renders any remaining partial block. Query the parent
+        // frame to find out if we're at 100%.
+        if (!IsProgressMeterFilled(aFrame)) {
+          break;
+        }
+      }
+      RECT bounds =
+        { chunk, aWidgetRect->top, chunk + chunkSize, aWidgetRect->bottom };
+      DrawThemeBackground(aTheme, aHdc, aPart, aState, &bounds, aClipRect);
+    }
+  } else {
+    // rtl needs to grow in the opposite direction to look right.
+    for (int chunk = aWidgetRect->right; chunk >= aWidgetRect->left;
+         chunk -= (chunkSize+spaceSize)) {
+      if ((chunk - chunkSize) < aWidgetRect->left) {
+        if (!IsProgressMeterFilled(aFrame)) {
+          break;
+        }
+      }
+      RECT bounds =
+        { chunk - chunkSize, aWidgetRect->top, chunk, aWidgetRect->bottom };
+      DrawThemeBackground(aTheme, aHdc, aPart, aState, &bounds, aClipRect);
+    }
+  }
+}
+
+/*
+ * DrawProgressMeter - render an appropriate progress meter based on progress
+ * meter style, orientation, and os. Note, this does not render the underlying
+ * progress track.
+ *
+ * @param aFrame       the widget frame
+ * @param aWidgetType  type of widget
+ * @param aTheme       progress theme handle
+ * @param aHdc         hdc returned by gfxWindowsNativeDrawing
+ * @param aPart        the PP_X progress part
+ * @param aState       the theme state
+ * @param aWidgetRect  bounding rect for the widget
+ * @param aClipRect    dirty rect that needs drawing.
+ * @param aAppUnits    app units per device pixel
+ */
+void
+nsNativeThemeWin::DrawThemedProgressMeter(nsIFrame* aFrame, int aWidgetType,
+                                          HANDLE aTheme, HDC aHdc,
+                                          int aPart, int aState,
+                                          RECT* aWidgetRect, RECT* aClipRect,
+                                          gfxFloat aAppUnits)
+{
+  if (!aFrame || !aTheme || !aHdc)
+    return;
+
+  NS_ASSERTION(aWidgetRect, "bad rect pointer");
+  NS_ASSERTION(aClipRect, "bad clip rect pointer");
+
+  RECT adjWidgetRect, adjClipRect;
+  adjWidgetRect = *aWidgetRect;
+  adjClipRect = *aClipRect;
+  if (WinUtils::GetWindowsVersion() < WinUtils::VISTA_VERSION) {
+    // Adjust clipping out by one pixel. XP progress meters are inset,
+    // Vista+ are not.
+    InflateRect(&adjWidgetRect, 1, 1);
+    InflateRect(&adjClipRect, 1, 1);
+  }
+
+  nsIFrame* parentFrame = aFrame->GetParent();
+  if (!parentFrame) {
+    // We have no parent to work with, just bail.
+    NS_WARNING("No parent frame for progress rendering. Can't paint.");
+    return;
+  }
+
+  nsEventStates eventStates = GetContentState(parentFrame, aWidgetType);
+  bool vertical = IsVerticalProgress(parentFrame) ||
+                  aWidgetType == NS_THEME_PROGRESSBAR_CHUNK_VERTICAL;
+  bool indeterminate = IsIndeterminateProgress(parentFrame, eventStates);
+  bool animate = indeterminate;
+
+  if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
+    // Vista and up progress meter is fill style, rendered here. We render
+    // the pulse overlay in the follow up section below.
+    DrawThemeBackground(aTheme, aHdc, aPart, aState,
+                        &adjWidgetRect, &adjClipRect);
+    if (!IsProgressMeterFilled(aFrame)) {
+      animate = true;
+    }
+  } else if (!indeterminate) {
+    // XP progress meters are 'chunk' style.
+    DrawChunkProgressMeter(aTheme, aHdc, aPart, aState, aFrame,
+                           &adjWidgetRect, &adjClipRect, aAppUnits,
+                           indeterminate, vertical, IsFrameRTL(aFrame));
+  }    
+
+  if (animate) {
+    // Indeterminate rendering
+    int32_t overlayPart = GetProgressOverlayStyle(vertical);
+    RECT overlayRect =
+      CalculateProgressOverlayRect(aFrame, &adjWidgetRect, vertical,
+                                   indeterminate, false);
+    if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
+      DrawThemeBackground(aTheme, aHdc, overlayPart, aState, &overlayRect,
+                          &adjClipRect);
+    } else {
+      DrawChunkProgressMeter(aTheme, aHdc, overlayPart, aState, aFrame,
+                             &overlayRect, &adjClipRect, aAppUnits,
+                             indeterminate, vertical, IsFrameRTL(aFrame));
+    }
+
+    if (!QueueAnimatedContentForRefresh(aFrame->GetContent(), 60)) {
+      NS_WARNING("unable to animate progress widget!");
+    }
+  }
 }
 
 HANDLE
@@ -429,6 +769,8 @@ nsNativeThemeWin::GetTheme(uint8_t aWidgetType)
     case NS_THEME_SCROLLBAR_THUMB_VERTICAL:
     case NS_THEME_SCROLLBAR_THUMB_HORIZONTAL:
       return nsUXThemeData::GetTheme(eUXScrollbar);
+    case NS_THEME_RANGE:
+    case NS_THEME_RANGE_THUMB:
     case NS_THEME_SCALE_HORIZONTAL:
     case NS_THEME_SCALE_VERTICAL:
     case NS_THEME_SCALE_THUMB_HORIZONTAL:
@@ -651,20 +993,23 @@ nsNativeThemeWin::GetThemePartAndState(nsIFrame* aFrame, uint8_t aWidgetType,
       aState = TS_NORMAL;
       return NS_OK;
     }
-    case NS_THEME_PROGRESSBAR: {
-      aPart = IsVerticalProgress(aFrame) ? PP_BARVERT : PP_BAR;
-      aState = TS_NORMAL;
+    case NS_THEME_PROGRESSBAR:
+    case NS_THEME_PROGRESSBAR_VERTICAL: {
+      // Note IsVerticalProgress only tests for orient css attrribute,
+      // NS_THEME_PROGRESSBAR_VERTICAL is dedicated to -moz-appearance:
+      // progressbar-vertical.
+      bool vertical = IsVerticalProgress(aFrame) ||
+                      aWidgetType == NS_THEME_PROGRESSBAR_VERTICAL;
+      aPart = vertical ? PP_BARVERT : PP_BAR;
+      aState = PBBS_NORMAL;
       return NS_OK;
     }
-    case NS_THEME_PROGRESSBAR_CHUNK: {
-      nsIFrame* stateFrame = aFrame->GetParent();
-      nsEventStates eventStates = GetContentState(stateFrame, aWidgetType);
-
-      if (IsIndeterminateProgress(stateFrame, eventStates)) {
-        // If the element is indeterminate, we are going to render it ourself so
-        // we have to return aPart = -1.
-        aPart = -1;
-      } else if (IsVerticalProgress(stateFrame)) {
+    case NS_THEME_PROGRESSBAR_CHUNK:
+    case NS_THEME_PROGRESSBAR_CHUNK_VERTICAL: {
+      nsIFrame* parentFrame = aFrame->GetParent();
+      nsEventStates eventStates = GetContentState(parentFrame, aWidgetType);
+      if (aWidgetType == NS_THEME_PROGRESSBAR_CHUNK_VERTICAL ||
+          IsVerticalProgress(parentFrame)) {
         aPart = WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION ?
           PP_FILLVERT : PP_CHUNKVERT;
       } else {
@@ -672,17 +1017,7 @@ nsNativeThemeWin::GetThemePartAndState(nsIFrame* aFrame, uint8_t aWidgetType,
           PP_FILL : PP_CHUNK;
       }
 
-      aState = TS_NORMAL;
-      return NS_OK;
-    }
-    case NS_THEME_PROGRESSBAR_VERTICAL: {
-      aPart = PP_BARVERT;
-      aState = TS_NORMAL;
-      return NS_OK;
-    }
-    case NS_THEME_PROGRESSBAR_CHUNK_VERTICAL: {
-      aPart = PP_CHUNKVERT;
-      aState = TS_NORMAL;
+      aState = PBBVS_NORMAL;
       return NS_OK;
     }
     case NS_THEME_TOOLBAR_BUTTON: {
@@ -737,7 +1072,7 @@ nsNativeThemeWin::GetThemePartAndState(nsIFrame* aFrame, uint8_t aWidgetType,
         aState += TS_DISABLED;
       else {
         nsIFrame *parent = aFrame->GetParent();
-        nsEventStates parentState = GetContentState(parent, parent->GetStyleDisplay()->mAppearance);
+        nsEventStates parentState = GetContentState(parent, parent->StyleDisplay()->mAppearance);
         if (eventState.HasAllStates(NS_EVENT_STATE_HOVER | NS_EVENT_STATE_ACTIVE))
           aState += TS_ACTIVE;
         else if (eventState.HasState(NS_EVENT_STATE_HOVER))
@@ -778,18 +1113,33 @@ nsNativeThemeWin::GetThemePartAndState(nsIFrame* aFrame, uint8_t aWidgetType,
       }
       return NS_OK;
     }
+    case NS_THEME_RANGE:
     case NS_THEME_SCALE_HORIZONTAL:
     case NS_THEME_SCALE_VERTICAL: {
-      aPart = (aWidgetType == NS_THEME_SCALE_HORIZONTAL) ?
-              TKP_TRACK : TKP_TRACKVERT;
-
-      aState = TS_NORMAL;
+      if (aWidgetType == NS_THEME_SCALE_HORIZONTAL ||
+          (aWidgetType == NS_THEME_RANGE &&
+           IsRangeHorizontal(aFrame))) {
+        aPart = TKP_TRACK;
+        aState = TRS_NORMAL;
+      } else {
+        aPart = TKP_TRACKVERT;
+        aState = TRVS_NORMAL;
+      }
       return NS_OK;
     }
+    case NS_THEME_RANGE_THUMB:
     case NS_THEME_SCALE_THUMB_HORIZONTAL:
     case NS_THEME_SCALE_THUMB_VERTICAL: {
-      aPart = (aWidgetType == NS_THEME_SCALE_THUMB_HORIZONTAL) ?
-              TKP_THUMB : TKP_THUMBVERT;
+      if (aWidgetType == NS_THEME_RANGE_THUMB) {
+        if (IsRangeHorizontal(aFrame)) {
+          aPart = TKP_THUMBBOTTOM;
+        } else {
+          aPart = IsFrameRTL(aFrame) ? TKP_THUMBLEFT : TKP_THUMBRIGHT;
+        }
+      } else {
+        aPart = (aWidgetType == NS_THEME_SCALE_THUMB_HORIZONTAL) ?
+                TKP_THUMB : TKP_THUMBVERT;
+      }
       nsEventStates eventState = GetContentState(aFrame, aWidgetType);
       if (!aFrame)
         aState = TS_NORMAL;
@@ -1169,6 +1519,15 @@ nsNativeThemeWin::GetThemePartAndState(nsIFrame* aFrame, uint8_t aWidgetType,
   return NS_ERROR_FAILURE;
 }
 
+static bool
+AssumeThemePartAndStateAreTransparent(int32_t aPart, int32_t aState)
+{
+  if (aPart == MENU_POPUPITEM && aState == MBI_NORMAL) {
+    return true;
+  }
+  return false;
+}
+
 NS_IMETHODIMP
 nsNativeThemeWin::DrawWidgetBackground(nsRenderingContext* aContext,
                                        nsIFrame* aFrame,
@@ -1213,6 +1572,10 @@ nsNativeThemeWin::DrawWidgetBackground(nsRenderingContext* aContext,
   nsresult rv = GetThemePartAndState(aFrame, aWidgetType, part, state);
   if (NS_FAILED(rv))
     return rv;
+
+  if (AssumeThemePartAndStateAreTransparent(part, state)) {
+    return NS_OK;
+  }
 
   gfxFloat p2a = gfxFloat(aContext->AppUnitsPerDevPixel());
   RECT widgetRect;
@@ -1313,7 +1676,8 @@ RENDER_AGAIN:
   // widgetRect is the bounding box for a widget, yet the scale track is only
   // a small portion of this size, so the edges of the scale need to be
   // adjusted to the real size of the track.
-  if (aWidgetType == NS_THEME_SCALE_HORIZONTAL ||
+  if (aWidgetType == NS_THEME_RANGE ||
+      aWidgetType == NS_THEME_SCALE_HORIZONTAL ||
       aWidgetType == NS_THEME_SCALE_VERTICAL) {
     RECT contentRect;
     GetThemeBackgroundContentRect(theme, hdc, part, state, &widgetRect, &contentRect);
@@ -1321,17 +1685,21 @@ RENDER_AGAIN:
     SIZE siz;
     GetThemePartSize(theme, hdc, part, state, &widgetRect, TS_TRUE, &siz);
 
-    if (aWidgetType == NS_THEME_SCALE_HORIZONTAL) {
-      int32_t adjustment = (contentRect.bottom - contentRect.top - siz.cy) / 2 + 1;
-      contentRect.top += adjustment;
-      contentRect.bottom -= adjustment;
+    // When rounding is necessary, we round the position of the track
+    // away from the chevron of the thumb to make it look better.
+    if (aWidgetType == NS_THEME_SCALE_HORIZONTAL ||
+        (aWidgetType == NS_THEME_RANGE && IsRangeHorizontal(aFrame))) {
+      contentRect.top += (contentRect.bottom - contentRect.top - siz.cy) / 2;
+      contentRect.bottom = contentRect.top + siz.cy;
     }
     else {
-      int32_t adjustment = (contentRect.right - contentRect.left - siz.cx) / 2 + 1;
-      // need to subtract one from the left position, otherwise the scale's
-      // border isn't visible
-      contentRect.left += adjustment - 1;
-      contentRect.right -= adjustment;
+      if (!IsFrameRTL(aFrame)) {
+        contentRect.left += (contentRect.right - contentRect.left - siz.cx) / 2;
+        contentRect.right = contentRect.left + siz.cx;
+      } else {
+        contentRect.right -= (contentRect.right - contentRect.left - siz.cx) / 2;
+        contentRect.left = contentRect.right - siz.cx;
+      }
     }
 
     DrawThemeBackground(theme, hdc, part, state, &contentRect, &clipRect);
@@ -1424,6 +1792,24 @@ RENDER_AGAIN:
     DrawThemeBGRTLAware(theme, hdc, part, state,
                         &widgetRect, &clipRect, IsFrameRTL(aFrame));
   }
+  else if (aWidgetType == NS_THEME_PROGRESSBAR ||
+           aWidgetType == NS_THEME_PROGRESSBAR_VERTICAL) {
+    // DrawThemeBackground renders each corner with a solid white pixel.
+    // Restore these pixels to the underlying color. Tracks are rendered
+    // using alpha recovery, so this makes the corners transparent.
+    COLORREF color;
+    color = GetPixel(hdc, widgetRect.left, widgetRect.top);
+    DrawThemeBackground(theme, hdc, part, state, &widgetRect, &clipRect);
+    SetPixel(hdc, widgetRect.left, widgetRect.top, color);
+    SetPixel(hdc, widgetRect.right-1, widgetRect.top, color);
+    SetPixel(hdc, widgetRect.right-1, widgetRect.bottom-1, color);
+    SetPixel(hdc, widgetRect.left, widgetRect.bottom-1, color);
+  }
+  else if (aWidgetType == NS_THEME_PROGRESSBAR_CHUNK ||
+           aWidgetType == NS_THEME_PROGRESSBAR_CHUNK_VERTICAL) {
+    DrawThemedProgressMeter(aFrame, aWidgetType, theme, hdc, part, state,
+                            &widgetRect, &clipRect, p2a);
+  }
   // If part is negative, the element wishes us to not render a themed
   // background, instead opting to be drawn specially below.
   else if (part >= 0) {
@@ -1434,6 +1820,7 @@ RENDER_AGAIN:
   // XXX it'd be nice to draw these outside of the frame
   if (((aWidgetType == NS_THEME_CHECKBOX || aWidgetType == NS_THEME_RADIO) &&
         aFrame->GetContent()->IsHTML()) ||
+      aWidgetType == NS_THEME_RANGE ||
       aWidgetType == NS_THEME_SCALE_HORIZONTAL ||
       aWidgetType == NS_THEME_SCALE_VERTICAL) {
       nsEventStates contentState = GetContentState(aFrame, aWidgetType);
@@ -1544,94 +1931,7 @@ RENDER_AGAIN:
 
     ctx->Restore();
     ctx->SetOperator(currentOp);
-  } else if (aWidgetType == NS_THEME_PROGRESSBAR_CHUNK) {
-    /**
-     * Here, we draw the animated part of the progress bar.
-     * A progress bar has always an animated part on Windows Vista and later.
-     * On Windows XP, a progress bar has an animated part when in an
-     * indeterminated state.
-     * When the progress bar is indeterminated, no background is painted so we
-     * only see the animated part.
-     * When the progress bar is determinated, the animated part is a glow draw
-     * on top of the background (PP_FILL).
-     */
-    nsIFrame* stateFrame = aFrame->GetParent();
-    nsEventStates eventStates = GetContentState(stateFrame, aWidgetType);
-    bool indeterminate = IsIndeterminateProgress(stateFrame, eventStates);
-    bool vertical = IsVerticalProgress(stateFrame);
-
-    if (indeterminate ||
-        WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
-      if (!QueueAnimatedContentForRefresh(aFrame->GetContent(), 30)) {
-        NS_WARNING("unable to animate progress widget!");
-      }
-
-      /**
-       * Unfortunately, vertical progress bar support on Windows seems weak and
-       * PP_MOVEOVERLAYRECT looks really different from PP_MOVEOVERLAY.
-       * Thus, we have to change the size and even don't use it for vertical
-       * indeterminate progress bars.
-       */
-      int32_t overlaySize;
-      if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
-        if (vertical) {
-          overlaySize = indeterminate ? kProgressVerticalIndeterminateOverlaySize
-                                      : kProgressVerticalOverlaySize;
-        } else {
-          overlaySize = kProgressHorizontalVistaOverlaySize;
-        }
-      } else {
-        overlaySize = kProgressHorizontalXPOverlaySize;
-      }
-
-      const double pixelsPerMillisecond = indeterminate
-                                            ? kProgressIndeterminateSpeed
-                                            : kProgressDeterminedVistaSpeed;
-      const int32_t delay = indeterminate ? kProgressIndeterminateDelay
-                                          : kProgressDeterminedVistaDelay;
-
-      const int32_t frameSize = vertical ? widgetRect.bottom - widgetRect.top
-                                         : widgetRect.right - widgetRect.left;
-      const int32_t animationSize = frameSize + overlaySize +
-                                     static_cast<int32_t>(pixelsPerMillisecond * delay);
-      const double interval = animationSize / pixelsPerMillisecond;
-      // We have to pass a double* to modf and we can't pass NULL.
-      double tempValue;
-      double ratio = modf(PR_IntervalToMilliseconds(PR_IntervalNow())/interval,
-                          &tempValue);
-      // If the frame direction is RTL, we want to have the animation going RTL.
-      // ratio is in [0.0; 1.0[ range, inverting it reverse the animation.
-      if (!vertical && IsFrameRTL(aFrame)) {
-        ratio = 1.0 - ratio;
-      }
-      int32_t dx = static_cast<int32_t>(animationSize * ratio) - overlaySize;
-
-      RECT overlayRect = widgetRect;
-      if (vertical) {
-        overlayRect.bottom -= dx;
-        overlayRect.top = overlayRect.bottom - overlaySize;
-      } else {
-        overlayRect.left += dx;
-        overlayRect.right = overlayRect.left + overlaySize;
-      }
-
-      int32_t overlayPart;
-      if (vertical) {
-        if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
-          overlayPart = indeterminate ? PP_MOVEOVERLAY : PP_MOVEOVERLAYVERT;
-        } else {
-          overlayPart = PP_CHUNKVERT;
-        }
-      } else {
-        overlayPart = WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION ?
-          PP_MOVEOVERLAY : PP_CHUNK;
-      }
-
-      DrawThemeBackground(theme, hdc, overlayPart, state, &overlayRect,
-                          &clipRect);
-    }
   }
-
 
   nativeDrawing.EndNativeDrawing();
 
@@ -1891,7 +2191,7 @@ nsNativeThemeWin::GetWidgetOverflow(nsDeviceContext* aContext,
     {
       int32_t p2a = aContext->AppUnitsPerDevPixel();
       /* Note: no overflow on the left */
-      nsMargin m(0, p2a, p2a, p2a);
+      nsMargin m(p2a, p2a, p2a, 0);
       aOverflowRect->Inflate (m);
       return true;
     }
@@ -1995,6 +2295,7 @@ nsNativeThemeWin::GetMinimumWidgetSize(nsRenderingContext* aContext, nsIFrame* a
       *aIsOverridable = false;
       break;
 
+    case NS_THEME_RANGE_THUMB:
     case NS_THEME_SCALE_THUMB_HORIZONTAL:
     case NS_THEME_SCALE_THUMB_VERTICAL:
     {
@@ -2002,7 +2303,8 @@ nsNativeThemeWin::GetMinimumWidgetSize(nsRenderingContext* aContext, nsIFrame* a
       // on Vista, GetThemePartAndState returns odd values for
       // scale thumbs, so use a hardcoded size instead.
       if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION) {
-        if (aWidgetType == NS_THEME_SCALE_THUMB_HORIZONTAL) {
+        if (aWidgetType == NS_THEME_SCALE_THUMB_HORIZONTAL ||
+            (aWidgetType == NS_THEME_RANGE_THUMB && IsRangeHorizontal(aFrame))) {
           aResult->width = 12;
           aResult->height = 20;
         }
@@ -2036,7 +2338,6 @@ nsNativeThemeWin::GetMinimumWidgetSize(nsRenderingContext* aContext, nsIFrame* a
       // The only way to get accurate titlebar button info is to query a
       // window w/buttons when it's visible. nsWindow takes care of this and
       // stores that info in nsUXThemeData.
-      QueryForButtonData(aFrame);
       aResult->width = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_RESTORE].cx;
       aResult->height = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_RESTORE].cy;
       // For XP, subtract 4 from system metrics dimensions.
@@ -2049,7 +2350,6 @@ nsNativeThemeWin::GetMinimumWidgetSize(nsRenderingContext* aContext, nsIFrame* a
       return NS_OK;
 
     case NS_THEME_WINDOW_BUTTON_MINIMIZE:
-      QueryForButtonData(aFrame);
       aResult->width = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_MINIMIZE].cx;
       aResult->height = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_MINIMIZE].cy;
       if (WinUtils::GetWindowsVersion() == WinUtils::WINXP_VERSION) {
@@ -2061,7 +2361,6 @@ nsNativeThemeWin::GetMinimumWidgetSize(nsRenderingContext* aContext, nsIFrame* a
       return NS_OK;
 
     case NS_THEME_WINDOW_BUTTON_CLOSE:
-      QueryForButtonData(aFrame);
       aResult->width = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_CLOSE].cx;
       aResult->height = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_CLOSE].cy;
       if (WinUtils::GetWindowsVersion() == WinUtils::WINXP_VERSION) {
@@ -2076,16 +2375,17 @@ nsNativeThemeWin::GetMinimumWidgetSize(nsRenderingContext* aContext, nsIFrame* a
     case NS_THEME_WINDOW_TITLEBAR_MAXIMIZED:
       aResult->height = GetSystemMetrics(SM_CYCAPTION);
       aResult->height += GetSystemMetrics(SM_CYFRAME);
+      aResult->height += GetSystemMetrics(SM_CXPADDEDBORDER);
       *aIsOverridable = false;
       return NS_OK;
 
     case NS_THEME_WINDOW_BUTTON_BOX:
     case NS_THEME_WINDOW_BUTTON_BOX_MAXIMIZED:
       if (nsUXThemeData::CheckForCompositor()) {
-        QueryForButtonData(aFrame);
         aResult->width = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_BUTTONBOX].cx;
         aResult->height = nsUXThemeData::sCommandButtons[CMDBUTTONIDX_BUTTONBOX].cy
-                          - GetSystemMetrics(SM_CYFRAME);
+                          - GetSystemMetrics(SM_CYFRAME)
+                          - GetSystemMetrics(SM_CXPADDEDBORDER);
         if (aWidgetType == NS_THEME_WINDOW_BUTTON_BOX_MAXIMIZED) {
           aResult->width += 1;
           aResult->height -= 2;
@@ -2262,7 +2562,7 @@ nsNativeThemeWin::WidgetIsContainer(uint8_t aWidgetType)
 }
 
 bool
-nsNativeThemeWin::ThemeDrawsFocusForWidget(nsPresContext* aPresContext, nsIFrame* aFrame, uint8_t aWidgetType)
+nsNativeThemeWin::ThemeDrawsFocusForWidget(uint8_t aWidgetType)
 {
   return false;
 }
@@ -2289,6 +2589,11 @@ nsNativeThemeWin::GetWidgetTransparency(nsIFrame* aFrame, uint8_t aWidgetType)
   case NS_THEME_WIN_BORDERLESS_GLASS:
   case NS_THEME_SCALE_HORIZONTAL:
   case NS_THEME_SCALE_VERTICAL:
+  case NS_THEME_PROGRESSBAR:
+  case NS_THEME_PROGRESSBAR_VERTICAL:
+  case NS_THEME_PROGRESSBAR_CHUNK:
+  case NS_THEME_PROGRESSBAR_CHUNK_VERTICAL:
+  case NS_THEME_RANGE:
     return eTransparent;
   }
 
@@ -2344,6 +2649,8 @@ nsNativeThemeWin::ClassicThemeSupportsWidget(nsPresContext* aPresContext,
     case NS_THEME_TEXTFIELD_MULTILINE:
     case NS_THEME_CHECKBOX:
     case NS_THEME_RADIO:
+    case NS_THEME_RANGE:
+    case NS_THEME_RANGE_THUMB:
     case NS_THEME_GROUPBOX:
     case NS_THEME_SCROLLBAR_BUTTON_UP:
     case NS_THEME_SCROLLBAR_BUTTON_DOWN:
@@ -2529,6 +2836,17 @@ nsNativeThemeWin::ClassicGetMinimumWidgetSize(nsRenderingContext* aContext, nsIF
 
         //      (*aResult).height = ::GetSystemMetrics(SM_CYVTHUMB) << 1;
       break;
+    case NS_THEME_RANGE_THUMB: {
+      if (IsRangeHorizontal(aFrame)) {
+        (*aResult).width = 12;
+        (*aResult).height = 20;
+      } else {
+        (*aResult).width = 20;
+        (*aResult).height = 12;
+      }
+      *aIsOverridable = false;
+      break;
+    }
     case NS_THEME_SCALE_THUMB_HORIZONTAL:
       (*aResult).width = 12;
       (*aResult).height = 20;
@@ -2669,7 +2987,7 @@ nsresult nsNativeThemeWin::ClassicGetThemePartAndState(nsIFrame* aFrame, uint8_t
       else {
         if (contentState.HasAllStates(NS_EVENT_STATE_ACTIVE | NS_EVENT_STATE_HOVER)) {
           aState |= DFCS_PUSHED;
-          const nsStyleUserInterface *uiData = aFrame->GetStyleUserInterface();
+          const nsStyleUserInterface *uiData = aFrame->StyleUserInterface();
           // The down state is flat if the button is focusable
           if (uiData->mUserFocus == NS_STYLE_USER_FOCUS_NORMAL) {
             if (!aFrame->GetContent()->IsHTML())
@@ -2791,6 +3109,8 @@ nsresult nsNativeThemeWin::ClassicGetThemePartAndState(nsIFrame* aFrame, uint8_t
     case NS_THEME_TEXTFIELD_MULTILINE:
     case NS_THEME_DROPDOWN:
     case NS_THEME_DROPDOWN_TEXTFIELD:
+    case NS_THEME_RANGE:
+    case NS_THEME_RANGE_THUMB:
     case NS_THEME_SCROLLBAR_THUMB_VERTICAL:
     case NS_THEME_SCROLLBAR_THUMB_HORIZONTAL:     
     case NS_THEME_SCROLLBAR_TRACK_VERTICAL:
@@ -3147,6 +3467,10 @@ nsresult nsNativeThemeWin::ClassicDrawWidgetBackground(nsRenderingContext* aCont
   if (NS_FAILED(rv))
     return rv;
 
+  if (AssumeThemePartAndStateAreTransparent(part, state)) {
+    return NS_OK;
+  }
+
   gfxFloat p2a = gfxFloat(aContext->AppUnitsPerDevPixel());
   RECT widgetRect;
   gfxRect tr(aRect.x, aRect.y, aRect.width, aRect.height),
@@ -3282,6 +3606,7 @@ RENDER_AGAIN:
       ::DrawEdge(hdc, &widgetRect, EDGE_RAISED, BF_RECT | BF_MIDDLE);
 
       break;
+    case NS_THEME_RANGE_THUMB:
     case NS_THEME_SCALE_THUMB_VERTICAL:
     case NS_THEME_SCALE_THUMB_HORIZONTAL: {
       nsEventStates eventState = GetContentState(aFrame, aWidgetType);
@@ -3320,17 +3645,25 @@ RENDER_AGAIN:
       break;
     }
     // Draw scale track background
+    case NS_THEME_RANGE:
     case NS_THEME_SCALE_VERTICAL:
-    case NS_THEME_SCALE_HORIZONTAL: {
-      if (aWidgetType == NS_THEME_SCALE_HORIZONTAL) {
-        int32_t adjustment = (widgetRect.bottom - widgetRect.top) / 2 - 2;
-        widgetRect.top += adjustment;
-        widgetRect.bottom -= adjustment;
+    case NS_THEME_SCALE_HORIZONTAL: { 
+      const int32_t trackWidth = 4;
+      // When rounding is necessary, we round the position of the track
+      // away from the chevron of the thumb to make it look better.
+      if (aWidgetType == NS_THEME_SCALE_HORIZONTAL ||
+          (aWidgetType == NS_THEME_RANGE && IsRangeHorizontal(aFrame))) {
+        widgetRect.top += (widgetRect.bottom - widgetRect.top - trackWidth) / 2;
+        widgetRect.bottom = widgetRect.top + trackWidth;
       }
       else {
-        int32_t adjustment = (widgetRect.right - widgetRect.left) / 2 - 2;
-        widgetRect.left += adjustment;
-        widgetRect.right -= adjustment;
+        if (!IsFrameRTL(aFrame)) {
+          widgetRect.left += (widgetRect.right - widgetRect.left - trackWidth) / 2;
+          widgetRect.right = widgetRect.left + trackWidth;
+        } else {
+          widgetRect.right -= (widgetRect.right - widgetRect.left - trackWidth) / 2;
+          widgetRect.left = widgetRect.right - trackWidth;
+        }
       }
 
       ::DrawEdge(hdc, &widgetRect, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
@@ -3345,75 +3678,27 @@ RENDER_AGAIN:
     case NS_THEME_PROGRESSBAR_CHUNK: {
       nsIFrame* stateFrame = aFrame->GetParent();
       nsEventStates eventStates = GetContentState(stateFrame, aWidgetType);
-      const bool indeterminate = IsIndeterminateProgress(stateFrame, eventStates);
 
-      if (!indeterminate) {
+      bool indeterminate = IsIndeterminateProgress(stateFrame, eventStates);
+      bool vertical = IsVerticalProgress(stateFrame) ||
+                      aWidgetType == NS_THEME_PROGRESSBAR_CHUNK_VERTICAL;
+      int32_t overlayPart = GetProgressOverlayStyle(vertical);
+
+      nsIContent* content = aFrame->GetContent();
+      if (!indeterminate || !content) {
         ::FillRect(hdc, &widgetRect, (HBRUSH) (COLOR_HIGHLIGHT+1));
         break;
       }
 
-      /**
-       * The indeterminate rendering is animated: the bar goes from one side to
-       * another.
-       */
+      RECT overlayRect =
+        CalculateProgressOverlayRect(aFrame, &widgetRect, vertical,
+                                     indeterminate, true);
+
+      ::FillRect(hdc, &overlayRect, (HBRUSH) (COLOR_HIGHLIGHT+1));
+
       if (!QueueAnimatedContentForRefresh(aFrame->GetContent(), 30)) {
         NS_WARNING("unable to animate progress widget!");
       }
-
-      const bool vertical = IsVerticalProgress(stateFrame);
-      const int32_t overlaySize = kProgressClassicOverlaySize;
-      const double pixelsPerMillisecond = kProgressClassicIndeterminateSpeed;
-      const int32_t frameSize = vertical ? widgetRect.bottom - widgetRect.top
-                                         : widgetRect.right - widgetRect.left;
-      const double interval = frameSize / pixelsPerMillisecond;
-      // We have to pass a double* to modf and we can't pass NULL.
-      double tempValue;
-      double ratio = modf(PR_IntervalToMilliseconds(PR_IntervalNow())/interval,
-                          &tempValue);
-      int32_t dx = 0;
-
-      // If the frame direction is RTL, we want to have the animation going RTL.
-      // ratio is in [0.0; 1.0[ range, inverting it reverse the animation.
-      if (!vertical && IsFrameRTL(aFrame)) {
-        ratio = 1.0 - ratio;
-        dx -= overlaySize;
-      }
-      dx += static_cast<int32_t>(frameSize * ratio);
-
-      RECT overlayRect = widgetRect;
-      if (vertical) {
-        overlayRect.bottom -= dx;
-        overlayRect.top = overlayRect.bottom - overlaySize;
-      } else {
-        overlayRect.left += dx;
-        overlayRect.right = overlayRect.left + overlaySize;
-      }
-
-      // Compute the leftover part.
-      RECT leftoverRect = widgetRect;
-      if (vertical) {
-        if (overlayRect.top < widgetRect.top) {
-          leftoverRect.bottom = widgetRect.bottom;
-          leftoverRect.top = leftoverRect.bottom + overlayRect.top - widgetRect.top;
-        }
-      } else if (IsFrameRTL(aFrame)) {
-        if (overlayRect.left < widgetRect.left) {
-          leftoverRect.right = widgetRect.right;
-          leftoverRect.left = leftoverRect.right + overlayRect.left - widgetRect.left;
-        }
-      } else if (overlayRect.right > widgetRect.right) {
-        leftoverRect.left = widgetRect.left;
-        leftoverRect.right = leftoverRect.left + overlayRect.right - widgetRect.right;
-      }
-
-      // Only show the leftover if the rect has been modified.
-      if (leftoverRect.top != widgetRect.top ||
-          leftoverRect.left != widgetRect.left ||
-          leftoverRect.right != widgetRect.right) {
-        ::FillRect(hdc, &leftoverRect, (HBRUSH) (COLOR_HIGHLIGHT+1));
-      }
-
-      ::FillRect(hdc, &overlayRect, (HBRUSH) (COLOR_HIGHLIGHT+1));
       break;
     }
 
@@ -3630,6 +3915,8 @@ nsNativeThemeWin::GetWidgetNativeDrawingFlags(uint8_t aWidgetType)
         gfxWindowsNativeDrawing::CANNOT_COMPLEX_TRANSFORM;
 
     // need to check these others
+    case NS_THEME_RANGE:
+    case NS_THEME_RANGE_THUMB:
     case NS_THEME_SCROLLBAR_BUTTON_UP:
     case NS_THEME_SCROLLBAR_BUTTON_DOWN:
     case NS_THEME_SCROLLBAR_BUTTON_LEFT:

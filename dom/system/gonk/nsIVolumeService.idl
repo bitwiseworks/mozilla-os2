@@ -4,16 +4,30 @@
 
 #include "nsISupports.idl"
 #include "nsIVolume.idl"
+#include "nsIVolumeMountLock.idl"
 
-[scriptable, uuid(b31bd379-4bd2-4189-a85b-c0927a266a85)]
+%{C++
+#include "nsTArray.h"
+#include "nsString.h"
+%}
+[ref] native nsStringTArrayRef(nsTArray<nsString>);
+
+[scriptable, uuid(7c179fb7-67a0-43a3-9337-294e0360b858)]
 interface nsIVolumeService : nsISupports
 {
     nsIVolume getVolumeByName(in DOMString volName);
     nsIVolume getVolumeByPath(in DOMString path);
+    nsIVolume createOrGetVolumeByPath(in DOMString path);
+
+    void BroadcastVolume(in DOMString volName);
+
+    nsIVolumeMountLock createMountLock(in DOMString volName);
+
+    [noscript] void getVolumeNames(in nsStringTArrayRef aVolNames);
 };
 
 %{C++
 #define NS_VOLUMESERVICE_CID \
-  {0xb31bd379, 0x4bd2, 0x4189, {0xa8, 0x5b, 0xc0, 0x92, 0x7a, 0x26, 0x6a, 0x85}}
+  {0x7c179fb7, 0x67a0, 0x43a3, {0x93, 0x37, 0x29, 0x4e, 0x03, 0x60, 0xb8, 0x58}}
 #define NS_VOLUMESERVICE_CONTRACTID "@mozilla.org/telephony/volume-service;1"
 %}

@@ -9,15 +9,8 @@ VPATH           = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = transformiix
-LIBRARY_NAME = txbase_s
 LIBXUL_LIBRARY = 1
-
-CPPSRCS	= txDouble.cpp \
-	txList.cpp \
-	txExpandedNameMap.cpp \
-	txNamespaceMap.cpp \
-	txURIUtils.cpp
+FAIL_ON_WARNINGS = 1
 
 # we don't want the shared lib, but we want to force the creation of a
 # static lib.

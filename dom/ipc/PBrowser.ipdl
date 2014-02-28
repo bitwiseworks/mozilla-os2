@@ -20,16 +20,18 @@ include "gfxMatrix.h";
 include "FrameMetrics.h";
 include "IPC/nsGUIEventIPC.h";
 include "mozilla/dom/TabMessageUtils.h";
+include "mozilla/dom/ScreenOrientation.h";
 include "mozilla/dom/PermissionMessageUtils.h";
 include "mozilla/layout/RenderFrameUtils.h";
+include "mozilla/layers/CompositorTypes.h";
 
 using IPC::Principal;
 using gfxMatrix;
 using gfxRect;
 using gfxSize;
-using mozilla::layers::LayersBackend;
 using mozilla::layers::FrameMetrics;
 using mozilla::layout::ScrollingBehavior;
+using mozilla::void_t;
 using mozilla::WindowsHandle;
 using nscolor;
 using nsCompositionEvent;
@@ -47,7 +49,9 @@ using nsSelectionEvent;
 using nsTextEvent;
 using nsTouchEvent;
 using RemoteDOMEvent;
-
+using mozilla::dom::ScreenOrientation;
+using mozilla::layers::TextureFactoryIdentifier;
+using mozilla::CSSIntPoint;
 namespace mozilla {
 namespace dom {
 
@@ -156,7 +160,8 @@ parent:
      */
     sync EndIMEComposition(bool cancel) returns (nsString composition);
 
-    sync GetInputContext() returns (int32_t IMEEnabled, int32_t IMEOpen);
+    sync GetInputContext() returns (int32_t IMEEnabled, int32_t IMEOpen,
+                                    intptr_t NativeIMEContext);
 
     SetInputContext(int32_t IMEEnabled,
                     int32_t IMEOpen,
@@ -172,6 +177,11 @@ parent:
     sync GetDPI() returns (float value);
 
     /**
+     * Gets the default scaling factor of the screen corresponding to this browser.
+     */
+    sync GetDefaultScale() returns (double value);
+
+    /**
      * Return native data of root widget
      */
     sync GetWidgetNativeData() returns (WindowsHandle value);
@@ -185,6 +195,8 @@ parent:
      *
      * @param aType
      *   The type of permission to request.
+     * @param aAccess
+     *   Access type. "read" for example.
      * @param aPrincipal
      *   The principal of the request.
      *
@@ -192,7 +204,7 @@ parent:
      *       principals that can live in the content process should
      *       provided.
      */
-    PContentPermissionRequest(nsCString aType, Principal principal);
+    PContentPermissionRequest(nsCString aType, nsCString aAccess, Principal principal);
 
     PContentDialog(uint32_t aType, nsCString aName, nsCString aFeatures,
                    int32_t[] aIntParams, nsString[] aStringParams);
@@ -203,7 +215,7 @@ parent:
      */
     sync PRenderFrame()
         returns (ScrollingBehavior scrolling,
-                 LayersBackend backend, int32_t maxTextureSize, uint64_t layersId);
+                 TextureFactoryIdentifier textureFactoryIdentifier, uint64_t layersId);
 
     /** 
      * Starts an offline application cache update.
@@ -211,8 +223,6 @@ parent:
      *   URI of the manifest to fetch, the application cache group ID
      * @param documentURI
      *   URI of the document that referred the manifest
-     * @param clientID
-     *   The group cache version identifier to use
      * @param stickDocument
      *   True if the update was initiated by a document load that referred
      *   a manifest.
@@ -230,7 +240,7 @@ parent:
      *   has already been cached (stickDocument=false).
      */
     POfflineCacheUpdate(URIParams manifestURI, URIParams documentURI,
-                        nsCString clientID, bool stickDocument);
+                        bool stickDocument);
 
     sync PIndexedDB(nsCString asciiOrigin)
         returns (bool allowed);
@@ -265,6 +275,12 @@ parent:
      */
     ContentReceivedTouch(bool aPreventDefault);
 
+    /**
+     * Updates any zoom constraints on the parent and anything tied to it. This
+     * is useful for control logic that resides outside of the remote browser.
+     */
+    UpdateZoomConstraints(bool aAllowZoom, float aMinZoom, float aMaxZoom);
+
     __delete__();
 
 child:
@@ -281,16 +297,32 @@ child:
 
     LoadURL(nsCString uri);
 
-    UpdateDimensions(nsRect rect, nsIntSize size);
+    CacheFileDescriptor(nsString path, FileDescriptor fd);
 
-    UpdateFrame(FrameMetrics frame);
+    UpdateDimensions(nsRect rect, nsIntSize size, ScreenOrientation orientation) compress;
+
+    UpdateFrame(FrameMetrics frame) compress;
 
     /**
      * Requests handling of a double tap. |point| is in CSS pixels, relative to
      * the scroll offset. This message is expected to round-trip back to
      * ZoomToRect() with a rect indicating where we should zoom to.
      */
-    HandleDoubleTap(nsIntPoint point);
+    HandleDoubleTap(CSSIntPoint point);
+
+    /**
+     * Requests handling of a single tap. |point| is in CSS pixels, relative to
+     * the scroll offset. This message is expected to send a "mousedown" and
+     * "mouseup" series of events at this point.
+     */
+    HandleSingleTap(CSSIntPoint point);
+
+    /**
+     * Requests handling of a long tap. |point| is in CSS pixels, relative to
+     * the scroll offset. This message is expected to send a "contextmenu"
+     * events at this point.
+     */
+    HandleLongTap(CSSIntPoint point);
 
     /**
      * Sending an activate message moves focus to the child.

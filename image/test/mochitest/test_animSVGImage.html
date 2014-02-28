@@ -26,6 +26,7 @@ SimpleTest.waitForExplicitFinish();
 
 const FAILURE_TIMEOUT = 120000; // Fail early after 120 seconds (2 minutes)
 
+const Cc = Components.classes;
 const Ci = Components.interfaces;
 const gImg = document.getElementsByTagName("img")[0];
 
@@ -53,8 +54,9 @@ function takeReferenceSnapshot() {
      "reference div should disappear when it becomes display:none");
 }
 
-function myOnStopFrame(aRequest, aFrame) {
+function myOnStopFrame(aRequest) {
   gOnStopFrameCounter++;
+  ok(true, "myOnStopFrame called");
   let currentSnapshot = snapshotWindow(window, false);
   if (compareSnapshots(currentSnapshot, gReferenceSnapshot, true)[0]) {
     // SUCCESS!
@@ -62,6 +64,7 @@ function myOnStopFrame(aRequest, aFrame) {
              "at call #" + gOnStopFrameCounter + " to onStopFrame");
     cleanUpAndFinish();
   }
+  setTimeout(function() { myOnStopFrame(0, 0); }, 1000);
 }
 
 function failTest() {
@@ -87,8 +90,11 @@ function main() {
   takeReferenceSnapshot();
 
   // Create, customize & attach decoder observer
-  gMyDecoderObserver = new ImageDecoderObserverStub();
-  gMyDecoderObserver.onStopFrame = myOnStopFrame;
+  observer = new ImageDecoderObserverStub();
+  observer.frameComplete = myOnStopFrame;
+  gMyDecoderObserver =
+    Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
+      .createScriptedObserver(observer);
   let imgLoadingContent = gImg.QueryInterface(Ci.nsIImageLoadingContent);
   imgLoadingContent.addObserver(gMyDecoderObserver);
 

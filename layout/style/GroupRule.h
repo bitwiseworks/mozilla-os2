@@ -11,6 +11,7 @@
 #ifndef mozilla_css_GroupRule_h__
 #define mozilla_css_GroupRule_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/css/Rule.h"
 #include "nsCOMArray.h"
 #include "nsAutoPtr.h"
@@ -43,7 +44,7 @@ public:
 
   // to help implement nsIStyleRule
 #ifdef DEBUG
-  virtual void List(FILE* out = stdout, int32_t aIndent = 0) const;
+  virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
 #endif
 
 public:
@@ -61,17 +62,15 @@ public:
    * called, DidDirty() needs to be called on the sheet.
    */
   nsresult DeleteStyleRuleAt(uint32_t aIndex);
-  nsresult InsertStyleRulesAt(uint32_t aIndex,
-                              nsCOMArray<Rule>& aRules);
+  nsresult InsertStyleRuleAt(uint32_t aIndex, Rule* aRule);
   nsresult ReplaceStyleRule(Rule *aOld, Rule *aNew);
 
   virtual bool UseForPresentation(nsPresContext* aPresContext,
                                     nsMediaQueryResultCacheKey& aKey) = 0;
 
-  NS_MUST_OVERRIDE size_t   // non-virtual -- it is only called by subclasses
-    SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
-  virtual size_t
-    SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const = 0;
+  // non-virtual -- it is only called by subclasses
+  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const = 0;
 
 protected:
   // to help implement nsIDOMCSSRule

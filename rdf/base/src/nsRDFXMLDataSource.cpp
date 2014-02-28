@@ -441,10 +441,9 @@ RDFXMLDataSourceImpl::~RDFXMLDataSourceImpl(void)
         NS_IF_RELEASE(gRDFService);
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(RDFXMLDataSourceImpl)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(RDFXMLDataSourceImpl)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(RDFXMLDataSourceImpl)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mInner)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInner)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(RDFXMLDataSourceImpl)
@@ -533,10 +532,10 @@ RDFXMLDataSourceImpl::BlockingParse(nsIURI* aURL, nsIStreamListener* aConsumer)
         if (avail == 0)
             break; // eof
 
-        if (avail > PR_UINT32_MAX)
-            avail = PR_UINT32_MAX;
+        if (avail > UINT32_MAX)
+            avail = UINT32_MAX;
 
-        rv = aConsumer->OnDataAvailable(channel, nullptr, bufStream, (uint32_t)NS_MIN(offset, (uint64_t)PR_UINT32_MAX), (uint32_t)avail);
+        rv = aConsumer->OnDataAvailable(channel, nullptr, bufStream, offset, (uint32_t)avail);
         if (NS_SUCCEEDED(rv))
             offset += avail;
     }
@@ -606,7 +605,7 @@ RDFXMLDataSourceImpl::GetURI(char* *aURI)
         return NS_OK;
     }
     
-    nsCAutoString spec;
+    nsAutoCString spec;
     mURL->GetSpec(spec);
     *aURI = ToNewCString(spec);
     if (!*aURI) {
@@ -743,7 +742,7 @@ RDFXMLDataSourceImpl::rdfXMLFlush(nsIURI *aURI)
         // write the file will be unaquirable.
         nsCOMPtr<nsIRDFService> dummy = do_GetService(kRDFServiceCID, &rv);
         if (NS_FAILED(rv)) {
-            NS_WARNING("unable to Flush() diry datasource during XPCOM shutdown");
+            NS_WARNING("unable to Flush() dirty datasource during XPCOM shutdown");
             return rv;
         }
     }
@@ -826,7 +825,7 @@ RDFXMLDataSourceImpl::Flush(void)
         return NS_ERROR_NOT_INITIALIZED;
 
 #ifdef PR_LOGGING
-    nsCAutoString spec;
+    nsAutoCString spec;
     mURL->GetSpec(spec);
     PR_LOG(gLog, PR_LOG_NOTICE,
            ("rdfxml[%p] flush(%s)", this, spec.get()));
@@ -906,7 +905,7 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::Refresh(bool aBlocking)
 {
 #ifdef PR_LOGGING
-    nsCAutoString spec;
+    nsAutoCString spec;
     if (mURL) {
         mURL->GetSpec(spec);
     }
@@ -961,7 +960,7 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::BeginLoad(void)
 {
 #ifdef PR_LOGGING
-    nsCAutoString spec;
+    nsAutoCString spec;
     if (mURL) {
         mURL->GetSpec(spec);
     }
@@ -987,7 +986,7 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::Interrupt(void)
 {
 #ifdef PR_LOGGING
-    nsCAutoString spec;
+    nsAutoCString spec;
     if (mURL) {
         mURL->GetSpec(spec);
     }
@@ -1012,7 +1011,7 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::Resume(void)
 {
 #ifdef PR_LOGGING
-    nsCAutoString spec;
+    nsAutoCString spec;
     if (mURL) {
         mURL->GetSpec(spec);
     }
@@ -1037,7 +1036,7 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::EndLoad(void)
 {
 #ifdef PR_LOGGING
-    nsCAutoString spec;
+    nsAutoCString spec;
     if (mURL) {
         mURL->GetSpec(spec);
     }
@@ -1143,7 +1142,7 @@ NS_IMETHODIMP
 RDFXMLDataSourceImpl::OnDataAvailable(nsIRequest *request,
                                       nsISupports *ctxt,
                                       nsIInputStream *inStr,
-                                      uint32_t sourceOffset,
+                                      uint64_t sourceOffset,
                                       uint32_t count)
 {
     return mListener->OnDataAvailable(request, ctxt, inStr, sourceOffset, count);

@@ -10,138 +10,14 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkconbase_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY	= 1
 
-
-EXPORTS		= \
-		nsAtomListUtils.h \
-		nsAttrName.h \
-		nsContentList.h \
-		nsContentSink.h \
-		nsGkAtomList.h \
-		nsGkAtoms.h \
-		nsNodeInfoManager.h \
-		nsNodeUtils.h \
-		nsPropertyTable.h \
-		nsRange.h \
-		nsScriptLoader.h \
-		nsStubDocumentObserver.h \
-		nsStubImageDecoderObserver.h \
-		nsStubMutationObserver.h \
-		nsTextFragment.h \
-		mozAutoDocUpdate.h \
-		nsFrameMessageManager.h \
-		nsAttrAndChildArray.h \
-		nsAttrValue.h \
-		nsCrossSiteListenerProxy.h \
-		nsDOMAttributeMap.h \
-		nsGenericElement.h \
-		nsMappedAttributeElement.h \
-		nsStyledElement.h \
-    nsSandboxFlags.h \
+ifdef MOZ_WEBRTC
+LOCAL_INCLUDES += \
+		-I$(topsrcdir)/netwerk/sctp/datachannel \
 		$(NULL)
-
-EXPORTS_NAMESPACES = mozilla/dom
-
-EXPORTS_mozilla/dom = \
-  Link.h \
-  $(NULL)
-
-LOCAL_INCLUDES = \
-		$(NULL)
-
-CPPSRCS		= \
-		DirectionalityUtils.cpp \
-		nsAtomListUtils.cpp \
-		nsAttrAndChildArray.cpp \
-		nsAttrValue.cpp \
-		nsAttrValueOrString.cpp \
-		nsCCUncollectableMarker.cpp \
-		nsChannelPolicy.cpp \
-		nsCommentNode.cpp \
-		nsContentAreaDragDrop.cpp \
-		nsContentIterator.cpp \
-		nsContentList.cpp \
-		nsContentPolicy.cpp \
-		nsContentSink.cpp \
-		nsContentUtils.cpp \
-		nsCopySupport.cpp \
-		nsCrossSiteListenerProxy.cpp \
-		nsCSPService.cpp \
-		nsDataDocumentContentPolicy.cpp \
-		nsDOMAttribute.cpp \
-		nsDOMAttributeMap.cpp \
-		nsDOMBlobBuilder.cpp \
-		nsDOMDocumentType.cpp \
-		nsDOMFile.cpp \
-		nsDOMFileReader.cpp \
-		nsDOMLists.cpp \
-		nsDOMParser.cpp \
-		nsDOMSerializer.cpp \
-		nsDOMTokenList.cpp \
-		nsDOMSettableTokenList.cpp \
-		nsDocument.cpp \
-		nsDocumentEncoder.cpp \
-		nsDocumentFragment.cpp \
-		nsFrameLoader.cpp \
-		nsFormData.cpp \
-		nsGenConImageContent.cpp \
-		nsGenericDOMDataNode.cpp \
-		nsGenericElement.cpp \
-		nsGkAtoms.cpp \
-		nsHTMLContentSerializer.cpp \
-		nsImageLoadingContent.cpp \
-		nsINode.cpp \
-		nsLineBreaker.cpp \
-		nsMappedAttributeElement.cpp \
-		nsMappedAttributes.cpp \
-		nsNameSpaceManager.cpp \
-		nsNoDataProtocolContentPolicy.cpp \
-		nsNodeInfo.cpp \
-		nsNodeInfoManager.cpp \
-		nsNodeIterator.cpp \
-		nsNodeUtils.cpp \
-		nsObjectLoadingContent.cpp \
-		nsPlainTextSerializer.cpp \
-		nsPropertyTable.cpp \
-		nsRange.cpp \
-		nsReferencedElement.cpp \
-		nsScriptElement.cpp \
-		nsScriptLoader.cpp \
-		nsStubDocumentObserver.cpp \
-		nsStubImageDecoderObserver.cpp \
-		nsStubMutationObserver.cpp \
-		nsStyledElement.cpp \
-		nsStyleLinkElement.cpp \
-		nsSyncLoadService.cpp \
-		nsTextFragment.cpp \
-		nsTextNode.cpp \
-		nsTraversal.cpp \
-		nsTreeSanitizer.cpp \
-		nsTreeWalker.cpp \
-		nsWebSocket.cpp \
-		nsXHTMLContentSerializer.cpp \
-		nsXMLContentSerializer.cpp \
-		nsXMLHttpRequest.cpp \
-		nsXMLNameSpaceMap.cpp \
-		FragmentOrElement.cpp \
-		Link.cpp \
-		nsBlobProtocolHandler.cpp \
-		nsBlobURI.cpp \
-		nsFrameMessageManager.cpp \
-		nsInProcessTabChildGlobal.cpp \
-		ThirdPartyUtil.cpp \
-		nsEventSource.cpp \
-		FileIOObject.cpp \
-		nsDOMMutationObserver.cpp \
-		$(NULL)
-
-# Are we targeting x86-32 or x86-64?  If so, we want to include SSE2 code for
-# nsTextFragment.cpp
-ifneq (,$(INTEL_ARCHITECTURE))
-CPPSRCS += nsTextFragmentSSE2.cpp
 endif
 
 GQI_SRCS = contentbase.gqi
@@ -151,9 +27,6 @@ GQI_SRCS = contentbase.gqi
 FORCE_STATIC_LIB = 1
 
 EXTRA_COMPONENTS = \
-		$(srcdir)/nsBadCertHandler.js \
-		nsBadCertHandler.manifest \
-		contentSecurityPolicy.js \
 		contentSecurityPolicy.manifest \
 		contentAreaDropListener.js \
 		contentAreaDropListener.manifest \
@@ -169,25 +42,28 @@ include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
-INCLUDES	+= \
-		-I$(srcdir)/../../events/src \
-		-I$(srcdir)/../../xml/content/src \
-		-I$(srcdir)/../../../layout/xul/base/src \
-		-I$(srcdir)/../../xul/content/src \
-		-I$(srcdir)/../../xul/document/src \
-		-I$(srcdir)/../../html/content/src \
-		-I$(srcdir)/../../base/src \
-		-I$(srcdir)/../../xbl/src \
-		-I$(srcdir)/../../../layout/generic \
-		-I$(srcdir)/../../../layout/style \
-		-I$(srcdir)/../../../dom/base \
-		-I$(srcdir)/../../xml/document/src \
-		-I$(topsrcdir)/xpcom/io \
-		-I$(topsrcdir)/dom/ipc \
-		-I$(topsrcdir)/js/xpconnect/src \
-		-I$(topsrcdir)/caps/include \
-		-I$(topsrcdir)/netwerk/base/src \
-		$(NULL)
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/caps/include \
+  -I$(topsrcdir)/content/events/src \
+  -I$(topsrcdir)/content/html/content/src \
+  -I$(topsrcdir)/content/html/document/src \
+  -I$(topsrcdir)/content/xbl/src \
+  -I$(topsrcdir)/content/xml/content/src \
+  -I$(topsrcdir)/content/xml/document/src \
+  -I$(topsrcdir)/content/xul/content/src \
+  -I$(topsrcdir)/content/xul/document/src \
+  -I$(topsrcdir)/dom/base \
+  -I$(topsrcdir)/dom/ipc \
+  -I$(topsrcdir)/image/src \
+  -I$(topsrcdir)/js/xpconnect/src \
+  -I$(topsrcdir)/layout/base \
+  -I$(topsrcdir)/layout/generic \
+  -I$(topsrcdir)/layout/style \
+  -I$(topsrcdir)/layout/svg \
+  -I$(topsrcdir)/layout/xul/base/src \
+  -I$(topsrcdir)/netwerk/base/src \
+  -I$(topsrcdir)/js/xpconnect/wrappers \
+  $(NULL)
 
 DEFINES += -D_IMPL_NS_LAYOUT
 DEFINES += -DHB_DONT_DEFINE_STDINT

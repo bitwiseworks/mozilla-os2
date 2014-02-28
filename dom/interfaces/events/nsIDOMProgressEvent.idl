@@ -7,22 +7,26 @@
 #include "nsIDOMEvent.idl"
 
 /**
- * The nsIDOMProgressEvent is used in the media elements (<video> and <audio>
- * to inform of the progress of the media download. It is currently undefined
- * in the HTML5 specification. This implementation is a placeholder until
- * the specification is complete and is compatible with the WebKit ProgressEvent.
+ * ProgressEvent can be used for measuring progress.
  */
 
-[scriptable, builtinclass, uuid(c5b7ec31-b846-4a9f-b81e-859e76a74f6b)]
+[scriptable, builtinclass, uuid(e0682338-4c3f-4d3a-9487-d7492ea76335)]
 interface nsIDOMProgressEvent : nsIDOMEvent
 {
   readonly attribute boolean lengthComputable;
   readonly attribute unsigned long long loaded;
   readonly attribute unsigned long long total;
+  [noscript]
   void initProgressEvent(in DOMString typeArg,
                          in boolean canBubbleArg,
                          in boolean cancelableArg,
                          in boolean lengthComputableArg,
                          in unsigned long long loadedArg,
                          in unsigned long long totalArg);
+};
+
+dictionary ProgressEventInit : EventInit {
+  boolean lengthComputable;
+  unsigned long long loaded;
+  unsigned long long total;
 };

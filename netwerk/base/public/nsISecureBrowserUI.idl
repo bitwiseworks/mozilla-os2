@@ -8,17 +8,17 @@
 
 interface nsIDOMWindow;
 interface nsIDOMElement;
+interface nsIDocShell;
 
-[scriptable, uuid(081e31e0-a144-11d3-8c7c-00609792278c)]
+[scriptable, uuid(62f6c5be-ea8c-4fab-8e5c-d1580b50ec3f)]
 interface nsISecureBrowserUI : nsISupports
 {
     void init(in nsIDOMWindow window);
+    void setDocShell(in nsIDocShell docShell);
 
     readonly attribute unsigned long state;
-    readonly attribute AString tooltipText;
 };
 
 %{C++
 #define NS_SECURE_BROWSER_UI_CONTRACTID "@mozilla.org/secure_browser_ui;1"
-#define NS_SECURE_BROWSER_UI_CLASSNAME "Mozilla Secure Browser UI Handler"
 %}

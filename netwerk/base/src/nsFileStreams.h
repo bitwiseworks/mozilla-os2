@@ -7,6 +7,7 @@
 #define nsFileStreams_h__
 
 #include "nsAlgorithm.h"
+#include "nsAutoPtr.h"
 #include "nsIFileStreams.h"
 #include "nsIFile.h"
 #include "nsIInputStream.h"
@@ -18,16 +19,19 @@
 #include "prlog.h"
 #include "prio.h"
 #include "nsIIPCSerializableInputStream.h"
+#include "nsReadLine.h"
+#include <algorithm>
 
-template<class CharType> class nsLineBuffer;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class nsFileStreamBase : public nsISeekableStream
+class nsFileStreamBase : public nsISeekableStream,
+                         public nsIFileMetadata
 {
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSISEEKABLESTREAM
+    NS_DECL_NSIFILEMETADATA
 
     nsFileStreamBase();
     virtual ~nsFileStreamBase();
@@ -111,10 +115,8 @@ public:
     NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
 
     NS_IMETHOD Close();
-    NS_IMETHOD Available(uint64_t* _retval)
-    {
-        return nsFileStreamBase::Available(_retval);
-    }
+    NS_IMETHOD Tell(int64_t *aResult);
+    NS_IMETHOD Available(uint64_t* _retval);
     NS_IMETHOD Read(char* aBuf, uint32_t aCount, uint32_t* _retval);
     NS_IMETHOD ReadSegments(nsWriteSegmentFun aWriter, void *aClosure,
                             uint32_t aCount, uint32_t* _retval)
@@ -125,18 +127,16 @@ public:
     NS_IMETHOD IsNonBlocking(bool* _retval)
     {
         return nsFileStreamBase::IsNonBlocking(_retval);
-    } 
-    
+    }
+
     // Overrided from nsFileStreamBase
     NS_IMETHOD Seek(int32_t aWhence, int64_t aOffset);
 
     nsFileInputStream()
-      : mIOFlags(0), mPerm(0)
-    {
-        mLineBuffer = nullptr;
-    }
+      : mLineBuffer(nullptr), mIOFlags(0), mPerm(0), mCachedPosition(0)
+    {}
 
-    virtual ~nsFileInputStream() 
+    virtual ~nsFileInputStream()
     {
         Close();
     }
@@ -145,7 +145,7 @@ public:
     Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
 
 protected:
-    nsLineBuffer<char> *mLineBuffer;
+    nsAutoPtr<nsLineBuffer<char> > mLineBuffer;
 
     /**
      * The file being opened.
@@ -160,16 +160,17 @@ protected:
      */
     int32_t mPerm;
 
+    /**
+     * Cached position for Tell for automatically reopening streams.
+     */
+    int64_t mCachedPosition;
+
 protected:
     /**
      * Internal, called to open a file.  Parameters are the same as their
      * Init() analogues.
      */
     nsresult Open(nsIFile* file, int32_t ioFlags, int32_t perm);
-    /**
-     * Reopen the file (for OPEN_ON_READ only!)
-     */
-    nsresult Reopen() { return Open(mFile, mIOFlags, mPerm); }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -179,6 +180,7 @@ class nsPartialFileInputStream : public nsFileInputStream,
 {
 public:
     using nsFileInputStream::Init;
+    using nsFileInputStream::Read;
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIPARTIALFILEINPUTSTREAM
     NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
@@ -197,7 +199,7 @@ public:
 
 private:
     uint64_t TruncateSize(uint64_t aSize) {
-          return NS_MIN<uint64_t>(mLength - mPosition, aSize);
+          return std::min<uint64_t>(mLength - mPosition, aSize);
     }
 
     uint64_t mStart;
@@ -261,13 +263,11 @@ protected:
 class nsFileStream : public nsFileStreamBase,
                      public nsIInputStream,
                      public nsIOutputStream,
-                     public nsIFileStream,
-                     public nsIFileMetadata
+                     public nsIFileStream
 {
 public:
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIFILESTREAM
-    NS_DECL_NSIFILEMETADATA
     NS_FORWARD_NSIINPUTSTREAM(nsFileStreamBase::)
 
     // Can't use NS_FORWARD_NSIOUTPUTSTREAM due to overlapping methods

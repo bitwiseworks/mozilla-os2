@@ -8,7 +8,6 @@
 
 #include "nsIFileStorage.h"
 #include "nsISeekableStream.h"
-#include "nsIStandardFileStream.h"
 #include "mozilla/Attributes.h"
 
 #include "FileHelper.h"
@@ -167,7 +166,7 @@ FileInputStreamWrapper::Read(char* aBuf, uint32_t aCount, uint32_t* _retval)
   if (mFirstTime) {
     mFirstTime = false;
 
-    if (mOffset != LL_MAXUINT) {
+    if (mOffset != UINT64_MAX) {
       nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mInputStream);
       if (seekable) {
         rv = seekable->Seek(nsISeekableStream::NS_SEEK_SET, mOffset);
@@ -246,16 +245,6 @@ FileOutputStreamWrapper::Close()
   nsresult rv = NS_OK;
 
   if (!mFirstTime) {
-    // We must flush buffers of the stream on the same thread on which we wrote
-    // some data.
-    nsCOMPtr<nsIStandardFileStream> sstream = do_QueryInterface(mFileStream);
-    if (sstream) {
-      rv = sstream->FlushBuffers();
-      if (NS_FAILED(rv)) {
-        NS_WARNING("Failed to flush buffers of the stream!");
-      }
-    }
-
     NS_ASSERTION(PR_GetCurrentThread() == mWriteThread,
                  "Unsetting thread locals on wrong thread!");
     mFileHelper->mFileStorage->UnsetThreadLocals();
@@ -293,7 +282,7 @@ FileOutputStreamWrapper::Write(const char* aBuf, uint32_t aCount,
 
     nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mOutputStream);
     if (seekable) {
-      if (mOffset == LL_MAXUINT) {
+      if (mOffset == UINT64_MAX) {
         rv = seekable->Seek(nsISeekableStream::NS_SEEK_END, 0);
       }
       else {

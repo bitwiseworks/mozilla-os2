@@ -1,12 +1,11 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef SharedContext_h__
-#define SharedContext_h__
+#ifndef frontend_SharedContext_h
+#define frontend_SharedContext_h
 
 #include "jstypes.h"
 #include "jsatom.h"
@@ -15,18 +14,20 @@
 #include "jsprvtd.h"
 #include "jspubtd.h"
 
+#include "builtin/Module.h"
 #include "frontend/ParseMaps.h"
 #include "frontend/ParseNode.h"
+#include "frontend/TokenStream.h"
 #include "vm/ScopeObject.h"
 
 namespace js {
 namespace frontend {
 
-class ContextFlags {
-
+// These flags apply to both global and function contexts.
+class AnyContextFlags
+{
     // This class's data is all private and so only visible to these friends.
-    friend struct SharedContext;
-    friend struct FunctionBox;
+    friend class SharedContext;
 
     // True if "use strict"; appears in the body instead of being inherited.
     bool            hasExplicitUseStrict:1;
@@ -54,12 +55,30 @@ class ContextFlags {
     //
     bool            bindingsAccessedDynamically:1;
 
+    // Whether this script, or any of its inner scripts contains a debugger
+    // statement which could potentially read or write anywhere along the
+    // scope chain.
+    bool            hasDebuggerStatement:1;
+
+  public:
+    AnyContextFlags()
+     :  hasExplicitUseStrict(false),
+        bindingsAccessedDynamically(false),
+        hasDebuggerStatement(false)
+    { }
+};
+
+class FunctionContextFlags
+{
+    // This class's data is all private and so only visible to these friends.
+    friend class FunctionBox;
+
     // We parsed a yield statement in the function.
-    bool            funIsGenerator:1;
+    bool isGenerator:1;
 
     // The function or a function that encloses it may define new local names
     // at runtime through means other than calling eval.
-    bool            funMightAliasLocals:1;
+    bool mightAliasLocals:1;
 
     // This function does something that can extend the set of bindings in its
     // call objects --- it does a direct eval in non-strict code, or includes a
@@ -68,7 +87,11 @@ class ContextFlags {
     // This flag is *not* inherited by enclosed or enclosing functions; it
     // applies only to the function in whose flags it appears.
     //
-    bool            funHasExtensibleScope:1;
+    bool hasExtensibleScope:1;
+
+    // This function refers directly to its name in a way which requires the
+    // name to be a separate object on the scope chain.
+    bool needsDeclEnvObject:1;
 
     // Technically, every function has a binding named 'arguments'. Internally,
     // this binding is only added when 'arguments' is mentioned by the function
@@ -91,7 +114,7 @@ class ContextFlags {
     // have no special semantics: the initial value is unconditionally the
     // actual argument (or undefined if nactual < nformal).
     //
-    bool            funArgumentsHasLocalBinding:1;
+    bool argumentsHasLocalBinding:1;
 
     // In many cases where 'arguments' has a local binding (as described above)
     // we do not need to actually create an arguments object in the function
@@ -102,19 +125,20 @@ class ContextFlags {
     // be unsound in several cases. The frontend filters out such cases by
     // setting this flag which eagerly sets script->needsArgsObj to true.
     //
-    bool            funDefinitelyNeedsArgsObj:1;
+    bool definitelyNeedsArgsObj:1;
 
   public:
-    ContextFlags(JSContext *cx)
-     :  hasExplicitUseStrict(false),
-        bindingsAccessedDynamically(false),
-        funIsGenerator(false),
-        funMightAliasLocals(false),
-        funHasExtensibleScope(false),
-        funArgumentsHasLocalBinding(false),
-        funDefinitelyNeedsArgsObj(false)
+    FunctionContextFlags()
+     :  isGenerator(false),
+        mightAliasLocals(false),
+        hasExtensibleScope(false),
+        needsDeclEnvObject(false),
+        argumentsHasLocalBinding(false),
+        definitelyNeedsArgsObj(false)
     { }
 };
+
+class GlobalSharedContext;
 
 /*
  * The struct SharedContext is part of the current parser context (see
@@ -122,82 +146,130 @@ class ContextFlags {
  * the bytecode emitter. Note however, that this information is not shared
  * between the two; they simply reuse the same data structure.
  */
-struct SharedContext {
-    JSContext       *const context;
+class SharedContext
+{
+  public:
+    JSContext *const context;
+    AnyContextFlags anyCxFlags;
+    bool strict;
 
+    // If it's function code, funbox must be non-NULL and scopeChain must be NULL.
+    // If it's global code, funbox must be NULL.
+    inline SharedContext(JSContext *cx, bool strict);
+
+    virtual ObjectBox *toObjectBox() = 0;
+    inline bool isGlobalSharedContext() { return toObjectBox() == NULL; }
+    inline bool isModuleBox() { return toObjectBox() && toObjectBox()->isModuleBox(); }
+    inline bool isFunctionBox() { return toObjectBox() && toObjectBox()->isFunctionBox(); }
+    inline GlobalSharedContext *asGlobalSharedContext();
+    inline ModuleBox *asModuleBox();
+    inline FunctionBox *asFunctionBox();
+
+    bool hasExplicitUseStrict()        const { return anyCxFlags.hasExplicitUseStrict; }
+    bool bindingsAccessedDynamically() const { return anyCxFlags.bindingsAccessedDynamically; }
+    bool hasDebuggerStatement()        const { return anyCxFlags.hasDebuggerStatement; }
+
+    void setExplicitUseStrict()           { anyCxFlags.hasExplicitUseStrict        = true; }
+    void setBindingsAccessedDynamically() { anyCxFlags.bindingsAccessedDynamically = true; }
+    void setHasDebuggerStatement()        { anyCxFlags.hasDebuggerStatement        = true; }
+
+    // JSOPTION_EXTRA_WARNINGS warnings or strict mode errors.
+    inline bool needStrictChecks();
+};
+
+class GlobalSharedContext : public SharedContext
+{
   private:
-    const RootedFunction fun_;      /* function to store argument and variable
-                                       names when it's a function's context */
-    FunctionBox *const funbox_;     /* null or box for function we're compiling
-                                       if inFunction() is true and not in
-                                       js::frontend::CompileFunctionBody */
-
     const RootedObject scopeChain_; /* scope chain object for the script */
 
   public:
-    ContextFlags    cxFlags;
+    inline GlobalSharedContext(JSContext *cx, JSObject *scopeChain, bool strict);
 
-
-    // strictModeState tracks the strictness of this context. Normally, it
-    // should be STRICT or NOTSTRICT. However, it can be UNKNOWN when parsing
-    // code for which the strictness has not yet been determined. This happens
-    // when parsing the defaults of a functions and non-"use strict" directive
-    // prologue strings.
-    //
-    // Unless its parent is strict, a context starts out in the UNKNOWN
-    // state. Parser::setStrictMode() should be called when a context has been
-    // determined to be strict or it cannot possibly become strict through the
-    // directive prologue. (It might become strict later if it is in the default
-    // expressions of a strict function.)
-    //
-    // If the state is STRICT, all context children are STRICT, too. Neither of
-    // the other two states have this behavior. A funbox with the UNKNOWN state
-    // can have STRICT children but not NOTSTRICT children. NOTSTRICT funboxes
-    // can have any kind of children.
-    //
-    // When parsing is done, no context may be in the UNKNOWN strictness state.
-    StrictMode::StrictModeState strictModeState;
-
-    // If it's function code, fun must be non-NULL and scopeChain must be NULL.
-    // If it's global code, fun and funbox must be NULL.
-    inline SharedContext(JSContext *cx, JSObject *scopeChain, JSFunction *fun, FunctionBox *funbox,
-                         StrictMode::StrictModeState sms);
-
-    // In theory, |fun*| flags are only relevant if |inFunction()| is true.
-    // However, we get and set in some cases where |inFunction()| is false,
-    // which is why |INFUNC| doesn't appear in all of the fun* and setFun*
-    // functions below.
-#define INFUNC JS_ASSERT(inFunction())
-
-    bool hasExplicitUseStrict()        const {         return cxFlags.hasExplicitUseStrict; }
-    bool bindingsAccessedDynamically() const {         return cxFlags.bindingsAccessedDynamically; }
-    bool funIsGenerator()              const { INFUNC; return cxFlags.funIsGenerator; }
-    bool funMightAliasLocals()         const {         return cxFlags.funMightAliasLocals; }
-    bool funHasExtensibleScope()       const {         return cxFlags.funHasExtensibleScope; }
-    bool funArgumentsHasLocalBinding() const { INFUNC; return cxFlags.funArgumentsHasLocalBinding; }
-    bool funDefinitelyNeedsArgsObj()   const { INFUNC; return cxFlags.funDefinitelyNeedsArgsObj; }
-
-    void setExplicitUseStrict()               {         cxFlags.hasExplicitUseStrict        = true; }
-    void setBindingsAccessedDynamically()     {         cxFlags.bindingsAccessedDynamically = true; }
-    void setFunIsGenerator()                  { INFUNC; cxFlags.funIsGenerator              = true; }
-    void setFunMightAliasLocals()             {         cxFlags.funMightAliasLocals         = true; }
-    void setFunHasExtensibleScope()           {         cxFlags.funHasExtensibleScope       = true; }
-    void setFunArgumentsHasLocalBinding()     { INFUNC; cxFlags.funArgumentsHasLocalBinding = true; }
-    void setFunDefinitelyNeedsArgsObj()       { JS_ASSERT(cxFlags.funArgumentsHasLocalBinding);
-                                                INFUNC; cxFlags.funDefinitelyNeedsArgsObj   = true; }
-
-#undef INFUNC
-
-    bool inFunction() const { return !!fun_; }
-
-    JSFunction *fun()      const { JS_ASSERT(inFunction());  return fun_; }
-    FunctionBox *funbox()  const { JS_ASSERT(inFunction());  return funbox_; }
-    JSObject *scopeChain() const { JS_ASSERT(!inFunction()); return scopeChain_; }
-
-    // JSOPTION_STRICT warnings or strict mode errors.
-    inline bool needStrictChecks();
-    inline bool inStrictMode();
+    ObjectBox *toObjectBox() { return NULL; }
+    JSObject *scopeChain() const { return scopeChain_; }
 };
+
+class ModuleBox : public ObjectBox, public SharedContext
+{
+  public:
+    Bindings bindings;
+
+    ModuleBox(JSContext *cx, ObjectBox *traceListHead, Module *module,
+              ParseContext<FullParseHandler> *pc);
+    ObjectBox *toObjectBox() { return this; }
+    Module *module() const { return &object->as<Module>(); }
+};
+
+class FunctionBox : public ObjectBox, public SharedContext
+{
+  public:
+    Bindings        bindings;               /* bindings for this function */
+    uint32_t        bufStart;
+    uint32_t        bufEnd;
+    uint32_t        startLine;
+    uint32_t        startColumn;
+    uint32_t        asmStart;               /* offset of the "use asm" directive, if present */
+    uint16_t        ndefaults;
+    bool            inWith:1;               /* some enclosing scope is a with-statement */
+    bool            inGenexpLambda:1;       /* lambda from generator expression */
+    bool            useAsm:1;               /* function contains "use asm" directive */
+    bool            insideUseAsm:1;         /* nested function of function of "use asm" directive */
+
+    // Fields for use in heuristics.
+    bool            usesArguments:1;  /* contains a free use of 'arguments' */
+    bool            usesApply:1;      /* contains an f.apply() call */
+
+    FunctionContextFlags funCxFlags;
+
+    template <typename ParseHandler>
+    FunctionBox(JSContext *cx, ObjectBox* traceListHead, JSFunction *fun, ParseContext<ParseHandler> *pc,
+                bool strict);
+
+    ObjectBox *toObjectBox() { return this; }
+    JSFunction *function() const { return &object->as<JSFunction>(); }
+
+    bool isGenerator()              const { return funCxFlags.isGenerator; }
+    bool mightAliasLocals()         const { return funCxFlags.mightAliasLocals; }
+    bool hasExtensibleScope()       const { return funCxFlags.hasExtensibleScope; }
+    bool needsDeclEnvObject()       const { return funCxFlags.needsDeclEnvObject; }
+    bool argumentsHasLocalBinding() const { return funCxFlags.argumentsHasLocalBinding; }
+    bool definitelyNeedsArgsObj()   const { return funCxFlags.definitelyNeedsArgsObj; }
+
+    void setIsGenerator()                  { funCxFlags.isGenerator              = true; }
+    void setMightAliasLocals()             { funCxFlags.mightAliasLocals         = true; }
+    void setHasExtensibleScope()           { funCxFlags.hasExtensibleScope       = true; }
+    void setNeedsDeclEnvObject()           { funCxFlags.needsDeclEnvObject       = true; }
+    void setArgumentsHasLocalBinding()     { funCxFlags.argumentsHasLocalBinding = true; }
+    void setDefinitelyNeedsArgsObj()       { JS_ASSERT(funCxFlags.argumentsHasLocalBinding);
+                                             funCxFlags.definitelyNeedsArgsObj   = true; }
+
+    // Return whether this function has either specified "use asm" or is
+    // (transitively) nested inside a function that has.
+    bool useAsmOrInsideUseAsm() const {
+        return useAsm || insideUseAsm;
+    }
+
+    void setStart(const TokenStream &tokenStream) {
+        bufStart = tokenStream.currentToken().pos.begin;
+        startLine = tokenStream.getLineno();
+        startColumn = tokenStream.getColumn();
+    }
+
+    bool isHeavyweight()
+    {
+        // Note: this should be kept in sync with JSFunction::isHeavyweight().
+        return bindings.hasAnyAliasedBindings() ||
+               hasExtensibleScope() ||
+               needsDeclEnvObject();
+    }
+};
+
+inline FunctionBox *
+SharedContext::asFunctionBox()
+{
+    JS_ASSERT(isFunctionBox());
+    return static_cast<FunctionBox*>(this);
+}
 
 /*
  * NB: If you add a new type of statement that is a scope, add it between
@@ -289,32 +361,6 @@ struct StmtInfoBase {
     }
 };
 
-struct FunctionBox : public ObjectBox
-{
-    FunctionBox     *siblings;
-    FunctionBox     *kids;
-    FunctionBox     *parent;
-    Bindings        bindings;               /* bindings for this function */
-    size_t          bufStart;
-    size_t          bufEnd;
-    uint16_t        ndefaults;
-    StrictMode::StrictModeState strictModeState;
-    bool            inWith:1;               /* some enclosing scope is a with-statement
-                                               or E4X filter-expression */
-    bool            inGenexpLambda:1;       /* lambda from generator expression */
-
-    ContextFlags    cxFlags;
-
-    FunctionBox(ObjectBox* traceListHead, JSObject *obj, ParseContext *pc,
-                StrictMode::StrictModeState sms);
-
-    bool funIsGenerator()        const { return cxFlags.funIsGenerator; }
-
-    JSFunction *function() const { return (JSFunction *) object; }
-
-    void recursivelySetStrictMode(StrictMode::StrictModeState strictness);
-};
-
 // Push the C-stack-allocated struct at stmt onto the StmtInfoPC stack.
 template <class ContextT>
 void
@@ -353,4 +399,4 @@ LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename ContextT::Stmt
 
 } // namespace js
 
-#endif // SharedContext_h__
+#endif /* frontend_SharedContext_h */

@@ -1,0 +1,61 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+EXPORTS.mozilla.dom.mobilemessage += [
+    'Constants.h',
+    'MobileMessageCallback.h',
+    'MobileMessageService.h',
+    'SmsChild.h',
+    'SmsParent.h',
+    'SmsServicesFactory.h',
+    'Types.h',
+]
+
+if CONFIG['MOZ_B2G_RIL']:
+    EXTRA_JS_MODULES = [
+        'ril/MmsPduHelper.jsm',
+        'ril/WspPduHelper.jsm',
+        'ril/mms_consts.js',
+        'ril/wap_consts.js',
+    ]
+else:
+    EXPORTS.mozilla.dom.mobilemessage += [
+        'MmsService.h',
+        'MobileMessageDatabaseService.h',
+    ]
+    CPP_SOURCES += [
+        'MobileMessageDatabaseService.cpp',
+        'MmsService.cpp',
+    ]
+
+EXPORTS.mozilla.dom += [
+    'MmsMessage.h',
+    'MobileMessageManager.h',
+    'SmsFilter.h',
+    'SmsManager.h',
+    'SmsMessage.h',
+    'SmsSegmentInfo.h',
+]
+
+CPP_SOURCES += [
+    'Constants.cpp',
+    'MmsMessage.cpp',
+    'MobileMessageCallback.cpp',
+    'MobileMessageCursorCallback.cpp',
+    'MobileMessageManager.cpp',
+    'MobileMessageService.cpp',
+    'MobileMessageThread.cpp',
+    'SmsChild.cpp',
+    'SmsFilter.cpp',
+    'SmsIPCService.cpp',
+    'SmsManager.cpp',
+    'SmsMessage.cpp',
+    'SmsParent.cpp',
+    'SmsSegmentInfo.cpp',
+    'SmsService.cpp',
+    'SmsServicesFactory.cpp',
+]
+

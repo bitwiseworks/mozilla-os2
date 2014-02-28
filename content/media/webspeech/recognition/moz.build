@@ -1,0 +1,43 @@
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'content'
+
+XPIDL_MODULE = 'dom_webspeechrecognition'
+
+XPIDL_SOURCES = [
+  'nsIDOMSpeechRecognitionError.idl',
+  'nsIDOMSpeechRecognitionEvent.idl',
+  'nsISpeechRecognitionService.idl'
+]
+
+TEST_DIRS += ['test']
+
+EXPORTS.mozilla.dom += [
+    'FakeSpeechRecognitionService.h',
+    'SpeechGrammar.h',
+    'SpeechGrammarList.h',
+    'SpeechRecognition.h',
+    'SpeechRecognitionAlternative.h',
+    'SpeechRecognitionResult.h',
+    'SpeechRecognitionResultList.h',
+    'SpeechStreamListener.h',
+]
+
+CPP_SOURCES += [
+    'EnableWebSpeechRecognitionCheck.cpp',
+    'FakeSpeechRecognitionService.cpp',
+    'SpeechGrammar.cpp',
+    'SpeechGrammarList.cpp',
+    'SpeechRecognition.cpp',
+    'SpeechRecognitionAlternative.cpp',
+    'SpeechRecognitionResult.cpp',
+    'SpeechRecognitionResultList.cpp',
+    'SpeechStreamListener.cpp',
+    'endpointer.cc',
+    'energy_endpointer.cc',
+    'energy_endpointer_params.cc',
+]
+

@@ -88,7 +88,7 @@ static nsresult ToManageableNumber(const nsDiscriminatedUnion& inData,
     case nsIDataType::VTYPE_UINT64:
         // XXX Need boundary checking here.
         // We may need to return NS_SUCCESS_LOSS_OF_INSIGNIFICANT_DATA
-        LL_L2D(outData->u.mDoubleValue, inData.u.mInt64Value);
+        outData->u.mDoubleValue = double(inData.u.mInt64Value);
         outData->mType = nsIDataType::VTYPE_DOUBLE;
         return NS_OK;
     case nsIDataType::VTYPE_FLOAT:
@@ -647,14 +647,14 @@ nsVariant::ConvertToInt64(const nsDiscriminatedUnion& data, int64_t *_retval)
     switch(tempData.mType)
     {
     case nsIDataType::VTYPE_INT32:
-        LL_I2L(*_retval, tempData.u.mInt32Value);
+        *_retval = tempData.u.mInt32Value;
         return rv;
     case nsIDataType::VTYPE_UINT32:
-        LL_UI2L(*_retval, tempData.u.mUint32Value);
+        *_retval = tempData.u.mUint32Value;
         return rv;
     case nsIDataType::VTYPE_DOUBLE:
         // XXX should check for data loss here!
-        LL_D2L(*_retval, tempData.u.mDoubleValue);
+        *_retval = tempData.u.mDoubleValue;
         return rv;
     default:
         NS_ERROR("bad type returned from ToManageableNumber");
@@ -790,7 +790,7 @@ static nsresult ToString(const nsDiscriminatedUnion& data,
 #define CASE__APPENDFLOAT_NUMBER(type_, member_)                        \
     case nsIDataType :: type_ :                                         \
     {                                                                   \
-        nsCAutoString str;                                              \
+        nsAutoCString str;                                              \
         str.AppendFloat(data.u. member_);                               \
         outString.Assign(str);                                          \
         return NS_OK;                                                   \
@@ -868,7 +868,7 @@ nsVariant::ConvertToAString(const nsDiscriminatedUnion& data,
         return NS_OK;
     default:
     {
-        nsCAutoString tempCString;
+        nsAutoCString tempCString;
         nsresult rv = ToString(data, tempCString);
         if(NS_FAILED(rv))
             return rv;
@@ -971,7 +971,7 @@ nsVariant::ConvertToAUTF8String(const nsDiscriminatedUnion& data,
     }
     default:
     {
-        nsCAutoString tempCString;
+        nsAutoCString tempCString;
         nsresult rv = ToString(data, tempCString);
         if(NS_FAILED(rv))
             return rv;
@@ -1002,7 +1002,7 @@ nsVariant::ConvertToStringWithSize(const nsDiscriminatedUnion& data,
                                    uint32_t *size, char **str)
 {
     nsAutoString  tempString;
-    nsCAutoString tempCString;
+    nsAutoCString tempCString;
     nsresult rv;
 
     switch(data.mType)
@@ -1080,7 +1080,7 @@ nsVariant::ConvertToWStringWithSize(const nsDiscriminatedUnion& data,
                                     uint32_t *size, PRUnichar **str)
 {
     nsAutoString  tempString;
-    nsCAutoString tempCString;
+    nsAutoCString tempCString;
     nsresult rv;
 
     switch(data.mType)

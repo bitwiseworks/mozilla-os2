@@ -6,13 +6,15 @@ mk_add_options MOZ_UNIFY_BDATE=1
 
 mk_add_options MOZ_POSTFLIGHT_ALL+=build/macosx/universal/flight.mk
 
-# Note, the version (10) is used by libffi's configure.
-ac_add_app_options i386 --target=i386-apple-darwin10
-ac_add_app_options x86_64 --target=x86_64-apple-darwin10
+DARWIN_VERSION=`uname -r`
+ac_add_app_options i386 --target=i386-apple-darwin$DARWIN_VERSION
+ac_add_app_options x86_64 --target=x86_64-apple-darwin$DARWIN_VERSION
+ac_add_app_options i386 --with-unify-dist=../x86_64/dist
+ac_add_app_options x86_64 --with-unify-dist=../i386/dist
 
 ac_add_options --with-macos-sdk=/Developer/SDKs/MacOSX10.6.sdk
 
-. $topsrcdir/build/macosx/common
+. $topsrcdir/build/macosx/mozconfig.common
 
 # $MOZ_BUILD_APP is only defined when sourced by configure.  That's not a
 # problem, because the variables it affects only need to be set for
@@ -39,7 +41,7 @@ if test "$MOZ_BUILD_APP" = "i386" -o "$MOZ_BUILD_APP" = "x86_64"; then
   AR=ar
   AS=$CC
   LD=ld
-  STRIP="strip -x -S"
+  STRIP="strip"
 
   # Let configure know that we mean business.
   if test "$NATIVE_CPU" != "$TARGET_CPU" ; then

@@ -9,8 +9,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = skia_npapi
-LIBRARY_NAME     = skia_npapi
 LIBXUL_LIBRARY   = 1
 EXPORT_LIBRARY   = 1
 
@@ -26,15 +24,5 @@ LOCAL_INCLUDES += \
   -I$(topsrcdir)/gfx/gl \
   $(NULL)
 
-
-CPPSRCS = \
-  SkANP.cpp \
-  ANPCanvas.cpp \
-  ANPPaint.cpp \
-  ANPPath.cpp \
-  ANPTypeface.cpp \
-  $(NULL)
-
-EXPORTS = SkANP.h
 
 include $(topsrcdir)/config/rules.mk

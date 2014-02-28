@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const EXPORTED_SYMBOLS = ['PrefsEngine', 'PrefRec'];
+this.EXPORTED_SYMBOLS = ['PrefsEngine', 'PrefRec'];
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -15,12 +15,12 @@ Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-common/utils.js");
-Cu.import("resource://services-common/preferences.js");
 Cu.import("resource://gre/modules/LightweightThemeManager.jsm");
+Cu.import("resource://gre/modules/Preferences.jsm");
 
 const PREFS_GUID = CommonUtils.encodeBase64URL(Services.appinfo.ID);
 
-function PrefRec(collection, id) {
+this.PrefRec = function PrefRec(collection, id) {
   CryptoWrapper.call(this, collection, id);
 }
 PrefRec.prototype = {
@@ -31,8 +31,8 @@ PrefRec.prototype = {
 Utils.deferGetSet(PrefRec, "cleartext", ["value"]);
 
 
-function PrefsEngine() {
-  SyncEngine.call(this, "Prefs");
+this.PrefsEngine = function PrefsEngine(service) {
+  SyncEngine.call(this, "Prefs", service);
 }
 PrefsEngine.prototype = {
   __proto__: SyncEngine.prototype,
@@ -65,8 +65,8 @@ PrefsEngine.prototype = {
 };
 
 
-function PrefStore(name) {
-  Store.call(this, name);
+function PrefStore(name, engine) {
+  Store.call(this, name, engine);
   Svc.Obs.add("profile-before-change", function() {
     this.__prefs = null;
   }, this);
@@ -188,8 +188,8 @@ PrefStore.prototype = {
   }
 };
 
-function PrefTracker(name) {
-  Tracker.call(this, name);
+function PrefTracker(name, engine) {
+  Tracker.call(this, name, engine);
   Svc.Obs.add("profile-before-change", this);
   Svc.Obs.add("weave:engine:start-tracking", this);
   Svc.Obs.add("weave:engine:stop-tracking", this);

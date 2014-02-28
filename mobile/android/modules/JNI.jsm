@@ -2,19 +2,23 @@
  *
  * Example Usage:
  *   let jni = new JNI();
- *   cls = jni.findClass("org.mozilla.gecko.GeckoAppShell");
+ *   cls = jni.findClass("org/mozilla/gecko/GeckoAppShell");
  *   method = jni.getStaticMethodID(cls, "getPreferredIconSize", "(I)I");
  *
  *   let val = jni.callStaticIntMethod(cls, method, 3);
  *   // close the jni library when you are done
  *   jni.close();
+ *
+ * Note: the getters in this file are deleted and replaced with static
+ * values once computed, as in, for example
+ * http://code.activestate.com/recipes/577310-using-a-getter-for-a-one-time-calculation-of-a-jav/
  */
-let EXPORTED_SYMBOLS = ["JNI"];
+this.EXPORTED_SYMBOLS = ["JNI"];
 
 Components.utils.import("resource://gre/modules/ctypes.jsm")
 Components.utils.import("resource://gre/modules/Services.jsm")
 
-function JNI() { }
+this.JNI = function JNI() { }
 
 JNI.prototype = {
   get lib() {
@@ -81,7 +85,7 @@ JNI.prototype = {
   },
 
   get _getStaticMethodID() {
-    delete this._getStatisMethodID;
+    delete this._getStaticMethodID;
     return this._getStaticMethodID = this.lib.declare("jsjni_GetStaticMethodID",
                                                       ctypes.default_abi,
                                                       this.types.jmethodID,
@@ -120,7 +124,7 @@ JNI.prototype = {
 
   callStaticVoidMethod: function(aClass, aMethod) {
     let args = Array.prototype.slice.apply(arguments, [2]);
-    this._callStaticVoidMethod(aClass, aMethodId.methodId, this.getArgs(aMethod, args));
+    this._callStaticVoidMethod(aClass, aMethod.methodId, this.getArgs(aMethod, args));
     if (this.exceptionCheck())
        throw("Error calling static void method");
   },

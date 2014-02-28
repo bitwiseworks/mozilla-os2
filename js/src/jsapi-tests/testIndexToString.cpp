@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -15,12 +15,12 @@
 
 #include "vm/String-inl.h"
 
-using namespace mozilla;
+using mozilla::ArrayLength;
 
 template<size_t N> JSFlatString *
 NewString(JSContext *cx, const jschar (&chars)[N])
 {
-    return js_NewStringCopyN(cx, chars, N);
+    return js_NewStringCopyN<js::CanGC>(cx, chars, N);
 }
 
 static const struct TestPair {
@@ -63,7 +63,7 @@ BEGIN_TEST(testIndexToString)
         CHECK(str);
 
         if (!js::StaticStrings::hasUint(u))
-            CHECK(cx->compartment->dtoaCache.lookup(10, u) == str);
+            CHECK(cx->compartment()->dtoaCache.lookup(10, u) == str);
 
         JSBool match = JS_FALSE;
         CHECK(JS_StringEqualsAscii(cx, str, tests[i].expected, &match));

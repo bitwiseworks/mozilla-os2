@@ -1,0 +1,43 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'accessibility'
+
+EXPORTS += [
+    'IUnknownImpl.h',
+]
+
+EXPORTS.mozilla.a11y += [
+    'AccessibleWrap.h',
+    'Compatibility.h',
+    'HyperTextAccessibleWrap.h',
+]
+
+CPP_SOURCES += [
+    'AccessibleWrap.cpp',
+    'ApplicationAccessibleWrap.cpp',
+    'ARIAGridAccessibleWrap.cpp',
+    'DocAccessibleWrap.cpp',
+    'HTMLTableAccessibleWrap.cpp',
+    'HTMLWin32ObjectAccessible.cpp',
+    'HyperTextAccessibleWrap.cpp',
+    'ImageAccessibleWrap.cpp',
+    'IUnknownImpl.cpp',
+    'nsWinUtils.cpp',
+    'Compatibility.cpp',
+    'EnumVariant.cpp',
+    'Platform.cpp',
+    'ServiceProvider.cpp',
+    'RootAccessibleWrap.cpp',
+    'TextLeafAccessibleWrap.cpp',
+]
+
+if CONFIG['MOZ_XUL']:
+    CPP_SOURCES += [
+        'XULListboxAccessibleWrap.cpp',
+        'XULMenuAccessibleWrap.cpp',
+        'XULTreeGridAccessibleWrap.cpp',
+    ]

@@ -10,26 +10,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= ucvja
-LIBRARY_NAME	= ucvja_s
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
 
-
-CPPSRCS		= \
-		nsJapaneseToUnicode.cpp \
-		nsUnicodeToSJIS.cpp \
-		nsUnicodeToEUCJP.cpp \
-		nsUnicodeToISO2022JP.cpp \
-		nsUnicodeToJISx0201.cpp \
-		$(NULL)
-
-EXPORTS		= \
-		nsUCVJACID.h \
-		nsUCVJA2CID.h \
-		$(NULL)
-
-#SHARED_LIBRARY_LIBS = $(DIST)/lib/$(LIB_PREFIX)ucvutil_s.$(LIB_SUFFIX)
 
 LOCAL_INCLUDES	= -I$(srcdir)/../util
 

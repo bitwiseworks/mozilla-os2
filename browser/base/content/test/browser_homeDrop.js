@@ -4,6 +4,15 @@
 function test() {
   waitForExplicitFinish();
 
+  let str = Cc["@mozilla.org/supports-string;1"]
+              .createInstance(Ci.nsISupportsString);
+  str.data = "about:mozilla";
+  Services.prefs.setComplexValue("browser.startup.homepage",
+                                 Ci.nsISupportsString, str);
+  registerCleanupFunction(() => {
+    Services.prefs.clearUserPref("browser.startup.homepage");
+  });
+
   // Open a new tab, since starting a drag from the home button activates it and
   // we don't want to interfere with future tests by loading the home page.
   let newTab = gBrowser.selectedTab = gBrowser.addTab();
@@ -13,8 +22,8 @@ function test() {
 
   let scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
                      getService(Ci.mozIJSSubScriptLoader);
-  let chromeUtils = {};
-  scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", chromeUtils);
+  let ChromeUtils = {};
+  scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
 
   let homeButton = document.getElementById("home-button");
   ok(homeButton, "home button present");
@@ -28,7 +37,7 @@ function test() {
     executeSoon(function () {
       let consoleListener = {
         observe: function (m) {
-          if (m.message.indexOf("NS_ERROR_DOM_BAD_URI") > -1) {
+          if (m.message.contains("NS_ERROR_DOM_BAD_URI")) {
             ok(true, "drop was blocked");
             executeSoon(finish);
           }
@@ -44,14 +53,14 @@ function test() {
         // The drop handler throws an exception when dragging URIs that inherit
         // principal, e.g. javascript:
         expectUncaughtException();
-        chromeUtils.synthesizeDrop(homeButton, homeButton, [[{type: "text/plain", data: "javascript:8888"}]], "copy", window, EventUtils);
+        ChromeUtils.synthesizeDrop(homeButton, homeButton, [[{type: "text/plain", data: "javascript:8888"}]], "copy", window);
       });
     })
   });
 
   Services.wm.addListener(dialogListener);
 
-  chromeUtils.synthesizeDrop(homeButton, homeButton, [[{type: "text/plain", data: "http://mochi.test:8888/"}]], "copy", window, EventUtils);
+  ChromeUtils.synthesizeDrop(homeButton, homeButton, [[{type: "text/plain", data: "http://mochi.test:8888/"}]], "copy", window);
 }
 
 function WindowListener(aURL, aCallback) {

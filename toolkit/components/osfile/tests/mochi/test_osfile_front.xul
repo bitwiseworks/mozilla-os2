@@ -11,6 +11,8 @@
           src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
   <script type="application/javascript"
           src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"/>
+  <script type="application/javascript"
+          src="worker_handler.js"/>
   <script type="application/javascript">
   <![CDATA[
 
@@ -18,7 +20,7 @@ let worker;
 let main = this;
 
 function test() {
-  ok(true, "test_osfile_front.xul: Starting test");
+  info("test_osfile_front.xul: Starting test");
 
   // Test OS.Constants.Path
 
@@ -34,29 +36,9 @@ function test() {
 
   worker = new ChromeWorker("worker_test_osfile_front.js");
   SimpleTest.waitForExplicitFinish();
-  ok(true, "test_osfile_front.xul: Chrome worker created");
+  info("test_osfile_front.xul: Chrome worker created");
   dump("MAIN: go\n");
-  worker.onerror = function(error) {
-    error.preventDefault();
-    ok(false, "error "+error);
-  }
-  worker.onmessage = function(msg) {
-    switch (msg.data.kind) {
-    case "is":
-      return SimpleTest.is(msg.data.a, msg.data.b, msg.data.description);
-    case "isnot":
-      return SimpleTest.isnot(msg.data.a, msg.data.b, msg.data.description);
-    case "ok":
-      return SimpleTest.ok(msg.data.condition, msg.data.description);
-    case "finish":
-      worker.terminate();
-      SimpleTest.finish();
-      return;
-    default:
-      SimpleTest.ok(false, "test_osfile_front.xul: wrong message "+JSON.stringify(msg.data));
-      return;
-    }
-  };
+  worker_handler(worker);
   worker.postMessage(0);
   ok(true, "test_osfile_front.xul: Test in progress");
 };

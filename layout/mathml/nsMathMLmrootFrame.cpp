@@ -12,6 +12,7 @@
 #include "nsRenderingContext.h"
 
 #include "nsMathMLmrootFrame.h"
+#include <algorithm>
 
 //
 // <msqrt> and <mroot> -- form a radical - implementation
@@ -50,12 +51,12 @@ nsMathMLmrootFrame::~nsMathMLmrootFrame()
 {
 }
 
-NS_IMETHODIMP
+void
 nsMathMLmrootFrame::Init(nsIContent*      aContent,
                          nsIFrame*        aParent,
                          nsIFrame*        aPrevInFlow)
 {
-  nsresult rv = nsMathMLContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsMathMLContainerFrame::Init(aContent, aParent, aPrevInFlow);
   
   nsPresContext *presContext = PresContext();
 
@@ -65,8 +66,6 @@ nsMathMLmrootFrame::Init(nsIContent*      aContent,
   nsAutoString sqrChar; sqrChar.Assign(kSqrChar);
   mSqrChar.SetData(presContext, sqrChar);
   ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mSqrChar, true);
-
-  return rv;
 }
 
 NS_IMETHODIMP
@@ -85,24 +84,21 @@ nsMathMLmrootFrame::TransmitAutomaticData()
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsMathMLmrootFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                      const nsRect&           aDirtyRect,
                                      const nsDisplayListSet& aLists)
 {
   /////////////
   // paint the content we are square-rooting
-  nsresult rv = nsMathMLContainerFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsMathMLContainerFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
   
   /////////////
   // paint the sqrt symbol
   if (!NS_MATHML_HAS_ERROR(mPresentationData.flags)) {
-    rv = mSqrChar.Display(aBuilder, this, aLists, 0);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mSqrChar.Display(aBuilder, this, aLists, 0);
 
-    rv = DisplayBar(aBuilder, this, mBarRect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, mBarRect, aLists);
 
 #if defined(DEBUG) && defined(SHOW_BOUNDING_BOX)
     // for visual debug
@@ -110,11 +106,9 @@ nsMathMLmrootFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     mSqrChar.GetRect(rect);
     nsBoundingMetrics bm;
     mSqrChar.GetBoundingMetrics(bm);
-    rv = DisplayBoundingMetrics(aBuilder, this, rect.TopLeft(), bm, aLists);
+    DisplayBoundingMetrics(aBuilder, this, rect.TopLeft(), bm, aLists);
 #endif
   }
-
-  return rv;
 }
 
 static void
@@ -210,6 +204,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   }
   if (2 != count) {
     // report an error, encourage people to get their markups in order
+    ReportChildCountError();
     rv = ReflowError(renderingContext, aDesiredSize);
     aStatus = NS_FRAME_COMPLETE;
     NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
@@ -276,7 +271,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
                    NS_STRETCH_DIRECTION_VERTICAL, 
                    contSize, radicalSize,
                    NS_STRETCH_LARGER,
-                   NS_MATHML_IS_RTL(mPresentationData.flags));
+                   StyleVisibility()->mDirection);
   // radicalSize have changed at this point, and should match with
   // the bounding metrics of the char
   mSqrChar.GetBoundingMetrics(bmSqr);
@@ -285,16 +280,16 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   // the baseline will be that of the base.
   mBoundingMetrics.ascent = bmBase.ascent + psi + ruleThickness;
   mBoundingMetrics.descent = 
-    NS_MAX(bmBase.descent,
+    std::max(bmBase.descent,
            (bmSqr.ascent + bmSqr.descent - mBoundingMetrics.ascent));
   mBoundingMetrics.width = bmSqr.width + bmBase.width;
   mBoundingMetrics.leftBearing = bmSqr.leftBearing;
   mBoundingMetrics.rightBearing = bmSqr.width + 
-    NS_MAX(bmBase.width, bmBase.rightBearing); // take also care of the rule
+    std::max(bmBase.width, bmBase.rightBearing); // take also care of the rule
 
   aDesiredSize.ascent = mBoundingMetrics.ascent + leading;
   aDesiredSize.height = aDesiredSize.ascent +
-    NS_MAX(baseSize.height - baseSize.ascent,
+    std::max(baseSize.height - baseSize.ascent,
            mBoundingMetrics.descent + ruleThickness);
   aDesiredSize.width = mBoundingMetrics.width;
 
@@ -323,9 +318,9 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
 
   mBoundingMetrics.width = dxSqr + bmSqr.width + bmBase.width;
   mBoundingMetrics.leftBearing = 
-    NS_MIN(dxIndex + bmIndex.leftBearing, dxSqr + bmSqr.leftBearing);
+    std::min(dxIndex + bmIndex.leftBearing, dxSqr + bmSqr.leftBearing);
   mBoundingMetrics.rightBearing = dxSqr + bmSqr.width +
-    NS_MAX(bmBase.width, bmBase.rightBearing);
+    std::max(bmBase.width, bmBase.rightBearing);
 
   aDesiredSize.width = mBoundingMetrics.width;
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;

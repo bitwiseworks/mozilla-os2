@@ -18,6 +18,7 @@
 #include "mozilla/Attributes.h"
 
 #include "nspr.h"
+#include <algorithm>
 
 #define ASYNC_TEST // undefine this if you want to test sycnronous conversion.
 
@@ -55,18 +56,18 @@ public:
     // nsISupports declaration
     NS_DECL_ISUPPORTS
 
-    EndListener() {};
+    EndListener() {}
 
     // nsIStreamListener method
     NS_IMETHOD OnDataAvailable(nsIRequest* request, nsISupports *ctxt, nsIInputStream *inStr, 
-                               uint32_t sourceOffset, uint32_t count)
+                               uint64_t sourceOffset, uint32_t count)
     {
         nsresult rv;
         uint32_t read;
         uint64_t len64;
         rv = inStr->Available(&len64);
         if (NS_FAILED(rv)) return rv;
-        uint32_t len = (uint32_t)NS_MIN(len64, (uint64_t)(PR_UINT32_MAX - 1));
+        uint32_t len = (uint32_t)std::min(len64, (uint64_t)(UINT32_MAX - 1));
 
         char *buffer = (char*)nsMemory::Alloc(len + 1);
         if (!buffer) return NS_ERROR_OUT_OF_MEMORY;
@@ -100,7 +101,7 @@ NS_IMPL_ISUPPORTS2(EndListener,
 static uint32_t 
 saturated(uint64_t aValue)
 {
-    return (uint32_t)NS_MIN(aValue, (uint64_t)PR_UINT32_MAX);
+    return (uint32_t)std::min(aValue, (uint64_t)UINT32_MAX);
 }
  
 nsresult SendData(const char * aData, nsIStreamListener* aListener, nsIRequest* request) {
@@ -120,7 +121,7 @@ nsresult SendData(const char * aData, nsIStreamListener* aListener, nsIRequest* 
     while (avail > 0) {
         uint32_t count = saturated(avail);
         rv = aListener->OnDataAvailable(request, nullptr, dataStream,
-                                        saturated(offset), count);
+                                        offset, count);
         if (NS_FAILED(rv)) return rv;
 
         offset += count;
@@ -178,12 +179,12 @@ main(int argc, char* argv[])
 
         nsCOMPtr<nsICategoryManager> catman =
             do_GetService(NS_CATEGORYMANAGER_CONTRACTID, &rv);
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
         nsCString previous;
 
         nsCOMPtr<nsIStreamConverterService> StreamConvService =
                  do_GetService(kStreamConverterServiceCID, &rv);
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 
         // Define the *from* content type and *to* content-type for conversion.
         static const char fromStr[] = "a/foo";
@@ -201,14 +202,14 @@ main(int argc, char* argv[])
         nsCOMPtr<nsIChannel> channel;
         nsCOMPtr<nsIURI> dummyURI;
         rv = NS_NewURI(getter_AddRefs(dummyURI), "http://meaningless");
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 
         rv = NS_NewInputStreamChannel(getter_AddRefs(channel),
                                       dummyURI,
                                       nullptr,   // inStr
                                       "text/plain", // content-type
                                       -1);      // XXX fix contentLength
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 
         nsCOMPtr<nsIRequest> request(do_QueryInterface(channel));
 #endif
@@ -227,7 +228,7 @@ main(int argc, char* argv[])
         nsIStreamListener *converterListener = nullptr;
         rv = StreamConvService->AsyncConvertData(fromStr, toStr,
                                                  dataReceiver, nullptr, &converterListener);
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
         NS_RELEASE(dataReceiver);
 
         // at this point we have a stream listener to push data to, and the one
@@ -235,17 +236,17 @@ main(int argc, char* argv[])
         // going. Typically these On*() calls would be made inside their respective wrappers On*()
         // methods.
         rv = converterListener->OnStartRequest(request, nullptr);
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 
         rv = SEND_DATA("aaa");
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 
         rv = SEND_DATA("aaa");
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 
         // Finish the request.
         rv = converterListener->OnStopRequest(request, nullptr, rv);
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 
         NS_RELEASE(converterListener);
 #else
@@ -253,7 +254,7 @@ main(int argc, char* argv[])
         nsCOMPtr<nsIInputStream> convertedData;
         rv = StreamConvService->Convert(inputData, fromStr, toStr,
                                         nullptr, getter_AddRefs(convertedData));
-        if (NS_FAILED(rv)) return rv;
+        if (NS_FAILED(rv)) return -1;
 #endif
 
         // Enter the message pump to allow the URL load to proceed.
@@ -264,5 +265,5 @@ main(int argc, char* argv[])
     } // this scopes the nsCOMPtrs
     // no nsCOMPtrs are allowed to be alive when you call NS_ShutdownXPCOM
     NS_ShutdownXPCOM(nullptr);
-    return rv;
+    return 0;
 }

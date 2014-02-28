@@ -7,8 +7,7 @@
 #ifndef mozilla_dom_file_domarchivereader_h__
 #define mozilla_dom_file_domarchivereader_h__
 
-#include "nsIDOMArchiveReader.h"
-#include "nsIJSNativeInitializer.h"
+#include "nsWrapperCache.h"
 
 #include "FileCommon.h"
 
@@ -17,29 +16,44 @@
 #include "nsIDOMFile.h"
 #include "mozilla/Attributes.h"
 
+namespace mozilla {
+namespace dom {
+class ArchiveReaderOptions;
+class GlobalObject;
+} // namespace dom
+} // namespace mozilla
+
 BEGIN_FILE_NAMESPACE
 
 class ArchiveRequest;
 
-class ArchiveReader MOZ_FINAL : public nsIDOMArchiveReader,
-                                public nsIJSNativeInitializer
+/**
+ * This is the ArchiveReader object
+ */
+class ArchiveReader MOZ_FINAL : public nsISupports,
+                                public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(ArchiveReader)
 
-  NS_DECL_NSIDOMARCHIVEREADER
+  static already_AddRefed<ArchiveReader>
+  Constructor(const GlobalObject& aGlobal, nsIDOMBlob* aBlob,
+              const ArchiveReaderOptions& aOptions, ErrorResult& aError);
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(ArchiveReader,
-                                           nsIDOMArchiveReader)
+  ArchiveReader(nsIDOMBlob* aBlob, nsPIDOMWindow* aWindow,
+                const nsString& aEncoding);
 
-  ArchiveReader();
+  nsIDOMWindow* GetParentObject() const
+  {
+    return mWindow;
+  }
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  // nsIJSNativeInitializer
-  NS_IMETHOD Initialize(nsISupports* aOwner,
-                        JSContext* aCx,
-                        JSObject* aObj,
-                        uint32_t aArgc,
-                        jsval* aArgv);
+  already_AddRefed<ArchiveRequest> GetFilenames();
+  already_AddRefed<ArchiveRequest> GetFile(const nsAString& filename);
+  already_AddRefed<ArchiveRequest> GetFiles();
 
   nsresult GetInputStream(nsIInputStream** aInputStream);
   nsresult GetSize(uint64_t* aSize);
@@ -92,6 +106,8 @@ protected:
     nsTArray<nsCOMPtr<nsIDOMFile> > fileList;
     nsresult status;
   } mData;
+
+  nsString mEncoding;
 };
 
 END_FILE_NAMESPACE

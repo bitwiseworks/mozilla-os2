@@ -1,19 +1,26 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource://services-sync/service.js");
-Cu.import("resource://services-sync/policies.js");
-Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-common/log4moz.js");
+Cu.import("resource://services-common/utils.js");
+Cu.import("resource://services-sync/service.js");
+Cu.import("resource://services-sync/util.js");
 
 const logsdir            = FileUtils.getDir("ProfD", ["weave", "logs"], true);
 const LOG_PREFIX_SUCCESS = "success-";
 const LOG_PREFIX_ERROR   = "error-";
-const CLEANUP_DELAY      = 1000; // delay to age files for cleanup (ms)
-const DELAY_BUFFER       = 50; // buffer for timers on different OS platforms
+
+// Delay to wait before cleanup, to allow files to age.
+// This is so large because the file timestamp granularity is per-second, and
+// so otherwise we can end up with all of our files -- the ones we want to
+// keep, and the ones we want to clean up -- having the same modified time.
+const CLEANUP_DELAY      = 2000;
+const DELAY_BUFFER       = 500;  // Buffer for timers on different OS platforms.
 
 const PROLONGED_ERROR_DURATION =
   (Svc.Prefs.get('errorhandler.networkFailureReportTimeout') * 2) * 1000;
+
+let errorHandler = Service.errorHandler;
 
 function setLastSync(lastSyncValue) {
   Svc.Prefs.set("lastSync", (new Date(Date.now() - lastSyncValue)).toString());
@@ -31,7 +38,7 @@ function run_test() {
 
 add_test(function test_noOutput() {
   // Ensure that the log appender won't print anything.
-  ErrorHandler._logAppender.level = Log4Moz.Level.Fatal + 1;
+  errorHandler._logAppender.level = Log4Moz.Level.Fatal + 1;
 
   // Clear log output from startup.
   Svc.Prefs.set("log.appender.file.logOnSuccess", false);
@@ -43,7 +50,7 @@ add_test(function test_noOutput() {
   Svc.Obs.add("weave:service:reset-file-log", function onResetFileLog() {
     Svc.Obs.remove("weave:service:reset-file-log", onResetFileLog);
 
-    ErrorHandler._logAppender.level = Log4Moz.Level.Trace;
+    errorHandler._logAppender.level = Log4Moz.Level.Trace;
     Svc.Prefs.resetBranch("");
     run_next_test();
   });
@@ -246,8 +253,8 @@ add_test(function test_login_error_logOnError_true() {
 
 // Check that error log files are deleted above an age threshold.
 add_test(function test_logErrorCleanup_age() {
-  let maxAge = CLEANUP_DELAY/1000;
-  let firstlog_name;
+  _("Beginning test_logErrorCleanup_age.");
+  let maxAge = CLEANUP_DELAY / 1000;
   let oldLogs = [];
   let numLogs = 10;
   let errString = "some error log\n";
@@ -255,13 +262,15 @@ add_test(function test_logErrorCleanup_age() {
   Svc.Prefs.set("log.appender.file.logOnError", true);
   Svc.Prefs.set("log.appender.file.maxErrorAge", maxAge);
 
-  // Make some files.
+  _("Making some files.");
   for (let i = 0; i < numLogs; i++) {
-    let filename = LOG_PREFIX_ERROR + Date.now() + i + ".txt";
+    let now = Date.now();
+    let filename = LOG_PREFIX_ERROR + now + "" + i + ".txt";
     let newLog = FileUtils.getFile("ProfD", ["weave", "logs", filename]);
     let foStream = FileUtils.openFileOutputStream(newLog);
     foStream.write(errString, errString.length);
     foStream.close();
+    _("  > Created " + filename);
     oldLogs.push(newLog.leafName);
   }
 
@@ -289,7 +298,10 @@ add_test(function test_logErrorCleanup_age() {
     run_next_test();
   });
 
-  Utils.namedTimer(function () Svc.Obs.notify("weave:service:sync:error"),
-                   CLEANUP_DELAY + DELAY_BUFFER, this, "cleanup-timer");
+  let delay = CLEANUP_DELAY + DELAY_BUFFER;
 
+  _("Cleaning up logs after " + delay + "msec.");
+  CommonUtils.namedTimer(function onTimer() {
+    Svc.Obs.notify("weave:service:sync:error");
+  }, delay, this, "cleanup-timer");
 });

@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_file_domfilehandle_h__
 #define mozilla_dom_file_domfilehandle_h__
 
+#include "mozilla/Attributes.h"
 #include "FileCommon.h"
 
 #include "FileHandle.h"
@@ -16,18 +17,16 @@ BEGIN_FILE_NAMESPACE
 class DOMFileHandle : public FileHandle
 {
 public:
-  NS_DECL_ISUPPORTS_INHERITED
-
   static already_AddRefed<DOMFileHandle>
   Create(nsPIDOMWindow* aWindow,
          nsIFileStorage* aFileStorage,
          nsIFile* aFile);
 
   virtual already_AddRefed<nsISupports>
-  CreateStream(nsIFile* aFile, bool aReadOnly);
+  CreateStream(nsIFile* aFile, bool aReadOnly) MOZ_OVERRIDE;
 
   virtual already_AddRefed<nsIDOMFile>
-  CreateFileObject(LockedFile* aLockedFile, uint32_t aFileSize);
+  CreateFileObject(LockedFile* aLockedFile, uint32_t aFileSize) MOZ_OVERRIDE;
 
 protected:
   DOMFileHandle()

@@ -35,9 +35,14 @@
 #include "prsystem.h"
 
 #ifdef XP_WIN
+#include "PluginHangUIParent.h"
 #include "mozilla/widget/AudioSession.h"
 #endif
-#include "sampler.h"
+#ifdef MOZ_ENABLE_PROFILER_SPS
+#include "nsIProfileSaveEvent.h"
+#endif
+#include "mozilla/Services.h"
+#include "nsIObserverService.h"
 
 using base::KillProcess;
 
@@ -59,6 +64,13 @@ using namespace CrashReporter;
 static const char kChildTimeoutPref[] = "dom.ipc.plugins.timeoutSecs";
 static const char kParentTimeoutPref[] = "dom.ipc.plugins.parentTimeoutSecs";
 static const char kLaunchTimeoutPref[] = "dom.ipc.plugins.processLaunchTimeoutSecs";
+#ifdef XP_WIN
+static const char kHangUITimeoutPref[] = "dom.ipc.plugins.hangUITimeoutSecs";
+static const char kHangUIMinDisplayPref[] = "dom.ipc.plugins.hangUIMinDisplaySecs";
+#define CHILD_TIMEOUT_PREF kHangUITimeoutPref
+#else
+#define CHILD_TIMEOUT_PREF kChildTimeoutPref
+#endif
 
 template<>
 struct RunnableMethodTraits<mozilla::plugins::PluginModuleParent>
@@ -87,7 +99,7 @@ PluginModuleParent::LoadModule(const char* aFilePath)
     parent->Open(parent->mSubprocess->GetChannel(),
                  parent->mSubprocess->GetChildProcessHandle());
 
-    TimeoutChanged(kChildTimeoutPref, parent);
+    TimeoutChanged(CHILD_TIMEOUT_PREF, parent);
 
 #ifdef MOZ_CRASHREPORTER
     // If this fails, we're having IPC troubles, and we're doomed anyways.
@@ -108,9 +120,12 @@ PluginModuleParent::PluginModuleParent(const char* aFilePath)
     , mGetSitesWithDataSupported(false)
     , mNPNIface(NULL)
     , mPlugin(NULL)
-    , mTaskFactory(this)
+    , ALLOW_THIS_IN_INITIALIZER_LIST(mTaskFactory(this))
 #ifdef XP_WIN
     , mPluginCpuUsageOnHang()
+    , mHangUIParent(nullptr)
+    , mHangUIEnabled(true)
+    , mIsTimerReset(true)
 #endif
 #ifdef MOZ_CRASHREPORTER_INJECTOR
     , mFlashProcess1(0)
@@ -123,11 +138,23 @@ PluginModuleParent::PluginModuleParent(const char* aFilePath)
 
     Preferences::RegisterCallback(TimeoutChanged, kChildTimeoutPref, this);
     Preferences::RegisterCallback(TimeoutChanged, kParentTimeoutPref, this);
+#ifdef XP_WIN
+    Preferences::RegisterCallback(TimeoutChanged, kHangUITimeoutPref, this);
+    Preferences::RegisterCallback(TimeoutChanged, kHangUIMinDisplayPref, this);
+#endif
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    InitPluginProfiling();
+#endif
 }
 
 PluginModuleParent::~PluginModuleParent()
 {
     NS_ASSERTION(OkToCleanup(), "unsafe destruction");
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    ShutdownPluginProfiling();
+#endif
 
     if (!mShutdown) {
         NS_WARNING("Plugin host deleted the module without shutting down.");
@@ -150,6 +177,15 @@ PluginModuleParent::~PluginModuleParent()
 
     Preferences::UnregisterCallback(TimeoutChanged, kChildTimeoutPref, this);
     Preferences::UnregisterCallback(TimeoutChanged, kParentTimeoutPref, this);
+#ifdef XP_WIN
+    Preferences::UnregisterCallback(TimeoutChanged, kHangUITimeoutPref, this);
+    Preferences::UnregisterCallback(TimeoutChanged, kHangUIMinDisplayPref, this);
+
+    if (mHangUIParent) {
+        delete mHangUIParent;
+        mHangUIParent = nullptr;
+    }
+#endif
 }
 
 #ifdef MOZ_CRASHREPORTER
@@ -165,51 +201,70 @@ PluginModuleParent::WriteExtraDataForMinidump(AnnotationTable& notes)
         filePos = 0;
     else
         filePos++;
-    notes.Put(CS("PluginFilename"), CS(pluginFile.substr(filePos).c_str()));
+    notes.Put(NS_LITERAL_CSTRING("PluginFilename"), CS(pluginFile.substr(filePos).c_str()));
 
-    //TODO: add plugin name and version: bug 539841
-    // (as PluginName, PluginVersion)
-    notes.Put(CS("PluginName"), CS(""));
-    notes.Put(CS("PluginVersion"), CS(""));
+    nsCString pluginName;
+    nsCString pluginVersion;
+
+    nsRefPtr<nsPluginHost> ph = nsPluginHost::GetInst();
+    if (ph) {
+        nsPluginTag* tag = ph->TagForPlugin(mPlugin);
+        if (tag) {
+            pluginName = tag->mName;
+            pluginVersion = tag->mVersion;
+        }
+    }
+        
+    notes.Put(NS_LITERAL_CSTRING("PluginName"), pluginName);
+    notes.Put(NS_LITERAL_CSTRING("PluginVersion"), pluginVersion);
 
     CrashReporterParent* crashReporter = CrashReporter();
     if (crashReporter) {
-        const nsString& hangID = crashReporter->HangID();
-        if (!hangID.IsEmpty()) {
-            notes.Put(CS("HangID"), NS_ConvertUTF16toUTF8(hangID));
 #ifdef XP_WIN
-            if (mPluginCpuUsageOnHang.Length() > 0) {
-              notes.Put(CS("NumberOfProcessors"),
-                        nsPrintfCString("%d", PR_GetNumberOfProcessors()));
+        if (mPluginCpuUsageOnHang.Length() > 0) {
+            notes.Put(NS_LITERAL_CSTRING("NumberOfProcessors"),
+                      nsPrintfCString("%d", PR_GetNumberOfProcessors()));
 
-              nsCString cpuUsageStr;
-              cpuUsageStr.AppendFloat(std::ceil(mPluginCpuUsageOnHang[0] * 100) / 100);
-              notes.Put(CS("PluginCpuUsage"), cpuUsageStr);
+            nsCString cpuUsageStr;
+            cpuUsageStr.AppendFloat(std::ceil(mPluginCpuUsageOnHang[0] * 100) / 100);
+            notes.Put(NS_LITERAL_CSTRING("PluginCpuUsage"), cpuUsageStr);
 
 #ifdef MOZ_CRASHREPORTER_INJECTOR
-              for (uint32_t i=1; i<mPluginCpuUsageOnHang.Length(); ++i) {
+            for (uint32_t i=1; i<mPluginCpuUsageOnHang.Length(); ++i) {
                 nsCString tempStr;
                 tempStr.AppendFloat(std::ceil(mPluginCpuUsageOnHang[i] * 100) / 100);
                 notes.Put(nsPrintfCString("CpuUsageFlashProcess%d", i), tempStr);
-              }
-#endif
             }
 #endif
         }
+#endif
     }
 }
 #endif  // MOZ_CRASHREPORTER
 
+void
+PluginModuleParent::SetChildTimeout(const int32_t aChildTimeout)
+{
+    int32_t timeoutMs = (aChildTimeout > 0) ? (1000 * aChildTimeout) :
+                      SyncChannel::kNoTimeout;
+    SetReplyTimeoutMs(timeoutMs);
+}
+
 int
 PluginModuleParent::TimeoutChanged(const char* aPref, void* aModule)
 {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thead!");
+    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+#ifndef XP_WIN
     if (!strcmp(aPref, kChildTimeoutPref)) {
       // The timeout value used by the parent for children
       int32_t timeoutSecs = Preferences::GetInt(kChildTimeoutPref, 0);
-      int32 timeoutMs = (timeoutSecs > 0) ? (1000 * timeoutSecs) :
-                        SyncChannel::kNoTimeout;
-      static_cast<PluginModuleParent*>(aModule)->SetReplyTimeoutMs(timeoutMs);
+      static_cast<PluginModuleParent*>(aModule)->SetChildTimeout(timeoutSecs);
+#else
+    if (!strcmp(aPref, kChildTimeoutPref) ||
+        !strcmp(aPref, kHangUIMinDisplayPref) ||
+        !strcmp(aPref, kHangUITimeoutPref)) {
+      static_cast<PluginModuleParent*>(aModule)->EvaluateHangUIState(true);
+#endif // XP_WIN
     } else if (!strcmp(aPref, kParentTimeoutPref)) {
       // The timeout value used by the child for its parent
       int32_t timeoutSecs = Preferences::GetInt(kParentTimeoutPref, 0);
@@ -219,10 +274,33 @@ PluginModuleParent::TimeoutChanged(const char* aPref, void* aModule)
 }
 
 void
-PluginModuleParent::CleanupFromTimeout()
+PluginModuleParent::CleanupFromTimeout(const bool aFromHangUI)
 {
-    if (!mShutdown && OkToCleanup())
+    if (mShutdown) {
+      return;
+    }
+
+    if (!OkToCleanup()) {
+        // there's still plugin code on the C++ stack, try again
+        MessageLoop::current()->PostDelayedTask(
+            FROM_HERE,
+            mTaskFactory.NewRunnableMethod(
+                &PluginModuleParent::CleanupFromTimeout, aFromHangUI), 10);
+        return;
+    }
+
+    /* If the plugin container was terminated by the Plugin Hang UI, 
+       then either the I/O thread detects a channel error, or the 
+       main thread must set the error (whomever gets there first).
+       OTOH, if we terminate and return false from 
+       ShouldContinueFromReplyTimeout, then the channel state has 
+       already been set to ChannelTimeout and we should call the 
+       regular Close function. */
+    if (aFromHangUI) {
+        GetIPCChannel()->CloseWithError();
+    } else {
         Close();
+    }
 }
 
 #ifdef XP_WIN
@@ -290,21 +368,98 @@ GetProcessCpuUsage(const InfallibleTArray<base::ProcessHandle>& processHandles, 
 }
 
 } // anonymous namespace
+
+void
+PluginModuleParent::ExitedCxxStack()
+{
+    FinishHangUI();
+}
+
 #endif // #ifdef XP_WIN
+
+#ifdef MOZ_CRASHREPORTER_INJECTOR
+static bool
+CreateFlashMinidump(DWORD processId, ThreadId childThread,
+                    nsIFile* parentMinidump, const nsACString& name)
+{
+  if (processId == 0) {
+    return false;
+  }
+
+  base::ProcessHandle handle;
+  if (!base::OpenPrivilegedProcessHandle(processId, &handle)) {
+    return false;
+  }
+
+  bool res = CreateAdditionalChildMinidump(handle, 0, parentMinidump, name);
+  base::CloseProcessHandle(handle);
+
+  return res;
+}
+#endif
 
 bool
 PluginModuleParent::ShouldContinueFromReplyTimeout()
 {
+#ifdef XP_WIN
+    if (LaunchHangUI()) {
+        return true;
+    }
+    // If LaunchHangUI returned false then we should proceed with the 
+    // original plugin hang behaviour and kill the plugin container.
+    FinishHangUI();
+#endif // XP_WIN
+    TerminateChildProcess(MessageLoop::current());
+    return false;
+}
+
+void
+PluginModuleParent::TerminateChildProcess(MessageLoop* aMsgLoop)
+{
 #ifdef MOZ_CRASHREPORTER
     CrashReporterParent* crashReporter = CrashReporter();
+    crashReporter->AnnotateCrashReport(NS_LITERAL_CSTRING("PluginHang"),
+                                       NS_LITERAL_CSTRING("1"));
+#ifdef XP_WIN
+    if (mHangUIParent) {
+        unsigned int hangUIDuration = mHangUIParent->LastShowDurationMs();
+        if (hangUIDuration) {
+            nsPrintfCString strHangUIDuration("%u", hangUIDuration);
+            crashReporter->AnnotateCrashReport(
+                    NS_LITERAL_CSTRING("PluginHangUIDuration"),
+                    strHangUIDuration);
+        }
+    }
+#endif // XP_WIN
     if (crashReporter->GeneratePairedMinidump(this)) {
-        mBrowserDumpID = crashReporter->ParentDumpID();
         mPluginDumpID = crashReporter->ChildDumpID();
         PLUGIN_LOG_DEBUG(
-                ("generated paired browser/plugin minidumps: %s/%s (ID=%s)",
-                 NS_ConvertUTF16toUTF8(mBrowserDumpID).get(),
-                 NS_ConvertUTF16toUTF8(mPluginDumpID).get(),
-                 NS_ConvertUTF16toUTF8(crashReporter->HangID()).get()));
+                ("generated paired browser/plugin minidumps: %s)",
+                 NS_ConvertUTF16toUTF8(mPluginDumpID).get()));
+
+        nsAutoCString additionalDumps("browser");
+
+#ifdef MOZ_CRASHREPORTER_INJECTOR
+        nsCOMPtr<nsIFile> pluginDumpFile;
+
+        if (GetMinidumpForID(mPluginDumpID, getter_AddRefs(pluginDumpFile)) &&
+            pluginDumpFile) {
+          nsCOMPtr<nsIFile> childDumpFile;
+
+          if (CreateFlashMinidump(mFlashProcess1, 0, pluginDumpFile,
+                                  NS_LITERAL_CSTRING("flash1"))) {
+            additionalDumps.Append(",flash1");
+          }
+          if (CreateFlashMinidump(mFlashProcess2, 0, pluginDumpFile,
+                                  NS_LITERAL_CSTRING("flash2"))) {
+            additionalDumps.Append(",flash2");
+          }
+        }
+#endif
+
+        crashReporter->AnnotateCrashReport(
+            NS_LITERAL_CSTRING("additional_minidumps"),
+            additionalDumps);
     } else {
         NS_WARNING("failed to capture paired minidumps from hang");
     }
@@ -314,15 +469,18 @@ PluginModuleParent::ShouldContinueFromReplyTimeout()
     // collect cpu usage for plugin processes
 
     InfallibleTArray<base::ProcessHandle> processHandles;
-    base::ProcessHandle handle;
 
     processHandles.AppendElement(OtherProcess());
+
 #ifdef MOZ_CRASHREPORTER_INJECTOR
-    if (mFlashProcess1 && base::OpenProcessHandle(mFlashProcess1, &handle)) {
-      processHandles.AppendElement(handle);
-    }
-    if (mFlashProcess2 && base::OpenProcessHandle(mFlashProcess2, &handle)) {
-      processHandles.AppendElement(handle);
+    {
+      base::ProcessHandle handle;
+      if (mFlashProcess1 && base::OpenProcessHandle(mFlashProcess1, &handle)) {
+        processHandles.AppendElement(handle);
+      }
+      if (mFlashProcess2 && base::OpenProcessHandle(mFlashProcess2, &handle)) {
+        processHandles.AppendElement(handle);
+      }
     }
 #endif
 
@@ -333,16 +491,131 @@ PluginModuleParent::ShouldContinueFromReplyTimeout()
 
     // this must run before the error notification from the channel,
     // or not at all
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        mTaskFactory.NewRunnableMethod(
-            &PluginModuleParent::CleanupFromTimeout));
+    bool isFromHangUI = aMsgLoop != MessageLoop::current();
+    if (isFromHangUI) {
+        // If we're posting from a different thread we can't create
+        // the task via mTaskFactory
+        aMsgLoop->PostTask(FROM_HERE,
+                           NewRunnableMethod(this,
+                               &PluginModuleParent::CleanupFromTimeout,
+                               isFromHangUI));
+    } else {
+        aMsgLoop->PostTask(
+            FROM_HERE,
+            mTaskFactory.NewRunnableMethod(
+                &PluginModuleParent::CleanupFromTimeout, isFromHangUI));
+    }
 
     if (!KillProcess(OtherProcess(), 1, false))
         NS_WARNING("failed to kill subprocess!");
-
-    return false;
 }
+
+#ifdef XP_WIN
+void
+PluginModuleParent::EvaluateHangUIState(const bool aReset)
+{
+    int32_t minDispSecs = Preferences::GetInt(kHangUIMinDisplayPref, 10);
+    int32_t autoStopSecs = Preferences::GetInt(kChildTimeoutPref, 0);
+    int32_t timeoutSecs = 0;
+    if (autoStopSecs > 0 && autoStopSecs < minDispSecs) {
+        /* If we're going to automatically terminate the plugin within a 
+           time frame shorter than minDispSecs, there's no point in 
+           showing the hang UI; it would just flash briefly on the screen. */
+        mHangUIEnabled = false;
+    } else {
+        timeoutSecs = Preferences::GetInt(kHangUITimeoutPref, 0);
+        mHangUIEnabled = timeoutSecs > 0;
+    }
+    if (mHangUIEnabled) {
+        if (aReset) {
+            mIsTimerReset = true;
+            SetChildTimeout(timeoutSecs);
+            return;
+        } else if (mIsTimerReset) {
+            /* The Hang UI is being shown, so now we're setting the 
+               timeout to kChildTimeoutPref while we wait for a user 
+               response. ShouldContinueFromReplyTimeout will fire 
+               after (reply timeout / 2) seconds, which is not what 
+               we want. Doubling the timeout value here so that we get 
+               the right result. */
+            autoStopSecs *= 2;
+        }
+    }
+    mIsTimerReset = false;
+    SetChildTimeout(autoStopSecs);
+}
+
+bool
+PluginModuleParent::GetPluginName(nsAString& aPluginName)
+{
+    nsRefPtr<nsPluginHost> host = nsPluginHost::GetInst();
+    if (!host) {
+        return false;
+    }
+    nsPluginTag* pluginTag = host->TagForPlugin(mPlugin);
+    if (!pluginTag) {
+        return false;
+    }
+    CopyUTF8toUTF16(pluginTag->mName, aPluginName);
+    return true;
+}
+
+bool
+PluginModuleParent::LaunchHangUI()
+{
+    if (!mHangUIEnabled) {
+        return false;
+    }
+    if (mHangUIParent) {
+        if (mHangUIParent->IsShowing()) {
+            // We've already shown the UI but the timeout has expired again.
+            return false;
+        }
+        if (mHangUIParent->DontShowAgain()) {
+            return !mHangUIParent->WasLastHangStopped();
+        }
+        delete mHangUIParent;
+        mHangUIParent = nullptr;
+    }
+    mHangUIParent = new PluginHangUIParent(this, 
+            Preferences::GetInt(kHangUITimeoutPref, 0),
+            Preferences::GetInt(kChildTimeoutPref, 0));
+    nsAutoString pluginName;
+    if (!GetPluginName(pluginName)) {
+        return false;
+    }
+    bool retval = mHangUIParent->Init(pluginName);
+    if (retval) {
+        /* Once the UI is shown we switch the timeout over to use 
+           kChildTimeoutPref, allowing us to terminate a hung plugin 
+           after kChildTimeoutPref seconds if the user doesn't respond to 
+           the hang UI. */
+        EvaluateHangUIState(false);
+    }
+    return retval;
+}
+
+void
+PluginModuleParent::FinishHangUI()
+{
+    if (mHangUIEnabled && mHangUIParent) {
+        bool needsCancel = mHangUIParent->IsShowing();
+        // If we're still showing, send a Cancel notification
+        if (needsCancel) {
+            mHangUIParent->Cancel();
+        }
+        /* If we cancelled the UI or if the user issued a response,
+           we need to reset the child process timeout. */
+        if (needsCancel ||
+            !mIsTimerReset && mHangUIParent->WasShown()) {
+            /* We changed the timeout to kChildTimeoutPref when the plugin hang
+               UI was displayed. Now that we're finishing the UI, we need to 
+               switch it back to kHangUITimeoutPref. */
+            EvaluateHangUIState(true);
+        }
+    }
+}
+#endif // XP_WIN
 
 #ifdef MOZ_CRASHREPORTER
 CrashReporterParent*
@@ -377,15 +650,15 @@ PluginModuleParent::ProcessFirstMinidump()
     AnnotationTable notes;
     notes.Init(4);
     WriteExtraDataForMinidump(notes);
-        
-    if (!mPluginDumpID.IsEmpty() && !mBrowserDumpID.IsEmpty()) {
-        crashReporter->GenerateHangCrashReport(&notes);
+
+    if (!mPluginDumpID.IsEmpty()) {
+        crashReporter->GenerateChildData(&notes);
         return;
     }
 
-    uint32_t sequence = PR_UINT32_MAX;
+    uint32_t sequence = UINT32_MAX;
     nsCOMPtr<nsIFile> dumpFile;
-    nsCAutoString flashProcessType;
+    nsAutoCString flashProcessType;
     TakeMinidump(getter_AddRefs(dumpFile), &sequence);
 
 #ifdef MOZ_CRASHREPORTER_INJECTOR
@@ -599,7 +872,7 @@ PluginModuleParent::NPP_NewStream(NPP instance, NPMIMEType type,
                                   NPStream* stream, NPBool seekable,
                                   uint16_t* stype)
 {
-    SAMPLE_LABEL("PluginModuleParent", "NPP_NewStream");
+    PROFILER_LABEL("PluginModuleParent", "NPP_NewStream");
     PluginInstanceParent* i = InstCast(instance);
     if (!i)
         return NPERR_GENERIC_ERROR;
@@ -727,7 +1000,9 @@ PluginModuleParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
     NS_ABORT_IF_FALSE(0 > mPluginXSocketFdDup.get(),
                       "Already backed up X resources??");
     mPluginXSocketFdDup.forget();
-    mPluginXSocketFdDup.reset(aXSocketFd.PlatformHandle());
+    if (aXSocketFd.IsValid()) {
+      mPluginXSocketFdDup.reset(aXSocketFd.PlatformHandle());
+    }
 #endif
     return true;
 }
@@ -1002,7 +1277,7 @@ nsresult
 PluginModuleParent::NP_GetValue(void *future, NPPVariable aVariable,
                                    void *aValue, NPError* error)
 {
-    PR_LOG(gPluginLog, PR_LOG_WARNING, ("%s Not implemented, requested variable %i", __FUNCTION__,
+    PR_LOG(GetPluginLog(), PR_LOG_WARNING, ("%s Not implemented, requested variable %i", __FUNCTION__,
                                         (int) aVariable));
 
     //TODO: implement this correctly
@@ -1133,7 +1408,17 @@ PluginModuleParent::IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing)
 
     return i->IsRemoteDrawingCoreAnimation(aDrawing);
 }
-#endif
+
+nsresult
+PluginModuleParent::ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor)
+{
+    PluginInstanceParent* i = InstCast(instance);
+    if (!i)
+        return NS_ERROR_FAILURE;
+
+    return i->ContentsScaleFactorChanged(aContentsScaleFactor);
+}
+#endif // #if defined(XP_MACOSX)
 
 bool
 PluginModuleParent::AnswerNPN_GetValue_WithBoolReturn(const NPNVariable& aVariable,
@@ -1437,3 +1722,57 @@ PluginModuleParent::OnCrash(DWORD processID)
 }
 
 #endif // MOZ_CRASHREPORTER_INJECTOR
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+class PluginProfilerObserver MOZ_FINAL : public nsIObserver,
+                                         public nsSupportsWeakReference
+{
+public:
+    NS_DECL_ISUPPORTS
+    NS_DECL_NSIOBSERVER
+
+    explicit PluginProfilerObserver(PluginModuleParent* pmp)
+      : mPmp(pmp)
+    {}
+
+private:
+    PluginModuleParent* mPmp;
+};
+
+NS_IMPL_ISUPPORTS2(PluginProfilerObserver, nsIObserver, nsISupportsWeakReference)
+
+NS_IMETHODIMP
+PluginProfilerObserver::Observe(nsISupports *aSubject,
+                                const char *aTopic,
+                                const PRUnichar *aData)
+{
+    nsCOMPtr<nsIProfileSaveEvent> pse = do_QueryInterface(aSubject);
+    if (pse) {
+      nsCString result;
+      bool success = mPmp->CallGeckoGetProfile(&result);
+      if (success && !result.IsEmpty()) {
+          pse->AddSubProfile(result.get());
+      }
+    }
+    return NS_OK;
+}
+
+void
+PluginModuleParent::InitPluginProfiling()
+{
+    nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+    if (observerService) {
+        mProfilerObserver = new PluginProfilerObserver(this);
+        observerService->AddObserver(mProfilerObserver, "profiler-subprocess", false);
+    }
+}
+
+void
+PluginModuleParent::ShutdownPluginProfiling()
+{
+    nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+    if (observerService) {
+        observerService->RemoveObserver(mProfilerObserver, "profiler-subprocess");
+    }
+}
+#endif

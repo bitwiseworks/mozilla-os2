@@ -1,5 +1,5 @@
 // Test timeout (seconds)
-const TIMEOUT_SECONDS = 30;
+var gTimeoutSeconds = 30;
 var gConfig;
 
 if (Cc === undefined) {
@@ -19,13 +19,18 @@ function testOnLoad() {
   window.removeEventListener("load", testOnLoad, false);
 
   gConfig = readConfig();
-  if (gConfig.testRoot == "browser" || gConfig.testRoot == "webapprtChrome") {
+  if (gConfig.testRoot == "browser" ||
+      gConfig.testRoot == "metro" ||
+      gConfig.testRoot == "webapprtChrome") {
     // Make sure to launch the test harness for the first opened window only
     var prefs = Services.prefs;
     if (prefs.prefHasUserValue("testing.browserTestHarness.running"))
       return;
 
     prefs.setBoolPref("testing.browserTestHarness.running", true);
+
+    if (prefs.prefHasUserValue("testing.browserTestHarness.timeout"))
+      gTimeoutSeconds = prefs.getIntPref("testing.browserTestHarness.timeout");
 
     var sstring = Cc["@mozilla.org/supports-string;1"].
                   createInstance(Ci.nsISupportsString);
@@ -74,6 +79,7 @@ Tester.prototype = {
   SimpleTest: {},
 
   repeat: 0,
+  runUntilFailure: false,
   checker: null,
   currentTestIndex: -1,
   lastStartTime: null,
@@ -87,17 +93,35 @@ Tester.prototype = {
   },
 
   start: function Tester_start() {
+    // Check whether this window is ready to run tests.
+    if (window.BrowserChromeTest) {
+      BrowserChromeTest.runWhenReady(this.actuallyStart.bind(this));
+      return;
+    }
+    this.actuallyStart();
+  },
+
+  actuallyStart: function Tester_actuallyStart() {
     //if testOnLoad was not called, then gConfig is not defined
     if (!gConfig)
       gConfig = readConfig();
-    this.repeat = gConfig.repeat;
+
+    if (gConfig.runUntilFailure)
+      this.runUntilFailure = true;
+
+    if (gConfig.repeat)
+      this.repeat = gConfig.repeat;
+
     this.dumper.dump("*** Start BrowserChrome Test Results ***\n");
     Services.console.registerListener(this);
     Services.obs.addObserver(this, "chrome-document-global-created", false);
     Services.obs.addObserver(this, "content-document-global-created", false);
     this._globalProperties = Object.keys(window);
-    this._globalPropertyWhitelist = ["navigator", "constructor", "Application",
-      "__SS_tabsToRestore", "__SSi", "webConsoleCommandController",
+    this._globalPropertyWhitelist = [
+      "navigator", "constructor", "top",
+      "Application",
+      "__SS_tabsToRestore", "__SSi",
+      "webConsoleCommandController",
     ];
 
     if (this.tests.length)
@@ -152,6 +176,13 @@ Tester.prototype = {
   },
 
   finish: function Tester_finish(aSkipSummary) {
+    var passCount = this.tests.reduce(function(a, f) a + f.passCount, 0);
+    var failCount = this.tests.reduce(function(a, f) a + f.failCount, 0);
+    var todoCount = this.tests.reduce(function(a, f) a + f.todoCount, 0);
+
+    if (failCount > 0 && this.runUntilFailure)
+      this.repeat = 0;
+
     if (this.repeat > 0) {
       --this.repeat;
       this.currentTestIndex = -1;
@@ -165,11 +196,6 @@ Tester.prototype = {
       this.dumper.dump("\nINFO TEST-START | Shutdown\n");
       if (this.tests.length) {
         this.dumper.dump("Browser Chrome Test Summary\n");
-  
-        function sum(a,b) a+b;
-        var passCount = this.tests.map(function (f) f.passCount).reduce(sum);
-        var failCount = this.tests.map(function (f) f.failCount).reduce(sum);
-        var todoCount = this.tests.map(function (f) f.todoCount).reduce(sum);
   
         this.dumper.dump("\tPassed: " + passCount + "\n" +
                          "\tFailed: " + failCount + "\n" +
@@ -246,11 +272,25 @@ Tester.prototype = {
         }
       };
 
+      let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                           .getInterface(Ci.nsIDOMWindowUtils);
+      if (winUtils.isTestControllingRefreshes) {
+        this.currentTest.addResult(new testResult(false, "test left refresh driver under test control", "", false));
+        winUtils.restoreNormalRefresh();
+      }
+
       if (this.SimpleTest.isExpectingUncaughtException()) {
         this.currentTest.addResult(new testResult(false, "expectUncaughtException was called but no uncaught exception was detected!", "", false));
       }
 
       Object.keys(window).forEach(function (prop) {
+        if (parseInt(prop) == prop) {
+          // This is a string which when parsed as an integer and then
+          // stringified gives the original string.  As in, this is in fact a
+          // string representation of an integer, so an index into
+          // window.frames.  Skip those.
+          return;
+        }
         if (this._globalProperties.indexOf(prop) == -1) {
           this._globalProperties.push(prop);
           if (this._globalPropertyWhitelist.indexOf(prop) == -1)
@@ -289,22 +329,47 @@ Tester.prototype = {
 
         // Schedule GC and CC runs before finishing in order to detect
         // DOM windows leaked by our tests or the tested code.
-        Cu.schedulePreciseGC((function () {
-          let analyzer = new CCAnalyzer();
-          analyzer.run(function () {
-            for (let obj of analyzer.find("nsGlobalWindow ")) {
-              let m = obj.name.match(/^nsGlobalWindow #(\d+)/);
-              if (m && m[1] in this.openedWindows) {
-                let test = this.openedWindows[m[1]];
-                let msg = "leaked until shutdown [" + obj.name +
-                          " " + (this.openedURLs[m[1]] || "NULL") + "]";
-                test.addResult(new testResult(false, msg, "", false));
-              }
-            }
 
+        let checkForLeakedGlobalWindows = aCallback => {
+          Cu.schedulePreciseGC(() => {
+            let analyzer = new CCAnalyzer();
+            analyzer.run(() => {
+              let results = [];
+              for (let obj of analyzer.find("nsGlobalWindow ")) {
+                let m = obj.name.match(/^nsGlobalWindow #(\d+)/);
+                if (m && m[1] in this.openedWindows)
+                  results.push({ name: obj.name, url: m[1] });
+              }
+              aCallback(results);
+            });
+          });
+        };
+
+        let reportLeaks = aResults => {
+          for (let result of aResults) {
+            let test = this.openedWindows[result.url];
+            let msg = "leaked until shutdown [" + result.name +
+                      " " + (this.openedURLs[result.url] || "NULL") + "]";
+            test.addResult(new testResult(false, msg, "", false));
+          }
+        };
+
+        checkForLeakedGlobalWindows(aResults => {
+          if (aResults.length == 0) {
             this.finish();
-          }.bind(this));
-        }).bind(this));
+            return;
+          }
+          // After the first check, if there are reported leaked windows, sleep
+          // for a while, to allow off-main-thread work to complete and free up
+          // main-thread objects.  Then check again.
+          setTimeout(() => {
+            checkForLeakedGlobalWindows(aResults => {
+              reportLeaks(aResults);
+              this.finish();
+            });
+          }, 1000);
+        });
+
         return;
       }
 
@@ -395,14 +460,14 @@ Tester.prototype = {
             "Longer timeout required, waiting longer...  Remaining timeouts: " +
             self.currentTest.scope.__timeoutFactor);
           self.currentTest.scope.__waitTimer =
-            setTimeout(arguments.callee, TIMEOUT_SECONDS * 1000);
+            setTimeout(arguments.callee, gTimeoutSeconds * 1000);
           return;
         }
         self.currentTest.addResult(new testResult(false, "Test timed out", "", false));
         self.currentTest.timedOut = true;
         self.currentTest.scope.__waitTimer = null;
         self.nextTest();
-      }, TIMEOUT_SECONDS * 1000);
+      }, gTimeoutSeconds * 1000);
     }
   },
 

@@ -48,14 +48,6 @@ public:
   History();
 
   /**
-   * Notifies about the visited status of a given URI.
-   *
-   * @param aURI
-   *        The URI to notify about.
-   */
-  void NotifyVisited(nsIURI* aURI);
-
-  /**
    * Obtains the statement to use to check if a URI is visited or not.
    */
   mozIStorageAsyncStatement* GetIsVisitedStatement();
@@ -81,9 +73,10 @@ public:
    *
    * @param _place
    *        The VisitData for the place we need to know information about.
-   * @return true if the page was recorded in moz_places, false otherwise.
+   * @param [out] _exists
+   *        Whether or the page was recorded in moz_places, false otherwise.
    */
-  bool FetchPageInfo(VisitData& _place);
+  nsresult FetchPageInfo(VisitData& _place, bool* _exists);
 
   /**
    * Get the number of bytes of memory this History object is using,
@@ -105,6 +98,14 @@ public:
   template<int N>
   already_AddRefed<mozIStorageStatement>
   GetStatement(const char (&aQuery)[N])
+  {
+    mozIStorageConnection* dbConn = GetDBConn();
+    NS_ENSURE_TRUE(dbConn, nullptr);
+    return mDB->GetStatement(aQuery);
+  }
+
+  already_AddRefed<mozIStorageStatement>
+  GetStatement(const nsACString& aQuery)
   {
     mozIStorageConnection* dbConn = GetDBConn();
     NS_ENSURE_TRUE(dbConn, nullptr);

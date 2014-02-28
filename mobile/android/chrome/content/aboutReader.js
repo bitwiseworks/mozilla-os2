@@ -29,6 +29,10 @@ let AboutReader = function(doc, win) {
   this._winRef = Cu.getWeakReference(win);
 
   Services.obs.addObserver(this, "Reader:FaviconReturn", false);
+  Services.obs.addObserver(this, "Reader:Add", false);
+  Services.obs.addObserver(this, "Reader:Remove", false);
+  Services.obs.addObserver(this, "Reader:ListCountReturn", false);
+  Services.obs.addObserver(this, "Reader:ListCountUpdated", false);
 
   this._article = null;
 
@@ -49,6 +53,7 @@ let AboutReader = function(doc, win) {
   body.addEventListener("touchstart", this, false);
   body.addEventListener("click", this, false);
 
+  win.addEventListener("unload", this, false);
   win.addEventListener("scroll", this, false);
   win.addEventListener("popstate", this, false);
   win.addEventListener("resize", this, false);
@@ -59,31 +64,68 @@ let AboutReader = function(doc, win) {
   this._setupButton("share-button", this._onShare.bind(this));
 
   let colorSchemeOptions = [
+    { name: gStrings.GetStringFromName("aboutReader.colorSchemeDark"),
+      value: "dark"},
     { name: gStrings.GetStringFromName("aboutReader.colorSchemeLight"),
       value: "light"},
-    { name: gStrings.GetStringFromName("aboutReader.colorSchemeDark"),
-      value: "dark"}
+    { name: gStrings.GetStringFromName("aboutReader.colorSchemeAuto"),
+      value: "auto"}
   ];
 
   let colorScheme = Services.prefs.getCharPref("reader.color_scheme");
-  this._setupSegmentedButton("color-scheme-buttons", colorSchemeOptions, colorScheme, this._setColorScheme.bind(this));
-  this._setColorScheme(colorScheme);
+  this._setupSegmentedButton("color-scheme-buttons", colorSchemeOptions, colorScheme, this._setColorSchemePref.bind(this));
+  this._setColorSchemePref(colorScheme);
 
-  let fontTitle = gStrings.GetStringFromName("aboutReader.textTitle");
-  this._setupStepControl("font-size-control", fontTitle, this._onFontSizeChange.bind(this));
-  this._fontSize = 0;
-  this._setFontSize(Services.prefs.getIntPref("reader.font_size"));
+  let fontTypeSample = gStrings.GetStringFromName("aboutReader.fontTypeSample");
+  let fontTypeOptions = [
+    { name: fontTypeSample,
+      description: gStrings.GetStringFromName("aboutReader.fontTypeCharis"),
+      value: "serif",
+      linkClass: "serif" },
+    { name: fontTypeSample,
+      description: gStrings.GetStringFromName("aboutReader.fontTypeOpenSans"),
+      value: "sans-serif",
+      linkClass: "sans-serif"
+    },
+  ];
 
-  let marginTitle = gStrings.GetStringFromName("aboutReader.marginTitle");
-  this._setupStepControl("margin-size-control", marginTitle, this._onMarginSizeChange.bind(this));
-  this._marginSize = 0;
-  this._setMarginSize(Services.prefs.getIntPref("reader.margin_size"));
+  let fontType = Services.prefs.getCharPref("reader.font_type");
+  this._setupSegmentedButton("font-type-buttons", fontTypeOptions, fontType, this._setFontType.bind(this));
+  this._setFontType(fontType);
+
+  let fontSizeSample = gStrings.GetStringFromName("aboutReader.fontSizeSample");
+  let fontSizeOptions = [
+    { name: fontSizeSample,
+      value: 1,
+      linkClass: "font-size1-sample" },
+    { name: fontSizeSample,
+      value: 2,
+      linkClass: "font-size2-sample" },
+    { name: fontSizeSample,
+      value: 3,
+      linkClass: "font-size3-sample" },
+    { name: fontSizeSample,
+      value: 4,
+      linkClass: "font-size4-sample" },
+    { name: fontSizeSample,
+      value: 5,
+      linkClass: "font-size5-sample" }
+  ];
+
+  let fontSize = Services.prefs.getIntPref("reader.font_size");
+  this._setupSegmentedButton("font-size-buttons", fontSizeOptions, fontSize, this._setFontSize.bind(this));
+  this._setFontSize(fontSize);
 
   dump("Decoding query arguments");
   let queryArgs = this._decodeQueryString(win.location.href);
 
   this._isReadingListItem = (queryArgs.readingList == "1");
   this._updateToggleButton();
+
+  // Track status of reader toolbar list button
+  this._readingListCount = 0;
+  this._updateListButton();
+  this._requestReadingListCount();
 
   let url = queryArgs.url;
   let tabId = queryArgs.tabId;
@@ -97,9 +139,6 @@ let AboutReader = function(doc, win) {
 }
 
 AboutReader.prototype = {
-  _STEP_INCREMENT: 0,
-  _STEP_DECREMENT: 1,
-
   _BLOCK_IMAGES_SELECTOR: ".content p > img:only-child, " +
                           ".content p > a:only-child > img:only-child, " +
                           ".content .wp-caption img, " +
@@ -141,12 +180,43 @@ AboutReader.prototype = {
     return this._messageElementRef.get();
   },
 
-  observe: function(aMessage, aTopic, aData) {
+  observe: function Reader_observe(aMessage, aTopic, aData) {
     switch(aTopic) {
       case "Reader:FaviconReturn": {
-        let info = JSON.parse(aData);
-        this._loadFavicon(info.url, info.faviconUrl);
-        Services.obs.removeObserver(this, "Reader:FaviconReturn", false);
+        let args = JSON.parse(aData);
+        this._loadFavicon(args.url, args.faviconUrl);
+        Services.obs.removeObserver(this, "Reader:FaviconReturn");
+        break;
+      }
+
+      case "Reader:Add": {
+        let args = JSON.parse(aData);
+        if (args.url == this._article.url) {
+          if (!this._isReadingListItem) {
+            this._isReadingListItem = true;
+            this._updateToggleButton();
+          }
+        }
+        break;
+      }
+
+      case "Reader:Remove": {
+        if (aData == this._article.url) {
+          if (this._isReadingListItem) {
+            this._isReadingListItem = false;
+            this._updateToggleButton();
+          }
+        }
+        break;
+      }
+
+      case "Reader:ListCountReturn":
+      case "Reader:ListCountUpdated":  {
+        let count = parseInt(aData);
+        if (this._readingListCount != count) {
+          this._readingListCount = count;
+          this._updateListButton();
+        }
         break;
       }
     }
@@ -177,6 +247,17 @@ AboutReader.prototype = {
       case "resize":
         this._updateImageMargins();
         break;
+
+      case "devicelight":
+        this._handleDeviceLight(aEvent.value);
+        break;
+
+      case "unload":
+        Services.obs.removeObserver(this, "Reader:Add");
+        Services.obs.removeObserver(this, "Reader:Remove");
+        Services.obs.removeObserver(this, "Reader:ListCountReturn");
+        Services.obs.removeObserver(this, "Reader:ListCountUpdated");
+        break;
     }
   },
 
@@ -190,6 +271,20 @@ AboutReader.prototype = {
     }
   },
 
+  _updateListButton: function Reader_updateListButton() {
+    let classes = this._doc.getElementById("list-button").classList;
+
+    if (this._readingListCount > 0) {
+      classes.add("on");
+    } else {
+      classes.remove("on");
+    }
+  },
+
+  _requestReadingListCount: function Reader_requestReadingListCount() {
+    gChromeWin.sendMessageToJava({ type: "Reader:ListCountRequest" });
+  },
+
   _onReaderToggle: function Reader_onToggle() {
     if (!this._article)
       return;
@@ -201,38 +296,38 @@ AboutReader.prototype = {
       gChromeWin.Reader.storeArticleInCache(this._article, function(success) {
         dump("Reader:Add (in reader) success=" + success);
 
+        let result = (success ? gChromeWin.Reader.READER_ADD_SUCCESS :
+            gChromeWin.Reader.READER_ADD_FAILED);
+
+        let json = JSON.stringify({ fromAboutReader: true, url: this._article.url });
+        Services.obs.notifyObservers(null, "Reader:Add", json);
+
         gChromeWin.sendMessageToJava({
-          gecko: {
-            type: "Reader:Added",
-            success: success,
-            title: this._article.title,
-            url: this._article.url,
-          }
+          type: "Reader:Added",
+          result: result,
+          title: this._article.title,
+          url: this._article.url,
         });
       }.bind(this));
     } else {
       gChromeWin.Reader.removeArticleFromCache(this._article.url , function(success) {
         dump("Reader:Remove (in reader) success=" + success);
 
+        Services.obs.notifyObservers(null, "Reader:Remove", this._article.url);
+
         gChromeWin.sendMessageToJava({
-          gecko: {
-            type: "Reader:Removed",
-            url: this._article.url
-          }
+          type: "Reader:Removed",
+          url: this._article.url
         });
       }.bind(this));
     }
   },
 
   _onList: function Reader_onList() {
-    if (!this._article)
+    if (!this._article || this._readingListCount == 0)
       return;
 
-    gChromeWin.sendMessageToJava({
-      gecko: {
-        type: "Reader:GoToReadingList"
-      }
-    });
+    gChromeWin.sendMessageToJava({ type: "Reader:GoToReadingList" });
   },
 
   _onShare: function Reader_onShare() {
@@ -240,56 +335,67 @@ AboutReader.prototype = {
       return;
 
     gChromeWin.sendMessageToJava({
-      gecko: {
-        type: "Reader:Share",
-        url: this._article.url,
-        title: this._article.title
-      }
+      type: "Reader:Share",
+      url: this._article.url,
+      title: this._article.title
     });
   },
 
-  _onMarginSizeChange: function Reader_onMarginSizeChange(operation) {
-    if (operation == this._STEP_INCREMENT)
-      this._setMarginSize(this._marginSize + 5);
-    else
-      this._setMarginSize(this._marginSize - 5);
-  },
-
-  _setMarginSize: function Reader_setMarginSize(newMarginSize) {
-    if (this._marginSize === newMarginSize)
-      return;
-
-    let doc = this._doc;
-
-    this._marginSize = Math.max(5, Math.min(25, newMarginSize));
-    doc.body.style.marginLeft = this._marginSize + "%";
-    doc.body.style.marginRight = this._marginSize + "%";
-
-    this._updateImageMargins();
-
-    Services.prefs.setIntPref("reader.margin_size", this._marginSize);
-  },
-
-  _onFontSizeChange: function Reader_onFontSizeChange(operation) {
-    if (operation == this._STEP_INCREMENT)
-      this._setFontSize(this._fontSize + 1);
-    else
-      this._setFontSize(this._fontSize - 1);
-  },
-
   _setFontSize: function Reader_setFontSize(newFontSize) {
-    if (this._fontSize === newFontSize)
-      return;
-
     let bodyClasses = this._doc.body.classList;
 
     if (this._fontSize > 0)
       bodyClasses.remove("font-size" + this._fontSize);
 
-    this._fontSize = Math.max(1, Math.min(7, newFontSize));
+    this._fontSize = newFontSize;
     bodyClasses.add("font-size" + this._fontSize);
 
     Services.prefs.setIntPref("reader.font_size", this._fontSize);
+  },
+
+  _handleDeviceLight: function Reader_handleDeviceLight(newLux) {
+    // Desired size of the this._luxValues array.
+    let luxValuesSize = 10;
+    // Add new lux value at the front of the array.
+    this._luxValues.unshift(newLux);
+    // Add new lux value to this._totalLux for averaging later.
+    this._totalLux += newLux;
+
+    // Don't update when length of array is less than luxValuesSize except when it is 1.
+    if (this._luxValues.length < luxValuesSize) {
+      // Use the first lux value to set the color scheme until our array equals luxValuesSize.
+      if (this._luxValues.length == 1) {
+        this._updateColorScheme(newLux);
+      }
+      return;
+    }
+    // Holds the average of the lux values collected in this._luxValues.
+    let averageLuxValue = this._totalLux/luxValuesSize;
+
+    this._updateColorScheme(averageLuxValue);
+    // Pop the oldest value off the array.
+    let oldLux = this._luxValues.pop();
+    // Subtract oldLux since it has been discarded from the array.
+    this._totalLux -= oldLux;
+  },
+
+  _updateColorScheme: function Reader_updateColorScheme(luxValue) {
+    // Upper bound value for "dark" color scheme beyond which it changes to "light".
+    let upperBoundDark = 50;
+    // Lower bound value for "light" color scheme beyond which it changes to "dark".
+    let lowerBoundLight = 10;
+    // Threshold for color scheme change.
+    let colorChangeThreshold = 20;
+
+    // Ignore changes that are within a certain threshold of previous lux values.
+    if ((this._colorScheme === "dark" && luxValue < upperBoundDark) ||
+        (this._colorScheme === "light" && luxValue > lowerBoundLight))
+      return;
+
+    if (luxValue < colorChangeThreshold)
+      this._setColorScheme("dark");
+    else
+      this._setColorScheme("light");
   },
 
   _setColorScheme: function Reader_setColorScheme(newColorScheme) {
@@ -303,8 +409,38 @@ AboutReader.prototype = {
 
     this._colorScheme = newColorScheme;
     bodyClasses.add(this._colorScheme);
+  },
 
-    Services.prefs.setCharPref("reader.color_scheme", this._colorScheme);
+  // Pref values include "dark", "light", and "auto", which automatically switches
+  // between light and dark color schemes based on the ambient light level.
+  _setColorSchemePref: function Reader_setColorSchemePref(colorSchemePref) {
+    if (colorSchemePref === "auto") {
+      this._win.addEventListener("devicelight", this, false);
+      this._luxValues = [];
+      this._totalLux = 0;
+    } else {
+      this._win.removeEventListener("devicelight", this, false);
+      this._setColorScheme(colorSchemePref);
+      delete this._luxValues;
+      delete this._totalLux;
+    }
+
+    Services.prefs.setCharPref("reader.color_scheme", colorSchemePref);
+  },
+
+  _setFontType: function Reader_setFontType(newFontType) {
+    if (this._fontType === newFontType)
+      return;
+
+    let bodyClasses = this._doc.body.classList;
+
+    if (this._fontType)
+      bodyClasses.remove(this._fontType);
+
+    this._fontType = newFontType;
+    bodyClasses.add(this._fontType);
+
+    Services.prefs.setCharPref("reader.font_type", this._fontType);
   },
 
   _getToolbarVisibility: function Reader_getToolbarVisibility() {
@@ -363,10 +499,8 @@ AboutReader.prototype = {
 
   _requestFavicon: function Reader_requestFavicon() {
     gChromeWin.sendMessageToJava({
-      gecko: {
-        type: "Reader:FaviconRequest",
-        url: this._article.url
-      }
+      type: "Reader:FaviconRequest",
+      url: this._article.url
     });
   },
 
@@ -427,6 +561,15 @@ AboutReader.prototype = {
     }
   },
 
+  _maybeSetTextDirection: function Read_maybeSetTextDirection(article){
+    if(!article.dir)
+      return;
+
+    //Set "dir" attribute on content
+    this._contentElement.setAttribute("dir", article.dir);
+    this._headerElement.setAttribute("dir", article.dir);
+  },
+
   _showError: function Reader_showError(error) {
     this._headerElement.style.display = "none";
     this._contentElement.style.display = "none";
@@ -442,14 +585,13 @@ AboutReader.prototype = {
 
     this._article = article;
 
+    this._domainElement.href = article.url;
     let articleUri = Services.io.newURI(article.url, null, null);
-    let domain = articleUri.host;
-
-    this._domainElement.innerHTML = domain;
+    this._domainElement.innerHTML = articleUri.host;
 
     this._creditsElement.innerHTML = article.byline;
 
-    this._titleElement.innerHTML = article.title;
+    this._titleElement.textContent = article.title;
     this._doc.title = article.title;
 
     this._headerElement.style.display = "block";
@@ -460,6 +602,7 @@ AboutReader.prototype = {
     this._contentElement.innerHTML = "";
     this._contentElement.appendChild(contentFragment);
     this._updateImageMargins();
+    this._maybeSetTextDirection(article);
 
     this._contentElement.style.display = "block";
 
@@ -503,39 +646,6 @@ AboutReader.prototype = {
     return result;
   },
 
-  _setupStepControl: function Reader_setupStepControl(id, name, callback) {
-    let doc = this._doc;
-    let stepControl = doc.getElementById(id);
-
-    let title = this._doc.createElement("h1");
-    title.innerHTML = name;
-    stepControl.appendChild(title);
-
-    let plusButton = doc.createElement("div");
-    plusButton.className = "button plus-button";
-    stepControl.appendChild(plusButton);
-
-    let minusButton = doc.createElement("div");
-    minusButton.className = "button minus-button";
-    stepControl.appendChild(minusButton);
-
-    plusButton.addEventListener("click", function(aEvent) {
-      if (!aEvent.isTrusted)
-        return;
-
-      aEvent.stopPropagation();
-      callback(this._STEP_INCREMENT);
-    }.bind(this), true);
-
-    minusButton.addEventListener("click", function(aEvent) {
-      if (!aEvent.isTrusted)
-        return;
-
-      aEvent.stopPropagation();
-      callback(this._STEP_DECREMENT);
-    }.bind(this), true);
-  },
-
   _setupSegmentedButton: function Reader_setupSegmentedButton(id, options, initialValue, callback) {
     let doc = this._doc;
     let segmentedButton = doc.getElementById(id);
@@ -545,9 +655,19 @@ AboutReader.prototype = {
 
       let item = doc.createElement("li");
       let link = doc.createElement("a");
-      link.innerHTML = option.name;
+      link.textContent = option.name;
       item.appendChild(link);
 
+      if (option.linkClass !== undefined)
+        link.classList.add(option.linkClass);
+
+      if (option.description !== undefined) {
+        let description = doc.createElement("div");
+        description.textContent = option.description;
+        item.appendChild(description);
+      }
+
+      link.style.MozUserSelect = 'none';
       segmentedButton.appendChild(item);
 
       link.addEventListener("click", function(aEvent) {
@@ -602,25 +722,26 @@ AboutReader.prototype = {
       dropdownPopup.appendChild(dropdownArrow);
 
       let updatePopupPosition = function() {
-          let popupWidth = dropdownPopup.offsetWidth + 30;
-          let arrowWidth = dropdownArrow.offsetWidth;
-          let toggleWidth = dropdownToggle.offsetWidth;
-          let toggleLeft = dropdownToggle.offsetLeft;
+        let popupWidth = dropdownPopup.offsetWidth + 30;
+        let arrowWidth = dropdownArrow.offsetWidth;
+        let toggleWidth = dropdownToggle.offsetWidth;
+        let toggleLeft = dropdownToggle.offsetLeft;
 
-          let popupShift = (toggleWidth - popupWidth) / 2;
-          let popupLeft = Math.max(0, Math.min(win.innerWidth - popupWidth, toggleLeft + popupShift));
-          dropdownPopup.style.left = popupLeft + "px";
+        let popupShift = (toggleWidth - popupWidth) / 2;
+        let popupLeft = Math.max(0, Math.min(win.innerWidth - popupWidth, toggleLeft + popupShift));
+        dropdownPopup.style.left = popupLeft + "px";
 
-          let arrowShift = (toggleWidth - arrowWidth) / 2;
-          let arrowLeft = toggleLeft - popupLeft + arrowShift;
-          dropdownArrow.style.left = arrowLeft + "px";
+        let arrowShift = (toggleWidth - arrowWidth) / 2;
+        let arrowLeft = toggleLeft - popupLeft + arrowShift;
+        dropdownArrow.style.left = arrowLeft + "px";
       };
 
       win.addEventListener("resize", function(aEvent) {
         if (!aEvent.isTrusted)
           return;
 
-        updatePopupPosition();
+        // Wait for reflow before calculating the new position of the popup.
+        setTimeout(updatePopupPosition, 0);
       }, true);
 
       dropdownToggle.addEventListener("click", function(aEvent) {
@@ -628,6 +749,9 @@ AboutReader.prototype = {
           return;
 
         aEvent.stopPropagation();
+
+        if (!this._getToolbarVisibility())
+          return;
 
         let dropdownClasses = dropdown.classList;
 

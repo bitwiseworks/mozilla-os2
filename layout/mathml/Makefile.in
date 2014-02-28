@@ -11,9 +11,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = layout
 LIBRARY_NAME = gkmathml_s
 LIBXUL_LIBRARY	= 1
+FAIL_ON_WARNINGS = 1
 
 
 LOCAL_INCLUDES = \
@@ -25,32 +25,6 @@ LOCAL_INCLUDES = \
 	-I$(topsrcdir)/content/mathml/content/src \
 	-I$(srcdir)/../xul/base/src \
 	$(NULL)
-
-CPPSRCS =         nsMathMLChar.cpp		        \
-                  nsMathMLFrame.cpp		\
-                  nsMathMLContainerFrame.cpp		\
-                  nsMathMLOperators.cpp \
-                  nsMathMLTokenFrame.cpp		\
-                  nsMathMLmoFrame.cpp			\
-                  nsMathMLmrowFrame.cpp		        \
-                  nsMathMLmphantomFrame.cpp		\
-                  nsMathMLmfencedFrame.cpp		\
-                  nsMathMLmfracFrame.cpp		\
-                  nsMathMLmsupFrame.cpp			\
-                  nsMathMLmsubFrame.cpp			\
-                  nsMathMLmsubsupFrame.cpp		\
-                  nsMathMLmmultiscriptsFrame.cpp	\
-                  nsMathMLmtableFrame.cpp		\
-                  nsMathMLmunderoverFrame.cpp		\
-                  nsMathMLmpaddedFrame.cpp		\
-                  nsMathMLmspaceFrame.cpp		\
-                  nsMathMLmstyleFrame.cpp		\
-                  nsMathMLmsqrtFrame.cpp		\
-                  nsMathMLmrootFrame.cpp		\
-                  nsMathMLmactionFrame.cpp		\
-                  nsMathMLmencloseFrame.cpp		\
-                  nsMathMLsemanticsFrame.cpp		\
-                  $(NULL)
 
 include $(topsrcdir)/config/config.mk
 

@@ -8,6 +8,8 @@
 #ifndef __nsCSSColorUtils_h
 #define __nsCSSColorUtils_h
 
+#include "mozilla/MathAlgorithms.h"
+
 #include "nsColor.h"
 
 // "Sufficient contrast" is determined by
@@ -15,7 +17,7 @@
 // See http://www.w3.org/TR/AERT#color-contrast
 #define NS_SUFFICIENT_LUMINOSITY_DIFFERENCE 125000
 #define NS_LUMINOSITY_DIFFERENCE(a, b) \
-          NS_ABS(NS_GetLuminosity(a) - NS_GetLuminosity(b))
+          int32_t(mozilla::Abs(NS_GetLuminosity(a) - NS_GetLuminosity(b)))
 
 // To determine colors based on the background brightness and border color
 void NS_GetSpecial3DColors(nscolor aResult[2],

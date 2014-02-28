@@ -20,10 +20,15 @@
  *      be explicitly specified for this property.
  *
  * To allow these testcases to be re-used in both horizontal and vertical
- * flex containers, we specify "width"/"min-width"/etc. as "_main-size",
- * "_min-main-size", etc.  The test code can map these placeholder names to
- * their corresponding property-names using the maps defined below --
- * gHorizontalPropertyMapping and gVerticalPropertyMapping.
+ * flex containers, we specify "width"/"min-width"/etc. using the aliases
+ * "_main-size", "_min-main-size", etc.  The test code can map these
+ * placeholder names to their corresponding property-names using the maps
+ * defined below -- gRowPropertyMapping, gColumnPropertyMapping, etc.
+ *
+ * If the testcase needs to customize its flex container at all (e.g. by
+ * specifying a custom container-size), it can do so by including a hash
+ * called "container_properties", with propertyName:propertyValue mappings.
+ * (This hash can use aliased property-names like "_main-size" as well.)
  */
 
 // The standard main-size we'll use for our flex container when setting up
@@ -97,20 +102,20 @@ var gFlexboxTestcases =
  {
    items:
      [
-       { "_main-size":       [ "40px", "40px" ] },
-       { "_main-size":       [ "65px", "65px" ] },
+       { "_main-size": [ "40px", "40px" ] },
+       { "_main-size": [ "65px", "65px" ] },
      ]
  },
  // flex-basis is specified:
  {
    items:
      [
-       { "-moz-flex-basis": "50px",
-         "_main-size":       [ null,  "50px" ]
+       { "flex-basis": "50px",
+         "_main-size": [ null,  "50px" ]
        },
        {
-         "-moz-flex-basis": "20px",
-         "_main-size":       [ null, "20px" ]
+         "flex-basis": "20px",
+         "_main-size": [ null, "20px" ]
        },
      ]
  },
@@ -120,12 +125,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "0 0 150px",
-         "_main-size":       [ null, "150px" ]
+         "flex": "0 0 150px",
+         "_main-size": [ null, "150px" ]
        },
        {
-         "-moz-flex": "0 0 90px",
-         "_main-size":       [ null, "90px" ]
+         "flex": "0 0 90px",
+         "_main-size": [ null, "90px" ]
        },
      ]
  },
@@ -135,12 +140,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "0 0 250px",
-         "_main-size":       [ null, "250px" ]
+         "flex": "0 0 250px",
+         "_main-size": [ null, "250px" ]
        },
        {
-         "-moz-flex": "0 0 400px",
-         "_main-size":       [ null, "400px" ]
+         "flex": "0 0 400px",
+         "_main-size": [ null, "400px" ]
        },
      ]
  },
@@ -149,12 +154,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex-basis": "30%",
-         "_main-size":       [ null, "60px" ]
+         "flex-basis": "30%",
+         "_main-size": [ null, "60px" ]
        },
        {
-         "-moz-flex-basis": "45%",
-         "_main-size":       [ null, "90px" ]
+         "flex-basis": "45%",
+         "_main-size": [ null, "90px" ]
        },
      ]
  },
@@ -163,12 +168,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex-basis": "-moz-calc(20%)",
-         "_main-size":       [ null, "40px" ]
+         "flex-basis": "calc(20%)",
+         "_main-size": [ null, "40px" ]
        },
        {
-         "-moz-flex-basis": "-moz-calc(80%)",
-         "_main-size":       [ null, "160px" ]
+         "flex-basis": "calc(80%)",
+         "_main-size": [ null, "160px" ]
        },
      ]
  },
@@ -177,12 +182,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex-basis": "-moz-calc(10px + 20%)",
-         "_main-size":       [ null, "50px" ]
+         "flex-basis": "calc(10px + 20%)",
+         "_main-size": [ null, "50px" ]
        },
        {
-         "-moz-flex-basis": "-moz-calc(60% - 1px)",
-         "_main-size":       [ null, "119px" ]
+         "flex-basis": "calc(60% - 1px)",
+         "_main-size": [ null, "119px" ]
        },
      ]
  },
@@ -191,16 +196,16 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "1",
-         "_main-size":       [ null,  "60px" ]
+         "flex": "1",
+         "_main-size": [ null,  "60px" ]
        },
        {
-         "-moz-flex": "2",
-         "_main-size":       [ null, "120px" ]
+         "flex": "2",
+         "_main-size": [ null, "120px" ]
        },
        {
-         "-moz-flex": "0 20px",
-         "_main-size":       [ null, "20px" ]
+         "flex": "0 20px",
+         "_main-size": [ null, "20px" ]
        }
      ]
  },
@@ -209,15 +214,15 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "100000",
+         "flex": "100000",
          "_main-size": [ null,  "60px" ]
        },
        {
-         "-moz-flex": "200000",
+         "flex": "200000",
          "_main-size": [ null, "120px" ]
        },
        {
-         "-moz-flex": "0.000001 20px",
+         "flex": "0.000001 20px",
          "_main-size": [ null,  "20px" ]
        }
      ]
@@ -228,15 +233,15 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "none",
+         "flex": "none",
          "_main-size": [ "20px", "20px" ]
        },
        {
-         "-moz-flex": "1",
+         "flex": "1",
          "_main-size": [ null,   "60px" ]
        },
        {
-         "-moz-flex": "2",
+         "flex": "2",
          "_main-size": [ null,  "120px" ]
        }
      ]
@@ -248,7 +253,7 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "9999999999999999999999999999999999999999999999999999999",
+         "flex": "9999999999999999999999999999999999999999999999999999999",
          "_main-size": [ null,  "200px" ]
        },
      ]
@@ -257,19 +262,19 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "9999999999999999999999999999999999999999999999999999999",
+         "flex": "9999999999999999999999999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
        },
        {
-         "-moz-flex": "9999999999999999999999999999999999999999999999999999999",
+         "flex": "9999999999999999999999999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
        },
        {
-         "-moz-flex": "9999999999999999999999999999999999999999999999999999999",
+         "flex": "9999999999999999999999999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
        },
        {
-         "-moz-flex": "9999999999999999999999999999999999999999999999999999999",
+         "flex": "9999999999999999999999999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
        },
      ]
@@ -278,20 +283,193 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "99999999999999999999999999999999999",
+         "flex": "99999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
        },
        {
-         "-moz-flex": "99999999999999999999999999999999999",
+         "flex": "99999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
        },
        {
-         "-moz-flex": "99999999999999999999999999999999999",
+         "flex": "99999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
        },
        {
-         "-moz-flex": "99999999999999999999999999999999999",
+         "flex": "99999999999999999999999999999999999",
          "_main-size": [ null,  "50px" ]
+       },
+     ]
+ },
+
+ // And now, some testcases to check that we handle float accumulation error
+ // gracefully.
+
+ // First, a testcase with just a custom-sized huge container, to be sure we'll
+ // be able to handle content on that scale, in the subsequent more-complex
+ // testcases:
+ {
+   container_properties:
+   {
+     "_main-size": "9000000px"
+   },
+   items:
+     [
+       {
+         "flex": "1",
+         "_main-size": [ null,  "9000000px" ]
+       },
+     ]
+ },
+ // ...and now with two flex items dividing up that container's huge size:
+ {
+   container_properties:
+   {
+     "_main-size": "9000000px"
+   },
+   items:
+     [
+       {
+         "flex": "2",
+         "_main-size": [ null,  "6000000px" ]
+       },
+       {
+         "flex": "1",
+         "_main-size": [ null,  "3000000px" ]
+       },
+     ]
+ },
+
+ // OK, now to actually test accumulation error. Below, we have six flex items
+ // splitting up the container's size, with huge differences between flex
+ // weights.  For simplicity, I've set up the weights so that they sum exactly
+ // to the container's size in px. So 1 unit of flex *should* get you 1px.
+ //
+ // NOTE: The expected computed "_main-size" values for the flex items below
+ // appear to add up to more than their container's size, which would suggest
+ // that they overflow their container unnecessarily. But they don't actually
+ // overflow -- this discrepancy is simply because Gecko's code for reporting
+ // computed-sizes rounds to 6 significant figures (in particular, the method
+ // (nsTSubstring_CharT::AppendFloat() does this).  Internally, in app-units,
+ // the child frames' main-sizes add up exactly to the container's main-size,
+ // as you'd hope & expect.
+ {
+   container_properties:
+   {
+     "_main-size": "9000000px"
+   },
+   items:
+     [
+       {
+         "flex": "3000000",
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "1",
+         "_main-size": [ null,  "1px" ]
+       },
+       {
+         "flex": "1",
+         "_main-size": [ null,  "1px" ]
+       },
+       {
+         "flex": "2999999",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths & when generating computed value string:
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "2999998",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths & when generating computed value string:
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "1",
+         "_main-size": [ null,  "1px" ]
+       },
+     ]
+ },
+ // Same flex items as previous testcase, but now reordered such that the items
+ // with tiny flex weights are all listed last:
+ {
+   container_properties:
+   {
+     "_main-size": "9000000px"
+   },
+   items:
+     [
+       {
+         "flex": "3000000",
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "2999999",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths & when generating computed value string:
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "2999998",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths & when generating computed value string:
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "1",
+         "_main-size": [ null,  "1px" ]
+       },
+       {
+         "flex": "1",
+         "_main-size": [ null,  "1px" ]
+       },
+       {
+         "flex": "1",
+         "_main-size": [ null,  "1px" ]
+       },
+     ]
+ },
+ // Same flex items as previous testcase, but now reordered such that the items
+ // with tiny flex weights are all listed first:
+ {
+   container_properties:
+   {
+     "_main-size": "9000000px"
+   },
+   items:
+     [
+       {
+         "flex": "1",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths:
+         "_main-size": [ null,  "0.966667px" ]
+       },
+       {
+         "flex": "1",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths:
+         "_main-size": [ null,  "0.983333px" ]
+       },
+       {
+         "flex": "1",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths:
+         "_main-size": [ null,  "0.983333px" ]
+       },
+       {
+         "flex": "3000000",
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "2999999",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths & when generating computed value string:
+         "_main-size": [ null,  "3000000px" ]
+       },
+       {
+         "flex": "2999998",
+         // NOTE: Expected value is off slightly, from float error when
+         // resolving flexible lengths & when generating computed value string:
+         "_main-size": [ null,  "3000000px" ]
        },
      ]
  },
@@ -301,15 +479,15 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_main-size": [ null, "45px" ]
        },
        {
-         "-moz-flex": "2",
+         "flex": "2",
          "_main-size": [ null, "90px" ]
        },
        {
-         "-moz-flex": "20px 1 0",
+         "flex": "20px 1 0",
          "_main-size": [ null, "65px" ]
        }
      ]
@@ -319,15 +497,15 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "20px",
+         "flex": "20px",
          "_main-size": [ null, "65px" ]
        },
        {
-         "-moz-flex": "1",
+         "flex": "1",
          "_main-size": [ null, "45px" ]
        },
        {
-         "-moz-flex": "2",
+         "flex": "2",
          "_main-size": [ null, "90px" ]
        }
      ]
@@ -336,18 +514,18 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "2",
+         "flex": "2",
          "_main-size": [ null,  "100px" ],
          "border": "0px dashed",
-         "_border-main-start-width":  [ "5px",  "5px" ],
+         "_border-main-start-width": [ "5px",  "5px" ],
          "_border-main-end-width": [ "15px", "15px" ],
          "_margin-main-start": [ "22px", "22px" ],
          "_margin-main-end": [ "8px", "8px" ]
        },
        {
-         "-moz-flex": "1",
+         "flex": "1",
          "_main-size": [ null,  "50px" ],
-         "_margin-main-start":   [ "auto", "0px" ],
+         "_margin-main-start": [ "auto", "0px" ],
          "_padding-main-end": [ "auto", "0px" ],
        }
      ]
@@ -367,7 +545,7 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "4 2 250px",
+         "flex": "4 2 250px",
          "_main-size": [ null,  "200px" ]
        },
      ],
@@ -390,15 +568,15 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "4 3 100px",
+         "flex": "4 3 100px",
          "_main-size": [ null,  "80px" ]
        },
        {
-         "-moz-flex": "5 3 50px",
+         "flex": "5 3 50px",
          "_main-size": [ null,  "40px" ]
        },
        {
-         "-moz-flex": "0 3 100px",
+         "flex": "0 3 100px",
          "_main-size": [ null, "80px" ]
        }
      ]
@@ -408,15 +586,15 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "4 2 50px",
+         "flex": "4 2 50px",
          "_main-size": [ null,  "30px" ]
        },
        {
-         "-moz-flex": "5 3 50px",
+         "flex": "5 3 50px",
          "_main-size": [ null,  "20px" ]
        },
        {
-         "-moz-flex": "0 0 150px",
+         "flex": "0 0 150px",
          "_main-size": [ null, "150px" ]
        }
      ]
@@ -426,15 +604,15 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "4 20000000 50px",
+         "flex": "4 20000000 50px",
          "_main-size": [ null,  "30px" ]
        },
        {
-         "-moz-flex": "5 30000000 50px",
+         "flex": "5 30000000 50px",
          "_main-size": [ null,  "20px" ]
        },
        {
-         "-moz-flex": "0 0.0000001 150px",
+         "flex": "0 0.0000001 150px",
          "_main-size": [ null, "150px" ]
        }
      ]
@@ -444,19 +622,19 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "4 2 115px",
+         "flex": "4 2 115px",
          "_main-size": [ null,  "69px" ]
        },
        {
-         "-moz-flex": "5 1 150px",
+         "flex": "5 1 150px",
          "_main-size": [ null,  "120px" ]
        },
        {
-         "-moz-flex": "1 4 30px",
+         "flex": "1 4 30px",
          "_main-size": [ null,  "6px" ]
        },
        {
-         "-moz-flex": "1 0 5px",
+         "flex": "1 0 5px",
          "_main-size": [ null, "5px" ]
        },
      ]
@@ -467,16 +645,16 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "4 5 75px",
+         "flex": "4 5 75px",
          "_min-main-size": "50px",
          "_main-size": [ null,  "50px" ],
        },
        {
-         "-moz-flex": "5 5 100px",
+         "flex": "5 5 100px",
          "_main-size": [ null,  "62.5px" ]
        },
        {
-         "-moz-flex": "0 4 125px",
+         "flex": "0 4 125px",
          "_main-size": [ null, "87.5px" ]
        }
      ]
@@ -488,12 +666,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_min-main-size": "110px",
          "_main-size": [ "50px",  "125px" ]
        },
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_main-size": [ null, "75px" ]
        }
      ]
@@ -506,12 +684,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_min-main-size": "150px",
          "_main-size": [ "50px",  "150px" ]
        },
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_main-size": [ null, "50px" ]
        }
      ]
@@ -522,12 +700,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_min-main-size": "20px",
          "_main-size": [ null,  "20px" ]
        },
        {
-         "-moz-flex": "9 auto",
+         "flex": "9 auto",
          "_min-main-size": "150px",
          "_main-size": [ "50px",  "180px" ]
        },
@@ -537,17 +715,17 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "1 1 0px",
+         "flex": "1 1 0px",
          "_min-main-size": "90px",
          "_main-size": [ null, "90px" ]
        },
        {
-         "-moz-flex": "1 1 0px",
+         "flex": "1 1 0px",
          "_min-main-size": "80px",
          "_main-size": [ null, "80px" ]
        },
        {
-         "-moz-flex": "1 1 40px",
+         "flex": "1 1 40px",
          "_main-size": [ null, "30px" ]
        }
      ]
@@ -559,17 +737,17 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "1 2 100px",
+         "flex": "1 2 100px",
          "_min-main-size": "90px",
          "_main-size": [ null, "90px" ]
        },
        {
-         "-moz-flex": "1 1 100px",
+         "flex": "1 1 100px",
          "_min-main-size": "70px",
          "_main-size": [ null, "70px" ]
        },
        {
-         "-moz-flex": "1 1 100px",
+         "flex": "1 1 100px",
          "_main-size": [ null, "40px" ]
        }
      ]
@@ -592,12 +770,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_min-main-size": "130px",
          "_main-size": [ null, "150px" ]
        },
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_max-main-size": "50px",
          "_main-size": [ null,  "50px" ]
        },
@@ -617,12 +795,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_min-main-size": "130px",
          "_main-size": [ null, "130px" ]
        },
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_max-main-size": "80px",
          "_main-size": [ null,  "70px" ]
        },
@@ -641,12 +819,12 @@ var gFlexboxTestcases =
    items:
      [
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_max-main-size": "80px",
          "_main-size": [ null,  "80px" ]
        },
        {
-         "-moz-flex": "auto",
+         "flex": "auto",
          "_min-main-size": "120px",
          "_main-size": [ null, "120px" ]
        },

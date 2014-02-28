@@ -37,10 +37,6 @@
 #define NS_TASKBAR_CONTRACTID "@mozilla.org/windows-taskbar;1"
 #endif
 
-#ifdef MOZ_WIDGET_ANDROID
-#include "APKOpen.h"
-#endif
-
 using mozilla::MonitorAutoLock;
 using mozilla::ipc::GeckoChildProcessHost;
 
@@ -74,13 +70,22 @@ struct RunnableMethodTraits<GeckoChildProcessHost>
     static void ReleaseCallee(GeckoChildProcessHost* obj) { }
 };
 
+/*static*/
+base::ChildPrivileges
+GeckoChildProcessHost::DefaultChildPrivileges()
+{
+  return (kLowRightsSubprocesses ?
+          base::PRIVILEGES_UNPRIVILEGED : base::PRIVILEGES_INHERIT);
+}
+
 GeckoChildProcessHost::GeckoChildProcessHost(GeckoProcessType aProcessType,
-                                             base::WaitableEventWatcher::Delegate* aDelegate)
+                                             ChildPrivileges aPrivileges)
   : ChildProcessHost(RENDER_PROCESS), // FIXME/cjones: we should own this enum
     mProcessType(aProcessType),
+    mPrivileges(aPrivileges),
     mMonitor("mozilla.ipc.GeckChildProcessHost.mMonitor"),
     mProcessState(CREATING_CHANNEL),
-    mDelegate(aDelegate),
+    mDelegate(nullptr),
     mChildProcessHandle(0)
 #if defined(MOZ_WIDGET_COCOA)
   , mChildTask(MACH_PORT_NULL)
@@ -168,7 +173,7 @@ private:
 };
 #endif
 
-nsresult GeckoChildProcessHost::GetArchitecturesForBinary(const char *path, uint32 *result)
+nsresult GeckoChildProcessHost::GetArchitecturesForBinary(const char *path, uint32_t *result)
 {
   *result = 0;
 
@@ -216,12 +221,12 @@ nsresult GeckoChildProcessHost::GetArchitecturesForBinary(const char *path, uint
 #endif
 }
 
-uint32 GeckoChildProcessHost::GetSupportedArchitecturesForProcessType(GeckoProcessType type)
+uint32_t GeckoChildProcessHost::GetSupportedArchitecturesForProcessType(GeckoProcessType type)
 {
 #ifdef MOZ_WIDGET_COCOA
   if (type == GeckoProcessType_Plugin) {
     // Cache this, it shouldn't ever change.
-    static uint32 pluginContainerArchs = 0;
+    static uint32_t pluginContainerArchs = 0;
     if (pluginContainerArchs == 0) {
       FilePath exePath;
       GetPathToBinary(exePath);
@@ -363,6 +368,20 @@ GeckoChildProcessHost::InitializeChannel()
   lock.Notify();
 }
 
+void
+GeckoChildProcessHost::Join()
+{
+  AssertIOThread();
+
+  if (!mChildProcessHandle) {
+    return;
+  }
+
+  // If this fails, there's nothing we can do.
+  base::KillProcess(mChildProcessHandle, 0, /*wait*/true);
+  mChildProcessHandle = 0;
+}
+
 int32_t GeckoChildProcessHost::mChildCounter = 0;
 
 //
@@ -383,7 +402,7 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts, b
   // different than parent.  So temporarily change NSPR_LOG_FILE so child
   // inherits value we want it to have. (NSPR only looks at NSPR_LOG_FILE at
   // startup, so it's 'safe' to play with the parent's environment this way.)
-  nsCAutoString setChildLogName("NSPR_LOG_FILE=");
+  nsAutoCString setChildLogName("NSPR_LOG_FILE=");
   setChildLogName.Append(origLogName);
 
   // remember original value so we can restore it.
@@ -407,6 +426,40 @@ GeckoChildProcessHost::PerformAsyncLaunch(std::vector<std::string> aExtraOpts, b
   PR_SetEnv(restoreOrigLogName);
 
   return retval;
+}
+
+void
+#if defined(XP_WIN)
+AddAppDirToCommandLine(CommandLine& aCmdLine)
+#else
+AddAppDirToCommandLine(std::vector<std::string>& aCmdLine)
+#endif
+{
+  // Content processes need access to application resources, so pass
+  // the full application directory path to the child process.
+  if (ShouldHaveDirectoryService()) {
+    nsCOMPtr<nsIProperties> directoryService(do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID));
+    NS_ASSERTION(directoryService, "Expected XPCOM to be available");
+    if (directoryService) {
+      nsCOMPtr<nsIFile> appDir;
+      // NS_XPCOM_CURRENT_PROCESS_DIR really means the app dir, not the
+      // current process dir.
+      nsresult rv = directoryService->Get(NS_XPCOM_CURRENT_PROCESS_DIR,
+                                          NS_GET_IID(nsIFile),
+                                          getter_AddRefs(appDir));
+      if (NS_SUCCEEDED(rv)) {
+        nsAutoCString path;
+        appDir->GetNativePath(path);
+#if defined(XP_WIN)
+        aCmdLine.AppendLooseValue(UTF8ToWide("-appdir"));
+        aCmdLine.AppendLooseValue(UTF8ToWide(path.get()));
+#else
+        aCmdLine.push_back("-appdir");
+        aCmdLine.push_back(path.get());
+#endif
+      }
+    }
+  }
 }
 
 bool
@@ -437,11 +490,12 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // and passing wstrings from one config to the other is unsafe.  So
   // we split the logic here.
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_BSD)
   base::environment_map newEnvVars;
-  base::ChildPrivileges privs = kLowRightsSubprocesses ?
-                                base::UNPRIVILEGED :
-                                base::SAME_PRIVILEGES_AS_PARENT;
+  ChildPrivileges privs = mPrivileges;
+  if (privs == base::PRIVILEGES_DEFAULT) {
+    privs = DefaultChildPrivileges();
+  }
   // XPCOM may not be initialized in some subprocesses.  We don't want
   // to initialize XPCOM just for the directory service, especially
   // since LD_LIBRARY_PATH is already set correctly in subprocesses
@@ -455,8 +509,8 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
       if (NS_SUCCEEDED(rv)) {
         nsCString path;
         greDir->GetNativePath(path);
-# ifdef OS_LINUX
-#  ifdef MOZ_WIDGET_ANDROID
+# if defined(OS_LINUX) || defined(OS_BSD)
+#  if defined(MOZ_WIDGET_ANDROID)
         path += "/lib";
 #  endif  // MOZ_WIDGET_ANDROID
         const char *ld_library_path = PR_GetEnv("LD_LIBRARY_PATH");
@@ -502,20 +556,6 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
 #ifdef MOZ_WIDGET_ANDROID
   // The java wrapper unpacks this for us but can't make it executable
   chmod(exePath.value().c_str(), 0700);
-  int cacheCount = 0;
-  const struct lib_cache_info * cache = getLibraryCache();
-  nsCString cacheStr;
-  while (cache &&
-         cacheCount++ < MAX_LIB_CACHE_ENTRIES &&
-         strlen(cache->name)) {
-    mFileMap.push_back(std::pair<int,int>(cache->fd, cache->fd));
-    cacheStr.Append(cache->name);
-    cacheStr.AppendPrintf(":%d;", cache->fd);
-    cache++;
-  }
-  // fill the last arg with something if there's no cache
-  if (cacheStr.IsEmpty())
-    cacheStr.AppendLiteral("-");
 #endif  // MOZ_WIDGET_ANDROID
 
 #ifdef ANDROID
@@ -559,7 +599,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   if (Omnijar::IsInitialized()) {
     // Make sure that child processes can find the omnijar
     // See XRE_InitCommandLine in nsAppRunner.cpp
-    nsCAutoString path;
+    nsAutoCString path;
     nsCOMPtr<nsIFile> file = Omnijar::GetPath(Omnijar::GRE);
     if (file && NS_SUCCEEDED(file->GetNativePath(path))) {
       childArgv.push_back("-greomni");
@@ -572,10 +612,13 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     }
   }
 
+  // Add the application directory path (-appdir path)
+  AddAppDirToCommandLine(childArgv);
+
   childArgv.push_back(pidstring);
 
 #if defined(MOZ_CRASHREPORTER)
-#  if defined(OS_LINUX)
+#  if defined(OS_LINUX) || defined(OS_BSD)
   int childCrashFd, childCrashRemapFd;
   if (!CrashReporter::CreateNotificationPipeForChild(
         &childCrashFd, &childCrashRemapFd))
@@ -607,12 +650,8 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
 
   childArgv.push_back(childProcessType);
 
-#ifdef MOZ_WIDGET_ANDROID
-  childArgv.push_back(cacheStr.get());
-#endif
-
   base::LaunchApp(childArgv, mFileMap,
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_BSD)
                   newEnvVars, privs,
 #endif
                   false, &process, arch);
@@ -671,8 +710,6 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
       cmdLine.AppendLooseValue(UTF8ToWide(*it));
   }
 
-  cmdLine.AppendLooseValue(std::wstring(mGroupId.get()));
-
   if (Omnijar::IsInitialized()) {
     // Make sure the child process can find the omnijar
     // See XRE_InitCommandLine in nsAppRunner.cpp
@@ -689,6 +726,17 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     }
   }
 
+  // Add the application directory path (-appdir path)
+  AddAppDirToCommandLine(cmdLine);
+
+  // XXX Command line params past this point are expected to be at
+  // the end of the command line string, and in a specific order.
+  // See XRE_InitChildProcess in nsEmbedFunction.
+
+  // Win app model id
+  cmdLine.AppendLooseValue(std::wstring(mGroupId.get()));
+
+  // Process id
   cmdLine.AppendLooseValue(UTF8ToWide(pidstring));
 
 #if defined(MOZ_CRASHREPORTER)
@@ -696,6 +744,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     UTF8ToWide(CrashReporter::GetChildNotificationPipe()));
 #endif
 
+  // Process type
   cmdLine.AppendLooseValue(UTF8ToWide(childProcessType));
 
   base::LaunchApp(cmdLine, false, false, &process);
@@ -741,7 +790,7 @@ GeckoChildProcessHost::OpenPrivilegedHandle(base::ProcessId aPid)
 }
 
 void
-GeckoChildProcessHost::OnChannelConnected(int32 peer_pid)
+GeckoChildProcessHost::OnChannelConnected(int32_t peer_pid)
 {
   OpenPrivilegedHandle(peer_pid);
   {

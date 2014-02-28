@@ -3,36 +3,33 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // This test makes sure that certificate exceptions UI behaves correctly
-// inside the private browsing mode, based on whether it's opened from the prefs
+// in private browsing windows, based on whether it's opened from the prefs
 // window or from the SSL error page (see bug 461627).
 
 function test() {
-  // initialization
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
-
   const EXCEPTIONS_DLG_URL = 'chrome://pippki/content/exceptionDialog.xul';
   const EXCEPTIONS_DLG_FEATURES = 'chrome,centerscreen';
   const INVALID_CERT_LOCATION = 'https://nocert.example.com/';
   waitForExplicitFinish();
 
-  // enter private browsing mode
-  pb.privateBrowsingEnabled = true;
+  // open a private browsing window
+  var pbWin = OpenBrowserWindow({private: true});
+  pbWin.addEventListener("load", function onLoad() {
+    pbWin.removeEventListener("load", onLoad, false);
+    doTest();
+  }, false);
 
-  step1();
-
-  // Test the certificate exceptions dialog as it is invoked from about:certerror
-  function step1() {
+  // Test the certificate exceptions dialog
+  function doTest() {
     let params = {
       exceptionAdded : false,
       location: INVALID_CERT_LOCATION,
-      handlePrivateBrowsing : true,
       prefetchCert: true,
     };
     function testCheckbox() {
       win.removeEventListener("load", testCheckbox, false);
-      Services.obs.addObserver(function (aSubject, aTopic, aData) {
-        Services.obs.removeObserver(arguments.callee, "cert-exception-ui-ready", false);
+      Services.obs.addObserver(function onCertUI(aSubject, aTopic, aData) {
+        Services.obs.removeObserver(onCertUI, "cert-exception-ui-ready");
         ok(win.gCert, "The certificate information should be available now");
 
         let checkbox = win.document.getElementById("permanent");
@@ -41,42 +38,16 @@ function test() {
         ok(!checkbox.hasAttribute("checked"),
           "the permanent checkbox should not be checked when handling the private browsing mode");
         win.close();
-        step2();
-      }, "cert-exception-ui-ready", false);
-    }
-    var win = openDialog(EXCEPTIONS_DLG_URL, "", EXCEPTIONS_DLG_FEATURES, params);
-    win.addEventListener("load", testCheckbox, false);
-  }
-
-  // Test the certificate excetions dialog as it is invoked from the Preferences dialog
-  function step2() {
-    let params = {
-      exceptionAdded : false,
-      location: INVALID_CERT_LOCATION,
-      prefetchCert: true,
-    };
-    function testCheckbox() {
-      win.removeEventListener("load", testCheckbox, false);
-      Services.obs.addObserver(function (aSubject, aTopic, aData) {
-        Services.obs.removeObserver(arguments.callee, "cert-exception-ui-ready", false);
-        ok(win.gCert, "The certificate information should be available now");
-
-        let checkbox = win.document.getElementById("permanent");
-        ok(!checkbox.hasAttribute("disabled"),
-          "the permanent checkbox should not be disabled when not handling the private browsing mode");
-        ok(checkbox.hasAttribute("checked"),
-          "the permanent checkbox should be checked when not handling the private browsing mode");
-        win.close();
         cleanup();
       }, "cert-exception-ui-ready", false);
     }
-    var win = openDialog(EXCEPTIONS_DLG_URL, "", EXCEPTIONS_DLG_FEATURES, params);
+    var win = pbWin.openDialog(EXCEPTIONS_DLG_URL, "", EXCEPTIONS_DLG_FEATURES, params);
     win.addEventListener("load", testCheckbox, false);
   }
 
   function cleanup() {
-    // leave the private browsing mode
-    pb.privateBrowsingEnabled = false;
+    // close the private browsing window
+    pbWin.close();
     finish();
   }
 }

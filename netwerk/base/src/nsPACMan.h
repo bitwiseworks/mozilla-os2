@@ -10,12 +10,20 @@
 #include "nsIStreamLoader.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIChannelEventSink.h"
-#include "nsIProxyAutoConfig.h"
+#include "ProxyAutoConfig.h"
+#include "nsICancelable.h"
+#include "nsThreadUtils.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
-#include "prclist.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/LinkedList.h"
+#include "nsIThread.h"
+#include "nsAutoPtr.h"
+#include "nsISystemProxySettings.h"
+#include "mozilla/TimeStamp.h"
+
+class nsPACMan;
 
 /**
  * This class defines a callback interface used by AsyncGetProxyForURI.
@@ -31,14 +39,45 @@ public:
    * @param pacString
    *        This parameter holds the value of the PAC string.  It is empty when
    *        status is a failure code.
+   * @param newPACURL
+   *        This parameter holds the URL of a new PAC file that should be loaded
+   *        before the query is evaluated again. At least one of pacString and
+   *        newPACURL should be 0 length.
    */
-  virtual void OnQueryComplete(nsresult status, const nsCString &pacString) = 0;
+  virtual void OnQueryComplete(nsresult status,
+                               const nsCString &pacString,
+                               const nsCString &newPACURL) = 0;
+};
+
+class PendingPACQuery MOZ_FINAL : public nsRunnable,
+                                  public mozilla::LinkedListElement<PendingPACQuery>
+{
+public:
+  PendingPACQuery(nsPACMan *pacMan, nsIURI *uri,
+                  nsPACManCallback *callback, bool mainThreadResponse);
+
+  // can be called from either thread
+  void Complete(nsresult status, const nsCString &pacString);
+  void UseAlternatePACFile(const nsCString &pacURL);
+
+  nsCString                  mSpec;
+  nsCString                  mScheme;
+  nsCString                  mHost;
+  int32_t                    mPort;
+
+  NS_IMETHOD Run(void);     /* nsRunnable */
+
+private:
+  nsPACMan                  *mPACMan;  // weak reference
+  nsRefPtr<nsPACManCallback> mCallback;
+  bool                       mOnMainThreadOnly;
 };
 
 /**
  * This class provides an abstraction layer above the PAC thread.  The methods
  * defined on this class are intended to be called on the main thread only.
  */
+
 class nsPACMan MOZ_FINAL : public nsIStreamLoaderObserver
                          , public nsIInterfaceRequestor
                          , public nsIChannelEventSink
@@ -56,19 +95,6 @@ public:
   void Shutdown();
 
   /**
-   * This method queries a PAC result synchronously.
-   *
-   * @param uri
-   *        The URI to query.
-   * @param result
-   *        Holds the PAC result string upon return.
-   *
-   * @return NS_ERROR_IN_PROGRESS if the PAC file is not yet loaded.
-   * @return NS_ERROR_NOT_AVAILABLE if the PAC file could not be loaded.
-   */
-  nsresult GetProxyForURI(nsIURI *uri, nsACString &result);
-
-  /**
    * This method queries a PAC result asynchronously.  The callback runs on the
    * calling thread.  If the PAC file has not yet been loaded, then this method
    * will queue up the request, and complete it once the PAC file has been
@@ -78,19 +104,22 @@ public:
    *        The URI to query.
    * @param callback
    *        The callback to run once the PAC result is available.
+   * @param mustCallbackOnMainThread
+   *        If set to false the callback can be made from the PAC thread
    */
-  nsresult AsyncGetProxyForURI(nsIURI *uri, nsPACManCallback *callback);
+  nsresult AsyncGetProxyForURI(nsIURI *uri, nsPACManCallback *callback,
+                               bool mustCallbackOnMainThread);
 
   /**
    * This method may be called to reload the PAC file.  While we are loading
    * the PAC file, any asynchronous PAC queries will be queued up to be
    * processed once the PAC file finishes loading.
    *
-   * @param pacURI
-   *        The nsIURI of the PAC file to load.  If this parameter is null,
-   *        then the previous PAC URI is simply reloaded.
+   * @param pacSpec
+   *        The non normalized uri spec of this URI used for comparison with
+   *        system proxy settings to determine if the PAC uri has changed.
    */
-  nsresult LoadPACFromURI(nsIURI *pacURI);
+  nsresult LoadPACFromURI(const nsCString &pacSpec);
 
   /**
    * Returns true if we are currently loading the PAC file.
@@ -98,17 +127,43 @@ public:
   bool IsLoading() { return mLoader != nullptr; }
 
   /**
-   * Returns true if the given URI matches the URI of our PAC file.
+   * Returns true if the given URI matches the URI of our PAC file or the
+   * URI it has been redirected to. In the case of a chain of redirections
+   * only the current one being followed and the original are considered
+   * becuase this information is used, respectively, to determine if we
+   * should bypass the proxy (to fetch the pac file) or if the pac
+   * configuration has changed (and we should reload the pac file)
    */
-  bool IsPACURI(nsIURI *uri) {
-    bool result;
-    return mPACURI && NS_SUCCEEDED(mPACURI->Equals(uri, &result)) && result;
+  bool IsPACURI(const nsACString &spec)
+  {
+    return mPACURISpec.Equals(spec) || mPACURIRedirectSpec.Equals(spec) ||
+      mNormalPACURISpec.Equals(spec);
   }
+
+  bool IsPACURI(nsIURI *uri) {
+    if (mPACURISpec.IsEmpty() && mPACURIRedirectSpec.IsEmpty())
+      return false;
+
+    nsAutoCString tmp;
+    uri->GetSpec(tmp);
+    return IsPACURI(tmp);
+  }
+
+  NS_HIDDEN_(nsresult) Init(nsISystemProxySettings *);
+  static nsPACMan *sInstance;
+
+  // PAC thread operations only
+  void ProcessPendingQ();
+  void CancelPendingQ(nsresult);
 
 private:
   NS_DECL_NSISTREAMLOADEROBSERVER
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSICHANNELEVENTSINK
+
+  friend class PendingPACQuery;
+  friend class PACLoadComplete;
+  friend class ExecutePACThreadAction;
 
   ~nsPACMan();
 
@@ -116,13 +171,6 @@ private:
    * Cancel any existing load if any.
    */
   void CancelExistingLoad();
-
-  /**
-   * Process mPendingQ.  If status is a failure code, then the pending queue
-   * will be emptied.  If status is a success code, then the pending requests
-   * will be processed (i.e., their Start method will be called).
-   */
-  void ProcessPendingQ(nsresult status);
 
   /**
    * Start loading the PAC file.
@@ -139,15 +187,40 @@ private:
    */
   void OnLoadFailure();
 
+  /**
+   * PostQuery() only runs on the PAC thread and it is used to
+   * place a pendingPACQuery into the queue and potentially
+   * execute the queue if it was otherwise empty
+   */
+  nsresult PostQuery(PendingPACQuery *query);
+
+  // PAC thread operations only
+  void PostProcessPendingQ();
+  void PostCancelPendingQ(nsresult);
+  bool ProcessPending();
+  void NamePACThread();
+
 private:
-  nsCOMPtr<nsIProxyAutoConfig> mPAC;
-  nsCOMPtr<nsIURI>             mPACURI;
-  PRCList                      mPendingQ;
+  mozilla::net::ProxyAutoConfig mPAC;
+  nsCOMPtr<nsIThread>           mPACThread;
+  nsCOMPtr<nsISystemProxySettings> mSystemProxySettings;
+
+  mozilla::LinkedList<PendingPACQuery> mPendingQ; /* pac thread only */
+
+  // These specs are not nsIURI so that they can be used off the main thread.
+  // The non-normalized versions are directly from the configuration, the
+  // normalized version has been extracted from an nsIURI
+  nsCString                    mPACURISpec;
+  nsCString                    mPACURIRedirectSpec;
+  nsCString                    mNormalPACURISpec;
+
   nsCOMPtr<nsIStreamLoader>    mLoader;
   bool                         mLoadPending;
   bool                         mShutdown;
-  PRTime                       mScheduledReload;
+  mozilla::TimeStamp           mScheduledReload;
   uint32_t                     mLoadFailureCount;
+
+  bool                         mInProgress;
 };
 
 #endif  // nsPACMan_h__

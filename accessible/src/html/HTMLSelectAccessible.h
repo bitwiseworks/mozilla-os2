@@ -7,9 +7,6 @@
 #define mozilla_a11y_HTMLSelectAccessible_h__
 
 #include "HTMLFormControlAccessible.h"
-#include "nsIDOMHTMLOptionsCollection.h"
-#include "nsIDOMHTMLOptionElement.h"
-#include "nsIDOMNode.h"
 
 class nsIMutableArray;
 
@@ -46,7 +43,6 @@ public:
   virtual uint64_t NativeState();
 
   // SelectAccessible
-  virtual bool IsSelect();
   virtual bool SelectAll();
   virtual bool UnselectAll();
 
@@ -61,13 +57,6 @@ protected:
 
   // Accessible
   virtual void CacheChildren();
-
-  // HTMLSelectListAccessible
-
-  /**
-   * Recursive helper for CacheChildren().
-   */
-  void CacheOptSiblings(nsIContent* aParentContent);
 };
 
 /*
@@ -87,7 +76,6 @@ public:
   NS_IMETHOD SetSelected(bool aSelect);
 
   // Accessible
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
   virtual uint64_t NativeInteractiveState() const;
@@ -101,6 +89,10 @@ public:
   // Widgets
   virtual Accessible* ContainerWidget() const;
 
+protected:
+  // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
+
 private:
 
   /**
@@ -108,8 +100,12 @@ private:
    */
   Accessible* GetSelect() const
   {
-    if (mParent && mParent->IsListControl()) {
-      Accessible* combobox = mParent->Parent();
+    Accessible* parent = mParent;
+    if (parent && parent->IsHTMLOptGroup())
+      parent = parent->Parent();
+
+    if (parent && parent->IsListControl()) {
+      Accessible* combobox = parent->Parent();
       return combobox && combobox->IsCombobox() ? combobox : mParent.get();
     }
 
@@ -121,8 +117,12 @@ private:
    */
   Accessible* GetCombobox() const
   {
-    if (mParent && mParent->IsListControl()) {
-      Accessible* combobox = mParent->Parent();
+    Accessible* parent = mParent;
+    if (parent && parent->IsHTMLOptGroup())
+      parent = parent->Parent();
+
+    if (parent && parent->IsListControl()) {
+      Accessible* combobox = parent->Parent();
       return combobox && combobox->IsCombobox() ? combobox : nullptr;
     }
 
@@ -137,7 +137,9 @@ class HTMLSelectOptGroupAccessible : public HTMLSelectOptionAccessible
 {
 public:
 
-  HTMLSelectOptGroupAccessible(nsIContent* aContent, DocAccessible* aDoc);
+  HTMLSelectOptGroupAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+    HTMLSelectOptionAccessible(aContent, aDoc)
+    { mType = eHTMLOptGroupType; }
   virtual ~HTMLSelectOptGroupAccessible() {}
 
   // nsIAccessible
@@ -150,10 +152,6 @@ public:
 
   // ActionAccessible
   virtual uint8_t ActionCount();
-
-protected:
-  // Accessible
-  virtual void CacheChildren();
 };
 
 /** ------------------------------------------------------ */
@@ -225,7 +223,6 @@ public:
 
   // nsAccessNode
   virtual nsIFrame* GetFrame() const;
-  virtual bool IsPrimaryForNode() const;
 
   // Accessible
   virtual a11y::role NativeRole();

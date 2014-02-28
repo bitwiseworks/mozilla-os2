@@ -38,14 +38,15 @@
 #include "nsInterfaceHashtable.h"
 #include "nsEventStates.h"
 #include "nsPresArena.h"
+#include "nsIImageLoadingContent.h"
 
 class nsIContent;
 class nsIDocument;
 class nsIFrame;
 class nsPresContext;
 class nsStyleSet;
-class nsIViewManager;
-class nsIView;
+class nsViewManager;
+class nsView;
 class nsRenderingContext;
 class nsIPageSequenceFrame;
 class nsAString;
@@ -76,7 +77,11 @@ class nsRefreshDriver;
 class nsARefreshObserver;
 #ifdef ACCESSIBILITY
 class nsAccessibilityService;
+namespace mozilla {
+namespace a11y {
 class DocAccessible;
+} // namespace a11y
+} // namespace mozilla
 #endif
 class nsIWidget;
 struct nsArenaMemoryStats;
@@ -85,6 +90,8 @@ typedef short SelectionType;
 typedef uint64_t nsFrameState;
 
 namespace mozilla {
+class Selection;
+
 namespace dom {
 class Element;
 } // namespace dom
@@ -102,7 +109,7 @@ class LayerManager;
 #define CAPTURE_RETARGETTOELEMENT 2
 // true if the current capture wants drags to be prevented
 #define CAPTURE_PREVENTDRAG 4
-// true when the mouse is pointer locked, and events are sent to locked elemnt
+// true when the mouse is pointer locked, and events are sent to locked element
 #define CAPTURE_POINTERLOCK 8
 
 typedef struct CapturingContentInfo {
@@ -114,10 +121,10 @@ typedef struct CapturingContentInfo {
   nsIContent* mContent;
 } CapturingContentInfo;
 
-// 7E29E8A8-9C77-4445-A523-41B363E0C98A
+// fac033dd-938d-45bc-aaa5-dc2fa7ef5a40
 #define NS_IPRESSHELL_IID \
-  { 0x7e29e8a8, 0x9c77, 0x4445, \
-    { 0xa5, 0x23, 0x41, 0xb3, 0x63, 0xe0, 0xc9, 0x8a } }
+{ 0xfac033dd, 0x938d, 0x45bc, \
+  { 0xaa, 0xa5, 0xdc, 0x2f, 0xa7, 0xef, 0x5a, 0x40 } }
 
 // debug VerifyReflow flags
 #define VERIFY_REFLOW_ON                    0x01
@@ -170,12 +177,6 @@ protected:
   typedef uint8_t RenderFlags; // for storing the above flags
 
 public:
-  virtual NS_HIDDEN_(nsresult) Init(nsIDocument* aDocument,
-                                   nsPresContext* aPresContext,
-                                   nsIViewManager* aViewManager,
-                                   nsStyleSet* aStyleSet,
-                                   nsCompatibility aCompatMode) = 0;
-
   /**
    * All callers are responsible for calling |Destroy| after calling
    * |EndObservingDocument|.  It needs to be separate only because form
@@ -186,6 +187,18 @@ public:
   virtual NS_HIDDEN_(void) Destroy() = 0;
 
   bool IsDestroying() { return mIsDestroying; }
+
+  /**
+   * Make a one-way transition into a "zombie" state.  In this state,
+   * no reflow is done, no painting is done, and no refresh driver
+   * ticks are processed.  This is a dangerous state: it can leave
+   * areas of the composition target unpainted if callers aren't
+   * careful.  (Don't let your zombie presshell out of the shed.)
+   *
+   * This is used in cases where a presshell is created for reasons
+   * other than reflow/painting.
+   */
+  virtual NS_HIDDEN_(void) MakeZombie() = 0;
 
   /**
    * All frames owned by the shell are allocated from an arena.  They
@@ -200,10 +213,7 @@ public:
     mPresArenaAllocCount++;
 #endif
     void* result = mFrameArena.AllocateByFrameID(aID, aSize);
-  
-    if (result) {
-      memset(result, 0, aSize);
-    }
+    memset(result, 0, aSize);
     return result;
   }
 
@@ -212,7 +222,7 @@ public:
 #ifdef DEBUG
     mPresArenaAllocCount--;
 #endif
-    if (PRESARENA_MUST_FREE_DURING_DESTROY || !mIsDestroying)
+    if (!mIsDestroying)
       mFrameArena.FreeByFrameID(aID, aPtr);
   }
 
@@ -228,10 +238,7 @@ public:
     mPresArenaAllocCount++;
 #endif
     void* result = mFrameArena.AllocateByObjectID(aID, aSize);
-  
-    if (result) {
-      memset(result, 0, aSize);
-    }
+    memset(result, 0, aSize);
     return result;
   }
 
@@ -240,7 +247,7 @@ public:
 #ifdef DEBUG
     mPresArenaAllocCount--;
 #endif
-    if (PRESARENA_MUST_FREE_DURING_DESTROY || !mIsDestroying)
+    if (!mIsDestroying)
       mFrameArena.FreeByObjectID(aID, aPtr);
   }
 
@@ -266,7 +273,7 @@ public:
 #ifdef DEBUG
     mPresArenaAllocCount--;
 #endif
-    if (PRESARENA_MUST_FREE_DURING_DESTROY || !mIsDestroying)
+    if (!mIsDestroying)
       mFrameArena.FreeBySize(aSize, aPtr);
   }
 
@@ -274,12 +281,23 @@ public:
 
   nsPresContext* GetPresContext() const { return mPresContext; }
 
-  nsIViewManager* GetViewManager() const { return mViewManager; }
+  nsViewManager* GetViewManager() const { return mViewManager; }
 
 #ifdef ACCESSIBILITY
-  void SetAccDocument(DocAccessible* aAccDocument)
+  /**
+   * Return the document accessible for this pres shell if there is one.
+   */
+  mozilla::a11y::DocAccessible* GetDocAccessible() const
   {
-    mAccDocument = aAccDocument;
+    return mDocAccessible;
+  }
+
+  /**
+   * Set the document accessible for this pres shell.
+   */
+  void SetDocAccessible(mozilla::a11y::DocAccessible* aDocAccessible)
+  {
+    mDocAccessible = aDocAccessible;
   }
 #endif
 
@@ -354,22 +372,22 @@ public:
   virtual NS_HIDDEN_(void) EndObservingDocument() = 0;
 
   /**
-   * Return whether InitialReflow() was previously called.
+   * Return whether Initialize() was previously called.
    */
-  bool DidInitialReflow() const { return mDidInitialReflow; }
+  bool DidInitialize() const { return mDidInitialize; }
 
   /**
-   * Perform the initial reflow. Constructs the frame for the root content
-   * object and then reflows the frame model into the specified width and
-   * height.
+   * Perform initialization. Constructs the frame for the root content
+   * object and then enqueues a reflow of the frame model into the
+   * specified width and height.
    *
    * The coordinates for aWidth and aHeight must be in standard nscoords.
    *
    * Callers of this method must hold a reference to this shell that
    * is guaranteed to survive through arbitrary script execution.
-   * Calling InitialReflow can execute arbitrary script.
+   * Calling Initialize can execute arbitrary script.
    */
-  virtual NS_HIDDEN_(nsresult) InitialReflow(nscoord aWidth, nscoord aHeight) = 0;
+  virtual NS_HIDDEN_(nsresult) Initialize(nscoord aWidth, nscoord aHeight) = 0;
 
   /**
    * Reflow the frame model into a new width and height.  The
@@ -392,11 +410,6 @@ public:
    * Return true if the presshell expects layout flush.
    */
   virtual bool IsLayoutFlushObserver() = 0;
-
-  /**
-   * Reflow the frame model with a reflow reason of eReflowReason_StyleChange
-   */
-  virtual NS_HIDDEN_(void) StyleChangeReflow() = 0;
 
   /**
    * This calls through to the frame manager to get the root frame.
@@ -475,6 +488,11 @@ public:
                                             nsFrameState aBitToAdd) = 0;
 
   /**
+   * Calls FrameNeedsReflow on all fixed position children of the root frame.
+   */
+  virtual void MarkFixedFramesForReflow(IntrinsicDirty aIntrinsicDirty);
+
+  /**
    * Tell the presshell that the given frame's reflow was interrupted.  This
    * will mark as having dirty children a path from the given frame (inclusive)
    * to the nearest ancestor with a dirty subtree, or to the reflow root
@@ -515,6 +533,7 @@ public:
    * @param aType the type of notifications to flush
    */
   virtual NS_HIDDEN_(void) FlushPendingNotifications(mozFlushType aType) = 0;
+  virtual NS_HIDDEN_(void) FlushPendingNotifications(mozilla::ChangesToFlush aType) = 0;
 
   /**
    * Callbacks will be called even if reflow itself fails for
@@ -739,7 +758,7 @@ public:
     */
   int16_t GetSelectionFlags() const { return mSelectionFlags; }
 
-  virtual nsISelection* GetCurrentSelection(SelectionType aType) = 0;
+  virtual mozilla::Selection* GetCurrentSelection(SelectionType aType) = 0;
 
   /**
     * Interface to dispatch events via the presshell
@@ -780,7 +799,7 @@ public:
    * Get and set the history state for the current document 
    */
 
-  virtual NS_HIDDEN_(nsresult) CaptureHistoryState(nsILayoutHistoryState** aLayoutHistoryState, bool aLeavingPage = false) = 0;
+  virtual NS_HIDDEN_(nsresult) CaptureHistoryState(nsILayoutHistoryState** aLayoutHistoryState) = 0;
 
   /**
    * Determine if reflow is currently locked
@@ -1062,12 +1081,12 @@ public:
   enum {
     FORCE_DRAW = 0x01
   };
-  virtual nsresult AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
-                                                nsDisplayList& aList,
-                                                nsIFrame* aFrame,
-                                                const nsRect& aBounds,
-                                                nscolor aBackstopColor = NS_RGBA(0,0,0,0),
-                                                uint32_t aFlags = 0) = 0;
+  virtual void AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
+                                            nsDisplayList& aList,
+                                            nsIFrame* aFrame,
+                                            const nsRect& aBounds,
+                                            nscolor aBackstopColor = NS_RGBA(0,0,0,0),
+                                            uint32_t aFlags = 0) = 0;
 
 
   /**
@@ -1075,17 +1094,17 @@ public:
    * bounds aBounds representing the dark grey background behind the page of a
    * print preview presentation.
    */
-  virtual nsresult AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
-                                                 nsDisplayList& aList,
-                                                 nsIFrame* aFrame,
-                                                 const nsRect& aBounds) = 0;
+  virtual void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
+                                             nsDisplayList& aList,
+                                             nsIFrame* aFrame,
+                                             const nsRect& aBounds) = 0;
 
   /**
    * Computes the backstop color for the view: transparent if in a transparent
    * widget, otherwise the PresContext default background color. This color is
    * only visible if the contents of the view as a whole are translucent.
    */
-  virtual nscolor ComputeBackstopColor(nsIView* aDisplayRoot) = 0;
+  virtual nscolor ComputeBackstopColor(nsView* aDisplayRoot) = 0;
 
   void ObserveNativeAnonMutationsForPrint(bool aObserve)
   {
@@ -1210,6 +1229,8 @@ public:
    */
   bool GetIsFirstPaint() const { return mIsFirstPaint; }
 
+  uint32_t GetPresShellId() { return mPresShellId; }
+
   /**
    * Dispatch a mouse move event based on the most recent mouse position if
    * this PresShell is visible. This is used when the contents of the page
@@ -1217,30 +1238,48 @@ public:
    */
   virtual void SynthesizeMouseMove(bool aFromScroll) = 0;
 
-  enum PaintType {
-    PaintType_Composite, /* Just composite the layers, don't do ThebesLayer painting. */
-    PaintType_NoComposite, /* Only paint ThebesLayers, don't composite. */
-    PaintType_Full /* Do a full transaction. */
+  enum PaintFlags {
+    /* Update the layer tree and paint ThebesLayers. If this is not specified,
+     * we may still have to do it if the layer tree lost ThebesLayer contents
+     * we need for compositing. */
+    PAINT_LAYERS = 0x01,
+    /* Composite layers to the window. */
+    PAINT_COMPOSITE = 0x02,
   };
-  virtual void Paint(nsIView* aViewToPaint, const nsRegion& aDirtyRegion,
-                     PaintType aType, bool aWillSendDidPaint) = 0;
+  virtual void Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
+                     uint32_t aFlags) = 0;
   virtual nsresult HandleEvent(nsIFrame*       aFrame,
                                nsGUIEvent*     aEvent,
                                bool            aDontRetargetEvents,
                                nsEventStatus*  aEventStatus) = 0;
   virtual bool ShouldIgnoreInvalidation() = 0;
   /**
-   * Notify that the NS_WILL_PAINT event was received. Fires on every
-   * visible presshell in the document tree.
+   * Notify that we're going to call Paint with PAINT_LAYERS
+   * on the pres shell for a widget (which might not be this one, since
+   * WillPaint is called on all presshells in the same toplevel window as the
+   * painted widget). This is issued at a time when it's safe to modify
+   * widget geometry.
    */
-  virtual void WillPaint(bool aWillSendDidPaint) = 0;
+  virtual void WillPaint() = 0;
   /**
-   * Notify that the NS_DID_PAINT event was received. Only fires on the
-   * root pres shell.
+   * Notify that we're going to call Paint with PAINT_COMPOSITE.
+   * Fires on the presshell for the painted widget.
+   * This is issued at a time when it's safe to modify widget geometry.
    */
-  virtual void DidPaint() = 0;
+  virtual void WillPaintWindow() = 0;
+  /**
+   * Notify that we called Paint with PAINT_COMPOSITE.
+   * Fires on the presshell for the painted widget.
+   * This is issued at a time when it's safe to modify widget geometry.
+   */
+  virtual void DidPaintWindow() = 0;
+
+  /**
+   * Ensures that the refresh driver is running, and schedules a view 
+   * manager flush on the next tick.
+   */
   virtual void ScheduleViewManagerFlush() = 0;
-  virtual void ClearMouseCaptureOnView(nsIView* aView) = 0;
+  virtual void ClearMouseCaptureOnView(nsView* aView) = 0;
   virtual bool IsVisible() = 0;
   virtual void DispatchSynthMouseMove(nsGUIEvent *aEvent, bool aFlushOnHoverChange) = 0;
 
@@ -1266,6 +1305,47 @@ public:
     return mFontSizeInflationLineThreshold;
   }
 
+  bool FontSizeInflationForceEnabled() const {
+    return mFontSizeInflationForceEnabled;
+  }
+
+  bool FontSizeInflationDisabledInMasterProcess() const {
+    return mFontSizeInflationDisabledInMasterProcess;
+  }
+
+  /**
+   * Determine if font size inflation is enabled. This value is cached until
+   * it becomes dirty.
+   *
+   * @returns true, if font size inflation is enabled; false otherwise.
+   */
+  bool FontSizeInflationEnabled();
+
+  /**
+   * Notify the pres shell that an event occurred making the current value of
+   * mFontSizeInflationEnabled invalid. This will schedule a recomputation of
+   * whether font size inflation is enabled on the next call to
+   * FontSizeInflationEnabled().
+   */
+  void NotifyFontSizeInflationEnabledIsDirty()
+  {
+    mFontSizeInflationEnabledIsDirty = true;
+  }
+
+  virtual void AddInvalidateHiddenPresShellObserver(nsRefreshDriver *aDriver) = 0;
+
+  void InvalidatePresShellIfHidden();
+
+  // Schedule an update of the list of visible images.
+  virtual void ScheduleImageVisibilityUpdate() = 0;
+
+  // Clears the current list of visible images on this presshell and replaces it
+  // with images that are in the display list aList.
+  virtual void RebuildImageVisibility(const nsDisplayList& aList) = 0;
+
+  // Ensures the image is in the list of visible images.
+  virtual void EnsureImageInVisibleList(nsIImageLoadingContent* aImage) = 0;
+
   /**
    * Refresh observer management.
    */
@@ -1278,6 +1358,14 @@ protected:
                                                mozFlushType aFlushType);
   bool RemoveRefreshObserverInternal(nsARefreshObserver* aObserver,
                                        mozFlushType aFlushType);
+
+  /**
+   * Do computations necessary to determine if font size inflation is enabled.
+   * This value is cached after computation, as the computation is somewhat
+   * expensive.
+   */
+  void RecomputeFontSizeInflationEnabled();
+
 public:
   bool AddRefreshObserver(nsARefreshObserver* aObserver,
                             mozFlushType aFlushType) {
@@ -1316,9 +1404,41 @@ public:
     return mScrollPositionClampingScrollPortSize;
   }
 
+  void SetContentDocumentFixedPositionMargins(const nsMargin& aMargins);
+  const nsMargin& GetContentDocumentFixedPositionMargins() {
+    return mContentDocumentFixedPositionMargins;
+  }
+
   virtual void WindowSizeMoveDone() = 0;
   virtual void SysColorChanged() = 0;
   virtual void ThemeChanged() = 0;
+  virtual void BackingScaleFactorChanged() = 0;
+
+  nscoord MaxLineBoxWidth() {
+    return mMaxLineBoxWidth;
+  }
+
+  void SetMaxLineBoxWidth(nscoord aMaxLineBoxWidth);
+
+  /**
+   * Returns whether or not there is a reflow on zoom event pending. A reflow
+   * on zoom event is a change to the max line box width, followed by a reflow.
+   * This subsequent reflow event should treat all frames as though they resized
+   * horizontally (and thus reflow all their descendants), rather than marking
+   * all frames dirty from the root. This is the way the pres shell indicates
+   * that an hresize reflow should take place during reflow state construction.
+   */
+  bool IsReflowOnZoomPending() {
+    return mReflowOnZoomPending;
+  }
+
+  /**
+   * Clear the flag indicating whether a reflow on zoom event is pending. This
+   * is performed at the very end of DoReflow().
+   */
+  void ClearReflowOnZoomPending() {
+    mReflowOnZoomPending = false;
+  }
 
 protected:
   friend class nsRefreshDriver;
@@ -1333,15 +1453,16 @@ protected:
   nsPresContext*            mPresContext;   // [STRONG]
   nsStyleSet*               mStyleSet;      // [OWNS]
   nsCSSFrameConstructor*    mFrameConstructor; // [OWNS]
-  nsIViewManager*           mViewManager;   // [WEAK] docViewer owns it so I don't have to
+  nsViewManager*           mViewManager;   // [WEAK] docViewer owns it so I don't have to
   nsPresArena               mFrameArena;
   nsFrameSelection*         mSelection;
   // Pointer into mFrameConstructor - this is purely so that FrameManager() and
   // GetRootFrame() can be inlined:
   nsFrameManagerBase*       mFrameManager;
   nsWeakPtr                 mForwardingContainer;
+  nsRefreshDriver*          mHiddenInvalidationObserverRefreshDriver;
 #ifdef ACCESSIBILITY
-  DocAccessible* mAccDocument;
+  mozilla::a11y::DocAccessible* mDocAccessible;
 #endif
 
 #ifdef DEBUG
@@ -1354,6 +1475,12 @@ protected:
   uint64_t                  mPaintCount;
 
   nsSize                    mScrollPositionClampingScrollPortSize;
+
+  // This margin is intended to be used when laying out fixed position children
+  // on this PresShell's viewport frame. See the documentation of
+  // nsIDOMWindowUtils.setContentDocumentFixedPositionMargins for details of
+  // their use.
+  nsMargin                  mContentDocumentFixedPositionMargins;
 
   // A list of weak frames. This is a pointer to the last item in the list.
   nsWeakFrame*              mWeakFrames;
@@ -1375,9 +1502,13 @@ protected:
   // re-use old pixels.
   RenderFlags               mRenderFlags;
 
+  // Indicates that the whole document must be restyled.  Changes to scoped
+  // style sheets are recorded in mChangedScopeStyleRoots rather than here
+  // in mStylesHaveChanged.
   bool                      mStylesHaveChanged : 1;
-  bool                      mDidInitialReflow : 1;
+  bool                      mDidInitialize : 1;
   bool                      mIsDestroying : 1;
+  bool                      mIsZombie : 1;
   bool                      mIsReflowing : 1;
 
   // For all documents we initially lock down painting.
@@ -1398,6 +1529,17 @@ protected:
   bool                      mSuppressInterruptibleReflows : 1;
   bool                      mScrollPositionClampingScrollPortSizeSet : 1;
 
+  uint32_t                  mPresShellId;
+
+  // List of subtrees rooted at style scope roots that need to be restyled.
+  // When a change to a scoped style sheet is made, we add the style scope
+  // root to this array rather than setting mStylesHaveChanged = true, since
+  // we know we don't need to restyle the whole document.  However, if in the
+  // same update block we have already had other changes that require
+  // the whole document to be restyled (i.e., mStylesHaveChanged is already
+  // true), then we don't bother adding the scope root here.
+  nsAutoTArray<nsRefPtr<mozilla::dom::Element>,1> mChangedScopeStyleRoots;
+
   static nsIContent*        gKeyDownTarget;
 
   // Cached font inflation values. This is done to prevent changing of font
@@ -1405,13 +1547,20 @@ protected:
   uint32_t mFontSizeInflationEmPerLine;
   uint32_t mFontSizeInflationMinTwips;
   uint32_t mFontSizeInflationLineThreshold;
-};
+  bool mFontSizeInflationForceEnabled;
+  bool mFontSizeInflationDisabledInMasterProcess;
+  bool mFontSizeInflationEnabled;
 
-/**
- * Create a new empty presentation shell. Upon success, call Init
- * before attempting to use the shell.
- */
-nsresult
-NS_NewPresShell(nsIPresShell** aInstancePtrResult);
+  // Dirty bit indicating that mFontSizeInflationEnabled needs to be recomputed.
+  bool mFontSizeInflationEnabledIsDirty;
+
+  // Flag to indicate whether or not there is a reflow on zoom event pending.
+  // See IsReflowOnZoomPending() for more information.
+  bool mReflowOnZoomPending;
+
+  // The maximum width of a line box. Text on a single line that exceeds this
+  // width will be wrapped. A value of 0 indicates that no limit is enforced.
+  nscoord mMaxLineBoxWidth;
+};
 
 #endif /* nsIPresShell_h___ */

@@ -6,8 +6,11 @@
 
 /* state used in reflow of block frames */
 
-#include "nsBlockReflowContext.h"
 #include "nsBlockReflowState.h"
+
+#include "mozilla/DebugOnly.h"
+
+#include "nsBlockReflowContext.h"
 #include "nsBlockFrame.h"
 #include "nsLineLayout.h"
 #include "nsPresContext.h"
@@ -18,8 +21,7 @@
 #include "FrameLayerBuilder.h"
 
 #include "nsINameSpaceManager.h"
-
-#include "mozilla/Util.h" // for DebugOnly
+#include <algorithm>
 
 #ifdef DEBUG
 #include "nsBlockDebugFlags.h"
@@ -31,7 +33,6 @@ using namespace mozilla::layout;
 nsBlockReflowState::nsBlockReflowState(const nsHTMLReflowState& aReflowState,
                                        nsPresContext* aPresContext,
                                        nsBlockFrame* aFrame,
-                                       const nsHTMLReflowMetrics& aMetrics,
                                        bool aTopMarginRoot,
                                        bool aBottomMarginRoot,
                                        bool aBlockNeedsFloatManager)
@@ -76,7 +77,6 @@ nsBlockReflowState::nsBlockReflowState(const nsHTMLReflowState& aReflowState,
 
   mReflowStatus = NS_FRAME_COMPLETE;
 
-  mPresContext = aPresContext;
   mNextInFlow = static_cast<nsBlockFrame*>(mBlock->GetNextInFlow());
 
   NS_WARN_IF_FALSE(NS_UNCONSTRAINEDSIZE != aReflowState.ComputedWidth(),
@@ -96,7 +96,7 @@ nsBlockReflowState::nsBlockReflowState(const nsHTMLReflowState& aReflowState,
     // the bottom border and padding. The content area height doesn't
     // include either border or padding edge.
     mBottomEdge = aReflowState.availableHeight - borderPadding.bottom;
-    mContentArea.height = NS_MAX(0, mBottomEdge - borderPadding.top);
+    mContentArea.height = std::max(0, mBottomEdge - borderPadding.top);
   }
   else {
     // When we are not in a paginated situation then we always use
@@ -139,14 +139,14 @@ nsBlockReflowState::ComputeReplacedBlockOffsetsForFloats(nsIFrame* aFrame,
     frameMargin = os.mComputedMargin;
 
     nscoord leftFloatXOffset = aFloatAvailableSpace.x - mContentArea.x;
-    leftOffset = NS_MAX(leftFloatXOffset, frameMargin.left) -
+    leftOffset = std::max(leftFloatXOffset, frameMargin.left) -
                  frameMargin.left;
-    leftOffset = NS_MAX(leftOffset, 0); // in case of negative margin
+    leftOffset = std::max(leftOffset, 0); // in case of negative margin
     nscoord rightFloatXOffset =
       mContentArea.XMost() - aFloatAvailableSpace.XMost();
-    rightOffset = NS_MAX(rightFloatXOffset, frameMargin.right) -
+    rightOffset = std::max(rightFloatXOffset, frameMargin.right) -
                   frameMargin.right;
-    rightOffset = NS_MAX(rightOffset, 0); // in case of negative margin
+    rightOffset = std::max(rightOffset, 0); // in case of negative margin
   }
   aLeftResult = leftOffset;
   aRightResult = rightOffset;
@@ -193,7 +193,7 @@ nsBlockReflowState::ComputeBlockAvailSpace(nsIFrame* aFrame,
     if (aFloatAvailableSpace.mHasFloats) {
       // Use the float-edge property to determine how the child block
       // will interact with the float.
-      const nsStyleBorder* borderStyle = aFrame->GetStyleBorder();
+      const nsStyleBorder* borderStyle = aFrame->StyleBorder();
       switch (borderStyle->mFloatEdge) {
         default:
         case NS_STYLE_FLOAT_EDGE_CONTENT:  // content and only content does runaround of floats
@@ -247,7 +247,7 @@ nsBlockReflowState::GetFloatAvailableSpaceWithState(
 #endif
 
   nscoord height = (mContentArea.height == nscoord_MAX)
-                     ? nscoord_MAX : NS_MAX(mContentArea.YMost() - aY, 0);
+                     ? nscoord_MAX : std::max(mContentArea.YMost() - aY, 0);
   nsFlowAreaRect result =
     mFloatManager->GetFlowArea(aY, nsFloatManager::BAND_FROM_POINT,
                                height, mContentArea, aState);
@@ -353,6 +353,14 @@ nsBlockReflowState::SetupPushedFloatList()
     mPushedFloats = mBlock->EnsurePushedFloats();
     SetFlag(BRS_PROPTABLE_FLOATCLIST, true);
   }
+}
+
+void
+nsBlockReflowState::AppendPushedFloat(nsIFrame* aFloatCont)
+{
+  SetupPushedFloatList();
+  aFloatCont->AddStateBits(NS_FRAME_IS_PUSHED_FLOAT);
+  mPushedFloats->AppendFrame(mBlock, aFloatCont);
 }
 
 /**
@@ -465,6 +473,9 @@ nsBlockReflowState::AddFloat(nsLineLayout*       aLineLayout,
     // push it again, though.)  Likewise, if that previous reflow
     // reflowed this block but not its next continuation, we might need
     // to steal it from our own float-continuations list.
+    //
+    // For more about pushed floats, see the comment above
+    // nsBlockFrame::DrainPushedFloats.
     nsBlockFrame *floatParent =
       static_cast<nsBlockFrame*>(aFloat->GetParent());
     floatParent->StealFrame(mPresContext, aFloat);
@@ -578,14 +589,14 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   const nscoord saveY = mY;
 
   // Grab the float's display information
-  const nsStyleDisplay* floatDisplay = aFloat->GetStyleDisplay();
+  const nsStyleDisplay* floatDisplay = aFloat->StyleDisplay();
 
   // The float's old region, so we can propagate damage.
   nsRect oldRegion = nsFloatManager::GetRegionFor(aFloat);
 
   // Enforce CSS2 9.5.1 rule [2], i.e., make sure that a float isn't
   // ``above'' another float that preceded it in the flow.
-  mY = NS_MAX(mFloatManager->GetLowestFloatTop(), mY);
+  mY = std::max(mFloatManager->GetLowestFloatTop(), mY);
 
   // See if the float should clear any preceding floats...
   // XXX We need to mark this float somehow so that it gets reflowed
@@ -741,7 +752,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // containing block is the content edge of the block box, this
   // means the margin edge of the float can't be higher than the
   // content edge of the block that contains it.)
-  floatY = NS_MAX(mY, mContentArea.y);
+  floatY = std::max(mY, mContentArea.y);
 
   // Reflow the float after computing its vertical position so it knows
   // where to break.
@@ -760,15 +771,29 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // (This code is only for DISABLE_FLOAT_BREAKING_IN_COLUMNS .)
   //
   // Likewise, if none of the float fit, and it needs to be pushed in
-  // its entirety to the next page (NS_FRAME_IS_TRUNCATED), we need to
-  // do the same.
+  // its entirety to the next page (NS_FRAME_IS_TRUNCATED or
+  // NS_INLINE_IS_BREAK_BEFORE), we need to do the same.
   if ((mContentArea.height != NS_UNCONSTRAINEDSIZE &&
        adjustedAvailableSpace.height == NS_UNCONSTRAINEDSIZE &&
        !mustPlaceFloat &&
        aFloat->GetSize().height + floatMargin.TopBottom() >
          mContentArea.YMost() - floatY) ||
-      NS_FRAME_IS_TRUNCATED(reflowStatus)) {
+      NS_FRAME_IS_TRUNCATED(reflowStatus) ||
+      NS_INLINE_IS_BREAK_BEFORE(reflowStatus)) {
+    PushFloatPastBreak(aFloat);
+    return false;
+  }
 
+  // We can't use aFloat->ShouldAvoidBreakInside(mReflowState) here since
+  // its mIsTopOfPage may be true even though the float isn't at the
+  // top when floatY > 0.
+  if (mContentArea.height != NS_UNCONSTRAINEDSIZE &&
+      !mustPlaceFloat && (!mReflowState.mFlags.mIsTopOfPage || floatY > 0) &&
+      NS_STYLE_PAGE_BREAK_AVOID == aFloat->StyleDisplay()->mBreakInside &&
+      (!NS_FRAME_IS_FULLY_COMPLETE(reflowStatus) ||
+       aFloat->GetSize().height + floatMargin.TopBottom() >
+         mContentArea.YMost() - floatY) &&
+      !aFloat->GetPrevInFlow()) {
     PushFloatPastBreak(aFloat);
     return false;
   }
@@ -790,7 +815,6 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
     aFloat->SetPosition(origin);
     nsContainerFrame::PositionFrameView(aFloat);
     nsContainerFrame::PositionChildViews(aFloat);
-    FrameLayerBuilder::InvalidateThebesLayersInSubtree(aFloat);
   }
 
   // Update the float combined area state
@@ -803,10 +827,10 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // if the float split, then take up all of the vertical height
   if (NS_FRAME_IS_NOT_COMPLETE(reflowStatus) &&
       (NS_UNCONSTRAINEDSIZE != mContentArea.height)) {
-    region.height = NS_MAX(region.height, mContentArea.height - floatY);
+    region.height = std::max(region.height, mContentArea.height - floatY);
   }
-  nsresult rv =
-  mFloatManager->AddFloat(aFloat, region);
+  DebugOnly<nsresult> rv =
+    mFloatManager->AddFloat(aFloat, region);
   NS_ABORT_IF_FALSE(NS_SUCCEEDED(rv), "bad float placement");
   // store region
   nsFloatManager::StoreRegionFor(aFloat, region);
@@ -818,8 +842,8 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
     // less damage; e.g., if only height has changed, then only note the
     // area into which the float has grown or from which the float has
     // shrunk.
-    nscoord top = NS_MIN(region.y, oldRegion.y);
-    nscoord bottom = NS_MAX(region.YMost(), oldRegion.YMost());
+    nscoord top = std::min(region.y, oldRegion.y);
+    nscoord bottom = std::max(region.YMost(), oldRegion.YMost());
     mFloatManager->IncludeInDamage(top, bottom);
   }
 
@@ -857,10 +881,10 @@ nsBlockReflowState::PushFloatPastBreak(nsIFrame *aFloat)
   //    must have their tops below the top of this float)
   //  * don't waste much time trying to reflow this float again until
   //    after the break
-  if (aFloat->GetStyleDisplay()->mFloats == NS_STYLE_FLOAT_LEFT) {
+  if (aFloat->StyleDisplay()->mFloats == NS_STYLE_FLOAT_LEFT) {
     mFloatManager->SetPushedLeftFloatPastBreak();
   } else {
-    NS_ABORT_IF_FALSE(aFloat->GetStyleDisplay()->mFloats ==
+    NS_ABORT_IF_FALSE(aFloat->StyleDisplay()->mFloats ==
                         NS_STYLE_FLOAT_RIGHT,
                       "unexpected float value");
     mFloatManager->SetPushedRightFloatPastBreak();
@@ -921,7 +945,11 @@ nsBlockReflowState::ClearFloats(nscoord aY, uint8_t aBreakType,
          aY, aBreakType);
   mFloatManager->List(stdout);
 #endif
-  
+
+  if (!mFloatManager->HasAnyFloats()) {
+    return aY;
+  }
+
   nscoord newY = aY;
 
   if (aBreakType != NS_STYLE_CLEAR_NONE) {
@@ -931,14 +959,19 @@ nsBlockReflowState::ClearFloats(nscoord aY, uint8_t aBreakType,
   if (aReplacedBlock) {
     for (;;) {
       nsFlowAreaRect floatAvailableSpace = GetFloatAvailableSpace(newY);
+      if (!floatAvailableSpace.mHasFloats) {
+        // If there aren't any floats here, then we always fit.
+        // We check this before calling WidthToClearPastFloats, which is
+        // somewhat expensive.
+        break;
+      }
       nsBlockFrame::ReplacedElementWidthToClear replacedWidth =
         nsBlockFrame::WidthToClearPastFloats(*this, floatAvailableSpace.mRect,
                                              aReplacedBlock);
-      if (!floatAvailableSpace.mHasFloats ||
-          NS_MAX(floatAvailableSpace.mRect.x - mContentArea.x,
+      if (std::max(floatAvailableSpace.mRect.x - mContentArea.x,
                  replacedWidth.marginLeft) +
             replacedWidth.borderBoxWidth +
-            NS_MAX(mContentArea.XMost() - floatAvailableSpace.mRect.XMost(),
+            std::max(mContentArea.XMost() - floatAvailableSpace.mRect.XMost(),
                    replacedWidth.marginRight) <=
           mContentArea.width) {
         break;

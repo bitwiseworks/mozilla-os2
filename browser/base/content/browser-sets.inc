@@ -84,33 +84,38 @@
     <command id="cmd_fullZoomEnlarge" oncommand="FullZoom.enlarge()"/>
     <command id="cmd_fullZoomReset"   oncommand="FullZoom.reset()"/>
     <command id="cmd_fullZoomToggle"  oncommand="ZoomManager.toggleZoom();"/>
+    <command id="cmd_gestureRotateLeft" oncommand="gGestureSupport.rotate(event.sourceEvent)"/>
+    <command id="cmd_gestureRotateRight" oncommand="gGestureSupport.rotate(event.sourceEvent)"/>
+    <command id="cmd_gestureRotateEnd" oncommand="gGestureSupport.rotateEnd()"/>
     <command id="Browser:OpenLocation" oncommand="openLocation();"/>
+    <command id="Browser:RestoreLastSession" oncommand="restoreLastSession();" disabled="true"/>
 
     <command id="Tools:Search" oncommand="BrowserSearch.webSearch();"/>
     <command id="Tools:Downloads" oncommand="BrowserDownloadsUI();"/>
+    <command id="Tools:DevToolbox" oncommand="gDevToolsBrowser.toggleToolboxCommand(gBrowser);"/>
     <command id="Tools:DevToolbar" oncommand="DeveloperToolbar.toggle();" disabled="true" hidden="true"/>
-    <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focus();" disabled="true"/>
-    <command id="Tools:WebConsole" oncommand="HUDConsoleUI.toggleHUD();"/>
-    <command id="Tools:Inspect" oncommand="InspectorUI.toggleInspectorUI();" disabled="true" hidden="true"/>
-    <command id="Tools:Debugger" oncommand="DebuggerUI.toggleDebugger();" disabled="true" hidden="true"/>
-    <command id="Tools:RemoteDebugger" oncommand="DebuggerUI.toggleRemoteDebugger();" disabled="true" hidden="true"/>
-    <command id="Tools:ChromeDebugger" oncommand="DebuggerUI.toggleChromeDebugger();" disabled="true" hidden="true"/>
+    <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focusToggle();" disabled="true"/>
+    <command id="Tools:ChromeDebugger" oncommand="BrowserDebuggerProcess.init();" disabled="true" hidden="true"/>
+    <command id="Tools:BrowserConsole" oncommand="HUDConsoleUI.toggleBrowserConsole();"/>
     <command id="Tools:Scratchpad" oncommand="Scratchpad.openScratchpad();" disabled="true" hidden="true"/>
-    <command id="Tools:StyleEditor" oncommand="StyleEditor.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:ResponsiveUI" oncommand="ResponsiveUI.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:Addons" oncommand="BrowserOpenAddonsMgr();"/>
     <command id="Tools:ErrorConsole" oncommand="toJavaScriptConsole()" disabled="true" hidden="true"/>
+    <command id="Tools:DevToolsConnect" oncommand="gDevToolsBrowser.openConnectScreen(gBrowser)" disabled="true" hidden="true"/>
     <command id="Tools:Sanitize"
      oncommand="Cc['@mozilla.org/browser/browserglue;1'].getService(Ci.nsIBrowserGlue).sanitize(window);"/>
-    <command id="Tools:PrivateBrowsing" oncommand="gPrivateBrowsingUI.toggleMode();"/>
+    <command id="Tools:PrivateBrowsing"
+      oncommand="OpenBrowserWindow({private: true});"/>
     <command id="History:UndoCloseTab" oncommand="undoCloseTab();"/>
     <command id="History:UndoCloseWindow" oncommand="undoCloseWindow();"/>
     <command id="Browser:ToggleAddonBar" oncommand="toggleAddonBar();"/>
-    <command id="Social:SharePage" oncommand="SocialShareButton.sharePage();"/>
-    <command id="Social:UnsharePage" oncommand="SocialShareButton.unsharePage();"/>
+    <command id="Social:TogglePageMark" oncommand="SocialMark.togglePageMark();" disabled="true"/>
+    <command id="Social:SharePage" oncommand="SocialShare.sharePage();" disabled="true"/>
     <command id="Social:ToggleSidebar" oncommand="Social.toggleSidebar();"/>
-    <command id="Social:ToggleNotifications" oncommand="Social.toggleNotifications();"/>
+    <command id="Social:ToggleNotifications" oncommand="Social.toggleNotifications();" hidden="true"/>
+    <command id="Social:FocusChat" oncommand="SocialChatBar.focus();" hidden="true" disabled="true"/>
     <command id="Social:Toggle" oncommand="Social.toggle();" hidden="true"/>
+    <command id="Social:Addons" oncommand="BrowserOpenAddonsMgr('addons://list/service');"/>
   </commandset>
 
   <commandset id="placesCommands">
@@ -118,27 +123,6 @@
              oncommand="PlacesCommandHook.showPlacesOrganizer('AllBookmarks');"/>
     <command id="Browser:ShowAllHistory"
              oncommand="PlacesCommandHook.showPlacesOrganizer('History');"/>
-  </commandset>
-
-  <commandset id="inspectorCommands">
-    <command id="Inspector:Inspect"
-             oncommand="InspectorUI.toggleInspection();"/>
-    <command id="Inspector:Sidebar"
-             oncommand="InspectorUI.toggleSidebar();"/>
-    <command id="Inspector:Tilt"
-             oncommand="Tilt.initialize();"/>
-    <command id="Inspector:HTMLPanel"
-             oncommand="InspectorUI.toggleHTMLPanel();"/>
-    <command id="Inspector:CopyInner"
-             oncommand="InspectorUI.copyInnerHTML();"/>
-    <command id="Inspector:CopyOuter"
-             oncommand="InspectorUI.copyOuterHTML();"/>
-    <command id="Inspector:DeleteNode"
-             oncommand="InspectorUI.deleteNode();"/>
-    <command id="Inspector:ToggleVeil"
-             oncommand="InspectorUI.toggleVeil();"/>
-    <command id="Inspector:ToggleInfobar"
-             oncommand="InspectorUI.toggleInfobar();"/>
   </commandset>
 
   <broadcasterset id="mainBroadcasterSet">
@@ -186,43 +170,29 @@
 #endif
     <broadcaster id="workOfflineMenuitemState"/>
     <broadcaster id="socialSidebarBroadcaster" hidden="true"/>
+    <broadcaster id="socialActiveBroadcaster" hidden="true"/>
 
     <!-- DevTools broadcasters -->
+    <broadcaster id="devtoolsMenuBroadcaster_DevToolbox"
+                 label="&devToolboxMenuItem.label;"
+                 type="checkbox" autocheck="false"
+                 command="Tools:DevToolbox"/>
     <broadcaster id="devtoolsMenuBroadcaster_DevToolbar"
                  label="&devToolbarMenu.label;"
                  type="checkbox" autocheck="false"
                  command="Tools:DevToolbar"
                  key="key_devToolbar"/>
-    <broadcaster id="devtoolsMenuBroadcaster_WebConsole"
-                 label="&webConsoleCmd.label;"
-                 type="checkbox" autocheck="false"
-                 key="key_webConsole"
-                 command="Tools:WebConsole"/>
-    <broadcaster id="devtoolsMenuBroadcaster_Inspect"
-                 label="&inspectMenu.label;"
-                 type="checkbox" autocheck="false"
-                 command="Tools:Inspect"
-                 key="key_inspect"/>
-    <broadcaster id="devtoolsMenuBroadcaster_Debugger"
-                 label="&debuggerMenu.label2;"
-                 type="checkbox" autocheck="false"
-                 command="Tools:Debugger"
-                 key="key_debugger"/>
-    <broadcaster id="devtoolsMenuBroadcaster_RemoteDebugger"
-                 label="&remoteDebuggerMenu.label;"
-                 command="Tools:RemoteDebugger"/>
     <broadcaster id="devtoolsMenuBroadcaster_ChromeDebugger"
                  label="&chromeDebuggerMenu.label;"
                  command="Tools:ChromeDebugger"/>
+    <broadcaster id="devtoolsMenuBroadcaster_BrowserConsole"
+                 label="&browserConsoleCmd.label;"
+                 key="key_browserConsole"
+                 command="Tools:BrowserConsole"/>
     <broadcaster id="devtoolsMenuBroadcaster_Scratchpad"
                  label="&scratchpad.label;"
                  command="Tools:Scratchpad"
                  key="key_scratchpad"/>
-    <broadcaster id="devtoolsMenuBroadcaster_StyleEditor"
-                 label="&styleeditor.label;"
-                 type="checkbox" autocheck="false"
-                 command="Tools:StyleEditor"
-                 key="key_styleeditor"/>
     <broadcaster id="devtoolsMenuBroadcaster_ResponsiveUI"
                  label="&responsiveDesignTool.label;"
                  type="checkbox" autocheck="false"
@@ -234,11 +204,17 @@
                  command="View:PageSource"/>
     <broadcaster id="devtoolsMenuBroadcaster_ErrorConsole"
                  label="&errorConsoleCmd.label;"
-                 key="key_errorConsole"
                  command="Tools:ErrorConsole"/>
     <broadcaster id="devtoolsMenuBroadcaster_GetMoreTools"
                  label="&getMoreDevtoolsCmd.label;"
                  oncommand="openUILinkIn('https://addons.mozilla.org/firefox/collections/mozilla/webdeveloper/', 'tab');"/>
+    <broadcaster id="devtoolsMenuBroadcaster_connect"
+                 label="&devtoolsConnect.label;"
+                 command="Tools:DevToolsConnect"/>
+
+    <!-- SocialAPI broadcasters -->
+    <broadcaster id="socialBroadcaster_userDetails"
+                 notLoggedInLabel="&social.notLoggedIn.label;"/>
   </broadcasterset>
 
   <keyset id="mainKeyset">
@@ -256,7 +232,7 @@
 
 #
 # Search Command Key Logic works like this:
-# 
+#
 # Unix: Ctrl+K (cross platform binding)
 #       Ctrl+J (in case of emacs Ctrl-K conflict)
 # Mac:  Cmd+K (cross platform binding)
@@ -285,30 +261,9 @@
     <key id="key_openDownloads" key="&downloads.commandkey;" command="Tools:Downloads" modifiers="accel"/>
 #endif
     <key id="key_openAddons" key="&addons.commandkey;" command="Tools:Addons" modifiers="accel,shift"/>
-    <key id="key_errorConsole" key="&errorConsoleCmd.commandkey;" command="Tools:ErrorConsole" modifiers="accel,shift"/>
+    <key id="key_browserConsole" key="&browserConsoleCmd.commandkey;" command="Tools:BrowserConsole" modifiers="accel,shift"/>
     <key id="key_devToolbar" keycode="&devToolbar.keycode;" modifiers="shift"
          keytext="&devToolbar.keytext;" command="Tools:DevToolbarFocus"/>
-    <key id="key_webConsole" key="&webConsoleCmd.commandkey;" oncommand="HUDConsoleUI.toggleHUD();"
-#ifdef XP_MACOSX
-        modifiers="accel,alt"
-#else
-        modifiers="accel,shift"
-#endif
-    />
-    <key id="key_debugger" key="&debuggerMenu.commandkey;" command="Tools:Debugger"
-#ifdef XP_MACOSX
-        modifiers="accel,alt"
-#else
-        modifiers="accel,shift"
-#endif
-    />
-    <key id="key_inspect" key="&inspectMenu.commandkey;" command="Inspector:Inspect"
-#ifdef XP_MACOSX
-        modifiers="accel,alt"
-#else
-        modifiers="accel,shift"
-#endif
-    />
     <key id="key_responsiveUI" key="&responsiveDesignTool.commandkey;" command="Tools:ResponsiveUI"
 #ifdef XP_MACOSX
         modifiers="accel,alt"
@@ -318,8 +273,6 @@
     />
     <key id="key_scratchpad" keycode="&scratchpad.keycode;" modifiers="shift"
          keytext="&scratchpad.keytext;" command="Tools:Scratchpad"/>
-    <key id="key_styleeditor" keycode="&styleeditor.keycode;" modifiers="shift"
-         keytext="&styleeditor.keytext;" command="Tools:StyleEditor"/>
     <key id="openFileKb" key="&openFileCmd.commandkey;" command="Browser:OpenFile"  modifiers="accel"/>
     <key id="key_savePage" key="&savePageCmd.commandkey;" command="Browser:SavePage" modifiers="accel"/>
     <key id="printKb" key="&printCmd.commandkey;" command="cmd_print"  modifiers="accel"/>
@@ -384,8 +337,8 @@
     <key keycode="&findAgainCmd.commandkey2;"  command="cmd_findPrevious" modifiers="shift"/>
 
     <key id="addBookmarkAsKb" key="&bookmarkThisPageCmd.commandkey;" command="Browser:AddBookmarkAs" modifiers="accel"/>
-# Accel+Shift+A-F are reserved on GTK2
-#ifndef MOZ_WIDGET_GTK2
+# Accel+Shift+A-F are reserved on GTK
+#ifndef MOZ_WIDGET_GTK
     <key id="bookmarkAllTabsKb" key="&bookmarkThisPageCmd.commandkey;" oncommand="PlacesCommandHook.bookmarkCurrentPages();" modifiers="accel,shift"/>
     <key id="manBookmarkKb" key="&bookmarksCmd.commandkey;" command="Browser:ShowAllBookmarks" modifiers="accel,shift"/>
 #else
@@ -397,14 +350,14 @@
 # overridden for other purposes there.
     <key id="viewBookmarksSidebarWinKb" key="&bookmarksWinCmd.commandkey;" command="viewBookmarksSidebar" modifiers="accel"/>
 #endif
-    <key id="sharePage" key="&sharePageCmd.commandkey;" command="Social:SharePage" modifiers="accel,shift"/>
 
-# don't use |command="Browser:Stop"|, ESC is being used to freeze animated gifs,
-# even if the stop button and menuitem are disabled (see Bug 284140)
-    <key id="key_stop" keycode="VK_ESCAPE" oncommand="BrowserStop();"/>
+    <key id="markPage" key="&markPageCmd.commandkey;" command="Social:TogglePageMark" modifiers="accel,shift"/>
+    <key id="focusChatBar" key="&social.chatBar.commandkey;" command="Social:FocusChat" modifiers="accel,shift"/>
+
+    <key id="key_stop" keycode="VK_ESCAPE" command="Browser:Stop"/>
 
 #ifdef XP_MACOSX
-    <key id="key_stop_mac" modifiers="accel" key="&stopCmd.macCommandKey;" oncommand="BrowserStop();"/>
+    <key id="key_stop_mac" modifiers="accel" key="&stopCmd.macCommandKey;" command="Browser:Stop"/>
 #endif
 
     <key id="key_gotoHistory"
@@ -436,7 +389,7 @@
     <key id="key_sanitize_mac" command="Tools:Sanitize" keycode="VK_BACK" modifiers="accel,shift"/>
 #endif
 #ifdef XP_UNIX
-    <key id="key_quitApplication" key="&quitApplicationCmdMac.key;" command="cmd_quitApplication" modifiers="accel"/>
+    <key id="key_quitApplication" key="&quitApplicationCmdUnix.key;" command="cmd_quitApplication" modifiers="accel"/>
 #endif
 
 #ifdef FULL_BROWSER_WINDOW

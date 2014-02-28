@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "ExternalHelperAppParent.h"
 #include "nsIContent.h"
 #include "nsCExternalHandlerService.h"
@@ -14,7 +16,6 @@
 #include "mozilla/ipc/URIUtils.h"
 
 #include "mozilla/unused.h"
-#include "mozilla/Util.h" // for DebugOnly
 
 using namespace mozilla::ipc;
 
@@ -52,8 +53,6 @@ ExternalHelperAppParent::Init(ContentParent *parent,
     do_GetService(NS_EXTERNALHELPERAPPSERVICE_CONTRACTID);
   NS_ASSERTION(helperAppService, "No Helper App Service!");
 
-  SetPropertyAsInt64(NS_CHANNEL_PROP_CONTENT_LENGTH, mContentLength);
-
   nsCOMPtr<nsIURI> referrer = DeserializeURI(aReferrer);
   if (referrer)
     SetPropertyAsInterface(NS_LITERAL_STRING("docshell.internalReferrer"), referrer);
@@ -76,7 +75,7 @@ ExternalHelperAppParent::RecvOnStartRequest(const nsCString& entityID)
 
 bool
 ExternalHelperAppParent::RecvOnDataAvailable(const nsCString& data,
-                                             const uint32_t& offset,
+                                             const uint64_t& offset,
                                              const uint32_t& count)
 {
   if (NS_FAILED(mStatus))
@@ -112,6 +111,10 @@ ExternalHelperAppParent::~ExternalHelperAppParent()
 NS_IMETHODIMP
 ExternalHelperAppParent::GetName(nsACString& aResult)
 {
+  if (!mURI) {
+    aResult.Truncate();
+    return NS_ERROR_NOT_AVAILABLE;
+  }
   mURI->GetAsciiSpec(aResult);
   return NS_OK;
 }
@@ -285,6 +288,12 @@ ExternalHelperAppParent::GetContentDisposition(uint32_t *aContentDisposition)
 }
 
 NS_IMETHODIMP
+ExternalHelperAppParent::SetContentDisposition(uint32_t aContentDisposition)
+{
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 ExternalHelperAppParent::GetContentDispositionFilename(nsAString& aContentDispositionFilename)
 {
   if (mContentDispositionFilename.IsEmpty())
@@ -292,6 +301,12 @@ ExternalHelperAppParent::GetContentDispositionFilename(nsAString& aContentDispos
 
   aContentDispositionFilename = mContentDispositionFilename;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+ExternalHelperAppParent::SetContentDispositionFilename(const nsAString& aContentDispositionFilename)
+{
+  return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
@@ -305,17 +320,17 @@ ExternalHelperAppParent::GetContentDispositionHeader(nsACString& aContentDisposi
 }
 
 NS_IMETHODIMP
-ExternalHelperAppParent::GetContentLength(int32_t *aContentLength)
+ExternalHelperAppParent::GetContentLength(int64_t *aContentLength)
 {
-  if (mContentLength > PR_INT32_MAX || mContentLength < 0)
+  if (mContentLength < 0)
     *aContentLength = -1;
   else
-    *aContentLength = (int32_t)mContentLength;
+    *aContentLength = mContentLength;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-ExternalHelperAppParent::SetContentLength(int32_t aContentLength)
+ExternalHelperAppParent::SetContentLength(int64_t aContentLength)
 {
   mContentLength = aContentLength;
   return NS_OK;

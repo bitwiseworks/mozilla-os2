@@ -28,7 +28,11 @@ import shutil
 import textwrap
 import fnmatch
 import subprocess
+import urlparse
+import multiprocessing
+import collections
 from optparse import OptionParser
+from xml.dom.minidom import parse
 
 # Utility classes
 
@@ -102,65 +106,6 @@ class VCSFileInfo:
             file or 'None' on failure. """
         raise NotImplementedError
 
-class CVSFileInfo(VCSFileInfo):
-    """ A class to maintiain version information for files in a CVS repository.
-        Derived from VCSFileInfo. """
-
-    def __init__(self, file, srcdir):
-        VCSFileInfo.__init__(self, file)
-        self.srcdir = srcdir
-
-    def GetRoot(self):
-        (path, filename) = os.path.split(self.file)
-        root = os.path.join(path, "CVS", "Root")
-        if not os.path.isfile(root):
-            return None
-        f = open(root, "r")
-        root_name = f.readline().strip()
-        f.close()
-        if root_name:
-            return root_name
-        print >> sys.stderr, "Failed to get CVS Root for %s" % filename
-        return None
-
-    def GetCleanRoot(self):
-        parts = self.root.split('@')
-        if len(parts) > 1:
-            # we don't want the extra colon
-            return parts[1].replace(":","")
-        return self.root.replace(":","")
-
-    def GetRevision(self):
-        (path, filename) = os.path.split(self.file)
-        entries = os.path.join(path, "CVS", "Entries")
-        if not os.path.isfile(entries):
-            return None
-        f = open(entries, "r")
-        for line in f:
-            parts = line.split("/")
-            if len(parts) > 1 and parts[1] == filename:
-                return parts[2]
-        print >> sys.stderr, "Failed to get CVS Revision for %s" % filename
-        return None
-
-    def GetFilename(self):
-        file = self.file
-        if self.revision and self.clean_root:
-            if self.srcdir:
-                # strip the base path off
-                # but we actually want the last dir in srcdir
-                file = os.path.normpath(file)
-                # the lower() is to handle win32+vc8, where
-                # the source filenames come out all lowercase,
-                # but the srcdir can be mixed case
-                if file.lower().startswith(self.srcdir.lower()):
-                    file = file[len(self.srcdir):]
-                (head, tail) = os.path.split(self.srcdir)
-                if tail == "":
-                    tail = os.path.basename(head)
-                file = tail + file
-            return "cvs:%s:%s:%s" % (self.clean_root, file, self.revision)
-        return file
 
 # This regex separates protocol and optional username/password from a url.
 # For instance, all the following urls will be transformed into
@@ -170,110 +115,97 @@ class CVSFileInfo(VCSFileInfo):
 #   svn+ssh://user@foo.com/bar
 #   svn+ssh://user:pass@foo.com/bar
 #
-# This is used by both SVN and HG
 rootRegex = re.compile(r'^\S+?:/+(?:[^\s/]*@)?(\S+)$')
-
-class SVNFileInfo(VCSFileInfo):
-    url = None
-    repo = None
-    svndata = {}
-
-    def __init__(self, file):
-        """ We only want to run subversion's info tool once so pull all the data
-            here. """
-
-        VCSFileInfo.__init__(self, file)
-
-        if os.path.isfile(file):
-            command = os.popen("svn info %s" % file, "r")
-            for line in command:
-                # The last line of the output is usually '\n'
-                if line.strip() == '':
-                    continue
-                # Split into a key/value pair on the first colon
-                key, value = line.split(':', 1)
-                if key in ["Repository Root", "Revision", "URL"]:
-                    self.svndata[key] = value.strip()
-
-            exitStatus = command.close()
-            if exitStatus:
-              print >> sys.stderr, "Failed to get SVN info for %s" % file
-
-    def GetRoot(self):
-        key = "Repository Root"
-        if key in self.svndata:
-            match = rootRegex.match(self.svndata[key])
-            if match:
-                return match.group(1)
-        print >> sys.stderr, "Failed to get SVN Root for %s" % self.file
-        return None
-
-    # File bug to get this teased out from the current GetRoot, this is temporary
-    def GetCleanRoot(self):
-        return self.root
-
-    def GetRevision(self):
-        key = "Revision"
-        if key in self.svndata:
-            return self.svndata[key]
-        print >> sys.stderr, "Failed to get SVN Revision for %s" % self.file
-        return None
-
-    def GetFilename(self):
-        if self.root and self.revision:
-            if "URL" in self.svndata and "Repository Root" in self.svndata:
-                url, repo = self.svndata["URL"], self.svndata["Repository Root"]
-                file = url[len(repo) + 1:]
-            return "svn:%s:%s:%s" % (self.root, file, self.revision)
-        print >> sys.stderr, "Failed to get SVN Filename for %s" % self.file
-        return self.file
 
 def read_output(*args):
     (stdout, _) = subprocess.Popen(args=args, stdout=subprocess.PIPE).communicate()
     return stdout.rstrip()
 
 class HGRepoInfo:
-    # HG info is per-repo, so cache it in a static
-    # member var
-    repos = {}
-    def __init__(self, path, rev, cleanroot):
+    def __init__(self, path):
         self.path = path
+        rev = read_output('hg', '-R', path,
+                          'parent', '--template={node|short}')
+        # Look for the default hg path.  If SRVSRV_ROOT is set, we
+        # don't bother asking hg.
+        hg_root = os.environ.get("SRCSRV_ROOT")
+        if hg_root:
+            root = hg_root
+        else:
+            root = read_output('hg', '-R', path,
+                               'showconfig', 'paths.default')
+            if not root:
+                print >> sys.stderr, "Failed to get HG Repo for %s" % path
+        cleanroot = None
+        if root:
+            match = rootRegex.match(root)
+            if match:
+                cleanroot = match.group(1)
+                if cleanroot.endswith('/'):
+                    cleanroot = cleanroot[:-1]
+        if cleanroot is None:
+            print >> sys.stderr, textwrap.dedent("""\
+                Could not determine repo info for %s.  This is either not a clone of the web-based
+                repository, or you have not specified SRCSRV_ROOT, or the clone is corrupt.""") % path
+            sys.exit(1)
+        self.rev = rev
+        self.root = root
+        self.cleanroot = cleanroot
+
+    def GetFileInfo(self, file):
+        return HGFileInfo(file, self)
+
+class HGFileInfo(VCSFileInfo):
+    def __init__(self, file, repo):
+        VCSFileInfo.__init__(self, file)
+        self.repo = repo
+        self.file = os.path.relpath(file, repo.path)
+
+    def GetRoot(self):
+        return self.repo.root
+
+    def GetCleanRoot(self):
+        return self.repo.cleanroot
+
+    def GetRevision(self):
+        return self.repo.rev
+
+    def GetFilename(self):
+        if self.revision and self.clean_root:
+            return "hg:%s:%s:%s" % (self.clean_root, self.file, self.revision)
+        return self.file
+
+class GitRepoInfo:
+    """
+    Info about a local git repository. Does not currently
+    support discovering info about a git clone, the info must be
+    provided out-of-band.
+    """
+    def __init__(self, path, rev, root):
+        self.path = path
+        cleanroot = None
+        if root:
+            match = rootRegex.match(root)
+            if match:
+                cleanroot = match.group(1)
+                if cleanroot.endswith('/'):
+                    cleanroot = cleanroot[:-1]
+        if cleanroot is None:
+            print >> sys.stderr, textwrap.dedent("""\
+                Could not determine repo info for %s (%s).  This is either not a clone of a web-based
+                repository, or you have not specified SRCSRV_ROOT, or the clone is corrupt.""") % (path, root)
+            sys.exit(1)
         self.rev = rev
         self.cleanroot = cleanroot
 
-class HGFileInfo(VCSFileInfo):
-    def __init__(self, file, srcdir):
+    def GetFileInfo(self, file):
+        return GitFileInfo(file, self)
+
+class GitFileInfo(VCSFileInfo):
+    def __init__(self, file, repo):
         VCSFileInfo.__init__(self, file)
-        # we should only have to collect this info once per-repo
-        if not srcdir in HGRepoInfo.repos:
-            rev = read_output('hg', '-R', srcdir,
-                              'parent', '--template={node|short}')
-            # Look for the default hg path.  If SRVSRV_ROOT is set, we
-            # don't bother asking hg.
-            hg_root = os.environ.get("SRCSRV_ROOT")
-            if hg_root:
-                path = hg_root
-            else:
-                path = read_output('hg', '-R', srcdir,
-                                   'showconfig', 'paths.default')
-                if not path:
-                    print >> sys.stderr, "Failed to get HG Repo for %s" % srcdir
-            cleanroot = None
-            if path != '': # not there?
-                match = rootRegex.match(path)
-                if match:
-                    cleanroot = match.group(1)
-                    if cleanroot.endswith('/'):
-                        cleanroot = cleanroot[:-1]
-            if cleanroot is None:
-                print >> sys.stderr, textwrap.dedent("""\
-                    Could not determine repo info for %s.  This is either not a clone of the web-based
-                    repository, or you have not specified SRCSRV_ROOT, or the clone is corrupt.""") % srcdir
-                sys.exit(1)
-            HGRepoInfo.repos[srcdir] = HGRepoInfo(path, rev, cleanroot)
-        self.repo = HGRepoInfo.repos[srcdir]
-        self.file = file
-        self.srcdir = srcdir
+        self.repo = repo
+        self.file = os.path.relpath(file, repo.path)
 
     def GetRoot(self):
         return self.repo.path
@@ -285,17 +217,9 @@ class HGFileInfo(VCSFileInfo):
         return self.repo.rev
 
     def GetFilename(self):
-        file = self.file
         if self.revision and self.clean_root:
-            if self.srcdir:
-                # strip the base path off
-                file = os.path.normpath(file)
-                if IsInDir(file, self.srcdir):
-                    file = file[len(self.srcdir):]
-                if file.startswith('/') or file.startswith('\\'):
-                    file = file[1:]
-            return "hg:%s:%s:%s" % (self.clean_root, file, self.revision)
-        return file
+            return "git:%s:%s:%s" % (self.clean_root, self.file, self.revision)
+        return self.file
 
 # Utility functions
 
@@ -308,6 +232,16 @@ def IsInDir(file, dir):
     # the source filenames come out all lowercase,
     # but the srcdir can be mixed case
     return os.path.abspath(file).lower().startswith(os.path.abspath(dir).lower())
+
+def GetVCSFilenameFromSrcdir(file, srcdir):
+    if srcdir not in Dumper.srcdirRepoInfo:
+        # Not in cache, so find it adnd cache it
+        if os.path.isdir(os.path.join(srcdir, '.hg')):
+            Dumper.srcdirRepoInfo[srcdir] = HGRepoInfo(srcdir)
+        else:
+            # Unknown VCS or file is not in a repo.
+            return None
+    return Dumper.srcdirRepoInfo[srcdir].GetFileInfo(file)
 
 def GetVCSFilename(file, srcdirs):
     """Given a full path to a file, and the top source directory,
@@ -330,18 +264,10 @@ def GetVCSFilename(file, srcdirs):
         fileInfo = vcsFileInfoCache[file]
     else:
         for srcdir in srcdirs:
-            if os.path.isdir(os.path.join(path, "CVS")):
-                fileInfo = CVSFileInfo(file, srcdir)
-                if fileInfo:
-                    root = fileInfo.root
-            elif os.path.isdir(os.path.join(path, ".svn")) or \
-                 os.path.isdir(os.path.join(path, "_svn")):
-                 fileInfo = SVNFileInfo(file);
-            elif os.path.isdir(os.path.join(srcdir, '.hg')) and \
-                 IsInDir(file, srcdir):
-                 fileInfo = HGFileInfo(file, srcdir)
-
-            if fileInfo: 
+            if not IsInDir(file, srcdir):
+                continue
+            fileInfo = GetVCSFilenameFromSrcdir(file, srcdir)
+            if fileInfo:
                 vcsFileInfoCache[file] = fileInfo
                 break
 
@@ -377,6 +303,18 @@ def SourceIndex(fileStream, outputPath, vcs_root):
     pdbStreamFile.close()
     return result
 
+def WorkerInitializer(cls, lock, srcdirRepoInfo):
+    """Windows worker processes won't have run GlobalInit, and due to a lack of fork(),
+    won't inherit the class variables from the parent. They only need a few variables,
+    so we run an initializer to set them. Redundant but harmless on other platforms."""
+    cls.lock = lock
+    cls.srcdirRepoInfo = srcdirRepoInfo
+
+def StartProcessFilesWork(dumper, files, arch_num, arch, vcs_root, after, after_arg):
+    """multiprocessing can't handle methods as Process targets, so we define
+    a simple wrapper function around the work method."""
+    return dumper.ProcessFilesWork(files, arch_num, arch, vcs_root, after, after_arg)
+
 class Dumper:
     """This class can dump symbols from a file with debug info, and
     store the output in a directory structure that is valid for use as
@@ -391,14 +329,21 @@ class Dumper:
 
     You don't want to use this directly if you intend to call
     ProcessDir.  Instead, call GetPlatformSpecificDumper to
-    get an instance of a subclass."""
+    get an instance of a subclass.
+ 
+    Processing is performed asynchronously via worker processes; in
+    order to wait for processing to finish and cleanup correctly, you
+    must call Finish after all Process/ProcessDir calls have been made.
+    You must also call Dumper.GlobalInit before creating or using any
+    instances."""
     def __init__(self, dump_syms, symbol_path,
                  archs=None,
-                 srcdirs=None,
+                 srcdirs=[],
                  copy_debug=False,
                  vcsinfo=False,
                  srcsrv=False,
-                 exclude=[]):
+                 exclude=[],
+                 repo_manifest=None):
         # popen likes absolute paths, at least on windows
         self.dump_syms = os.path.abspath(dump_syms)
         self.symbol_path = symbol_path
@@ -407,14 +352,118 @@ class Dumper:
             self.archs = ['']
         else:
             self.archs = ['-a %s' % a for a in archs.split()]
-        if srcdirs is not None:
-            self.srcdirs = [os.path.normpath(a) for a in srcdirs]
-        else:
-            self.srcdirs = None
+        self.srcdirs = [os.path.normpath(a) for a in srcdirs]
         self.copy_debug = copy_debug
         self.vcsinfo = vcsinfo
         self.srcsrv = srcsrv
         self.exclude = exclude[:]
+        if repo_manifest:
+            self.parse_repo_manifest(repo_manifest)
+
+        # book-keeping to keep track of our jobs and the cleanup work per file tuple
+        self.files_record = {}
+        self.jobs_record = collections.defaultdict(int)
+
+    @classmethod
+    def GlobalInit(cls, module=multiprocessing):
+        """Initialize the class globals for the multiprocessing setup; must
+        be called before any Dumper instances are created and used. Test cases
+        may pass in a different module to supply Manager and Pool objects,
+        usually multiprocessing.dummy."""
+        num_cpus = module.cpu_count()
+        if num_cpus is None:
+            # assume a dual core machine if we can't find out for some reason
+            # probably better on single core anyway due to I/O constraints
+            num_cpus = 2
+
+        # have to create any locks etc before the pool
+        cls.manager = module.Manager()
+        cls.jobs_condition = Dumper.manager.Condition()
+        cls.lock = Dumper.manager.RLock()
+        cls.srcdirRepoInfo = Dumper.manager.dict()
+        cls.pool = module.Pool(num_cpus, WorkerInitializer,
+                               (cls, cls.lock, cls.srcdirRepoInfo))
+
+    def JobStarted(self, file_key):
+        """Increments the number of submitted jobs for the specified key file,
+        defined as the original file we processed; note that a single key file
+        can generate up to 1 + len(self.archs) jobs in the Mac case."""
+        with Dumper.jobs_condition:
+            self.jobs_record[file_key] += 1
+            Dumper.jobs_condition.notify_all()
+
+    def JobFinished(self, file_key):
+        """Decrements the number of submitted jobs for the specified key file,
+        defined as the original file we processed; once the count is back to 0,
+        remove the entry from our record."""
+        with Dumper.jobs_condition:
+            self.jobs_record[file_key] -= 1
+
+            if self.jobs_record[file_key] == 0:
+                del self.jobs_record[file_key]
+
+            Dumper.jobs_condition.notify_all()
+
+    def output(self, dest, output_str):
+        """Writes |output_str| to |dest|, holding |lock|;
+        terminates with a newline."""
+        with Dumper.lock:
+            dest.write(output_str + "\n")
+            dest.flush()
+
+    def output_pid(self, dest, output_str):
+        """Debugging output; prepends the pid to the string."""
+        self.output(dest, "%d: %s" % (os.getpid(), output_str))
+
+    def parse_repo_manifest(self, repo_manifest):
+        """
+        Parse an XML manifest of repository info as produced
+        by the `repo manifest -r` command.
+        """
+        doc = parse(repo_manifest)
+        if doc.firstChild.tagName != "manifest":
+            return
+        # First, get remotes.
+        def ensure_slash(u):
+            if not u.endswith("/"):
+                return u + "/"
+            return u
+        remotes = dict([(r.getAttribute("name"), ensure_slash(r.getAttribute("fetch"))) for r in doc.getElementsByTagName("remote")])
+        # And default remote.
+        default_remote = None
+        if doc.getElementsByTagName("default"):
+            default_remote = doc.getElementsByTagName("default")[0].getAttribute("remote")
+        # Now get projects. Assume they're relative to repo_manifest.
+        base_dir = os.path.abspath(os.path.dirname(repo_manifest))
+        for proj in doc.getElementsByTagName("project"):
+            # name is the repository URL relative to the remote path.
+            name = proj.getAttribute("name")
+            # path is the path on-disk, relative to the manifest file.
+            path = proj.getAttribute("path")
+            # revision is the changeset ID.
+            rev = proj.getAttribute("revision")
+            # remote is the base URL to use.
+            remote = proj.getAttribute("remote")
+            # remote defaults to the <default remote>.
+            if not remote:
+                remote = default_remote
+            # path defaults to name.
+            if not path:
+                path = name
+            if not (name and path and rev and remote):
+                print "Skipping project %s" % proj.toxml()
+                continue
+            remote = remotes[remote]
+            # Turn git URLs into http URLs so that urljoin works.
+            if remote.startswith("git:"):
+                remote = "http" + remote[3:]
+            # Add this project to srcdirs.
+            srcdir = os.path.join(base_dir, path)
+            self.srcdirs.append(srcdir)
+            # And cache its VCS file info. Currently all repos mentioned
+            # in a repo manifest are assumed to be git.
+            root = urlparse.urljoin(remote, name)
+            Dumper.srcdirRepoInfo[srcdir] = GitRepoInfo(srcdir, rev, root)
 
     # subclasses override this
     def ShouldProcess(self, file):
@@ -445,19 +494,30 @@ class Dumper:
     def CopyDebug(self, file, debug_file, guid):
         pass
 
+    def Finish(self, stop_pool=True):
+        """Wait for the expected number of jobs to be submitted, and then
+        wait for the pool to finish processing them. By default, will close
+        and clear the pool, but for testcases that need multiple runs, pass
+        stop_pool = False."""
+        with Dumper.jobs_condition:
+            while len(self.jobs_record) != 0:
+                Dumper.jobs_condition.wait()
+        if stop_pool:
+            Dumper.pool.close()
+            Dumper.pool.join()
+
     def Process(self, file_or_dir):
-        "Process a file or all the (valid) files in a directory."
+        """Process a file or all the (valid) files in a directory; processing is performed
+        asynchronously, and Finish must be called to wait for it complete and cleanup."""
         if os.path.isdir(file_or_dir) and not self.ShouldSkipDir(file_or_dir):
-            return self.ProcessDir(file_or_dir)
+            self.ProcessDir(file_or_dir)
         elif os.path.isfile(file_or_dir):
-            return self.ProcessFile(file_or_dir)
-        # maybe it doesn't exist?
-        return False
+            self.ProcessFiles((file_or_dir,))
 
     def ProcessDir(self, dir):
         """Process all the valid files in this directory.  Valid files
-        are determined by calling ShouldProcess."""
-        result = True
+        are determined by calling ShouldProcess; processing is performed
+        asynchronously, and Finish must be called to wait for it complete and cleanup."""
         for root, dirs, files in os.walk(dir):
             for d in dirs[:]:
                 if self.ShouldSkipDir(d):
@@ -465,21 +525,48 @@ class Dumper:
             for f in files:
                 fullpath = os.path.join(root, f)
                 if self.ShouldProcess(fullpath):
-                    if not self.ProcessFile(fullpath):
-                        result = False
-        return result
+                    self.ProcessFiles((fullpath,))
 
-    def ProcessFile(self, file):
-        """Dump symbols from this file into a symbol file, stored
-        in the proper directory structure in  |symbol_path|."""
-        print >> sys.stderr, "Processing file: %s" % file
-        sys.stderr.flush()
-        result = False
-        sourceFileStream = ''
+    def SubmitJob(self, file_key, func, args, callback):
+        """Submits a job to the pool of workers; increments the number of submitted jobs."""
+        self.JobStarted(file_key)
+        res = Dumper.pool.apply_async(func, args=args, callback=callback)
+
+    def ProcessFilesFinished(self, res):
+        """Callback from multiprocesing when ProcessFilesWork finishes;
+        run the cleanup work, if any"""
+        self.JobFinished(res['files'][-1])
+        # only run the cleanup function once per tuple of files
+        self.files_record[res['files']] += 1
+        if self.files_record[res['files']] == len(self.archs):
+            del self.files_record[res['files']]
+            if res['after']:
+                res['after'](res['status'], res['after_arg'])
+
+    def ProcessFiles(self, files, after=None, after_arg=None):
+        """Dump symbols from these files into a symbol file, stored
+        in the proper directory structure in  |symbol_path|; processing is performed
+        asynchronously, and Finish must be called to wait for it complete and cleanup.
+        All files after the first are fallbacks in case the first file does not process
+        successfully; if it does, no other files will be touched."""
+        self.output_pid(sys.stderr, "Submitting jobs for files: %s" % str(files))
+
         # tries to get the vcs root from the .mozconfig first - if it's not set
         # the tinderbox vcs path will be assigned further down
         vcs_root = os.environ.get("SRCSRV_ROOT")
         for arch_num, arch in enumerate(self.archs):
+            self.files_record[files] = 0 # record that we submitted jobs for this tuple of files
+            self.SubmitJob(files[-1], StartProcessFilesWork, args=(self, files, arch_num, arch, vcs_root, after, after_arg), callback=self.ProcessFilesFinished)
+
+    def ProcessFilesWork(self, files, arch_num, arch, vcs_root, after, after_arg):
+        self.output_pid(sys.stderr, "Worker processing files: %s" % (files,))
+
+        # our result is a status, a cleanup function, an argument to that function, and the tuple of files we were called on
+        result = { 'status' : False, 'after' : after, 'after_arg' : after_arg, 'files' : files }
+
+        sourceFileStream = ''
+        for file in files:
+            # files is a tuple of files, containing fallbacks in case the first file doesn't process successfully
             try:
                 proc = subprocess.Popen([self.dump_syms] + arch.split() + [file],
                                         stdout=subprocess.PIPE)
@@ -529,12 +616,12 @@ class Dumper:
                             # pass through all other lines unchanged
                             f.write(line)
                             # we want to return true only if at least one line is not a MODULE or FILE line
-                            result = True
+                            result['status'] = True
                     f.close()
                     proc.wait()
                     # we output relative paths so callers can get a list of what
                     # was generated
-                    print rel_path
+                    self.output(sys.stdout, rel_path)
                     if self.srcsrv and vcs_root:
                         # add source server indexing to the pdb file
                         self.SourceServerIndexing(file, guid, sourceFileStream, vcs_root)
@@ -543,9 +630,12 @@ class Dumper:
                         self.CopyDebug(file, debug_file, guid)
             except StopIteration:
                 pass
-            except:
-                print >> sys.stderr, "Unexpected error: ", sys.exc_info()[0]
+            except e:
+                self.output(sys.stderr, "Unexpected error: %s" % (str(e),))
                 raise
+            if result['status']:
+                # we only need 1 file to work
+                break
         return result
 
 # Platform-specific subclasses.  For the most part, these just have
@@ -604,9 +694,9 @@ class Dumper_Win32(Dumper):
                                   stdout=open("NUL:","w"), stderr=subprocess.STDOUT)
         if success == 0 and os.path.exists(compressed_file):
             os.unlink(full_path)
-            print os.path.splitext(rel_path)[0] + ".pd_"
+            self.output(sys.stdout, os.path.splitext(rel_path)[0] + ".pd_")
         else:
-            print rel_path
+            self.output(sys.stdout, rel_path)
         
     def SourceServerIndexing(self, debug_file, guid, sourceFileStream, vcs_root):
         # Creates a .pdb.stream file in the mozilla\objdir to be used for source indexing
@@ -653,7 +743,7 @@ class Dumper_Linux(Dumper):
             shutil.move(file_dbg, full_path)
             # gzip the shipped debug files
             os.system("gzip %s" % full_path)
-            print rel_path + ".gz"
+            self.output(sys.stdout, rel_path + ".gz")
         else:
             if os.path.isfile(file_dbg):
                 os.unlink(file_dbg)
@@ -678,6 +768,16 @@ class Dumper_Solaris(Dumper):
             return self.RunFileCommand(file).startswith("ELF")
         return False
 
+def StartProcessFilesWorkMac(dumper, file):
+    """multiprocessing can't handle methods as Process targets, so we define
+    a simple wrapper function around the work method."""
+    return dumper.ProcessFilesWorkMac(file)
+
+def AfterMac(status, dsymbundle):
+    """Cleanup function to run on Macs after we process the file(s)."""
+    # CopyDebug will already have been run from Dumper.ProcessFiles
+    shutil.rmtree(dsymbundle)
+
 class Dumper_Mac(Dumper):
     def ShouldProcess(self, file):
         """This function will allow processing of files that are
@@ -699,10 +799,28 @@ class Dumper_Mac(Dumper):
             return True
         return False
 
-    def ProcessFile(self, file):
+    def ProcessFiles(self, files, after=None, after_arg=None):
+        # also note, files must be len 1 here, since we're the only ones
+        # that ever add more than one file to the list
+        self.output_pid(sys.stderr, "Submitting job for Mac pre-processing on file: %s" % (files[0]))
+        self.SubmitJob(files[0], StartProcessFilesWorkMac, args=(self, files[0]), callback=self.ProcessFilesMacFinished)
+
+    def ProcessFilesMacFinished(self, result):
+        if result['status']:
+            # kick off new jobs per-arch with our new list of files
+            Dumper.ProcessFiles(self, result['files'], after=AfterMac, after_arg=result['files'][0])
+        # only decrement jobs *after* that, since otherwise we'll remove the record for this file
+        self.JobFinished(result['files'][-1])
+
+    def ProcessFilesWorkMac(self, file):
         """dump_syms on Mac needs to be run on a dSYM bundle produced
         by dsymutil(1), so run dsymutil here and pass the bundle name
         down to the superclass method instead."""
+        self.output_pid(sys.stderr, "Worker running Mac pre-processing on file: %s" % (file,))
+
+        # our return is a status and a tuple of files to dump symbols for
+        # the extra files are fallbacks; as soon as one is dumped successfully, we stop
+        result = { 'status' : False, 'files' : None, 'file_key' : file }
         dsymbundle = file + ".dSYM"
         if os.path.exists(dsymbundle):
             shutil.rmtree(dsymbundle)
@@ -712,20 +830,17 @@ class Dumper_Mac(Dumper):
                         stdout=open("/dev/null","w"))
         if not os.path.exists(dsymbundle):
             # dsymutil won't produce a .dSYM for files without symbols
-            return False
-        res = Dumper.ProcessFile(self, dsymbundle)
-        # CopyDebug will already have been run from Dumper.ProcessFile
-        shutil.rmtree(dsymbundle)
+            self.output_pid(sys.stderr, "No symbols found in file: %s" % (file,))
+            result['status'] = False
+            result['files'] = (file, )
+            return result
 
-        # fallback for DWARF-less binaries
-        if not res:
-            print >> sys.stderr, "Couldn't read DWARF symbols in: %s" % dsymbundle
-            res = Dumper.ProcessFile(self, file)
-
-        return res
+        result['status'] = True
+        result['files'] = (dsymbundle, file)
+        return result
 
     def CopyDebug(self, file, debug_file, guid):
-        """ProcessFile has already produced a dSYM bundle, so we should just
+        """ProcessFiles has already produced a dSYM bundle, so we should just
         copy that to the destination directory. However, we'll package it
         into a .tar.bz2 because the debug symbols are pretty huge, and
         also because it's a bundle, so it's a directory. |file| here is the
@@ -739,7 +854,7 @@ class Dumper_Mac(Dumper):
                                   cwd=os.path.dirname(file),
                                   stdout=open("/dev/null","w"), stderr=subprocess.STDOUT)
         if success == 0 and os.path.exists(full_path):
-            print rel_path
+            self.output(sys.stdout, rel_path)
 
 # Entry point if called as a standalone program
 def main():
@@ -762,15 +877,20 @@ def main():
     parser.add_option("-x", "--exclude",
                       action="append", dest="exclude", default=[], metavar="PATTERN",
                       help="Skip processing files matching PATTERN.")
+    parser.add_option("--repo-manifest",
+                      action="store", dest="repo_manifest",
+                      help="""Get source information from this XML manifest
+produced by the `repo manifest -r` command.
+""")
     (options, args) = parser.parse_args()
-    
+
     #check to see if the pdbstr.exe exists
     if options.srcsrv:
         pdbstr = os.environ.get("PDBSTR_PATH")
         if not os.path.exists(pdbstr):
             print >> sys.stderr, "Invalid path to pdbstr.exe - please set/check PDBSTR_PATH.\n"
             sys.exit(1)
-            
+
     if len(args) < 3:
         parser.error("not enough arguments")
         exit(1)
@@ -782,10 +902,16 @@ def main():
                                        srcdirs=options.srcdir,
                                        vcsinfo=options.vcsinfo,
                                        srcsrv=options.srcsrv,
-                                       exclude=options.exclude)
+                                       exclude=options.exclude,
+                                       repo_manifest=options.repo_manifest)
     for arg in args[2:]:
         dumper.Process(arg)
+    dumper.Finish()
 
 # run main if run directly
 if __name__ == "__main__":
+    # set up the multiprocessing infrastructure before we start;
+    # note that this needs to be in the __main__ guard, or else Windows will choke
+    Dumper.GlobalInit()
+
     main()

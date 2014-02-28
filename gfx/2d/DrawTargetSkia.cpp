@@ -7,6 +7,11 @@
 #include "SourceSurfaceSkia.h"
 #include "ScaledFontBase.h"
 #include "skia/SkDevice.h"
+
+#ifdef USE_SKIA_GPU
+#include "skia/SkGpuDevice.h"
+#endif
+
 #include "skia/SkTypeface.h"
 #include "skia/SkGradientShader.h"
 #include "skia/SkBlurDrawLooper.h"
@@ -28,12 +33,6 @@
 
 namespace mozilla {
 namespace gfx {
-
-SkColor ColorToSkColor(const Color &color, Float aAlpha)
-{
-  //XXX: do a better job converting to int
-  return SkColorSetARGB(color.a*aAlpha*255.0, color.r*255.0, color.g*255.0, color.b*255.0);
-}
 
 class GradientStopsSkia : public GradientStops
 {
@@ -80,67 +79,6 @@ public:
   ExtendMode mExtendMode;
 };
 
-SkXfermode::Mode
-GfxOpToSkiaOp(CompositionOp op)
-{
-  switch (op)
-  {
-    case OP_OVER:
-      return SkXfermode::kSrcOver_Mode;
-    case OP_ADD:
-      return SkXfermode::kPlus_Mode;
-    case OP_ATOP:
-      return SkXfermode::kSrcATop_Mode;
-    case OP_OUT:
-      return SkXfermode::kSrcOut_Mode;
-    case OP_IN:
-      return SkXfermode::kSrcIn_Mode;
-    case OP_SOURCE:
-      return SkXfermode::kSrc_Mode;
-    case OP_DEST_IN:
-      return SkXfermode::kDstIn_Mode;
-    case OP_DEST_OUT:
-      return SkXfermode::kDstOut_Mode;
-    case OP_DEST_OVER:
-      return SkXfermode::kDstOver_Mode;
-    case OP_DEST_ATOP:
-      return SkXfermode::kDstATop_Mode;
-    case OP_XOR:
-      return SkXfermode::kXor_Mode;
-    case OP_COUNT:
-      return SkXfermode::kSrcOver_Mode;
-  }
-  return SkXfermode::kSrcOver_Mode;
-}
-
-
-SkRect
-RectToSkRect(const Rect& aRect)
-{
-  return SkRect::MakeXYWH(SkFloatToScalar(aRect.x), SkFloatToScalar(aRect.y), 
-                          SkFloatToScalar(aRect.width), SkFloatToScalar(aRect.height));
-}
-
-SkRect
-IntRectToSkRect(const IntRect& aRect)
-{
-  return SkRect::MakeXYWH(SkIntToScalar(aRect.x), SkIntToScalar(aRect.y), 
-                          SkIntToScalar(aRect.width), SkIntToScalar(aRect.height));
-}
-
-SkIRect
-RectToSkIRect(const Rect& aRect)
-{
-  return SkIRect::MakeXYWH(aRect.x, aRect.y, aRect.width, aRect.height);
-}
-
-SkIRect
-IntRectToSkIRect(const IntRect& aRect)
-{
-  return SkIRect::MakeXYWH(aRect.x, aRect.y, aRect.width, aRect.height);
-}
-
-
 DrawTargetSkia::DrawTargetSkia()
 {
 }
@@ -161,26 +99,12 @@ TemporaryRef<SourceSurface>
 DrawTargetSkia::Snapshot()
 {
   RefPtr<SourceSurfaceSkia> source = new SourceSurfaceSkia();
-  if (!source->InitWithBitmap(mBitmap, mFormat, this)) {
+
+  if (!source->InitFromCanvas(mCanvas.get(), mFormat, this))
     return nullptr;
-  }
+
   AppendSnapshot(source);
   return source;
-}
-
-SkShader::TileMode
-ExtendModeToTileMode(ExtendMode aMode)
-{
-  switch (aMode)
-  {
-    case EXTEND_CLAMP:
-      return SkShader::kClamp_TileMode;
-    case EXTEND_REPEAT:
-      return SkShader::kRepeat_TileMode;
-    case EXTEND_REFLECT:
-      return SkShader::kMirror_TileMode;
-  }
-  return SkShader::kClamp_TileMode;
 }
 
 void SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.0)
@@ -229,14 +153,14 @@ void SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.
         points[0] = SkPoint::Make(SkFloatToScalar(pat.mCenter1.x), SkFloatToScalar(pat.mCenter1.y));
         points[1] = SkPoint::Make(SkFloatToScalar(pat.mCenter2.x), SkFloatToScalar(pat.mCenter2.y));
 
-        SkShader* shader = SkGradientShader::CreateTwoPointRadial(points[0], 
-                                                                  SkFloatToScalar(pat.mRadius1),
-                                                                  points[1], 
-                                                                  SkFloatToScalar(pat.mRadius2),
-                                                                  &stops->mColors.front(), 
-                                                                  &stops->mPositions.front(), 
-                                                                  stops->mCount, 
-                                                                  mode);
+        SkShader* shader = SkGradientShader::CreateTwoPointConical(points[0], 
+                                                                   SkFloatToScalar(pat.mRadius1),
+                                                                   points[1], 
+                                                                   SkFloatToScalar(pat.mRadius2),
+                                                                   &stops->mColors.front(), 
+                                                                   &stops->mPositions.front(), 
+                                                                   stops->mCount, 
+                                                                   mode);
         if (shader) {
             SkMatrix mat;
             GfxMatrixToSkiaMatrix(pat.mMatrix, mat);
@@ -309,12 +233,12 @@ struct AutoPaintSetup {
       mPaint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
       SkPaint temp;
       temp.setXfermodeMode(GfxOpToSkiaOp(aOptions.mCompositionOp));
-      temp.setAlpha(aOptions.mAlpha*255);
+      temp.setAlpha(U8CPU(aOptions.mAlpha*255));
       //TODO: Get a rect here
       mCanvas->saveLayer(nullptr, &temp);
       mNeedsRestore = true;
     } else {
-      mPaint.setAlpha(aOptions.mAlpha*255.0);
+      mPaint.setAlpha(U8CPU(aOptions.mAlpha*255.0));
       mAlpha = aOptions.mAlpha;
     }
     mPaint.setFilterBitmap(true);
@@ -330,6 +254,7 @@ struct AutoPaintSetup {
 void
 DrawTargetSkia::Flush()
 {
+  mCanvas->flush();
 }
 
 void
@@ -425,7 +350,8 @@ DrawTargetSkia::DrawSurfaceWithShadow(SourceSurface *aSurface,
   paint.setXfermodeMode(GfxOpToSkiaOp(aOperator));
   SkSafeUnref(paint.setLooper(dl));
 
-  SkRect rect = RectToSkRect(Rect(aDest.x, aDest.y, bitmap.width(), bitmap.height()));
+  SkRect rect = RectToSkRect(Rect(Float(aDest.x), Float(aDest.y),
+                                  Float(bitmap.width()), Float(bitmap.height())));
   mCanvas->drawRect(rect, paint);
   mCanvas->restore();
 }
@@ -570,7 +496,7 @@ DrawTargetSkia::Mask(const Pattern &aSource,
   // Take our destination bounds and convert them into user space to use
   // as the path to draw.
   SkPath path;
-  path.addRect(SkRect::MakeWH(mSize.width, mSize.height));
+  path.addRect(SkRect::MakeWH(SkScalar(mSize.width), SkScalar(mSize.height)));
  
   Matrix temp = mTransform;
   temp.Invert();
@@ -626,7 +552,7 @@ DrawTargetSkia::CopySurface(SourceSurface *aSurface,
 {
   //TODO: We could just use writePixels() here if the sourceRect is the entire source
   
-    if (aSurface->GetType() != SURFACE_SKIA) {
+  if (aSurface->GetType() != SURFACE_SKIA) {
     return;
   }
 
@@ -641,8 +567,7 @@ DrawTargetSkia::CopySurface(SourceSurface *aSurface,
   mCanvas->clipRect(dest, SkRegion::kReplace_Op);
   SkPaint paint;
 
-  if (mBitmap.config() == SkBitmap::kRGB_565_Config &&
-      mCanvas->getDevice()->config() == SkBitmap::kRGB_565_Config) {
+  if (mCanvas->getDevice()->config() == SkBitmap::kRGB_565_Config) {
     // Set the xfermode to SOURCE_OVER to workaround
     // http://code.google.com/p/skia/issues/detail?id=628
     // RGB565 is opaque so they're equivalent anyway
@@ -658,32 +583,68 @@ DrawTargetSkia::CopySurface(SourceSurface *aSurface,
 bool
 DrawTargetSkia::Init(const IntSize &aSize, SurfaceFormat aFormat)
 {
-  mBitmap.setConfig(GfxFormatToSkiaConfig(aFormat), aSize.width, aSize.height);
-  if (!mBitmap.allocPixels()) {
+  SkAutoTUnref<SkDevice> device(new SkDevice(GfxFormatToSkiaConfig(aFormat), aSize.width, aSize.height));
+
+  SkBitmap bitmap = device->accessBitmap(true);
+  if (!bitmap.allocPixels()) {
     return false;
   }
-  mBitmap.eraseARGB(0, 0, 0, 0);
-  SkAutoTUnref<SkDevice> device(new SkDevice(mBitmap));
+
+  bitmap.eraseARGB(0, 0, 0, 0);
+
   SkAutoTUnref<SkCanvas> canvas(new SkCanvas(device.get()));
   mSize = aSize;
 
-  mDevice = device.get();
   mCanvas = canvas.get();
   mFormat = aFormat;
   return true;
 }
 
+#ifdef USE_SKIA_GPU
 void
-DrawTargetSkia::Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat)
+DrawTargetSkia::InitWithFBO(unsigned int aFBOID, GrContext* aGrContext, const IntSize &aSize, SurfaceFormat aFormat)
 {
-  mBitmap.setConfig(GfxFormatToSkiaConfig(aFormat), aSize.width, aSize.height, aStride);
-  mBitmap.setPixels(aData);
-  
-  SkAutoTUnref<SkDevice> device(new SkDevice(mBitmap));
+  GrPlatformRenderTargetDesc targetDescriptor;
+
+  targetDescriptor.fWidth = aSize.width;
+  targetDescriptor.fHeight = aSize.height;
+  targetDescriptor.fConfig = GfxFormatToGrConfig(aFormat);
+  targetDescriptor.fSampleCnt = 0;
+  targetDescriptor.fRenderTargetHandle = aFBOID;
+
+  SkAutoTUnref<GrRenderTarget> target(aGrContext->createPlatformRenderTarget(targetDescriptor));
+
+  SkAutoTUnref<SkDevice> device(new SkGpuDevice(aGrContext, target.get()));
   SkAutoTUnref<SkCanvas> canvas(new SkCanvas(device.get()));
   mSize = aSize;
 
-  mDevice = device.get();
+  mCanvas = canvas.get();
+  mFormat = aFormat;
+}
+#endif
+
+void
+DrawTargetSkia::Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat)
+{
+  bool isOpaque = false;
+  if (aFormat == FORMAT_B8G8R8X8) {
+    // We have to manually set the A channel to be 255 as Skia doesn't understand BGRX
+    ConvertBGRXToBGRA(aData, aSize, aStride);
+    isOpaque = true;
+  }
+  
+  SkAutoTUnref<SkDevice> device(new SkDevice(GfxFormatToSkiaConfig(aFormat), aSize.width, aSize.height, isOpaque));
+
+  SkBitmap bitmap = (SkBitmap)device->accessBitmap(true);
+  bitmap.lockPixels();
+  bitmap.setPixels(aData);
+  bitmap.setConfig(GfxFormatToSkiaConfig(aFormat), aSize.width, aSize.height, aStride);
+  bitmap.unlockPixels();
+  bitmap.notifyPixelsChanged();
+
+  SkAutoTUnref<SkCanvas> canvas(new SkCanvas(device.get()));
+  mSize = aSize;
+
   mCanvas = canvas.get();
   mFormat = aFormat;
 }

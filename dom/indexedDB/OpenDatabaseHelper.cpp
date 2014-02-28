@@ -2,33 +2,43 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "OpenDatabaseHelper.h"
 
+#include "nsIBFCacheEntry.h"
 #include "nsIFile.h"
 
+#include <algorithm>
+#include "mozilla/dom/quota/AcquireListener.h"
+#include "mozilla/dom/quota/OriginOrPatternString.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/storage.h"
 #include "nsEscape.h"
+#include "nsNetUtil.h"
 #include "nsThreadUtils.h"
 #include "snappy/snappy.h"
-#include "test_quota.h"
 
-#include "nsIBFCacheEntry.h"
+#include "Client.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
 #include "IndexedDatabaseManager.h"
+#include "ProfilerHelpers.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 USING_INDEXEDDB_NAMESPACE
+USING_QUOTA_NAMESPACE
 
 namespace {
 
 // If JS_STRUCTURED_CLONE_VERSION changes then we need to update our major
 // schema version.
-MOZ_STATIC_ASSERT(JS_STRUCTURED_CLONE_VERSION == 1,
+MOZ_STATIC_ASSERT(JS_STRUCTURED_CLONE_VERSION == 2,
                   "Need to update the major schema version.");
 
 // Major schema version. Bump for almost everything.
-const uint32_t kMajorSchemaVersion = 12;
+const uint32_t kMajorSchemaVersion = 14;
 
 // Minor schema version. Should almost always be 0 (maybe bump on release
 // branches if we have to).
@@ -53,32 +63,11 @@ MakeSchemaVersion(uint32_t aMajorSchemaVersion,
 const int32_t kSQLiteSchemaVersion = int32_t((kMajorSchemaVersion << 4) +
                                              kMinorSchemaVersion);
 
-uint32_t
-RotateBitsLeft32(uint32_t value, uint8_t bits)
-{
-  return (value << bits) | (value >> (32 - bits));
-}
-
-uint32_t
-HashString_ESR10(const nsAString& aFilename)
-{
-  const PRUnichar* str = aFilename.BeginReading();
-  size_t length = aFilename.Length();
-
-  uint32_t hash = 0;
-  for (size_t i = 0; i < length; i++) {
-    hash = RotateBitsLeft32(hash, 4) ^ str[i];
-  }
-  return hash;
-}
-
 nsresult
 GetDatabaseFilename(const nsAString& aName,
-                    nsAString& aDatabaseFilename,
-                    bool aUseESR10Hashing = false)
+                    nsAString& aDatabaseFilename)
 {
-  aDatabaseFilename.AppendInt(aUseESR10Hashing ? HashString_ESR10(aName)
-                                               : HashString(aName));
+  aDatabaseFilename.AppendInt(HashString(aName));
 
   nsCString escapedName;
   if (!NS_Escape(NS_ConvertUTF16toUTF8(aName), escapedName, url_XPAlphas)) {
@@ -107,6 +96,11 @@ GetDatabaseFilename(const nsAString& aName,
 nsresult
 CreateFileTables(mozIStorageConnection* aDBConn)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "CreateFileTables");
+
   // Table `file`
   nsresult rv = aDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TABLE file ("
@@ -164,9 +158,11 @@ CreateFileTables(mozIStorageConnection* aDBConn)
 nsresult
 CreateTables(mozIStorageConnection* aDBConn)
 {
-  NS_PRECONDITION(!NS_IsMainThread(),
-                  "Creating tables on the main thread!");
-  NS_PRECONDITION(aDBConn, "Passing a null database connection!");
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+  NS_ASSERTION(aDBConn, "Passing a null database connection!");
+
+  PROFILER_LABEL("IndexedDB", "CreateTables");
 
   // Table `database`
   nsresult rv = aDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -279,6 +275,11 @@ CreateTables(mozIStorageConnection* aDBConn)
 nsresult
 UpgradeSchemaFrom4To5(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom4To5");
+
   nsresult rv;
 
   // All we changed is the type of the version column, so lets try to
@@ -306,7 +307,7 @@ UpgradeSchemaFrom4To5(mozIStorageConnection* aConnection)
     rv = stmt->GetString(1, version);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    intVersion = version.ToInteger(&rv, 10);
+    intVersion = version.ToInteger(&rv);
     if (NS_FAILED(rv)) {
       intVersion = 0;
     }
@@ -363,6 +364,11 @@ UpgradeSchemaFrom4To5(mozIStorageConnection* aConnection)
 nsresult
 UpgradeSchemaFrom5To6(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom5To6");
+
   // First, drop all the indexes we're no longer going to use.
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "DROP INDEX key_index;"
@@ -716,6 +722,11 @@ UpgradeSchemaFrom5To6(mozIStorageConnection* aConnection)
 nsresult
 UpgradeSchemaFrom6To7(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom6To7");
+
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
       "id, "
@@ -770,6 +781,11 @@ UpgradeSchemaFrom6To7(mozIStorageConnection* aConnection)
 nsresult
 UpgradeSchemaFrom7To8(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom7To8");
+
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
       "id, "
@@ -840,6 +856,8 @@ public:
   OnFunctionCall(mozIStorageValueArray* aArguments,
                  nsIVariant** aResult)
   {
+    PROFILER_LABEL("IndexedDB", "CompressDataBlobsFunction::OnFunctionCall");
+
     uint32_t argc;
     nsresult rv = aArguments->GetNumEntries(&argc);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -887,6 +905,11 @@ NS_IMPL_ISUPPORTS1(CompressDataBlobsFunction, mozIStorageFunction)
 nsresult
 UpgradeSchemaFrom8To9_0(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom8To9_0");
+
   // We no longer use the dataVersion column.
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "UPDATE database SET dataVersion = 0;"
@@ -923,6 +946,11 @@ UpgradeSchemaFrom8To9_0(mozIStorageConnection* aConnection)
 nsresult
 UpgradeSchemaFrom9_0To10_0(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom9_0To10_0");
+
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "ALTER TABLE object_data ADD COLUMN file_ids TEXT;"
   ));
@@ -945,6 +973,11 @@ UpgradeSchemaFrom9_0To10_0(mozIStorageConnection* aConnection)
 nsresult
 UpgradeSchemaFrom10_0To11_0(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom10_0To11_0");
+
   nsresult rv = aConnection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "CREATE TEMPORARY TABLE temp_upgrade ("
       "id, "
@@ -1082,6 +1115,8 @@ public:
   OnFunctionCall(mozIStorageValueArray* aArguments,
                  nsIVariant** aResult)
   {
+    PROFILER_LABEL("IndexedDB", "EncodeKeysFunction::OnFunctionCall");
+
     uint32_t argc;
     nsresult rv = aArguments->GetNumEntries(&argc);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1128,6 +1163,11 @@ NS_IMPL_ISUPPORTS1(EncodeKeysFunction, mozIStorageFunction)
 nsresult
 UpgradeSchemaFrom11_0To12_0(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom11_0To12_0");
+
   NS_NAMED_LITERAL_CSTRING(encoderName, "encode");
 
   nsCOMPtr<mozIStorageFunction> encoder = new EncodeKeysFunction();
@@ -1336,10 +1376,54 @@ UpgradeSchemaFrom11_0To12_0(mozIStorageConnection* aConnection)
   return NS_OK;
 }
 
+nsresult
+UpgradeSchemaFrom12_0To13_0(mozIStorageConnection* aConnection,
+                            bool* aVacuumNeeded)
+{
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "UpgradeSchemaFrom12_0To13_0");
+
+  nsresult rv;
+
+#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+  int32_t defaultPageSize;
+  rv = aConnection->GetDefaultPageSize(&defaultPageSize);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Enable auto_vacuum mode and update the page size to the platform default.
+  nsAutoCString upgradeQuery("PRAGMA auto_vacuum = FULL; PRAGMA page_size = ");
+  upgradeQuery.AppendInt(defaultPageSize);
+
+  rv = aConnection->ExecuteSimpleSQL(upgradeQuery);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  *aVacuumNeeded = true;
+#endif
+
+  rv = aConnection->SetSchemaVersion(MakeSchemaVersion(13, 0));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+nsresult
+UpgradeSchemaFrom13_0To14_0(mozIStorageConnection* aConnection)
+{
+  // The only change between 13 and 14 was a different structured
+  // clone format, but it's backwards-compatible.
+  nsresult rv = aConnection->SetSchemaVersion(MakeSchemaVersion(14, 0));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
 class VersionChangeEventsRunnable;
 
 class SetVersionHelper : public AsyncConnectionHelper,
-                         public IDBTransactionListener
+                         public IDBTransactionListener,
+                         public AcquireListener
 {
   friend class VersionChangeEventsRunnable;
 
@@ -1360,7 +1444,10 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
+
+  virtual nsresult
+  OnExclusiveAccessAcquired() MOZ_OVERRIDE;
 
 protected:
   virtual nsresult Init() MOZ_OVERRIDE;
@@ -1374,7 +1461,8 @@ protected:
   { }
 
   // Need an upgradeneeded event here.
-  virtual already_AddRefed<nsDOMEvent> CreateSuccessEvent() MOZ_OVERRIDE;
+  virtual already_AddRefed<nsIDOMEvent> CreateSuccessEvent(
+    mozilla::dom::EventTarget* aOwner) MOZ_OVERRIDE;
 
   virtual nsresult NotifyTransactionPreComplete(IDBTransaction* aTransaction)
                                                 MOZ_OVERRIDE;
@@ -1382,7 +1470,7 @@ protected:
                                                  MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE
   {
     return Success_NotSent;
   }
@@ -1408,7 +1496,8 @@ private:
   uint64_t mCurrentVersion;
 };
 
-class DeleteDatabaseHelper : public AsyncConnectionHelper
+class DeleteDatabaseHelper : public AsyncConnectionHelper,
+                             public AcquireListener
 {
   friend class VersionChangeEventsRunnable;
 public:
@@ -1423,8 +1512,10 @@ public:
     mASCIIOrigin(aASCIIOrigin)
   { }
 
+  NS_DECL_ISUPPORTS_INHERITED
+
   nsresult GetSuccessResult(JSContext* aCx,
-                            jsval* aVal);
+                            JS::MutableHandle<JS::Value> aVal);
 
   void ReleaseMainThreadObjects()
   {
@@ -1433,6 +1524,9 @@ public:
 
     AsyncConnectionHelper::ReleaseMainThreadObjects();
   }
+
+  virtual nsresult
+  OnExclusiveAccessAcquired() MOZ_OVERRIDE;
 
 protected:
   nsresult DoDatabaseWork(mozIStorageConnection* aConnection);
@@ -1456,7 +1550,7 @@ protected:
   }
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE
   {
     return Success_NotSent;
   }
@@ -1485,11 +1579,11 @@ class VersionChangeEventsRunnable : public nsRunnable
 {
 public:
   VersionChangeEventsRunnable(
-                            IDBDatabase* aRequestingDatabase,
-                            IDBOpenDBRequest* aRequest,
-                            nsTArray<nsRefPtr<IDBDatabase> >& aWaitingDatabases,
-                            int64_t aOldVersion,
-                            int64_t aNewVersion)
+                      IDBDatabase* aRequestingDatabase,
+                      IDBOpenDBRequest* aRequest,
+                      nsTArray<nsCOMPtr<nsIOfflineStorage> >& aWaitingDatabases,
+                      int64_t aOldVersion,
+                      int64_t aNewVersion)
   : mRequestingDatabase(aRequestingDatabase),
     mRequest(aRequest),
     mOldVersion(aOldVersion),
@@ -1499,20 +1593,22 @@ public:
     NS_ASSERTION(aRequestingDatabase, "Null pointer!");
     NS_ASSERTION(aRequest, "Null pointer!");
 
-    if (!mWaitingDatabases.SwapElements(aWaitingDatabases)) {
-      NS_ERROR("This should never fail!");
-    }
+    mWaitingDatabases.SwapElements(aWaitingDatabases);
   }
 
   NS_IMETHOD Run()
   {
     NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
+    PROFILER_MAIN_THREAD_LABEL("IndexedDB", "VersionChangeEventsRunnable::Run");
+
     // Fire version change events at all of the databases that are not already
     // closed. Also kick bfcached documents out of bfcache.
     uint32_t count = mWaitingDatabases.Length();
     for (uint32_t index = 0; index < count; index++) {
-      nsRefPtr<IDBDatabase>& database = mWaitingDatabases[index];
+      IDBDatabase* database =
+        IDBDatabase::FromStorage(mWaitingDatabases[index]);
+      NS_ASSERTION(database, "This shouldn't be null!");
 
       if (database->IsClosed()) {
         continue;
@@ -1528,9 +1624,25 @@ public:
         continue;
       }
 
+      // Next check if it's in the process of being bfcached.
+      nsPIDOMWindow* owner = database->GetOwner();
+      if (owner && owner->IsFrozen()) {
+        // We can't kick the document out of the bfcache because it's not yet
+        // fully in the bfcache.  Instead we'll abort everything for the window
+        // and mark it as not-bfcacheable.
+        QuotaManager* quotaManager = QuotaManager::Get();
+        NS_ASSERTION(quotaManager, "Huh?");
+        quotaManager->AbortCloseStoragesForWindow(owner);
+
+        NS_ASSERTION(database->IsClosed(),
+                   "AbortCloseStoragesForWindow should have closed database");
+        ownerDoc->DisallowBFCaching();
+        continue;
+      }
+
       // Otherwise fire a versionchange event.
       nsRefPtr<nsDOMEvent> event = 
-        IDBVersionChangeEvent::Create(mOldVersion, mNewVersion);
+        IDBVersionChangeEvent::Create(database, mOldVersion, mNewVersion);
       NS_ENSURE_TRUE(event, NS_ERROR_FAILURE);
 
       bool dummy;
@@ -1542,7 +1654,8 @@ public:
     for (uint32_t index = 0; index < count; index++) {
       if (!mWaitingDatabases[index]->IsClosed()) {
         nsRefPtr<nsDOMEvent> event =
-          IDBVersionChangeEvent::CreateBlocked(mOldVersion, mNewVersion);
+          IDBVersionChangeEvent::CreateBlocked(mRequest,
+                                               mOldVersion, mNewVersion);
         NS_ENSURE_TRUE(event, NS_ERROR_FAILURE);
 
         bool dummy;
@@ -1557,24 +1670,24 @@ public:
 
   template <class T>
   static
-  void QueueVersionChange(nsTArray<nsRefPtr<IDBDatabase> >& aDatabases,
+  void QueueVersionChange(nsTArray<nsCOMPtr<nsIOfflineStorage> >& aDatabases,
                           void* aClosure);
 private:
   nsRefPtr<IDBDatabase> mRequestingDatabase;
   nsRefPtr<IDBOpenDBRequest> mRequest;
-  nsTArray<nsRefPtr<IDBDatabase> > mWaitingDatabases;
+  nsTArray<nsCOMPtr<nsIOfflineStorage> > mWaitingDatabases;
   int64_t mOldVersion;
   int64_t mNewVersion;
 };
 
 } // anonymous namespace
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(OpenDatabaseHelper, nsIRunnable);
+NS_IMPL_THREADSAFE_ISUPPORTS1(OpenDatabaseHelper, nsIRunnable)
 
 nsresult
 OpenDatabaseHelper::Init()
 {
-  mDatabaseId = IndexedDatabaseManager::GetDatabaseId(mASCIIOrigin, mName);
+  mDatabaseId = QuotaManager::GetStorageId(mASCIIOrigin, mName);
   NS_ENSURE_TRUE(mDatabaseId, NS_ERROR_FAILURE);
 
   return NS_OK;
@@ -1604,19 +1717,14 @@ OpenDatabaseHelper::RunImmediately()
 nsresult
 OpenDatabaseHelper::DoDatabaseWork()
 {
-#ifdef DEBUG
-  {
-    bool correctThread;
-    NS_ASSERTION(NS_SUCCEEDED(IndexedDatabaseManager::Get()->IOThread()->
-                              IsOnCurrentThread(&correctThread)) &&
-                 correctThread,
-                 "Running on the wrong thread!");
-  }
-#endif
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "OpenDatabaseHelper::DoDatabaseWork");
 
   mState = eFiringEvents; // In case we fail somewhere along the line.
 
-  if (IndexedDatabaseManager::IsShuttingDown()) {
+  if (QuotaManager::IsShuttingDown()) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
@@ -1629,16 +1737,33 @@ OpenDatabaseHelper::DoDatabaseWork()
 
   nsCOMPtr<nsIFile> dbDirectory;
 
-  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
-  NS_ASSERTION(mgr, "This should never be null!");
+  QuotaManager* quotaManager = QuotaManager::Get();
+  NS_ASSERTION(quotaManager, "This should never be null!");
 
-  nsresult rv = mgr->EnsureOriginIsInitialized(mASCIIOrigin,
-                                               mPrivilege,
-                                               getter_AddRefs(dbDirectory));
+  nsresult rv =
+    quotaManager->EnsureOriginIsInitialized(mASCIIOrigin,
+                                            mTrackingQuota,
+                                            getter_AddRefs(dbDirectory));
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  rv = CheckExistingDatabase(dbDirectory, mName);
+  rv = dbDirectory->Append(NS_LITERAL_STRING(IDB_DIRECTORY_NAME));
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  bool exists;
+  rv = dbDirectory->Exists(&exists);
+  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  if (!exists) {
+    rv = dbDirectory->Create(nsIFile::DIRECTORY_TYPE, 0755);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  }
+#ifdef DEBUG
+  else {
+    bool isDirectory;
+    NS_ASSERTION(NS_SUCCEEDED(dbDirectory->IsDirectory(&isDirectory)) &&
+                isDirectory, "Should have caught this earlier!");
+  }
+#endif
 
   nsAutoString filename;
   rv = GetDatabaseFilename(mName, filename);
@@ -1654,15 +1779,15 @@ OpenDatabaseHelper::DoDatabaseWork()
   rv = dbFile->GetPath(mDatabaseFilePath);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  nsCOMPtr<nsIFile> fileManagerDirectory;
-  rv = dbDirectory->Clone(getter_AddRefs(fileManagerDirectory));
+  nsCOMPtr<nsIFile> fmDirectory;
+  rv = dbDirectory->Clone(getter_AddRefs(fmDirectory));
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  rv = fileManagerDirectory->Append(filename);
+  rv = fmDirectory->Append(filename);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsCOMPtr<mozIStorageConnection> connection;
-  rv = CreateDatabaseConnection(mName, dbFile, fileManagerDirectory,
+  rv = CreateDatabaseConnection(dbFile, fmDirectory, mName, mASCIIOrigin,
                                 getter_AddRefs(connection));
   if (NS_FAILED(rv) &&
       NS_ERROR_GET_MODULE(rv) != NS_ERROR_MODULE_DOM_INDEXEDDB) {
@@ -1683,9 +1808,9 @@ OpenDatabaseHelper::DoDatabaseWork()
     nsRefPtr<ObjectStoreInfo>& objectStoreInfo = mObjectStores[i];
     for (uint32_t j = 0; j < objectStoreInfo->indexes.Length(); j++) {
       IndexInfo& indexInfo = objectStoreInfo->indexes[j];
-      mLastIndexId = NS_MAX(indexInfo.id, mLastIndexId);
+      mLastIndexId = std::max(indexInfo.id, mLastIndexId);
     }
-    mLastObjectStoreId = NS_MAX(objectStoreInfo->id, mLastObjectStoreId);
+    mLastObjectStoreId = std::max(objectStoreInfo->id, mLastObjectStoreId);
   }
 
   // See if we need to do a VERSION_CHANGE transaction
@@ -1711,14 +1836,17 @@ OpenDatabaseHelper::DoDatabaseWork()
     mState = eSetVersionPending;
   }
 
+  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
+  NS_ASSERTION(mgr, "This should never be null!");
+
   nsRefPtr<FileManager> fileManager = mgr->GetFileManager(mASCIIOrigin, mName);
   if (!fileManager) {
-    fileManager = new FileManager(mASCIIOrigin, mName);
+    fileManager = new FileManager(mASCIIOrigin, mPrivilege, mName);
 
-    rv = fileManager->Init(fileManagerDirectory, connection);
+    rv = fileManager->Init(fmDirectory, connection);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-    mgr->AddFileManager(mASCIIOrigin, mName, fileManager);
+    mgr->AddFileManager(fileManager);
   }
 
   mFileManager = fileManager.forget();
@@ -1728,101 +1856,41 @@ OpenDatabaseHelper::DoDatabaseWork()
 
 // static
 nsresult
-OpenDatabaseHelper::CheckExistingDatabase(nsIFile* aDirectory,
-                                          const nsAString& aName)
+OpenDatabaseHelper::CreateDatabaseConnection(
+                                        nsIFile* aDBFile,
+                                        nsIFile* aFMDirectory,
+                                        const nsAString& aName,
+                                        const nsACString& aOrigin,
+                                        mozIStorageConnection** aConnection)
 {
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  nsString oldFilename;
-  nsresult rv = GetDatabaseFilename(aName, oldFilename, true);
-  NS_ENSURE_SUCCESS(rv, rv);
+  PROFILER_LABEL("IndexedDB", "OpenDatabaseHelper::CreateDatabaseConnection");
 
-  nsString newFilename;
-  rv = GetDatabaseFilename(aName, newFilename, false);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIFile> oldDbFile;
-  rv = aDirectory->Clone(getter_AddRefs(oldDbFile));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = oldDbFile->Append(oldFilename + NS_LITERAL_STRING(".sqlite"));
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  nsresult rv;
   bool exists;
-  rv = oldDbFile->Exists(&exists);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (exists) {
-    nsCOMPtr<nsIFile> newDbFile;
-    rv = aDirectory->Clone(getter_AddRefs(newDbFile));
-    NS_ENSURE_SUCCESS(rv, rv);
 
-    nsString newDbFilename = newFilename + NS_LITERAL_STRING(".sqlite");
-
-    rv = newDbFile->Append(newDbFilename);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = newDbFile->Exists(&exists);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (exists) {
-      NS_WARNING("The database has been already created with the new hashing "
-                 "algorithm!");
-      return NS_OK;
-    }
-
-    rv = oldDbFile->MoveTo(nullptr, newDbFilename);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  nsCOMPtr<nsIFile> oldFmDirectory;
-  rv = aDirectory->Clone(getter_AddRefs(oldFmDirectory));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = oldFmDirectory->Append(oldFilename);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = oldFmDirectory->Exists(&exists);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (exists) {
-    nsCOMPtr<nsIFile> newFmDirectory;
-    rv = aDirectory->Clone(getter_AddRefs(newFmDirectory));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = newFmDirectory->Append(newFilename);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = newFmDirectory->Exists(&exists);
+  if (IndexedDatabaseManager::InLowDiskSpaceMode()) {
+    rv = aDBFile->Exists(&exists);
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (!exists) {
-      rv = oldFmDirectory->MoveTo(nullptr, newFilename);
-      NS_ENSURE_SUCCESS(rv, rv);
+      NS_WARNING("Refusing to create database because disk space is low!");
+      return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
     }
   }
 
-  return NS_OK;
-}
+  nsCOMPtr<nsIFileURL> dbFileUrl =
+    IDBFactory::GetDatabaseFileURL(aDBFile, aOrigin);
+  NS_ENSURE_TRUE(dbFileUrl, NS_ERROR_FAILURE);
 
-// static
-nsresult
-OpenDatabaseHelper::CreateDatabaseConnection(
-                                        const nsAString& aName,
-                                        nsIFile* aDBFile,
-                                        nsIFile* aFileManagerDirectory,
-                                        mozIStorageConnection** aConnection)
-{
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
-  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
-
-  NS_NAMED_LITERAL_CSTRING(quotaVFSName, "quota");
-
-  nsCOMPtr<mozIStorageServiceQuotaManagement> ss =
+  nsCOMPtr<mozIStorageService> ss =
     do_GetService(MOZ_STORAGE_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(ss, NS_ERROR_FAILURE);
 
   nsCOMPtr<mozIStorageConnection> connection;
-  nsresult rv = ss->OpenDatabaseWithVFS(aDBFile, quotaVFSName,
-                                        getter_AddRefs(connection));
+  rv = ss->OpenDatabaseWithFileURL(dbFileUrl, getter_AddRefs(connection));
   if (rv == NS_ERROR_FILE_CORRUPTED) {
     // If we're just opening the database during origin initialization, then
     // we don't want to erase any files. The failure here will fail origin
@@ -1835,23 +1903,24 @@ OpenDatabaseHelper::CreateDatabaseConnection(
     rv = aDBFile->Remove(false);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    bool exists;
-    rv = aFileManagerDirectory->Exists(&exists);
+    rv = aFMDirectory->Exists(&exists);
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (exists) {
       bool isDirectory;
-      rv = aFileManagerDirectory->IsDirectory(&isDirectory);
+      rv = aFMDirectory->IsDirectory(&isDirectory);
       NS_ENSURE_SUCCESS(rv, rv);
       NS_ENSURE_TRUE(isDirectory, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-      rv = aFileManagerDirectory->Remove(true);
+      rv = aFMDirectory->Remove(true);
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
-    rv = ss->OpenDatabaseWithVFS(aDBFile, quotaVFSName,
-                                 getter_AddRefs(connection));
+    rv = ss->OpenDatabaseWithFileURL(dbFileUrl, getter_AddRefs(connection));
   }
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = IDBFactory::SetDefaultPragmas(connection);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = connection->EnableModule(NS_LITERAL_CSTRING("filesystem"));
@@ -1876,6 +1945,17 @@ OpenDatabaseHelper::CreateDatabaseConnection(
   bool vacuumNeeded = false;
 
   if (schemaVersion != kSQLiteSchemaVersion) {
+#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+    if (!schemaVersion) {
+      // Have to do this before opening a transaction.
+      rv = connection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+        // Turn on auto_vacuum mode to reclaim disk space on mobile devices.
+        "PRAGMA auto_vacuum = FULL; "
+      ));
+      NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    }
+#endif
+
     mozStorageTransaction transaction(connection, false,
                                   mozIStorageConnection::TRANSACTION_IMMEDIATE);
 
@@ -1903,7 +1983,7 @@ OpenDatabaseHelper::CreateDatabaseConnection(
     }
     else  {
       // This logic needs to change next time we change the schema!
-      MOZ_STATIC_ASSERT(kSQLiteSchemaVersion == int32_t((12 << 4) + 0),
+      MOZ_STATIC_ASSERT(kSQLiteSchemaVersion == int32_t((14 << 4) + 0),
                         "Need upgrade code from schema version increase.");
 
       while (schemaVersion != kSQLiteSchemaVersion) {
@@ -1932,6 +2012,12 @@ OpenDatabaseHelper::CreateDatabaseConnection(
         else if (schemaVersion == MakeSchemaVersion(11, 0)) {
           rv = UpgradeSchemaFrom11_0To12_0(connection);
         }
+        else if (schemaVersion == MakeSchemaVersion(12, 0)) {
+          rv = UpgradeSchemaFrom12_0To13_0(connection, &vacuumNeeded);
+        }
+        else if (schemaVersion == MakeSchemaVersion(13, 0)) {
+          rv = UpgradeSchemaFrom13_0To14_0(connection);
+        }
         else {
           NS_WARNING("Unable to open IndexedDB database, no upgrade path is "
                      "available!");
@@ -1946,7 +2032,7 @@ OpenDatabaseHelper::CreateDatabaseConnection(
       NS_ASSERTION(schemaVersion == kSQLiteSchemaVersion, "Huh?!");
     }
 
-    rv = transaction.Commit();    
+    rv = transaction.Commit();
     if (rv == NS_ERROR_FILE_NO_DEVICE_SPACE) {
       // mozstorage translates SQLITE_FULL to NS_ERROR_FILE_NO_DEVICE_SPACE,
       // which we know better as NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR.
@@ -1956,17 +2042,9 @@ OpenDatabaseHelper::CreateDatabaseConnection(
   }
 
   if (vacuumNeeded) {
-    rv = connection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-      "VACUUM;"
-    ));
+    rv = connection->ExecuteSimpleSQL(NS_LITERAL_CSTRING("VACUUM;"));
     NS_ENSURE_SUCCESS(rv, rv);
   }
-
-  // Turn on foreign key constraints.
-  rv = connection->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "PRAGMA foreign_keys = ON;"
-  ));
-  NS_ENSURE_SUCCESS(rv, rv);
 
   connection.forget(aConnection);
   return NS_OK;
@@ -1993,12 +2071,13 @@ OpenDatabaseHelper::StartSetVersion()
     new SetVersionHelper(transaction, mOpenDBRequest, this, mRequestedVersion,
                          mCurrentVersion);
 
-  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
-  NS_ASSERTION(mgr, "This should never be null!");
+  QuotaManager* quotaManager = QuotaManager::Get();
+  NS_ASSERTION(quotaManager, "This should never be null!");
 
-  rv = mgr->AcquireExclusiveAccess(mDatabase, mDatabase->Origin(), helper,
+  rv = quotaManager->AcquireExclusiveAccess(
+             mDatabase, mDatabase->Origin(), helper,
              &VersionChangeEventsRunnable::QueueVersionChange<SetVersionHelper>,
-                                   helper);
+             helper);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   // The SetVersionHelper is responsible for dispatching us back to the
@@ -2022,12 +2101,13 @@ OpenDatabaseHelper::StartDelete()
     new DeleteDatabaseHelper(mOpenDBRequest, this, mCurrentVersion, mName,
                              mASCIIOrigin);
 
-  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
-  NS_ASSERTION(mgr, "This should never be null!");
+  QuotaManager* quotaManager = QuotaManager::Get();
+  NS_ASSERTION(quotaManager, "This should never be null!");
 
-  rv = mgr->AcquireExclusiveAccess(mDatabase, mDatabase->Origin(), helper,
+  rv = quotaManager->AcquireExclusiveAccess(
+         mDatabase, mDatabase->Origin(), helper,
          &VersionChangeEventsRunnable::QueueVersionChange<DeleteDatabaseHelper>,
-                                   helper);
+         helper);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   // The DeleteDatabaseHelper is responsible for dispatching us back to the
@@ -2042,6 +2122,8 @@ OpenDatabaseHelper::Run()
   NS_ASSERTION(mState != eCreated, "Dispatch was not called?!?");
 
   if (NS_IsMainThread()) {
+    PROFILER_MAIN_THREAD_LABEL("IndexedDB", "OpenDatabaseHelper::Run");
+
     // If we need to queue up a SetVersionHelper, do that here.
     if (mState == eSetVersionPending) {
       nsresult rv = StartSetVersion();
@@ -2082,11 +2164,6 @@ OpenDatabaseHelper::Run()
 
         DatabaseInfo::Remove(mDatabaseId);
 
-        IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
-        NS_ASSERTION(mgr, "This should never fail!");
-
-        mgr->InvalidateFileManager(mASCIIOrigin, mName);
-
         mState = eFiringEvents;
         break;
       }
@@ -2110,28 +2187,44 @@ OpenDatabaseHelper::Run()
 
     NS_ASSERTION(mState == eFiringEvents, "Why are we here?");
 
+    IDB_PROFILER_MARK("IndexedDB Request %llu: Running main thread "
+                      "response (rv = %lu)",
+                      "IDBRequest[%llu] MT Done",
+                      mRequest->GetSerialNumber(), mResultCode);
+
     if (NS_FAILED(mResultCode)) {
       DispatchErrorEvent();
     } else {
       DispatchSuccessEvent();
     }
 
-    IndexedDatabaseManager* manager = IndexedDatabaseManager::Get();
-    NS_ASSERTION(manager, "This should never be null!");
+    QuotaManager* quotaManager = QuotaManager::Get();
+    NS_ASSERTION(quotaManager, "This should never be null!");
 
-    manager->AllowNextSynchronizedOp(mASCIIOrigin, mDatabaseId);
+    quotaManager->AllowNextSynchronizedOp(
+                                OriginOrPatternString::FromOrigin(mASCIIOrigin),
+                                mDatabaseId);
 
     ReleaseMainThreadObjects();
 
     return NS_OK;
   }
 
+  PROFILER_LABEL("IndexedDB", "OpenDatabaseHelper::Run");
+
+  // We're on the DB thread.
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  // If we're on the DB thread, do that
+  IDB_PROFILER_MARK("IndexedDB Request %llu: Beginning database work",
+                    "IDBRequest[%llu] DT Start", mRequest->GetSerialNumber());
+
   NS_ASSERTION(mState == eDBWork, "Why are we here?");
   mResultCode = DoDatabaseWork();
   NS_ASSERTION(mState != eDBWork, "We should be doing something else now.");
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: Finished database work (rv = %lu)",
+                    "IDBRequest[%llu] DT Done", mRequest->GetSerialNumber(),
+                    mResultCode);
 
   return NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL);
 }
@@ -2139,6 +2232,11 @@ OpenDatabaseHelper::Run()
 nsresult
 OpenDatabaseHelper::EnsureSuccessResult()
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "OpenDatabaseHelper::EnsureSuccessResult");
+
   nsRefPtr<DatabaseInfo> dbInfo;
   if (DatabaseInfo::Get(mDatabaseId, getter_AddRefs(dbInfo))) {
 
@@ -2210,8 +2308,9 @@ OpenDatabaseHelper::EnsureSuccessResult()
   dbInfo->nextIndexId = mLastIndexId + 1;
 
   nsRefPtr<IDBDatabase> database =
-    IDBDatabase::Create(mOpenDBRequest, dbInfo.forget(), mASCIIOrigin,
-                        mFileManager, mContentParent);
+    IDBDatabase::Create(mOpenDBRequest, mOpenDBRequest->Factory(),
+                        dbInfo.forget(), mASCIIOrigin, mFileManager,
+                        mContentParent);
   if (!database) {
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
@@ -2224,7 +2323,7 @@ OpenDatabaseHelper::EnsureSuccessResult()
 
 nsresult
 OpenDatabaseHelper::GetSuccessResult(JSContext* aCx,
-                                     jsval* aVal)
+                                     JS::MutableHandle<JS::Value> aVal)
 {
   // Be careful not to load the database twice.
   if (!mDatabase) {
@@ -2232,7 +2331,7 @@ OpenDatabaseHelper::GetSuccessResult(JSContext* aCx,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(nsIDOMEventTarget*, mDatabase),
+  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mDatabase),
                     aVal);
 }
 
@@ -2275,8 +2374,13 @@ OpenDatabaseHelper::BlockDatabase()
 void
 OpenDatabaseHelper::DispatchSuccessEvent()
 {
-  nsRefPtr<nsDOMEvent> event =
-    CreateGenericEvent(NS_LITERAL_STRING(SUCCESS_EVT_STR),
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                              "OpenDatabaseHelper::DispatchSuccessEvent");
+
+  nsRefPtr<nsIDOMEvent> event =
+    CreateGenericEvent(mOpenDBRequest, NS_LITERAL_STRING(SUCCESS_EVT_STR),
                        eDoesNotBubble, eNotCancelable);
   if (!event) {
     NS_ERROR("Failed to create event!");
@@ -2290,18 +2394,23 @@ OpenDatabaseHelper::DispatchSuccessEvent()
 void
 OpenDatabaseHelper::DispatchErrorEvent()
 {
-  nsRefPtr<nsDOMEvent> event =
-    CreateGenericEvent(NS_LITERAL_STRING(ERROR_EVT_STR),
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                              "OpenDatabaseHelper::DispatchErrorEvent");
+
+  nsRefPtr<nsIDOMEvent> event =
+    CreateGenericEvent(mOpenDBRequest, NS_LITERAL_STRING(ERROR_EVT_STR),
                        eDoesBubble, eCancelable);
   if (!event) {
     NS_ERROR("Failed to create event!");
     return;
   }
 
-  nsCOMPtr<nsIDOMDOMError> error;
-  DebugOnly<nsresult> rv =
-    mOpenDBRequest->GetError(getter_AddRefs(error));
-  NS_ASSERTION(NS_SUCCEEDED(rv), "This shouldn't be failing at this point!");
+  ErrorResult rv;
+  nsRefPtr<DOMError> error = mOpenDBRequest->GetError(rv);
+
+  NS_ASSERTION(!rv.Failed(), "This shouldn't be failing at this point!");
   if (!error) {
     mOpenDBRequest->SetError(mResultCode);
   }
@@ -2322,7 +2431,7 @@ OpenDatabaseHelper::ReleaseMainThreadObjects()
   HelperBase::ReleaseMainThreadObjects();
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(SetVersionHelper, AsyncConnectionHelper);
+NS_IMPL_ISUPPORTS_INHERITED0(SetVersionHelper, AsyncConnectionHelper)
 
 nsresult
 SetVersionHelper::Init()
@@ -2336,7 +2445,11 @@ SetVersionHelper::Init()
 nsresult
 SetVersionHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(aConnection, "Passing a null connection!");
+
+  PROFILER_LABEL("IndexedDB", "SetVersionHelper::DoDatabaseWork");
 
   nsCOMPtr<mozIStorageStatement> stmt;
   nsresult rv = aConnection->CreateStatement(NS_LITERAL_CSTRING(
@@ -2358,7 +2471,7 @@ SetVersionHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
 nsresult
 SetVersionHelper::GetSuccessResult(JSContext* aCx,
-                                   jsval* aVal)
+                                   JS::MutableHandle<JS::Value> aVal)
 {
   DatabaseInfo* info = mDatabase->Info();
   info->version = mRequestedVersion;
@@ -2367,16 +2480,25 @@ SetVersionHelper::GetSuccessResult(JSContext* aCx,
 
   mOpenRequest->SetTransaction(mTransaction);
 
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(nsIDOMEventTarget*, mDatabase),
+  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mDatabase),
                     aVal);
+}
+
+nsresult
+SetVersionHelper::OnExclusiveAccessAcquired()
+{
+  nsresult rv = DispatchToTransactionPool();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
 }
 
 // static
 template <class T>
 void
 VersionChangeEventsRunnable::QueueVersionChange(
-                                  nsTArray<nsRefPtr<IDBDatabase> >& aDatabases,
-                                  void* aClosure)
+                             nsTArray<nsCOMPtr<nsIOfflineStorage> >& aDatabases,
+                             void* aClosure)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(!aDatabases.IsEmpty(), "Why are we here?");
@@ -2393,12 +2515,13 @@ VersionChangeEventsRunnable::QueueVersionChange(
   NS_DispatchToCurrentThread(eventsRunnable);
 }
 
-already_AddRefed<nsDOMEvent>
-SetVersionHelper::CreateSuccessEvent()
+already_AddRefed<nsIDOMEvent>
+SetVersionHelper::CreateSuccessEvent(mozilla::dom::EventTarget* aOwner)
 {
   NS_ASSERTION(mCurrentVersion < mRequestedVersion, "Huh?");
 
-  return IDBVersionChangeEvent::CreateUpgradeNeeded(mCurrentVersion,
+  return IDBVersionChangeEvent::CreateUpgradeNeeded(aOwner,
+                                                    mCurrentVersion,
                                                     mRequestedVersion);
 }
 
@@ -2438,22 +2561,30 @@ SetVersionHelper::NotifyTransactionPostComplete(IDBTransaction* aTransaction)
   return rv;
 }
 
+NS_IMPL_ISUPPORTS_INHERITED0(DeleteDatabaseHelper, AsyncConnectionHelper);
+
 nsresult
 DeleteDatabaseHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  AssertIsOnIOThread();
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(!aConnection, "How did we get a connection here?");
 
-  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
-  NS_ASSERTION(mgr, "This should never fail!");
+  PROFILER_LABEL("IndexedDB", "DeleteDatabaseHelper::DoDatabaseWork");
+
+  const StoragePrivilege& privilege = mOpenHelper->Privilege();
+
+  QuotaManager* quotaManager = QuotaManager::Get();
+  NS_ASSERTION(quotaManager, "This should never fail!");
 
   nsCOMPtr<nsIFile> directory;
-  nsresult rv = mgr->GetDirectoryForOrigin(mASCIIOrigin,
-                                           getter_AddRefs(directory));
+  nsresult rv = quotaManager->GetDirectoryForOrigin(mASCIIOrigin,
+                                                    getter_AddRefs(directory));
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   NS_ASSERTION(directory, "What?");
 
-  rv = OpenDatabaseHelper::CheckExistingDatabase(directory, mName);
+  rv = directory->Append(NS_LITERAL_STRING(IDB_DIRECTORY_NAME));
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsAutoString filename;
@@ -2471,67 +2602,97 @@ DeleteDatabaseHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   rv = dbFile->Exists(&exists);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  int rc;
-
   if (exists) {
-    nsString dbFilePath;
-    rv = dbFile->GetPath(dbFilePath);
-    NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    int64_t fileSize;
 
-    rc = sqlite3_quota_remove(NS_ConvertUTF16toUTF8(dbFilePath).get());
-    if (rc != SQLITE_OK) {
-      NS_WARNING("Failed to delete db file!");
-      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    if (privilege != Chrome) {
+      rv = dbFile->GetFileSize(&fileSize);
+      NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     }
 
-    // sqlite3_quota_remove won't actually remove anything if we're not tracking
-    // the quota here. Manually remove the file if it exists.
-    rv = dbFile->Exists(&exists);
+    rv = dbFile->Remove(false);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-    if (exists) {
-      rv = dbFile->Remove(false);
-      NS_ENSURE_SUCCESS(rv, rv);
+    if (privilege != Chrome) {
+      QuotaManager* quotaManager = QuotaManager::Get();
+      NS_ASSERTION(quotaManager, "Shouldn't be null!");
+
+      quotaManager->DecreaseUsageForOrigin(mASCIIOrigin, fileSize);
     }
   }
 
-  nsCOMPtr<nsIFile> fileManagerDirectory;
-  rv = directory->Clone(getter_AddRefs(fileManagerDirectory));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = fileManagerDirectory->Append(filename);
+  nsCOMPtr<nsIFile> dbJournalFile;
+  rv = directory->Clone(getter_AddRefs(dbJournalFile));
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  rv = fileManagerDirectory->Exists(&exists);
+  rv = dbJournalFile->Append(filename + NS_LITERAL_STRING(".sqlite-journal"));
+  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  rv = dbJournalFile->Exists(&exists);
+  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  if (exists) {
+    rv = dbJournalFile->Remove(false);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  }
+
+  nsCOMPtr<nsIFile> fmDirectory;
+  rv = directory->Clone(getter_AddRefs(fmDirectory));
+  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  rv = fmDirectory->Append(filename);
+  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  rv = fmDirectory->Exists(&exists);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   if (exists) {
     bool isDirectory;
-    rv = fileManagerDirectory->IsDirectory(&isDirectory);
+    rv = fmDirectory->IsDirectory(&isDirectory);
     NS_ENSURE_SUCCESS(rv, rv);
     NS_ENSURE_TRUE(isDirectory, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-    nsString fileManagerDirectoryPath;
-    rv = fileManagerDirectory->GetPath(fileManagerDirectoryPath);
-    NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    uint64_t usage = 0;
 
-    rc = sqlite3_quota_remove(
-      NS_ConvertUTF16toUTF8(fileManagerDirectoryPath).get());
-    if (rc != SQLITE_OK) {
-      NS_WARNING("Failed to delete file directory!");
-      return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+    if (privilege != Chrome) {
+      rv = FileManager::GetUsage(fmDirectory, &usage);
+      NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     }
 
-    rv = fileManagerDirectory->Remove(true);
-    NS_ENSURE_SUCCESS(rv, rv);
+    rv = fmDirectory->Remove(true);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+    if (privilege != Chrome) {
+      QuotaManager* quotaManager = QuotaManager::Get();
+      NS_ASSERTION(quotaManager, "Shouldn't be null!");
+
+      quotaManager->DecreaseUsageForOrigin(mASCIIOrigin, usage);
+    }
   }
+
+  IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get();
+  NS_ASSERTION(mgr, "This should never fail!");
+
+  mgr->InvalidateFileManager(mASCIIOrigin, mName);
 
   return NS_OK;
 }
 
 nsresult
-DeleteDatabaseHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
+DeleteDatabaseHelper::GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
 {
+  return NS_OK;
+}
+
+nsresult
+DeleteDatabaseHelper::OnExclusiveAccessAcquired()
+{
+  QuotaManager* quotaManager = QuotaManager::Get();
+  NS_ASSERTION(quotaManager, "We should definitely have a manager here");
+
+  nsresult rv = Dispatch(quotaManager->IOThread());
+  NS_ENSURE_SUCCESS(rv, rv);
+
   return NS_OK;
 }
 

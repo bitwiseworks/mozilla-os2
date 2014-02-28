@@ -10,10 +10,12 @@
 #include "nsHttpHeaderArray.h"
 #include "nsAHttpTransaction.h"
 #include "nsAHttpConnection.h"
+#include "EventTokenBucket.h"
 #include "nsCOMPtr.h"
 
 #include "nsIPipe.h"
 #include "nsIInputStream.h"
+#include "nsILoadGroup.h"
 #include "nsIOutputStream.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsISocketTransportService.h"
@@ -28,6 +30,7 @@ class nsHttpRequestHead;
 class nsHttpResponseHead;
 class nsHttpChunkedDecoder;
 class nsIHttpActivityObserver;
+class UpdateSecurityCallbacks;
 
 //-----------------------------------------------------------------------------
 // nsHttpTransaction represents a single HTTP transaction.  It is thread-safe,
@@ -35,6 +38,7 @@ class nsIHttpActivityObserver;
 //-----------------------------------------------------------------------------
 
 class nsHttpTransaction : public nsAHttpTransaction
+                        , public mozilla::net::ATokenBucketEvent
                         , public nsIInputStreamCallback
                         , public nsIOutputStreamCallback
 {
@@ -49,7 +53,7 @@ public:
 
     //
     // called to initialize the transaction
-    // 
+    //
     // @param caps
     //        the transaction capabilities (see nsHttp.h)
     // @param connInfo
@@ -69,7 +73,7 @@ public:
     //        wait on this input stream for data.  on first notification,
     //        headers should be available (check transaction status).
     //
-    nsresult Init(uint8_t                caps,
+    nsresult Init(uint32_t               caps,
                   nsHttpConnectionInfo  *connInfo,
                   nsHttpRequestHead     *reqHeaders,
                   nsIInputStream        *reqBody,
@@ -84,8 +88,9 @@ public:
     nsHttpResponseHead    *ResponseHead()   { return mHaveAllHeaders ? mResponseHead : nullptr; }
     nsISupports           *SecurityInfo()   { return mSecurityInfo; }
 
-    nsIInterfaceRequestor *Callbacks()      { return mCallbacks; } 
     nsIEventTarget        *ConsumerTarget() { return mConsumerTarget; }
+
+    void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);
 
     // Called to take ownership of the response headers; the transaction
     // will drop any reference to the response headers after this call.
@@ -105,6 +110,17 @@ public:
 
     void PrintDiagnostics(nsCString &log);
 
+    // Sets mPendingTime to the current time stamp or to a null time stamp (if now is false)
+    void SetPendingTime(bool now = true) { mPendingTime = now ? mozilla::TimeStamp::Now() : mozilla::TimeStamp(); }
+    const mozilla::TimeStamp GetPendingTime() { return mPendingTime; }
+    bool UsesPipelining() const { return mCaps & NS_HTTP_ALLOW_PIPELINING; }
+
+    // overload of nsAHttpTransaction::LoadGroupConnectionInfo()
+    nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() { return mLoadGroupCI.get(); }
+    void SetLoadGroupConnectionInfo(nsILoadGroupConnectionInfo *aLoadGroupCI) { mLoadGroupCI = aLoadGroupCI; }
+    void DispatchedAsBlocking();
+    void RemoveDispatchedAsBlocking();
+
 private:
     nsresult Restart();
     nsresult RestartInProgress();
@@ -117,6 +133,7 @@ private:
     nsresult HandleContent(char *, uint32_t count, uint32_t *contentRead, uint32_t *contentRemaining);
     nsresult ProcessData(char *, uint32_t, uint32_t *);
     void     DeleteSelfOnConsumerThread();
+    void     ReleaseBlockingTransaction();
 
     Classifier Classify();
     void       CancelPipeline(uint32_t reason);
@@ -129,12 +146,33 @@ private:
     bool TimingEnabled() const { return mCaps & NS_HTTP_TIMING_ENABLED; }
 
 private:
+    class UpdateSecurityCallbacks : public nsRunnable
+    {
+      public:
+        UpdateSecurityCallbacks(nsHttpTransaction* aTrans,
+                                nsIInterfaceRequestor* aCallbacks)
+        : mTrans(aTrans), mCallbacks(aCallbacks) {}
+
+        NS_IMETHOD Run()
+        {
+            if (mTrans->mConnection)
+                mTrans->mConnection->SetSecurityCallbacks(mCallbacks);
+            return NS_OK;
+        }
+      private:
+        nsRefPtr<nsHttpTransaction> mTrans;
+        nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
+    };
+
+    mozilla::Mutex mCallbacksLock;
+
     nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
     nsCOMPtr<nsITransportEventSink> mTransportSink;
     nsCOMPtr<nsIEventTarget>        mConsumerTarget;
     nsCOMPtr<nsISupports>           mSecurityInfo;
     nsCOMPtr<nsIAsyncInputStream>   mPipeIn;
     nsCOMPtr<nsIAsyncOutputStream>  mPipeOut;
+    nsCOMPtr<nsILoadGroupConnectionInfo> mLoadGroupCI;
 
     nsCOMPtr<nsISupports>             mChannel;
     nsCOMPtr<nsIHttpActivityObserver> mActivityDistributor;
@@ -172,7 +210,7 @@ private:
     int16_t                         mPriority;
 
     uint16_t                        mRestartCount;        // the number of times this transaction has been restarted
-    uint8_t                         mCaps;
+    uint32_t                        mCaps;
     enum Classifier                 mClassification;
     int32_t                         mPipelinePosition;
     int64_t                         mMaxPipelineObjectSize;
@@ -196,6 +234,7 @@ private:
     bool                            mProxyConnectFailed;
     bool                            mHttpResponseMatched;
     bool                            mPreserveStream;
+    bool                            mDispatchedAsBlocking;
 
     // mClosed           := transaction has been explicitly closed
     // mTransactionDone  := transaction ran to completion or was interrupted
@@ -209,7 +248,10 @@ private:
     nsHttpResponseHead             *mForTakeResponseHead;
     bool                            mResponseHeadTaken;
 
-    class RestartVerifier 
+    // The time when the transaction was submitted to the Connection Manager
+    mozilla::TimeStamp              mPendingTime;
+
+    class RestartVerifier
     {
 
         // When a idemptotent transaction has received part of its response body
@@ -228,7 +270,7 @@ private:
             , mSetup(false)
         {}
         ~RestartVerifier() {}
-        
+
         void Set(int64_t contentLength, nsHttpResponseHead *head);
         bool Verify(int64_t contentLength, nsHttpResponseHead *head);
         bool IsDiscardingContent() { return mToReadBeforeRestart != 0; }
@@ -241,8 +283,8 @@ private:
         int64_t ToReadBeforeRestart() { return mToReadBeforeRestart; }
         void HaveReadBeforeRestart(uint32_t amt)
         {
-            NS_ABORT_IF_FALSE(amt <= mToReadBeforeRestart,
-                              "too large of a HaveReadBeforeRestart deduction");
+            MOZ_ASSERT(amt <= mToReadBeforeRestart,
+                       "too large of a HaveReadBeforeRestart deduction");
             mToReadBeforeRestart -= amt;
         }
 
@@ -270,6 +312,32 @@ private:
         // true when ::Set has been called with a response header
         bool                            mSetup;
     } mRestartInProgressVerifier;
+
+// For Rate Pacing via an EventTokenBucket
+public:
+    // called by the connection manager to run this transaction through the
+    // token bucket. If the token bucket admits the transaction immediately it
+    // returns true. The function is called repeatedly until it returns true.
+    bool TryToRunPacedRequest();
+
+    // ATokenBucketEvent pure virtual implementation. Called by the token bucket
+    // when the transaction is ready to run. If this happens asynchrounously to
+    // token bucket submission the transaction just posts an event that causes
+    // the pending transaction queue to be rerun (and TryToRunPacedRequest() to
+    // be run again.
+    void OnTokenBucketAdmitted(); // ATokenBucketEvent
+
+    // CancelPacing() can be used to tell the token bucket to remove this
+    // transaction from the list of pending transactions. This is used when a
+    // transaction is believed to be HTTP/1 (and thus subject to rate pacing)
+    // but later can be dispatched via spdy (not subject to rate pacing).
+    void CancelPacing(nsresult reason);
+
+private:
+    bool mSubmittedRatePacing;
+    bool mPassedRatePacing;
+    bool mSynchronousRatePaceRequest;
+    nsCOMPtr<nsICancelable> mTokenBucketCancel;
 };
 
 #endif // nsHttpTransaction_h__

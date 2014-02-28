@@ -1,0 +1,62 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'content'
+
+EXPORTS += [
+    'nsDOMEvent.h',
+    'nsDOMEventTargetHelper.h',
+    'nsDOMTouchEvent.h',
+    'nsDOMUIEvent.h',
+    'nsEventListenerManager.h',
+    'nsEventStateManager.h',
+]
+
+EXPORTS.mozilla.dom += [
+    'Touch.h',
+]
+
+CPP_SOURCES += [
+    'DOMWheelEvent.cpp',
+    'EventTarget.cpp',
+    'TextComposition.cpp',
+    'Touch.cpp',
+    'nsAsyncDOMEvent.cpp',
+    'nsContentEventHandler.cpp',
+    'nsDOMAnimationEvent.cpp',
+    'nsDOMBeforeUnloadEvent.cpp',
+    'nsDOMClipboardEvent.cpp',
+    'nsDOMCommandEvent.cpp',
+    'nsDOMCompositionEvent.cpp',
+    'nsDOMDataContainerEvent.cpp',
+    'nsDOMDataTransfer.cpp',
+    'nsDOMDeviceMotionEvent.cpp',
+    'nsDOMDragEvent.cpp',
+    'nsDOMEvent.cpp',
+    'nsDOMEventTargetHelper.cpp',
+    'nsDOMFocusEvent.cpp',
+    'nsDOMKeyboardEvent.cpp',
+    'nsDOMMessageEvent.cpp',
+    'nsDOMMouseEvent.cpp',
+    'nsDOMMouseScrollEvent.cpp',
+    'nsDOMMutationEvent.cpp',
+    'nsDOMNotifyAudioAvailableEvent.cpp',
+    'nsDOMNotifyPaintEvent.cpp',
+    'nsDOMScrollAreaEvent.cpp',
+    'nsDOMSimpleGestureEvent.cpp',
+    'nsDOMTextEvent.cpp',
+    'nsDOMTouchEvent.cpp',
+    'nsDOMTransitionEvent.cpp',
+    'nsDOMUIEvent.cpp',
+    'nsDOMXULCommandEvent.cpp',
+    'nsEventDispatcher.cpp',
+    'nsEventListenerManager.cpp',
+    'nsEventListenerService.cpp',
+    'nsEventStateManager.cpp',
+    'nsIMEStateManager.cpp',
+    'nsPaintRequest.cpp',
+    'nsPrivateTextRange.cpp',
+]

@@ -5,7 +5,6 @@
 #include "nsTableColGroupFrame.h"
 #include "nsTableColFrame.h"
 #include "nsTableFrame.h"
-#include "nsIDOMHTMLTableColElement.h"
 #include "nsStyleContext.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
@@ -71,6 +70,8 @@ nsTableColGroupFrame::AddColsToTable(int32_t                   aFirstColIndex,
                                      const nsFrameList::Slice& aCols)
 {
   nsTableFrame* tableFrame = nsTableFrame::GetTableFrame(this);
+
+  tableFrame->InvalidateFrameSubtree();
 
   // set the col indices of the col frames and and add col info to the table
   int32_t colIndex = aFirstColIndex;
@@ -162,7 +163,7 @@ nsTableColGroupFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
      
   nsTableFrame* tableFrame = nsTableFrame::GetTableFrame(this);
   if (tableFrame->IsBorderCollapse() &&
-      tableFrame->BCRecalcNeeded(aOldStyleContext, GetStyleContext())) {
+      tableFrame->BCRecalcNeeded(aOldStyleContext, StyleContext())) {
     int32_t colCount = GetColCount();
     if (!colCount)
       return; // this is a degenerated colgroup 
@@ -299,9 +300,9 @@ nsTableColGroupFrame::RemoveFrame(ChildListID     aListID,
       while (col && col->GetColType() == eColAnonymousCol) {
 #ifdef DEBUG
         nsIFrame* providerFrame = colFrame->GetParentStyleContextFrame();
-        if (colFrame->GetStyleContext()->GetParent() ==
-            providerFrame->GetStyleContext()) {
-          NS_ASSERTION(col->GetStyleContext() == colFrame->GetStyleContext() &&
+        if (colFrame->StyleContext()->GetParent() ==
+            providerFrame->StyleContext()) {
+          NS_ASSERTION(col->StyleContext() == colFrame->StyleContext() &&
                        col->GetContent() == colFrame->GetContent(),
                        "How did that happen??");
         }
@@ -358,7 +359,7 @@ NS_METHOD nsTableColGroupFrame::Reflow(nsPresContext*          aPresContext,
   NS_ASSERTION(nullptr!=mContent, "bad state -- null content for frame");
   nsresult rv=NS_OK;
   
-  const nsStyleVisibility* groupVis = GetStyleVisibility();
+  const nsStyleVisibility* groupVis = StyleVisibility();
   bool collapseGroup = (NS_STYLE_VISIBILITY_COLLAPSE == groupVis->mVisible);
   if (collapseGroup) {
     nsTableFrame* tableFrame = nsTableFrame::GetTableFrame(this);
@@ -404,7 +405,7 @@ nsTableColFrame * nsTableColGroupFrame::GetNextColumn(nsIFrame *aChildFrame)
   while (childFrame)
   {
     if (NS_STYLE_DISPLAY_TABLE_COLUMN ==
-        childFrame->GetStyleDisplay()->mDisplay)
+        childFrame->StyleDisplay()->mDisplay)
     {
       result = (nsTableColFrame *)childFrame;
       break;
@@ -416,7 +417,7 @@ nsTableColFrame * nsTableColGroupFrame::GetNextColumn(nsIFrame *aChildFrame)
 
 int32_t nsTableColGroupFrame::GetSpan()
 {
-  return GetStyleTable()->mSpan;
+  return StyleTable()->mSpan;
 }
 
 void nsTableColGroupFrame::SetContinuousBCBorderWidth(uint8_t     aForSide,
@@ -460,6 +461,23 @@ nsIAtom*
 nsTableColGroupFrame::GetType() const
 {
   return nsGkAtoms::tableColGroupFrame;
+}
+  
+void 
+nsTableColGroupFrame::InvalidateFrame(uint32_t aDisplayItemKey)
+{
+  nsIFrame::InvalidateFrame(aDisplayItemKey);
+  GetParent()->InvalidateFrameWithRect(GetVisualOverflowRect() + GetPosition(), aDisplayItemKey);
+}
+
+void 
+nsTableColGroupFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey)
+{
+  nsIFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey);
+  // If we have filters applied that would affects our bounds, then
+  // we get an inactive layer created and this is computed
+  // within FrameLayerBuilder
+  GetParent()->InvalidateFrameWithRect(aRect + GetPosition(), aDisplayItemKey);
 }
 
 #ifdef DEBUG

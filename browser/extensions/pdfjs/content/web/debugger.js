@@ -1,5 +1,20 @@
 /* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
+/* Copyright 2012 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/* globals PDFJS */
 
 'use strict';
 
@@ -31,7 +46,7 @@ var FontInspector = (function FontInspectorClosure() {
     }
   }
   function textLayerClick(e) {
-    if (!e.target.dataset.fontName || e.target.tagName != 'DIV')
+    if (!e.target.dataset.fontName || e.target.tagName.toUpperCase() !== 'DIV')
       return;
     var fontName = e.target.dataset.fontName;
     var selects = document.getElementsByTagName('input');
@@ -257,7 +272,7 @@ var Stepper = (function StepperClosure() {
             else
               self.breakPoints.splice(self.breakPoints.indexOf(x), 1);
             StepperManager.saveBreakPoints(self.pageIndex, self.breakPoints);
-          }
+          };
         })(i);
 
         breakCell.appendChild(cbox);
@@ -362,7 +377,7 @@ var Stats = (function Stats() {
       wrapper.appendChild(title);
       wrapper.appendChild(statsDiv);
       stats.push({ pageNumber: pageNumber, div: wrapper });
-      stats.sort(function(a, b) { return a.pageNumber - b.pageNumber});
+      stats.sort(function(a, b) { return a.pageNumber - b.pageNumber; });
       clear(this.panel);
       for (var i = 0, ii = stats.length; i < ii; ++i)
         this.panel.appendChild(stats[i].div);

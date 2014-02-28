@@ -25,8 +25,8 @@ interface nsISimpleEnumerator : nsISupports {
    * internal state of enumerator.
    *
    * @see getNext()
-   * @return PR_TRUE if there are remaining elements in the enumerator.
-   *         PR_FALSE if there are no more elements in the enumerator.
+   * @return true if there are remaining elements in the enumerator.
+   *         false if there are no more elements in the enumerator.
    */                                            
   boolean hasMoreElements();
 
@@ -38,9 +38,7 @@ interface nsISimpleEnumerator : nsISupports {
    * the elements in the enumerator.
    *
    * @see hasMoreElements()
-   * @return NS_OK if the call succeeded in returning a non-null
-   *               value through the out parameter.
-   *         NS_ERROR_FAILURE if there are no more elements
+   * @throws NS_ERROR_FAILURE if there are no more elements
    *                          to enumerate.
    * @return the next element in the enumeration.
    */

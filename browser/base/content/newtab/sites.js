@@ -84,6 +84,7 @@ Site.prototype = {
    */
   block: function Site_block() {
     if (!gBlockedLinks.isBlocked(this._link)) {
+      gUndoDialog.show(this);
       gBlockedLinks.block(this._link);
       gUpdater.updateGrid();
     }
@@ -143,10 +144,20 @@ Site.prototype = {
     // Register drag-and-drop event handlers.
     this._node.addEventListener("dragstart", this, false);
     this._node.addEventListener("dragend", this, false);
+    this._node.addEventListener("mouseover", this, false);
 
     let controls = this.node.querySelectorAll(".newtab-control");
     for (let i = 0; i < controls.length; i++)
       controls[i].addEventListener("click", this, false);
+  },
+
+  /**
+   * Speculatively opens a connection to the current site.
+   */
+  _speculativeConnect: function Site_speculativeConnect() {
+    let sc = Services.io.QueryInterface(Ci.nsISpeculativeConnect);
+    let uri = Services.io.newURI(this.url, null, null);
+    sc.speculativeConnect(uri, null);
   },
 
   /**
@@ -162,6 +173,10 @@ Site.prototype = {
           this.unpin();
         else
           this.pin();
+        break;
+      case "mouseover":
+        this._node.removeEventListener("mouseover", this, false);
+        this._speculativeConnect();
         break;
       case "dragstart":
         gDrag.start(this, aEvent);

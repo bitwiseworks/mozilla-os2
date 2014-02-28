@@ -5,6 +5,7 @@
 #ifndef nsIDocument_h___
 #define nsIDocument_h___
 
+#include "mozilla/Attributes.h"
 #include "mozFlushType.h"                // for enum
 #include "nsAutoPtr.h"                   // for member
 #include "nsCOMArray.h"                  // for member
@@ -23,7 +24,7 @@
 #include "nsPIDOMWindow.h"               // for use in inline functions
 #include "nsPropertyTable.h"             // for member
 #include "nsTHashtable.h"                // for member
-#include "mozilla/dom/DirectionalityUtils.h"
+#include "mozilla/dom/DocumentBinding.h"
 
 class imgIRequest;
 class nsAString;
@@ -33,6 +34,7 @@ class nsDOMNavigationTiming;
 class nsEventStates;
 class nsFrameLoader;
 class nsHTMLCSSStyleSheet;
+class nsHTMLDocument;
 class nsHTMLStyleSheet;
 class nsIAtom;
 class nsIBFCacheEntry;
@@ -46,8 +48,10 @@ class nsIDOMDocument;
 class nsIDOMDocumentFragment;
 class nsIDOMDocumentType;
 class nsIDOMElement;
-class nsIDOMEventTarget;
 class nsIDOMNodeList;
+class nsIDOMTouchList;
+class nsIDOMXPathExpression;
+class nsIDOMXPathNSResolver;
 class nsILayoutHistoryState;
 class nsIObjectLoadingContent;
 class nsIObserver;
@@ -59,28 +63,59 @@ class nsIStyleRule;
 class nsIStyleSheet;
 class nsIURI;
 class nsIVariant;
-class nsIViewManager;
+class nsViewManager;
 class nsPresContext;
+class nsRange;
 class nsScriptLoader;
 class nsSMILAnimationController;
 class nsStyleSet;
+class nsTextNode;
 class nsWindowSizes;
+class nsSmallVoidArray;
+class nsDOMCaretPosition;
+class nsViewportInfo;
+class nsDOMEvent;
+class nsIGlobalObject;
 
 namespace mozilla {
+class ErrorResult;
+
 namespace css {
 class Loader;
 class ImageLoader;
 } // namespace css
 
 namespace dom {
-class Link;
+class Attr;
+class CDATASection;
+class Comment;
+class DocumentFragment;
+class DocumentType;
+class DOMImplementation;
 class Element;
+struct ElementRegistrationOptions;
+class EventTarget;
+class FrameRequestCallback;
+class GlobalObject;
+class HTMLBodyElement;
+class Link;
+class NodeFilter;
+class NodeIterator;
+class ProcessingInstruction;
+class Touch;
+class TreeWalker;
+class UndoManager;
+template<typename> class OwningNonNull;
+template<typename> class Sequence;
+
+template<typename, typename> class CallbackObjectHolder;
+typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 } // namespace dom
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x0e1324c9, 0xc997, 0x447e, \
-  { 0xbc, 0xd9, 0xa6, 0x57, 0x80, 0x29, 0x91, 0xe4 } }
+{ 0x62cca591, 0xa030, 0x4117, \
+ { 0x9b, 0x80, 0xdc, 0xd3, 0x66, 0xbb, 0xb5, 0x9 } }
 
 // Flag for AddStyleSheet().
 #define NS_STYLESHEET_FROM_CATALOG                (1 << 0)
@@ -99,6 +134,13 @@ enum DocumentFlavor {
 // Window activation status
 #define NS_DOCUMENT_STATE_WINDOW_INACTIVE         NS_DEFINE_EVENT_STATE_MACRO(1)
 
+// Some function forward-declarations
+class nsContentList;
+
+already_AddRefed<nsContentList>
+NS_GetContentList(nsINode* aRootNode,
+                  int32_t aMatchNameSpaceId,
+                  const nsAString& aTagname);
 //----------------------------------------------------------------------
 
 // Document interface.  This is implemented by all document objects in
@@ -206,11 +248,8 @@ public:
    */
   already_AddRefed<nsILoadGroup> GetDocumentLoadGroup() const
   {
-    nsILoadGroup *group = nullptr;
-    if (mDocumentLoadGroup)
-      CallQueryReferent(mDocumentLoadGroup.get(), &group);
-
-    return group;
+    nsCOMPtr<nsILoadGroup> group = do_QueryReferent(mDocumentLoadGroup);
+    return group.forget();
   }
 
   /**
@@ -222,7 +261,7 @@ public:
   {
     return mDocumentBaseURI ? mDocumentBaseURI : mDocumentURI;
   }
-  virtual already_AddRefed<nsIURI> GetBaseURI() const
+  virtual already_AddRefed<nsIURI> GetBaseURI() const MOZ_OVERRIDE
   {
     nsCOMPtr<nsIURI> uri = GetDocBaseURI();
 
@@ -400,6 +439,69 @@ public:
     mBidiOptions = aBidiOptions;
   }
 
+  /**
+   * Get the has mixed active content loaded flag for this document.
+   */
+  bool GetHasMixedActiveContentLoaded()
+  {
+    return mHasMixedActiveContentLoaded;
+  }
+
+  /**
+   * Set the has mixed active content loaded flag for this document.
+   */
+  void SetHasMixedActiveContentLoaded(bool aHasMixedActiveContentLoaded)
+  {
+    mHasMixedActiveContentLoaded = aHasMixedActiveContentLoaded;
+  }
+
+  /**
+   * Get mixed active content blocked flag for this document.
+   */
+  bool GetHasMixedActiveContentBlocked()
+  {
+    return mHasMixedActiveContentBlocked;
+  }
+
+  /**
+   * Set the mixed active content blocked flag for this document.
+   */
+  void SetHasMixedActiveContentBlocked(bool aHasMixedActiveContentBlocked)
+  {
+    mHasMixedActiveContentBlocked = aHasMixedActiveContentBlocked;
+  }
+
+  /**
+   * Get the has mixed display content loaded flag for this document.
+   */
+  bool GetHasMixedDisplayContentLoaded()
+  {
+    return mHasMixedDisplayContentLoaded;
+  }
+
+  /**
+   * Set the has mixed display content loaded flag for this document.
+   */
+  void SetHasMixedDisplayContentLoaded(bool aHasMixedDisplayContentLoaded)
+  {
+    mHasMixedDisplayContentLoaded = aHasMixedDisplayContentLoaded;
+  }
+
+  /**
+   * Get mixed display content blocked flag for this document.
+   */
+  bool GetHasMixedDisplayContentBlocked()
+  {
+    return mHasMixedDisplayContentBlocked;
+  }
+
+  /**
+   * Set the mixed display content blocked flag for this document.
+   */
+  void SetHasMixedDisplayContentBlocked(bool aHasMixedDisplayContentBlocked)
+  {
+    mHasMixedDisplayContentBlocked = aHasMixedDisplayContentBlocked;
+  }
 
   /**
    * Get the sandbox flags for this document.
@@ -419,10 +521,6 @@ public:
     mSandboxFlags = sandboxFlags;
   }
 
-  inline mozilla::directionality::Directionality GetDocumentDirectionality() {
-    return mDirectionality;
-  }
-  
   /**
    * Access HTTP header data (this may also get set from other
    * sources, like HTML META tags).
@@ -437,10 +535,9 @@ public:
    * method is responsible for calling BeginObservingDocument() on the
    * presshell if the presshell should observe document mutations.
    */
-  virtual nsresult CreateShell(nsPresContext* aContext,
-                               nsIViewManager* aViewManager,
-                               nsStyleSet* aStyleSet,
-                               nsIPresShell** aInstancePtrResult) = 0;
+  virtual already_AddRefed<nsIPresShell> CreateShell(nsPresContext* aContext,
+                                                     nsViewManager* aViewManager,
+                                                     nsStyleSet* aStyleSet) = 0;
   virtual void DeleteShell() = 0;
 
   nsIPresShell* GetShell() const
@@ -448,8 +545,22 @@ public:
     return GetBFCacheEntry() ? nullptr : mPresShell;
   }
 
+  void DisallowBFCaching()
+  {
+    NS_ASSERTION(!mBFCacheEntry, "We're already in the bfcache!");
+    mBFCacheDisallowed = true;
+  }
+
+  bool IsBFCachingAllowed() const
+  {
+    return !mBFCacheDisallowed;
+  }
+
   void SetBFCacheEntry(nsIBFCacheEntry* aEntry)
   {
+    NS_ASSERTION(IsBFCachingAllowed() || !aEntry,
+                 "You should have checked!");
+
     mBFCacheEntry = aEntry;
   }
 
@@ -500,12 +611,26 @@ public:
   /**
    * Return the doctype for this document.
    */
-  nsIContent* GetDocumentType() const;
+  mozilla::dom::DocumentType* GetDoctype() const;
 
   /**
    * Return the root element for this document.
    */
   Element* GetRootElement() const;
+
+  virtual nsViewportInfo GetViewportInfo(uint32_t aDisplayWidth,
+                                         uint32_t aDisplayHeight) = 0;
+
+  /**
+   * True iff this doc will ignore manual character encoding overrides.
+   */
+  virtual bool WillIgnoreCharsetOverride() {
+    return true;
+  }
+
+  bool DidDocumentOpen() {
+    return mDidDocumentOpen;
+  }
 
 protected:
   virtual Element *GetRootElementInternal() const = 0;
@@ -513,15 +638,13 @@ protected:
 public:
   // Get the root <html> element, or return null if there isn't one (e.g.
   // if the root isn't <html>)
-  Element* GetHtmlElement();
+  Element* GetHtmlElement() const;
   // Returns the first child of GetHtmlContent which has the given tag,
   // or nullptr if that doesn't exist.
   Element* GetHtmlChildElement(nsIAtom* aTag);
   // Get the canonical <body> element, or return null if there isn't one (e.g.
   // if the root isn't <html> or if the <body> isn't there)
-  Element* GetBodyElement() {
-    return GetHtmlChildElement(nsGkAtoms::body);
-  }
+  mozilla::dom::HTMLBodyElement* GetBodyElement();
   // Get the canonical <head> element, or return null if there isn't one (e.g.
   // if the root isn't <html> or if the <head> isn't there)
   Element* GetHeadElement() {
@@ -600,8 +723,19 @@ public:
    */
   virtual int32_t GetNumberOfCatalogStyleSheets() const = 0;
   virtual nsIStyleSheet* GetCatalogStyleSheetAt(int32_t aIndex) const = 0;
-  virtual void AddCatalogStyleSheet(nsIStyleSheet* aSheet) = 0;
+  virtual void AddCatalogStyleSheet(nsCSSStyleSheet* aSheet) = 0;
   virtual void EnsureCatalogStyleSheet(const char *aStyleSheetURI) = 0;
+
+  enum additionalSheetType {
+    eAgentSheet,
+    eUserSheet,
+    eAuthorSheet,
+    SheetTypeCount
+  };
+
+  virtual nsresult LoadAdditionalStyleSheet(additionalSheetType aType, nsIURI* aSheetURI) = 0;
+  virtual void RemoveAdditionalStyleSheet(additionalSheetType aType, nsIURI* sheetURI) = 0;
+  virtual nsIStyleSheet* FirstAdditionalAuthorSheet() = 0;
 
   /**
    * Get this document's CSSLoader.  This is guaranteed to not return null.
@@ -636,15 +770,10 @@ public:
    * Get this document's inline style sheet.  May return null if there
    * isn't one
    */
-  virtual nsHTMLCSSStyleSheet* GetInlineStyleSheet() const = 0;
+  nsHTMLCSSStyleSheet* GetInlineStyleSheet() const {
+    return mStyleAttrStyleSheet;
+  }
 
-  /**
-   * Get/set the object from which a document can get a script context
-   * and scope. This is the context within which all scripts (during
-   * document creation and during event handling) will run. Note that
-   * this is the *inner* window object.
-   */
-  virtual nsIScriptGlobalObject* GetScriptGlobalObject() const = 0;
   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aGlobalObject) = 0;
 
   /**
@@ -672,7 +801,8 @@ public:
    * document is truly gone. Use this object when you're trying to find a
    * content wrapper in XPConnect.
    */
-  virtual nsIScriptGlobalObject* GetScopeObject() = 0;
+  virtual nsIGlobalObject* GetScopeObject() const = 0;
+  virtual void SetScopeObject(nsIGlobalObject* aGlobal) = 0;
 
   /**
    * Return the window containing the document (the outer window).
@@ -695,7 +825,7 @@ public:
    */
   nsPIDOMWindow* GetInnerWindow()
   {
-    return mRemovedFromDocShell ? GetInnerWindowInternal() : mWindow;
+    return mRemovedFromDocShell ? nullptr : mWindow;
   }
 
   /**
@@ -738,10 +868,15 @@ public:
   virtual Element* GetFullScreenElement() = 0;
 
   /**
-   * Asynchronously requests that the document make aElement the full-screen
-   * element, and move into full-screen mode. The current full-screen element
-   * (if any) is pushed onto the full-screen element stack, and it can be
-   * returned to full-screen status by calling RestorePreviousFullScreenState().
+   * Asynchronously requests that the document make aElement the fullscreen
+   * element, and move into fullscreen mode. The current fullscreen element
+   * (if any) is pushed onto the fullscreen element stack, and it can be
+   * returned to fullscreen status by calling RestorePreviousFullScreenState().
+   *
+   * Note that requesting fullscreen in a document also makes the element which
+   * contains this document in this document's parent document fullscreen. i.e.
+   * the <iframe> or <browser> that contains this document is also mode
+   * fullscreen. This happens recursively in all ancestor documents.
    */
   virtual void AsyncRequestFullScreen(Element* aElement) = 0;
 
@@ -760,7 +895,7 @@ public:
    * so that all its fullscreen element stacks are empty; we must continue the
    * rollback in this parent process' doc tree branch which is fullscreen.
    * Note that only one branch of the document tree can have its documents in
-   * fullscreen state at one time. We're in inconsistent state if the a 
+   * fullscreen state at one time. We're in inconsistent state if a
    * fullscreen document has a parent and that parent isn't fullscreen. We
    * preserve this property across process boundaries.
    */
@@ -779,6 +914,25 @@ public:
   virtual bool IsFullScreenDoc() = 0;
 
   /**
+   * Returns true if this document is a fullscreen leaf document, i.e. it
+   * is in fullscreen mode and has no fullscreen children.
+   */
+  virtual bool IsFullscreenLeaf() = 0;
+
+  /**
+   * Returns the document which is at the root of this document's branch
+   * in the in-process document tree. Returns nullptr if the document isn't
+   * fullscreen.
+   */
+  virtual nsIDocument* GetFullscreenRoot() = 0;
+
+  /**
+   * Sets the fullscreen root to aRoot. This stores a weak reference to aRoot
+   * in this document.
+   */
+  virtual void SetFullscreenRoot(nsIDocument* aRoot) = 0;
+
+  /**
    * Sets whether this document is approved for fullscreen mode.
    * Documents aren't approved for fullscreen until chrome has sent a
    * "fullscreen-approved" notification with a subject which is a pointer
@@ -787,16 +941,31 @@ public:
   virtual void SetApprovedForFullscreen(bool aIsApproved) = 0;
 
   /**
-   * Exits all documents from DOM full-screen mode, and moves the top-level
-   * browser window out of full-screen mode. If aRunAsync is true, this runs
-   * asynchronously.
+   * Exits documents out of DOM fullscreen mode.
+   *
+   * If aDocument is null, all fullscreen documents in all browser windows
+   * exit fullscreen.
+   *
+   * If aDocument is non null, all documents from aDocument's fullscreen root
+   * to the fullscreen leaf exit fullscreen. 
+   *
+   * Note that the fullscreen leaf is the bottom-most document which is
+   * fullscreen, it may have non-fullscreen child documents. The fullscreen
+   * root is usually the chrome document, but if fullscreen is content-only,
+   * (see the comment in nsContentUtils.h on IsFullscreenApiContentOnly())
+   * the fullscreen root will be a direct child of the chrome document, and
+   * there may be other branches of the same doctree that are fullscreen.
+   *
+   * If aRunAsync is true, fullscreen is executed asynchronously.
+   *
+   * Note if aDocument is not fullscreen this function has no effect, even if
+   * aDocument has fullscreen ancestors.
    */
-  static void ExitFullScreen(bool aRunAsync);
-
+  static void ExitFullscreen(nsIDocument* aDocument, bool aRunAsync);
 
   virtual void RequestPointerLock(Element* aElement) = 0;
 
-  static void UnlockPointer();
+  static void UnlockPointer(nsIDocument* aDoc = nullptr);
 
 
   //----------------------------------------------------------------------
@@ -828,7 +997,10 @@ public:
 
   enum ReadyState { READYSTATE_UNINITIALIZED = 0, READYSTATE_LOADING = 1, READYSTATE_INTERACTIVE = 3, READYSTATE_COMPLETE = 4};
   virtual void SetReadyStateInternal(ReadyState rs) = 0;
-  virtual ReadyState GetReadyStateEnum() = 0;
+  ReadyState GetReadyStateEnum()
+  {
+    return mReadyState;
+  }
 
   // notify that a content node changed state.  This must happen under
   // a scriptblocker but NOT within a begin/end update.
@@ -904,11 +1076,8 @@ public:
    */
   already_AddRefed<nsISupports> GetContainer() const
   {
-    nsISupports* container = nullptr;
-    if (mDocumentContainer)
-      CallQueryReferent(mDocumentContainer.get(), &container);
-
-    return container;
+    nsCOMPtr<nsISupports> container = do_QueryReferent(mDocumentContainer);
+    return container.forget();
   }
 
   /**
@@ -947,8 +1116,6 @@ public:
   }
 
   virtual bool IsScriptEnabled() = 0;
-
-  virtual void AddXMLEventsContent(nsIContent * aXMLEventsElement) = 0;
 
   /**
    * Create an element with the specified name, prefix and namespace ID.
@@ -1007,7 +1174,7 @@ public:
    * Sanitize the document by resetting all input elements and forms that have
    * autocomplete=off to their default values.
    */
-  virtual nsresult Sanitize() = 0;
+  virtual void Sanitize() = 0;
 
   /**
    * Enumerate all subdocuments.
@@ -1088,7 +1255,7 @@ public:
    * document won't be altered.
    */
   virtual void OnPageShow(bool aPersisted,
-                          nsIDOMEventTarget* aDispatchStartTarget) = 0;
+                          mozilla::dom::EventTarget* aDispatchStartTarget) = 0;
 
   /**
    * Notification that the page has been hidden, for documents which are loaded
@@ -1103,8 +1270,8 @@ public:
    * document won't be altered.
    */
   virtual void OnPageHide(bool aPersisted,
-                          nsIDOMEventTarget* aDispatchStartTarget) = 0;
-  
+                          mozilla::dom::EventTarget* aDispatchStartTarget) = 0;
+
   /*
    * We record the set of links in the document that are relevant to
    * style.
@@ -1132,7 +1299,9 @@ public:
    * Get the box object for an element. This is not exposed through a
    * scriptable interface except for XUL documents.
    */
-  NS_IMETHOD GetBoxObjectFor(nsIDOMElement* aElement, nsIBoxObject** aResult) = 0;
+  virtual already_AddRefed<nsIBoxObject>
+    GetBoxObjectFor(mozilla::dom::Element* aElement,
+                    mozilla::ErrorResult& aRv) = 0;
 
   /**
    * Get the compatibility mode for this document
@@ -1164,7 +1333,7 @@ public:
   /**
    * See GetAnonymousElementByAttribute on nsIDOMDocumentXBL.
    */
-  virtual nsIContent*
+  virtual Element*
     GetAnonymousElementByAttribute(nsIContent* aElement,
                                    nsIAtom* aAttrName,
                                    const nsAString& aAttrValue) const = 0;
@@ -1175,10 +1344,9 @@ public:
    *
    * @see nsIDOMWindowUtils::elementFromPoint
    */
-  virtual nsresult ElementFromPointHelper(float aX, float aY,
+  virtual Element* ElementFromPointHelper(float aX, float aY,
                                           bool aIgnoreRootScrollFrame,
-                                          bool aFlushLayout,
-                                          nsIDOMElement** aReturn) = 0;
+                                          bool aFlushLayout) = 0;
 
   virtual nsresult NodesFromRectHelper(float aX, float aY,
                                        float aTopSize, float aRightSize,
@@ -1304,8 +1472,7 @@ public:
   {
     NS_PRECONDITION(!GetShell() &&
                     !nsCOMPtr<nsISupports>(GetContainer()) &&
-                    !GetWindow() &&
-                    !GetScriptGlobalObject(),
+                    !GetWindow(),
                     "Shouldn't set mDisplayDocument on documents that already "
                     "have a presentation or a docshell or a window");
     NS_PRECONDITION(aDisplayDocument != this, "Should be different document");
@@ -1378,6 +1545,13 @@ public:
    * OnPageHide having been called and OnPageShow not yet having been called)
    */
   bool IsVisible() const { return mVisible; }
+
+  /**
+   * Return whether the document and all its ancestors are visible in the sense of
+   * pageshow / hide.
+   */
+  bool IsVisibleConsideringAncestors() const;
+
   /**
    * Return true when this document is active, i.e., the active document
    * in a content viewer.
@@ -1451,6 +1625,12 @@ public:
   }
 
   /**
+   * Returns the template content owner document that owns the content of
+   * HTMLTemplateElement.
+   */
+  virtual nsIDocument* GetTemplateContentsOwner() = 0;
+
+  /**
    * true when this document is a static clone of a normal document.
    * For example print preview and printing use static documents.
    */
@@ -1483,10 +1663,12 @@ public:
                                  const nsAString& aCrossOriginAttr) = 0;
 
   /**
-   * Called by nsParser to preload style sheets.  Can also be merged into
-   * the parser if and when the parser is merged with libgklayout.
+   * Called by nsParser to preload style sheets.  Can also be merged into the
+   * parser if and when the parser is merged with libgklayout.  aCrossOriginAttr
+   * should be a void string if the attr is not present.
    */
-  virtual void PreloadStyle(nsIURI* aURI, const nsAString& aCharset) = 0;
+  virtual void PreloadStyle(nsIURI* aURI, const nsAString& aCharset,
+                            const nsAString& aCrossOriginAttr) = 0;
 
   /**
    * Called by the chrome registry to load style sheets.  Can be put
@@ -1544,13 +1726,13 @@ public:
   virtual nsISupports* GetCurrentContentSink() = 0;
 
   /**
-   * Register/Unregister a filedata uri as being "owned" by this document. 
+   * Register/Unregister a hostobject uri as being "owned" by this document.
    * I.e. that its lifetime is connected with this document. When the document
    * goes away it should "kill" the uri by calling
-   * nsBlobProtocolHandler::RemoveFileDataEntry
+   * nsHostObjectProtocolHandler::RemoveDataEntry
    */
-  virtual void RegisterFileDataUri(const nsACString& aUri) = 0;
-  virtual void UnregisterFileDataUri(const nsACString& aUri) = 0;
+  virtual void RegisterHostObjectUri(const nsACString& aUri) = 0;
+  virtual void UnregisterHostObjectUri(const nsACString& aUri) = 0;
 
   virtual void SetScrollToRef(nsIURI *aDocumentURI) = 0;
   virtual void ScrollToRef() = 0;
@@ -1581,11 +1763,16 @@ public:
    */
   virtual Element* LookupImageElement(const nsAString& aElementId) = 0;
 
-  nsresult ScheduleFrameRequestCallback(nsIFrameRequestCallback* aCallback,
+  virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager() = 0;
+
+  typedef mozilla::dom::CallbackObjectHolder<
+    mozilla::dom::FrameRequestCallback,
+    nsIFrameRequestCallback> FrameRequestCallbackHolder;
+  nsresult ScheduleFrameRequestCallback(const FrameRequestCallbackHolder& aCallback,
                                         int32_t *aHandle);
   void CancelFrameRequestCallback(int32_t aHandle);
 
-  typedef nsTArray< nsCOMPtr<nsIFrameRequestCallback> > FrameRequestCallbackList;
+  typedef nsTArray<FrameRequestCallbackHolder> FrameRequestCallbackList;
   /**
    * Put this document's frame request callbacks into the provided
    * list, and forget about them.
@@ -1660,7 +1847,7 @@ public:
 
   virtual void PostVisibilityUpdateEvent() = 0;
   
-  bool IsSyntheticDocument() { return mIsSyntheticDocument; }
+  bool IsSyntheticDocument() const { return mIsSyntheticDocument; }
 
   void SetNeedLayoutFlush() {
     mNeedLayoutFlush = true;
@@ -1710,6 +1897,219 @@ public:
     }
   }
 
+  bool CreatingStaticClone() const
+  {
+    return mCreatingStaticClone;
+  }
+
+  // WebIDL API
+  nsIGlobalObject* GetParentObject() const
+  {
+    return GetScopeObject();
+  }
+  static already_AddRefed<nsIDocument>
+    Constructor(const mozilla::dom::GlobalObject& aGlobal,
+                mozilla::ErrorResult& rv);
+  virtual mozilla::dom::DOMImplementation*
+    GetImplementation(mozilla::ErrorResult& rv) = 0;
+  void GetURL(nsString& retval) const;
+  void GetDocumentURI(nsString& retval) const;
+  void GetCompatMode(nsString& retval) const;
+  void GetCharacterSet(nsAString& retval) const;
+  // Skip GetContentType, because our NS_IMETHOD version above works fine here.
+  // GetDoctype defined above
+  Element* GetDocumentElement() const
+  {
+    return GetRootElement();
+  }
+  virtual JSObject*
+  Register(JSContext* aCx, const nsAString& aName,
+           const mozilla::dom::ElementRegistrationOptions& aOptions,
+           mozilla::ErrorResult& rv) = 0;
+  already_AddRefed<nsContentList>
+  GetElementsByTagName(const nsAString& aTagName)
+  {
+    return NS_GetContentList(this, kNameSpaceID_Unknown, aTagName);
+  }
+  already_AddRefed<nsContentList>
+    GetElementsByTagNameNS(const nsAString& aNamespaceURI,
+                           const nsAString& aLocalName);
+  already_AddRefed<nsContentList>
+    GetElementsByClassName(const nsAString& aClasses);
+  // GetElementById defined above
+  already_AddRefed<Element> CreateElement(const nsAString& aTagName,
+                                          mozilla::ErrorResult& rv);
+  already_AddRefed<Element> CreateElementNS(const nsAString& aNamespaceURI,
+                                            const nsAString& aQualifiedName,
+                                            mozilla::ErrorResult& rv);
+  already_AddRefed<mozilla::dom::DocumentFragment>
+    CreateDocumentFragment() const;
+  already_AddRefed<nsTextNode> CreateTextNode(const nsAString& aData) const;
+  already_AddRefed<mozilla::dom::Comment>
+    CreateComment(const nsAString& aData) const;
+  already_AddRefed<mozilla::dom::ProcessingInstruction>
+    CreateProcessingInstruction(const nsAString& target, const nsAString& data,
+                                mozilla::ErrorResult& rv) const;
+  already_AddRefed<nsINode>
+    ImportNode(nsINode& aNode, bool aDeep, mozilla::ErrorResult& rv) const;
+  nsINode* AdoptNode(nsINode& aNode, mozilla::ErrorResult& rv);
+  already_AddRefed<nsDOMEvent> CreateEvent(const nsAString& aEventType,
+                                           mozilla::ErrorResult& rv) const;
+  already_AddRefed<nsRange> CreateRange(mozilla::ErrorResult& rv);
+  already_AddRefed<mozilla::dom::NodeIterator>
+    CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
+                       mozilla::dom::NodeFilter* aFilter,
+                       mozilla::ErrorResult& rv) const;
+  already_AddRefed<mozilla::dom::NodeIterator>
+    CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
+                       const mozilla::dom::NodeFilterHolder& aFilter,
+                       mozilla::ErrorResult& rv) const;
+  already_AddRefed<mozilla::dom::TreeWalker>
+    CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
+                     mozilla::dom::NodeFilter* aFilter, mozilla::ErrorResult& rv) const;
+  already_AddRefed<mozilla::dom::TreeWalker>
+    CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
+                     const mozilla::dom::NodeFilterHolder& aFilter,
+                     mozilla::ErrorResult& rv) const;
+
+  // Deprecated WebIDL bits
+  already_AddRefed<mozilla::dom::CDATASection>
+    CreateCDATASection(const nsAString& aData, mozilla::ErrorResult& rv);
+  already_AddRefed<mozilla::dom::Attr>
+    CreateAttribute(const nsAString& aName, mozilla::ErrorResult& rv);
+  already_AddRefed<mozilla::dom::Attr>
+    CreateAttributeNS(const nsAString& aNamespaceURI,
+                      const nsAString& aQualifiedName,
+                      mozilla::ErrorResult& rv);
+  void GetInputEncoding(nsAString& aInputEncoding);
+  already_AddRefed<nsIDOMLocation> GetLocation() const;
+  void GetReferrer(nsAString& aReferrer) const;
+  void GetLastModified(nsAString& aLastModified) const;
+  void GetReadyState(nsAString& aReadyState) const;
+  // Not const because otherwise the compiler can't figure out whether to call
+  // this GetTitle or the nsAString version from non-const methods, since
+  // neither is an exact match.
+  virtual void GetTitle(nsString& aTitle) = 0;
+  virtual void SetTitle(const nsAString& aTitle, mozilla::ErrorResult& rv) = 0;
+  void GetDir(nsAString& aDirection) const;
+  void SetDir(const nsAString& aDirection);
+  nsIDOMWindow* GetDefaultView() const
+  {
+    return GetWindow();
+  }
+  Element* GetActiveElement();
+  bool HasFocus(mozilla::ErrorResult& rv) const;
+  // Event handlers are all on nsINode already
+  bool MozSyntheticDocument() const
+  {
+    return IsSyntheticDocument();
+  }
+  Element* GetCurrentScript();
+  void ReleaseCapture() const;
+  virtual void MozSetImageElement(const nsAString& aImageElementId,
+                                  Element* aElement) = 0;
+  nsIURI* GetDocumentURIObject()
+  {
+    return GetDocumentURI();
+  }
+  // Not const because all the full-screen goop is not const
+  virtual bool MozFullScreenEnabled() = 0;
+  virtual Element* GetMozFullScreenElement(mozilla::ErrorResult& rv) = 0;
+  bool MozFullScreen()
+  {
+    return IsFullScreenDoc();
+  }
+  void MozCancelFullScreen();
+  Element* GetMozPointerLockElement();
+  void MozExitPointerLock()
+  {
+    UnlockPointer(this);
+  }
+  bool Hidden() const
+  {
+    return mVisibilityState != mozilla::dom::VisibilityState::Visible;
+  }
+  bool MozHidden() // Not const because of WarnOnceAbout
+  {
+    WarnOnceAbout(ePrefixedVisibilityAPI);
+    return Hidden();
+  }
+  mozilla::dom::VisibilityState VisibilityState()
+  {
+    return mVisibilityState;
+  }
+  mozilla::dom::VisibilityState MozVisibilityState()
+  {
+    WarnOnceAbout(ePrefixedVisibilityAPI);
+    return VisibilityState();
+  }
+  virtual nsIDOMStyleSheetList* StyleSheets() = 0;
+  void GetSelectedStyleSheetSet(nsAString& aSheetSet);
+  virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet) = 0;
+  virtual void GetLastStyleSheetSet(nsString& aSheetSet) = 0;
+  void GetPreferredStyleSheetSet(nsAString& aSheetSet);
+  virtual nsIDOMDOMStringList* StyleSheetSets() = 0;
+  virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet) = 0;
+  Element* ElementFromPoint(float aX, float aY);
+
+  /**
+   * Retrieve the location of the caret position (DOM node and character
+   * offset within that node), given a point.
+   *
+   * @param aX Horizontal point at which to determine the caret position, in
+   *           page coordinates.
+   * @param aY Vertical point at which to determine the caret position, in
+   *           page coordinates.
+   */
+  already_AddRefed<nsDOMCaretPosition>
+    CaretPositionFromPoint(float aX, float aY);
+
+  // QuerySelector and QuerySelectorAll already defined on nsINode
+  nsINodeList* GetAnonymousNodes(Element& aElement);
+  Element* GetAnonymousElementByAttribute(Element& aElement,
+                                          const nsAString& aAttrName,
+                                          const nsAString& aAttrValue);
+  Element* GetBindingParent(nsINode& aNode);
+  void LoadBindingDocument(const nsAString& aURI, mozilla::ErrorResult& rv);
+  already_AddRefed<nsIDOMXPathExpression>
+    CreateExpression(const nsAString& aExpression,
+                     nsIDOMXPathNSResolver* aResolver,
+                     mozilla::ErrorResult& rv);
+  already_AddRefed<nsIDOMXPathNSResolver>
+    CreateNSResolver(nsINode* aNodeResolver, mozilla::ErrorResult& rv);
+  already_AddRefed<nsISupports>
+    Evaluate(const nsAString& aExpression, nsINode* aContextNode,
+             nsIDOMXPathNSResolver* aResolver, uint16_t aType,
+             nsISupports* aResult, mozilla::ErrorResult& rv);
+  // Touch event handlers already on nsINode
+  already_AddRefed<mozilla::dom::Touch>
+    CreateTouch(nsIDOMWindow* aView, mozilla::dom::EventTarget* aTarget,
+                int32_t aIdentifier, int32_t aPageX, int32_t aPageY,
+                int32_t aScreenX, int32_t aScreenY, int32_t aClientX,
+                int32_t aClientY, int32_t aRadiusX, int32_t aRadiusY,
+                float aRotationAngle, float aForce);
+  already_AddRefed<nsIDOMTouchList> CreateTouchList();
+  already_AddRefed<nsIDOMTouchList>
+    CreateTouchList(mozilla::dom::Touch& aTouch,
+                    const mozilla::dom::Sequence<mozilla::dom::OwningNonNull<mozilla::dom::Touch> >& aTouches);
+  already_AddRefed<nsIDOMTouchList>
+    CreateTouchList(const mozilla::dom::Sequence<mozilla::dom::OwningNonNull<mozilla::dom::Touch> >& aTouches);
+
+  void SetStyleSheetChangeEventsEnabled(bool aValue)
+  {
+    mStyleSheetChangeEventsEnabled = aValue;
+  }
+
+  bool StyleSheetChangeEventsEnabled() const
+  {
+    return mStyleSheetChangeEventsEnabled;
+  }
+
+  virtual nsHTMLDocument* AsHTMLDocument() { return nullptr; }
+
+  virtual JSObject* WrapObject(JSContext *aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
 private:
   uint64_t mWarnedAbout;
 
@@ -1719,9 +2119,6 @@ protected:
 
   // Never ever call this. Only call GetWindow!
   virtual nsPIDOMWindow *GetWindowInternal() const = 0;
-
-  // Never ever call this. Only call GetInnerWindow!
-  virtual nsPIDOMWindow *GetInnerWindowInternal() = 0;
 
   // Never ever call this. Only call GetScriptHandlingObject!
   virtual nsIScriptGlobalObject* GetScriptHandlingObjectInternal() const = 0;
@@ -1754,6 +2151,9 @@ protected:
     return mContentType;
   }
 
+  nsCString mReferrer;
+  nsString mLastModified;
+
   nsCOMPtr<nsIURI> mDocumentURI;
   nsCOMPtr<nsIURI> mOriginalURI;
   nsCOMPtr<nsIURI> mDocumentBaseURI;
@@ -1776,6 +2176,7 @@ protected:
   nsRefPtr<mozilla::css::Loader> mCSSLoader;
   nsRefPtr<mozilla::css::ImageLoader> mStyleImageLoader;
   nsRefPtr<nsHTMLStyleSheet> mAttrStyleSheet;
+  nsRefPtr<nsHTMLCSSStyleSheet> mStyleAttrStyleSheet;
 
   // The set of all object, embed, applet, video and audio elements for
   // which this is the owner document. (They might not be in the document.)
@@ -1797,6 +2198,12 @@ protected:
 
   // Compatibility mode
   nsCompatibility mCompatMode;
+
+  // Our readyState
+  ReadyState mReadyState;
+
+  // Our visibility state
+  mozilla::dom::VisibilityState mVisibilityState;
 
   // True if BIDI is enabled.
   bool mBidiEnabled;
@@ -1822,7 +2229,7 @@ protected:
   // as scripts and plugins, disabled.
   bool mLoadedAsData;
 
-  // This flag is only set in nsXMLDocument, for e.g. documents used in XBL. We
+  // This flag is only set in XMLDocument, for e.g. documents used in XBL. We
   // don't want animations to play in such documents, so we need to store the
   // flag here so that we can check it in nsDocument::GetAnimationController.
   bool mLoadedAsInteractiveData;
@@ -1881,6 +2288,35 @@ protected:
   // True if a DOMMutationObserver is perhaps attached to a node in the document.
   bool mMayHaveDOMMutationObservers;
 
+  // True if a document has loaded Mixed Active Script (see nsMixedContentBlocker.cpp)
+  bool mHasMixedActiveContentLoaded;
+
+  // True if a document has blocked Mixed Active Script (see nsMixedContentBlocker.cpp)
+  bool mHasMixedActiveContentBlocked;
+
+  // True if a document has loaded Mixed Display/Passive Content (see nsMixedContentBlocker.cpp)
+  bool mHasMixedDisplayContentLoaded;
+
+  // True if a document has blocked Mixed Display/Passive Content (see nsMixedContentBlocker.cpp)
+  bool mHasMixedDisplayContentBlocked;
+
+  // True if DisallowBFCaching has been called on this document.
+  bool mBFCacheDisallowed;
+
+  // If true, we have an input encoding.  If this is false, then the
+  // document was created entirely in memory
+  bool mHaveInputEncoding;
+
+  bool mHasHadDefaultView;
+
+  // Whether style sheet change events will be dispatched for this document
+  bool mStyleSheetChangeEventsEnabled;
+
+  // Records whether we've done a document.open. If this is true, it's possible
+  // for nodes from this document to have outdated wrappers in their wrapper
+  // caches.
+  bool mDidDocumentOpen;
+
   // The document's script global object, the object from which the
   // document can get its script context and scope. This is the
   // *inner* window object.
@@ -1898,9 +2334,6 @@ protected:
   // associated IFRAME or CSP-protectable content, if existent. These are set at load time and
   // are immutable - see nsSandboxFlags.h for the possible flags.
   uint32_t mSandboxFlags;
-
-  // The root directionality of this document.
-  mozilla::directionality::Directionality mDirectionality;
 
   nsCString mContentLanguage;
 private:
@@ -1947,29 +2380,7 @@ protected:
 
   nsCOMPtr<nsIDocumentEncoder> mCachedEncoder;
 
-  struct FrameRequest {
-    FrameRequest(nsIFrameRequestCallback* aCallback,
-                 int32_t aHandle) :
-      mCallback(aCallback),
-      mHandle(aHandle)
-    {}
-
-    // Conversion operator so that we can append these to a
-    // FrameRequestCallbackList
-    operator nsIFrameRequestCallback* const () const { return mCallback; }
-
-    // Comparator operators to allow RemoveElementSorted with an
-    // integer argument on arrays of FrameRequest
-    bool operator==(int32_t aHandle) const {
-      return mHandle == aHandle;
-    }
-    bool operator<(int32_t aHandle) const {
-      return mHandle < aHandle;
-    }
-    
-    nsCOMPtr<nsIFrameRequestCallback> mCallback;
-    int32_t mHandle;
-  };
+  struct FrameRequest;
 
   nsTArray<FrameRequest> mFrameRequestCallbacks;
 
@@ -1995,7 +2406,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)
  * event is dispatched, if necessary, when the outermost mozAutoSubtreeModified
  * object is deleted.
  */
-class NS_STACK_CLASS mozAutoSubtreeModified
+class MOZ_STACK_CLASS mozAutoSubtreeModified
 {
 public:
   /**
@@ -2032,7 +2443,7 @@ private:
   nsCOMPtr<nsIDocument> mSubtreeOwner;
 };
 
-class NS_STACK_CLASS nsAutoSyncOperation
+class MOZ_STACK_CLASS nsAutoSyncOperation
 {
 public:
   nsAutoSyncOperation(nsIDocument* aDocument);
@@ -2044,10 +2455,10 @@ private:
 
 // XXX These belong somewhere else
 nsresult
-NS_NewHTMLDocument(nsIDocument** aInstancePtrResult);
+NS_NewHTMLDocument(nsIDocument** aInstancePtrResult, bool aLoadedAsData = false);
 
 nsresult
-NS_NewXMLDocument(nsIDocument** aInstancePtrResult);
+NS_NewXMLDocument(nsIDocument** aInstancePtrResult, bool aLoadedAsData = false);
 
 nsresult
 NS_NewSVGDocument(nsIDocument** aInstancePtrResult);
@@ -2055,14 +2466,8 @@ NS_NewSVGDocument(nsIDocument** aInstancePtrResult);
 nsresult
 NS_NewImageDocument(nsIDocument** aInstancePtrResult);
 
-#ifdef MOZ_MEDIA
 nsresult
 NS_NewVideoDocument(nsIDocument** aInstancePtrResult);
-#endif
-
-nsresult
-NS_NewDocumentFragment(nsIDOMDocumentFragment** aInstancePtrResult,
-                       nsNodeInfoManager *aNodeInfoManager);
 
 // Note: it's the caller's responsibility to create or get aPrincipal as needed
 // -- this method will not attempt to get a principal based on aDocumentURI.
@@ -2076,7 +2481,7 @@ NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
                   nsIURI* aBaseURI,
                   nsIPrincipal* aPrincipal,
                   bool aLoadedAsData,
-                  nsIScriptGlobalObject* aEventObject,
+                  nsIGlobalObject* aEventObject,
                   DocumentFlavor aFlavor);
 
 // This is used only for xbl documents created from the startup cache.

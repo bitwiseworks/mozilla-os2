@@ -15,6 +15,7 @@
 #include "nsCOMPtr.h"
 #include "plstr.h"
 #include "prprf.h"
+#include <algorithm>
 
 #ifndef USE_CREATE_INSTANCE
 #include "nsICacheService.h"
@@ -93,9 +94,9 @@ TestListener::OnStopRequest(nsIRequest *req, nsISupports *ctx, nsresult status)
 NS_IMETHODIMP
 TestListener::OnDataAvailable(nsIRequest *req, nsISupports *ctx,
                               nsIInputStream *is,
-                              uint32_t offset, uint32_t count)
+                              uint64_t offset, uint32_t count)
 {
-    printf("OnDataAvailable: offset=%u count=%u\n", offset, count);
+    printf("OnDataAvailable: offset=%llu count=%u\n", offset, count);
 
     if (!mFile) return NS_ERROR_FAILURE;
 
@@ -104,7 +105,7 @@ TestListener::OnDataAvailable(nsIRequest *req, nsISupports *ctx,
     uint32_t nread = 0;
 
     while (count) {
-        uint32_t amount = NS_MIN<uint32_t>(count, sizeof(buf));
+        uint32_t amount = std::min<uint32_t>(count, sizeof(buf));
 
         rv = is->Read(buf, amount, &nread);
         if (NS_FAILED(rv)) return rv;

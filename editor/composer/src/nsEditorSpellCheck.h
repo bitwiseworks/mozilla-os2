@@ -14,7 +14,6 @@
 #include "nsString.h"                   // for nsString
 #include "nsTArray.h"                   // for nsTArray
 #include "nscore.h"                     // for nsresult
-#include "prtypes.h"                    // for int32_t
 
 class nsIEditor;
 class nsISpellChecker;
@@ -26,10 +25,12 @@ class nsITextServicesFilter;
     { 0x93, 0x9a, 0xec, 0x63, 0x51, 0xee, 0xa0, 0xcc }\
 }
 
-class LastDictionary;
+class DictionaryFetcher;
 
 class nsEditorSpellCheck : public nsIEditorSpellCheck
 {
+  friend class DictionaryFetcher;
+
 public:
   nsEditorSpellCheck();
   virtual ~nsEditorSpellCheck();
@@ -39,10 +40,6 @@ public:
 
   /* Declare all methods in the nsIEditorSpellCheck interface */
   NS_DECL_NSIEDITORSPELLCHECK
-
-  static LastDictionary* gDictionaryStore;
-
-  static void ShutDown();
 
 protected:
   nsCOMPtr<nsISpellChecker> mSpellChecker;
@@ -62,7 +59,11 @@ protected:
 
   nsString mPreferredLang;
 
+  uint32_t mDictionaryFetcherGroup;
+
   bool mUpdateDictionaryRunning;
+
+  nsresult DictionaryFetched(DictionaryFetcher* aFetchState);
 
 public:
   void BeginUpdateDictionary() { mUpdateDictionaryRunning = true ;}

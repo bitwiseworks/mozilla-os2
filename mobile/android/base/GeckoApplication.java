@@ -4,72 +4,109 @@
 
 package org.mozilla.gecko;
 
-import android.app.Application;
+import org.mozilla.gecko.db.BrowserContract;
+import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.mozglue.GeckoLoader;
+import org.mozilla.gecko.util.Clipboard;
+import org.mozilla.gecko.util.HardwareUtils;
+import org.mozilla.gecko.util.ThreadUtils;
 
-import java.util.ArrayList;
+import android.app.Application;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 
 public class GeckoApplication extends Application {
 
-    private boolean mInBackground = false;
-    private ArrayList<ApplicationLifecycleCallbacks> mListeners;
+    private boolean mInited;
+    private boolean mInBackground;
+    private boolean mPausedGecko;
+    private boolean mNeedsRestart;
 
-    @Override
-    public void onCreate() {
+    private LightweightTheme mLightweightTheme;
+
+    protected void initialize() {
+        if (mInited)
+            return;
+
         // workaround for http://code.google.com/p/android/issues/detail?id=20915
         try {
             Class.forName("android.os.AsyncTask");
         } catch (ClassNotFoundException e) {}
 
-        super.onCreate();
+        mLightweightTheme = new LightweightTheme(this);
+
+        GeckoConnectivityReceiver.getInstance().init(getApplicationContext());
+        GeckoBatteryManager.getInstance().init(getApplicationContext());
+        GeckoBatteryManager.getInstance().start();
+        GeckoNetworkManager.getInstance().init(getApplicationContext());
+        MemoryMonitor.getInstance().init(getApplicationContext());
+
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                mNeedsRestart = true;
+            }
+        };
+        registerReceiver(receiver, new IntentFilter(Intent.ACTION_LOCALE_CHANGED));
+
+        mInited = true;
     }
 
-    public interface ApplicationLifecycleCallbacks {
-        public void onApplicationPause();
-        public void onApplicationResume();
-    }
-
-    public void addApplicationLifecycleCallbacks(ApplicationLifecycleCallbacks callback) {
-        if (mListeners == null)
-            mListeners = new ArrayList<ApplicationLifecycleCallbacks>();
-
-        mListeners.add(callback);
-    }
-
-    public void removeApplicationLifecycleCallbacks(ApplicationLifecycleCallbacks callback) {
-        if (mListeners == null)
-            return;
-
-        mListeners.remove(callback);
-    }
-
-    public void onActivityPause(GeckoActivity activity) {
-        if (activity.isGeckoActivityOpened())
-            return;
-
-        if (mListeners == null)
-            return;
-
+    protected void onActivityPause(GeckoActivityStatus activity) {
         mInBackground = true;
 
-        for (ApplicationLifecycleCallbacks listener: mListeners)
-            listener.onApplicationPause();
+        if ((activity.isFinishing() == false) &&
+            (activity.isGeckoActivityOpened() == false)) {
+            // Notify Gecko that we are pausing; the cache service will be
+            // shutdown, closing the disk cache cleanly. If the android
+            // low memory killer subsequently kills us, the disk cache will
+            // be left in a consistent state, avoiding costly cleanup and
+            // re-creation. 
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createAppBackgroundingEvent());
+            mPausedGecko = true;
+
+            ThreadUtils.postToBackgroundThread(new Runnable() {
+                @Override
+                public void run() {
+                    BrowserDB.expireHistory(getContentResolver(),
+                                            BrowserContract.ExpirePriority.NORMAL);
+                }
+            });
+        }
+        GeckoConnectivityReceiver.getInstance().stop();
+        GeckoNetworkManager.getInstance().stop();
     }
 
-    public void onActivityResume(GeckoActivity activity) {
-        // This is a misnomer. Should have been "wasGeckoActivityOpened".
-        if (activity.isGeckoActivityOpened())
-            return;
-
-        if (mListeners == null)
-            return;
-
-        for (ApplicationLifecycleCallbacks listener: mListeners)
-            listener.onApplicationResume();
+    protected void onActivityResume(GeckoActivityStatus activity) {
+        if (mPausedGecko) {
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createAppForegroundingEvent());
+            mPausedGecko = false;
+        }
+        GeckoConnectivityReceiver.getInstance().start();
+        GeckoNetworkManager.getInstance().start();
 
         mInBackground = false;
     }
 
+    protected boolean needsRestart() {
+        return mNeedsRestart;
+    }
+
+    @Override
+    public void onCreate() {
+        HardwareUtils.init(getApplicationContext());
+        Clipboard.init(getApplicationContext());
+        GeckoLoader.loadMozGlue(getApplicationContext());
+        super.onCreate();
+    }
+
     public boolean isApplicationInBackground() {
         return mInBackground;
+    }
+
+    public LightweightTheme getLightweightTheme() {
+        return mLightweightTheme;
     }
 }

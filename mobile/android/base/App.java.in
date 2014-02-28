@@ -6,59 +6,10 @@
 #filter substitution
 package @ANDROID_PACKAGE_NAME@;
 
-import android.view.MenuItem;
-
 import org.mozilla.gecko.BrowserApp;
-import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.R;
 
-public class App extends BrowserApp {
-    public int getLayout() { return R.layout.gecko_app; }
-
-    public String getPackageName() {
-        return "@ANDROID_PACKAGE_NAME@";
-    }
-
-    public String getContentProcessName() {
-        return "@MOZ_CHILD_PROCESS_NAME@";
-    }
-
-    protected String getDefaultProfileName() {
-      return "default";
-    }
-
-    public String getDefaultUAString() {
-        String deviceType = "Mobile";
-        if (GeckoAppShell.isTablet())
-            deviceType = "Tablet";
-        return "Mozilla/5.0 (Android; " + deviceType + "; rv:@MOZ_APP_VERSION@) Gecko/@MOZ_APP_VERSION@ Firefox/@MOZ_APP_VERSION@";
-    }
-
-    public String getUAStringForHost(String host) {
-        // With our standard UA String, we get a 200 response code and 
-        // client-side redirect from t.co. This bot-like UA gives us a 
-        // 301 response code
-        if ("t.co".equals(host))
-            return "Redirector/@MOZ_APP_VERSION@ (Android; rv:@MOZ_APP_VERSION@)";
-        return getDefaultUAString();
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-#ifdef MOZ_PROFILING
-        if (item.getItemId() == R.id.toggle_profiling) {
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("ToggleProfiling", null));
-            return true;
-        }
-#endif
-        return super.onOptionsItemSelected(item);
-    }
-
-#ifdef MOZ_LINKER_EXTRACT
-    @Override
-    public boolean linkerExtract() {
-        return true;
-    }
-#endif
-};
+/**
+ * This class serves only as a namespace wrapper for BrowserApp.
+ */
+public class App extends BrowserApp {}
 

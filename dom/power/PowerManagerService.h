@@ -16,6 +16,9 @@
 
 namespace mozilla {
 namespace dom {
+
+class ContentParent;
+
 namespace power {
 
 class PowerManagerService
@@ -26,12 +29,28 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPOWERMANAGERSERVICE
 
-  static already_AddRefed<nsIPowerManagerService> GetInstance();
+  static already_AddRefed<PowerManagerService> GetInstance();
 
   void Init();
 
   // Implement WakeLockObserver
   void Notify(const hal::WakeLockInformation& aWakeLockInfo);
+
+  /**
+   * Acquire a wake lock on behalf of a given process (aContentParent).
+   *
+   * This method stands in contrast to nsIPowerManagerService::NewWakeLock,
+   * which acquires a wake lock on behalf of the /current/ process.
+   *
+   * NewWakeLockOnBehalfOfProcess is different from NewWakeLock in that
+   *
+   *  - The wake lock unlocks itself if the /given/ process dies, and
+   *  - The /given/ process shows up in WakeLockInfo::lockingProcesses.
+   *
+   */
+  already_AddRefed<nsIDOMMozWakeLock>
+  NewWakeLockOnBehalfOfProcess(const nsAString& aTopic,
+                               ContentParent* aContentParent);
 
 private:
 
@@ -40,9 +59,13 @@ private:
   void ComputeWakeLockState(const hal::WakeLockInformation& aWakeLockInfo,
                             nsAString &aState);
 
+  void SyncProfile();
+
   static StaticRefPtr<PowerManagerService> sSingleton;
 
   nsTArray<nsCOMPtr<nsIDOMMozWakeLockListener> > mWakeLockListeners;
+  
+  int32_t mWatchdogTimeoutSecs;
 };
 
 } // namespace power

@@ -22,16 +22,25 @@
 #include "nsIGeolocationProvider.h"
 #include "nsIRadioInterfaceLayer.h"
 #include "nsString.h"
+#include "nsISettingsService.h"
 
 class nsIThread;
 
+#define GONK_GPS_GEOLOCATION_PROVIDER_CID \
+{ 0x48525ec5, 0x5a7f, 0x490a, { 0x92, 0x77, 0xba, 0x66, 0xe0, 0xd2, 0x2c, 0x8b } }
+
+#define GONK_GPS_GEOLOCATION_PROVIDER_CONTRACTID \
+"@mozilla.org/gonk-gps-geolocation-provider;1"
+
 class GonkGPSGeolocationProvider : public nsIGeolocationProvider
                                  , public nsIRILDataCallback
+                                 , public nsISettingsServiceCallback
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIGEOLOCATIONPROVIDER
   NS_DECL_NSIRILDATACALLBACK
+  NS_DECL_NSISETTINGSSERVICECALLBACK
 
   static already_AddRefed<GonkGPSGeolocationProvider> GetSingleton();
 
@@ -60,10 +69,13 @@ private:
   static AGpsCallbacks mAGPSCallbacks;
   static AGpsRilCallbacks mAGPSRILCallbacks;
 
+  int32_t GetDataConnectionState();
+  void SetAGpsDataConn(nsAString& aApn);
+  void RequestSettingValue(char* aKey);
   void Init();
   void SetupAGPS();
   void StartGPS();
-  void ShutdownNow();
+  void ShutdownGPS();
   void RequestDataConnection();
   void ReleaseDataConnection();
   void RequestSetID(uint32_t flags);
@@ -87,7 +99,6 @@ private:
   nsCOMPtr<nsIGeolocationUpdate> mLocationCallback;
   nsCOMPtr<nsIThread> mInitThread;
   nsCOMPtr<nsIRadioInterfaceLayer> mRIL;
-  nsAutoString mCid;
 };
 
 #endif /* GonkGPSGeolocationProvider_h */

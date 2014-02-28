@@ -8,16 +8,7 @@
 #include "mozGenericWordUtils.h"
 #include "nsString.h"
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(mozSpellI18NManager)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(mozSpellI18NManager)
-
-NS_INTERFACE_MAP_BEGIN(mozSpellI18NManager)
-  NS_INTERFACE_MAP_ENTRY(mozISpellI18NManager)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, mozISpellI18NManager)
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(mozSpellI18NManager)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_CYCLE_COLLECTION_0(mozSpellI18NManager)
+NS_IMPL_ISUPPORTS1(mozSpellI18NManager, mozISpellI18NManager)
 
 mozSpellI18NManager::mozSpellI18NManager()
 {
@@ -32,10 +23,10 @@ mozSpellI18NManager::~mozSpellI18NManager()
 /* mozISpellI18NUtil GetUtil (in wstring language); */
 NS_IMETHODIMP mozSpellI18NManager::GetUtil(const PRUnichar *aLanguage, mozISpellI18NUtil **_retval)
 {
- if( NULL == _retval) {
+ if( nullptr == _retval) {
    return NS_ERROR_NULL_POINTER;
  }
- *_retval = NULL;
+ *_retval = nullptr;
  nsAutoString lang;
  lang.Assign(aLanguage);
  if(lang.EqualsLiteral("en")){

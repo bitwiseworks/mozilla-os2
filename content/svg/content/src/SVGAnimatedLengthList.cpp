@@ -33,7 +33,7 @@ SVGAnimatedLengthList::SetBaseValueString(const nsAString& aValue)
   }
 
   // We don't need to call DidChange* here - we're only called by
-  // nsSVGElement::ParseAttribute under nsGenericElement::SetAttr,
+  // nsSVGElement::ParseAttribute under Element::SetAttr,
   // which takes care of notifying.
 
   rv = mBaseVal.CopyFrom(newBaseValue);
@@ -128,7 +128,7 @@ SVGAnimatedLengthList::ToSMILAttr(nsSVGElement *aSVGElement,
 nsresult
 SVGAnimatedLengthList::
   SMILAnimatedLengthList::ValueFromString(const nsAString& aStr,
-                               const nsISMILAnimationElement* /*aSrcElement*/,
+                               const dom::SVGAnimationElement* /*aSrcElement*/,
                                nsSMILValue& aValue,
                                bool& aPreventCachingOfSandwich) const
 {

@@ -34,84 +34,12 @@ namespace safebrowsing {
 
 Classifier::Classifier()
   : mFreshTime(45 * 60)
-  , mPerClientRandomize(true)
 {
 }
 
 Classifier::~Classifier()
 {
   Close();
-}
-
-/*
- * Generate a unique 32-bit key for this user, which we will
- * use to rehash all prefixes. This ensures that different users
- * will get hash collisions on different prefixes, which in turn
- * avoids that "unlucky" URLs get mysterious slowdowns, and that
- * the servers get spammed if any such URL should get slashdotted.
- * https://bugzilla.mozilla.org/show_bug.cgi?id=669407#c10
- */
-nsresult
-Classifier::InitKey()
-{
-  nsCOMPtr<nsIFile> storeFile;
-  nsresult rv = mStoreDirectory->Clone(getter_AddRefs(storeFile));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = storeFile->AppendNative(NS_LITERAL_CSTRING("classifier.hashkey"));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool exists;
-  rv = storeFile->Exists(&exists);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (!exists) {
-    // generate and store key
-    nsCOMPtr<nsIRandomGenerator> rg =
-      do_GetService("@mozilla.org/security/random-generator;1");
-    NS_ENSURE_STATE(rg);
-
-    uint8_t *temp;
-    nsresult rv = rg->GenerateRandomBytes(sizeof(mHashKey), &temp);
-    NS_ENSURE_SUCCESS(rv, rv);
-    memcpy(&mHashKey, temp, sizeof(mHashKey));
-    NS_Free(temp);
-
-    nsCOMPtr<nsIOutputStream> out;
-    rv = NS_NewSafeLocalFileOutputStream(getter_AddRefs(out), storeFile,
-                                       -1, -1, 0);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    uint32_t written;
-    rv = out->Write(reinterpret_cast<char*>(&mHashKey), sizeof(uint32_t), &written);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsCOMPtr<nsISafeOutputStream> safeOut = do_QueryInterface(out);
-    rv = safeOut->Finish();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    LOG(("Initialized classifier, key = %X", mHashKey));
-  } else {
-    // read key
-    nsCOMPtr<nsIInputStream> inputStream;
-    rv = NS_NewLocalFileInputStream(getter_AddRefs(inputStream), storeFile,
-                                    -1, -1, 0);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(inputStream);
-    nsresult rv = seekable->Seek(nsISeekableStream::NS_SEEK_SET, 0);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    void *buffer = &mHashKey;
-    rv = NS_ReadInputStreamToBuffer(inputStream,
-                                    &buffer,
-                                    sizeof(uint32_t));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    LOG(("Loaded classifier key = %X", mHashKey));
-  }
-
-  return NS_OK;
 }
 
 nsresult
@@ -127,7 +55,7 @@ Classifier::SetupPathNames()
   // Make sure LookupCaches (which are persistent and survive updates)
   // are reading/writing in the right place. We will be moving their
   // files "underneath" them during backup/restore.
-  for (uint32 i = 0; i < mLookupCaches.Length(); i++) {
+  for (uint32_t i = 0; i < mLookupCaches.Length(); i++) {
     mLookupCaches[i]->UpdateDirHandle(mStoreDirectory);
   }
 
@@ -198,13 +126,6 @@ Classifier::Open(nsIFile& aCacheDirectory)
   mCryptoHash = do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = InitKey();
-  if (NS_FAILED(rv)) {
-    // Without a usable key the database is useless
-    Reset();
-    return NS_ERROR_FAILURE;
-  }
-
   mTableFreshness.Init();
 
   // Build the list of know urlclassifier lists
@@ -240,7 +161,7 @@ Classifier::TableRequest(nsACString& aResult)
 {
   nsTArray<nsCString> tables;
   ActiveTables(tables);
-  for (uint32 i = 0; i < tables.Length(); i++) {
+  for (uint32_t i = 0; i < tables.Length(); i++) {
     nsAutoPtr<HashStore> store(new HashStore(tables[i], mStoreDirectory));
     if (!store)
       continue;
@@ -257,7 +178,7 @@ Classifier::TableRequest(nsACString& aResult)
 
     if (adds.Length() > 0) {
       aResult.Append("a:");
-      nsCAutoString addList;
+      nsAutoCString addList;
       adds.Serialize(addList);
       aResult.Append(addList);
     }
@@ -266,7 +187,7 @@ Classifier::TableRequest(nsACString& aResult)
       if (adds.Length() > 0)
         aResult.Append(':');
       aResult.Append("s:");
-      nsCAutoString subList;
+      nsAutoCString subList;
       subs.Serialize(subList);
       aResult.Append(subList);
     }
@@ -313,7 +234,7 @@ Classifier::Check(const nsACString& aSpec, LookupResultArray& aResults)
 
 #if DEBUG && defined(PR_LOGGING)
     if (LOG_ENABLED()) {
-      nsCAutoString checking;
+      nsAutoCString checking;
       lookupHash.ToString(checking);
       LOG(("Checking %s (%X)", checking.get(), lookupHash.ToUint32()));
     }
@@ -321,9 +242,7 @@ Classifier::Check(const nsACString& aSpec, LookupResultArray& aResults)
     for (uint32_t i = 0; i < cacheArray.Length(); i++) {
       LookupCache *cache = cacheArray[i];
       bool has, complete;
-      Prefix codedPrefix;
-      rv = cache->Has(lookupHash, hostKey, mHashKey,
-                      &has, &complete, &codedPrefix);
+      rv = cache->Has(lookupHash, &has, &complete);
       NS_ENSURE_SUCCESS(rv, rv);
       if (has) {
         LookupResult *result = aResults.AppendElement();
@@ -345,7 +264,6 @@ Classifier::Check(const nsACString& aSpec, LookupResultArray& aResults)
              age));
 
         result->hash.complete = lookupHash;
-        result->mCodedPrefix = codedPrefix;
         result->mComplete = complete;
         result->mFresh = (age < mFreshTime);
         result->mTableName.Assign(cache->TableName());
@@ -376,7 +294,7 @@ Classifier::ApplyUpdates(nsTArray<TableUpdate*>* aUpdates)
 
   LOG(("Applying table updates."));
 
-  for (uint32 i = 0; i < aUpdates->Length(); i++) {
+  for (uint32_t i = 0; i < aUpdates->Length(); i++) {
     // Previous ApplyTableUpdates() may have consumed this update..
     if ((*aUpdates)[i]) {
       // Run all updates for one table
@@ -420,7 +338,7 @@ Classifier::ApplyUpdates(nsTArray<TableUpdate*>* aUpdates)
 nsresult
 Classifier::MarkSpoiled(nsTArray<nsCString>& aTables)
 {
-  for (uint32 i = 0; i < aTables.Length(); i++) {
+  for (uint32_t i = 0; i < aTables.Length(); i++) {
     LOG(("Spoiling table: %s", aTables[i].get()));
     // Spoil this table by marking it as no known freshness
     mTableFreshness.Remove(aTables[i]);
@@ -436,11 +354,11 @@ Classifier::MarkSpoiled(nsTArray<nsCString>& aTables)
 void
 Classifier::DropStores()
 {
-  for (uint32 i = 0; i < mHashStores.Length(); i++) {
+  for (uint32_t i = 0; i < mHashStores.Length(); i++) {
     delete mHashStores[i];
   }
   mHashStores.Clear();
-  for (uint32 i = 0; i < mLookupCaches.Length(); i++) {
+  for (uint32_t i = 0; i < mLookupCaches.Length(); i++) {
     delete mLookupCaches[i];
   }
   mLookupCaches.Clear();
@@ -454,7 +372,7 @@ Classifier::RegenActiveTables()
   nsTArray<nsCString> foundTables;
   ScanStoreDir(foundTables);
 
-  for (uint32 i = 0; i < foundTables.Length(); i++) {
+  for (uint32_t i = 0; i < foundTables.Length(); i++) {
     nsAutoPtr<HashStore> store(new HashStore(nsCString(foundTables[i]), mStoreDirectory));
     if (!store)
       return NS_ERROR_OUT_OF_MEMORY;
@@ -634,9 +552,9 @@ Classifier::ApplyTableUpdates(nsTArray<TableUpdate*>* aUpdates,
 
   // take the quick exit if there is no valid update for us
   // (common case)
-  uint32 validupdates = 0;
+  uint32_t validupdates = 0;
 
-  for (uint32 i = 0; i < aUpdates->Length(); i++) {
+  for (uint32_t i = 0; i < aUpdates->Length(); i++) {
     TableUpdate *update = aUpdates->ElementAt(i);
     if (!update || !update->TableName().Equals(store->TableName()))
       continue;
@@ -669,11 +587,11 @@ Classifier::ApplyTableUpdates(nsTArray<TableUpdate*>* aUpdates,
   NS_ENSURE_SUCCESS(rv, rv);
   AddPrefixHashes.Clear();
 
-  uint32 applied = 0;
+  uint32_t applied = 0;
   bool updateFreshness = false;
   bool hasCompletes = false;
 
-  for (uint32 i = 0; i < aUpdates->Length(); i++) {
+  for (uint32_t i = 0; i < aUpdates->Length(); i++) {
     TableUpdate *update = aUpdates->ElementAt(i);
     if (!update || !update->TableName().Equals(store->TableName()))
       continue;
@@ -752,14 +670,13 @@ Classifier::ApplyTableUpdates(nsTArray<TableUpdate*>* aUpdates,
 LookupCache *
 Classifier::GetLookupCache(const nsACString& aTable)
 {
-  for (uint32 i = 0; i < mLookupCaches.Length(); i++) {
+  for (uint32_t i = 0; i < mLookupCaches.Length(); i++) {
     if (mLookupCaches[i]->TableName().Equals(aTable)) {
       return mLookupCaches[i];
     }
   }
 
-  LookupCache *cache = new LookupCache(aTable, mStoreDirectory,
-                                       mPerClientRandomize);
+  LookupCache *cache = new LookupCache(aTable, mStoreDirectory);
   nsresult rv = cache->Init();
   if (NS_FAILED(rv)) {
     return nullptr;
@@ -778,7 +695,7 @@ Classifier::GetLookupCache(const nsACString& aTable)
 nsresult
 Classifier::ReadNoiseEntries(const Prefix& aPrefix,
                              const nsACString& aTableName,
-                             int32_t aCount,
+                             uint32_t aCount,
                              PrefixArray* aNoiseEntries)
 {
   LookupCache *cache = GetLookupCache(aTableName);
@@ -790,7 +707,7 @@ Classifier::ReadNoiseEntries(const Prefix& aPrefix,
   nsresult rv = cache->GetPrefixes(&prefixes);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int32_t idx = prefixes.BinaryIndexOf(aPrefix.ToUint32());
+  uint32_t idx = prefixes.BinaryIndexOf(aPrefix.ToUint32());
 
   if (idx == nsTArray<uint32_t>::NoIndex) {
     NS_WARNING("Could not find prefix in PrefixSet during noise lookup");
@@ -799,7 +716,7 @@ Classifier::ReadNoiseEntries(const Prefix& aPrefix,
 
   idx -= idx % aCount;
 
-  for (int32_t i = 0; (i < aCount) && ((idx+i) < prefixes.Length()); i++) {
+  for (uint32_t i = 0; (i < aCount) && ((idx+i) < prefixes.Length()); i++) {
     Prefix newPref;
     newPref.FromUint32(prefixes[idx+i]);
     if (newPref != aPrefix) {
@@ -810,5 +727,5 @@ Classifier::ReadNoiseEntries(const Prefix& aPrefix,
   return NS_OK;
 }
 
-}
-}
+} // namespace safebrowsing
+} // namespace mozilla

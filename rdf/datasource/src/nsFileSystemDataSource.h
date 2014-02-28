@@ -10,10 +10,8 @@
 #include "nsIRDFLiteral.h"
 #include "nsIRDFResource.h"
 #include "nsIRDFService.h"
-#include "nsISupportsArray.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
-#include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 
 #if defined(XP_UNIX) || defined(XP_OS2) || defined(XP_WIN)
@@ -23,8 +21,7 @@
 class FileSystemDataSource MOZ_FINAL : public nsIRDFDataSource
 {
 public:
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_CLASS(FileSystemDataSource)
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIRDFDATASOURCE
 
     static nsresult Create(nsISupports* aOuter,

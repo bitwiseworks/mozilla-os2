@@ -4,7 +4,7 @@
 
 "use strict";
 
-let EXPORTED_SYMBOLS = ["WebappsHandler"];
+this.EXPORTED_SYMBOLS = ["WebappsHandler"];
 
 let Cc = Components.classes;
 let Ci = Components.interfaces;
@@ -15,7 +15,7 @@ Cu.import("resource://gre/modules/Webapps.jsm");
 Cu.import("resource://gre/modules/WebappsInstaller.jsm");
 Cu.import("resource://gre/modules/WebappOSUtils.jsm");
 
-let WebappsHandler = {
+this.WebappsHandler = {
   init: function() {
     Services.obs.addObserver(this, "webapps-ask-install", false);
     Services.obs.addObserver(this, "webapps-launch", false);
@@ -24,10 +24,11 @@ let WebappsHandler = {
 
   observe: function(subject, topic, data) {
     data = JSON.parse(data);
+    data.mm = subject;
 
     switch (topic) {
       case "webapps-ask-install":
-        let chromeWin = this._getWindowByOuterId(data.oid);
+        let chromeWin = Services.wm.getOuterWindowById(data.oid);
         if (chromeWin)
           this.doInstall(data, chromeWin);
         break;
@@ -38,18 +39,6 @@ let WebappsHandler = {
         WebappOSUtils.uninstall(data);
         break;
     }
-  },
-
-  _getWindowByOuterId: function(outerId) {
-    let someWindow = Services.wm.getMostRecentWindow(null);
-    if (!someWindow) {
-      return null;
-    }
-
-    let content = someWindow.QueryInterface(Ci.nsIInterfaceRequestor).
-                             getInterface(Ci.nsIDOMWindowUtils).
-                             getOuterWindowWithId(outerId);
-    return content;
   },
 
   doInstall: function(data, window) {

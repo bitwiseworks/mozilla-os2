@@ -15,7 +15,6 @@
 #include "nsNetCID.h"
 #include "nsCExternalHandlerService.h"
 #include "nsCycleCollectionParticipant.h"
-#include "mozIAsyncFavicons.h"
 #include "mozilla/Preferences.h"
 #include "JumpListBuilder.h"
 #include "WinUtils.h"
@@ -35,19 +34,11 @@ NS_IMPL_ISUPPORTS_INHERITED1(JumpListLink,
                              JumpListItem,
                              nsIJumpListLink)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(JumpListShortcut)
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(JumpListShortcut)
   NS_INTERFACE_MAP_ENTRY(nsIJumpListShortcut)
 NS_INTERFACE_MAP_END_INHERITING(JumpListItem)
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(JumpListShortcut)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mHandlerApp)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(JumpListShortcut)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mHandlerApp)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_1(JumpListShortcut, mHandlerApp)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(JumpListShortcut)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(JumpListShortcut)
@@ -135,7 +126,7 @@ NS_IMETHODIMP JumpListLink::CompareHash(nsIURI *aUri, bool *aResult)
 
   NS_ENSURE_ARG_POINTER(aUri);
 
-  nsCAutoString hash1, hash2;
+  nsAutoCString hash1, hash2;
 
   rv = mozilla::widget::FaviconHelper::HashURI(mCryptoHash, mURI, hash1);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -566,7 +557,7 @@ nsresult JumpListLink::GetShellItem(nsCOMPtr<nsIJumpListItem>& item, nsRefPtr<IS
   rv = link->GetUri(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   rv = uri->GetSpec(spec);
   NS_ENSURE_SUCCESS(rv, rv);
 

@@ -12,19 +12,11 @@ include $(DEPTH)/config/autoconf.mk
 include $(topsrcdir)/rdf/util/src/objs.mk
 include $(topsrcdir)/intl/unicharutil/util/objs.mk
 
-MODULE = libxul
-LIBRARY_NAME = xul
+MSVC_ENABLE_PGO := 1
 FORCE_SHARED_LIB = 1
 MOZILLA_INTERNAL_API = 1
 
-ifdef MOZ_METRO
-DIRS += winvccorlib
-endif
-
 ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
-# This is going to be a framework named "XUL", not an ordinary library named
-# "libxul.dylib"
-LIBRARY_NAME=XUL
 # Setting MAKE_FRAMEWORK makes DLL_PREFIX and DLL_SUFFIX be ignored when
 # setting SHARED_LIBRARY; we need to leave DLL_PREFIX and DLL_SUFFIX
 # as-is so that dependencies of the form -ltracemalloc still work.
@@ -33,59 +25,51 @@ endif
 
 VPATH += $(topsrcdir)/build/
 
-ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_)
-CPPSRCS += dlldeps-xul.cpp
-endif
-
-ifeq ($(OS_ARCH),OS2)
-CPPSRCS += dlldeps-xul.cpp
-endif
-
 SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/media/kiss_fft/$(LIB_PREFIX)kiss_fft.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/components/osfile/$(LIB_PREFIX)osfile_s.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/xre/$(LIB_PREFIX)xulapp_s.$(LIB_SUFFIX) \
   $(NULL)
+
+ifdef ACCESSIBILITY
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/accessible/src/base/$(LIB_PREFIX)accessibility_base_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/generic/$(LIB_PREFIX)accessibility_generic_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/html/$(LIB_PREFIX)accessibility_html_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/xpcom/$(LIB_PREFIX)accessibility_xpcom_s.$(LIB_SUFFIX) \
+  $(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/accessible/src/windows/msaa/$(LIB_PREFIX)accessibility_toolkit_msaa_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/windows/ia2/$(LIB_PREFIX)accessibility_toolkit_ia2_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/windows/sdn/$(LIB_PREFIX)accessibility_toolkit_sdn_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/windows/uia/$(LIB_PREFIX)accessibility_toolkit_uia_s.$(LIB_SUFFIX) \
+  $(NULL)
+else
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/accessible/src/$(LIB_PREFIX)accessibility_toolkit_s.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+
+ifdef MOZ_XUL
+SHARED_LIBRARY_LIBS += $(DEPTH)/accessible/src/xul/$(LIB_PREFIX)accessibility_xul_s.$(LIB_SUFFIX)
+endif
+endif
 
 SHARED_LIBRARY_LIBS += \
   $(foreach component,$(COMPONENT_LIBS),$(DEPTH)/staticlib/components/$(LIB_PREFIX)$(component).$(LIB_SUFFIX)) \
   $(foreach lib,$(STATIC_LIBS),$(DEPTH)/staticlib/$(LIB_PREFIX)$(lib).$(LIB_SUFFIX)) \
   $(NULL)
 
-CPPSRCS += \
-  nsStaticXULComponents.cpp \
-  $(NULL)
-
-ifeq ($(OS_ARCH),WINNT)
-CPPSRCS += \
-  nsDllMain.cpp \
-  $(NULL)
-endif
-
 ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_)
-CPPSRCS += \
-  nsGFXDeps.cpp \
-  $(NULL)
-
 RCINCLUDE = xulrunner.rc
-
-ifndef MOZ_NATIVE_ZLIB
-CPPSRCS += dlldeps-zlib.cpp
-endif
 
 LOCAL_INCLUDES += -I$(topsrcdir)/widget/windows
 LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/base
 endif
 
 ifeq ($(OS_ARCH),OS2)
-
-CPPSRCS += \
-  nsGFXDeps.cpp \
-  $(NULL)
-
-ifndef MOZ_NATIVE_ZLIB
-CPPSRCS += dlldeps-zlib.cpp
-endif
-
 RESFILE = xulrunos2.res
 RCFLAGS += -i $(topsrcdir)/widget/os2
 
@@ -114,6 +98,18 @@ ifdef MOZ_B2G_BT #{
 STATIC_LIBS += mozdbus_s
 endif #}
 
+ifneq ($(strip $(MOZ_B2G_RIL)$(MOZ_B2G_BT)),) #{
+STATIC_LIBS += mozipcunixsocket_s
+endif #}
+
+ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+STATIC_LIBS += moznetd_s
+endif
+
+ifdef MOZ_B2G_CAMERA #{
+OS_LIBS += -lstagefright -lstagefright_omx
+endif #}
+
 ifdef MOZ_IPDL_TESTS
 STATIC_LIBS += ipdlunittest_s
 endif
@@ -121,6 +117,13 @@ endif
 ifeq (Linux,$(OS_ARCH))
 ifneq (Android,$(OS_TARGET))
 OS_LIBS += -lrt
+EXTRA_DSO_LDOPTS += -Wl,-version-script,symverscript
+
+symverscript: symverscript.in
+	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
+		-DVERSION="$(LIBRARY_NAME)$(MOZILLA_SYMBOLVERSION)" $< > $@
+
+EXTRA_DEPS += symverscript
 endif
 endif
 
@@ -143,6 +146,7 @@ COMPONENT_LIBS += \
   htmlpars \
   identity \
   imglib2 \
+  mediasniffer \
   gkgfx \
   gklayout \
   docshell \
@@ -163,6 +167,7 @@ COMPONENT_LIBS += \
   storagecomps \
   rdf \
   windowds \
+  diskspacewatcher \
   $(NULL)
 
 ifdef BUILD_CTYPES
@@ -177,7 +182,7 @@ COMPONENT_LIBS += \
   $(NULL)
 
 ifdef MOZ_XUL
-ifdef MOZ_ENABLE_GTK2
+ifdef MOZ_ENABLE_GTK
 COMPONENT_LIBS += \
   unixproxy \
   $(NULL)
@@ -201,6 +206,12 @@ endif
 ifneq (,$(filter windows,$(MOZ_WIDGET_TOOLKIT)))
 COMPONENT_LIBS += \
   windowsproxy \
+  $(NULL)
+endif
+
+ifneq (,$(filter android,$(MOZ_WIDGET_TOOLKIT)))
+COMPONENT_LIBS += \
+  androidproxy \
   $(NULL)
 endif
 
@@ -254,6 +265,10 @@ COMPONENT_LIBS += \
 	$(NULL)
 endif
 
+ifdef MOZ_ENABLE_GTK3
+COMPONENT_LIBS += widget_gtk3
+endif
+
 ifdef MOZ_ENABLE_GTK2
 COMPONENT_LIBS += widget_gtk2
 endif
@@ -265,7 +280,7 @@ endif
 endif
 
 # Platform-specific icon channel stuff - supported mostly-everywhere
-ifneq (,$(filter windows os2 mac cocoa gtk2 qt android,$(MOZ_WIDGET_TOOLKIT)))
+ifneq (,$(filter windows os2 mac cocoa gtk2 gtk3 qt android,$(MOZ_WIDGET_TOOLKIT)))
 DEFINES += -DICON_DECODER
 COMPONENT_LIBS += imgicon
 endif
@@ -287,6 +302,9 @@ endif
 
 ifeq (windows,$(MOZ_WIDGET_TOOLKIT))
 COMPONENT_LIBS += widget_windows
+ifdef MOZ_METRO
+COMPONENT_LIBS += widget_winrt
+endif
 endif
 ifeq (os2,$(MOZ_WIDGET_TOOLKIT))
 COMPONENT_LIBS += wdgtos2
@@ -296,10 +314,6 @@ COMPONENT_LIBS += widget_mac
 endif
 ifeq (qt,$(MOZ_WIDGET_TOOLKIT))
 COMPONENT_LIBS += widget_qt
-endif
-
-ifdef ACCESSIBILITY
-COMPONENT_LIBS += accessibility
 endif
 
 ifdef MOZ_ENABLE_XREMOTE
@@ -322,6 +336,11 @@ ifdef MOZ_DEBUG
 ifdef ENABLE_TESTS
 COMPONENT_LIBS += gkdebug
 endif
+endif
+
+ifdef MOZ_GIO_COMPONENT
+DEFINES += -DMOZ_GIO_COMPONENT
+COMPONENT_LIBS += nkgio
 endif
 
 ifdef MOZ_APP_COMPONENT_LIBS
@@ -369,16 +388,41 @@ ifndef MOZ_TREE_PIXMAN
 EXTRA_DSO_LDOPTS += $(MOZ_PIXMAN_LIBS)
 endif
 
-EXTRA_DSO_LDOPTS += $(call EXPAND_LIBNAME_PATH,gkmedias,$(DIST)/lib) 
+ifdef MOZ_DMD
+EXTRA_DSO_LDOPTS += $(call EXPAND_LIBNAME_PATH,dmd,$(DIST)/lib)
+endif
 
-ifdef MOZ_SYDNEYAUDIO
-ifeq ($(OS_ARCH),Linux)
+EXTRA_DSO_LDOPTS += $(call EXPAND_LIBNAME_PATH,gkmedias,$(DIST)/lib)
+
+ifdef MOZ_WEBRTC
+ifdef MOZ_PEERCONNECTION
+COMPONENT_LIBS += peerconnection
+endif
+ifdef MOZ_WEBRTC_SIGNALING
+EXTRA_DSO_LDOPTS += \
+  $(DEPTH)/media/mtransport/build/$(LIB_PREFIX)mtransport.$(LIB_SUFFIX) \
+  $(DEPTH)/media/webrtc/signaling/signaling_ecc/$(LIB_PREFIX)ecc.$(LIB_SUFFIX) \
+  $(DEPTH)/media/webrtc/signaling/signaling_sipcc/$(LIB_PREFIX)sipcc.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+ifdef MOZ_WEBRTC_IN_LIBXUL
+include $(topsrcdir)/media/webrtc/shared_libs.mk
+EXTRA_DSO_LDOPTS += $(WEBRTC_LIBS)
+ifeq (WINNT,$(OS_TARGET))
+EXTRA_DSO_LDOPTS += \
+  -LIBPATH:"$(MOZ_DIRECTX_SDK_PATH)/lib/$(MOZ_DIRECTX_SDK_CPU_SUFFIX)" \
+  $(NULL)
+OS_LIBS += $(call EXPAND_LIBNAME,secur32 crypt32 iphlpapi strmiids dmoguids wmcodecdspuuid amstrmid msdmo wininet)
+endif
+endif
+endif
+
+
+ifdef MOZ_CUBEB
+ifdef MOZ_ALSA
 EXTRA_DSO_LDOPTS += $(MOZ_ALSA_LIBS)
 endif
-endif
-
 ifdef MOZ_PULSEAUDIO
-ifdef MOZ_CUBEB
 EXTRA_DSO_LDOPTS += $(MOZ_PULSEAUDIO_LIBS)
 endif
 endif
@@ -401,20 +445,23 @@ OS_LIBS += \
   -lcutils \
   -lsysutils \
   -lcamera_client \
-  -lbinder \
   -lsensorservice \
   -ldbus \
+  -lstagefright \
+  -lstagefright_foundation \
+  -lstagefright_omx \
+  -lbinder \
+  -lgui \
   $(NULL)
+endif
+
+ifdef MOZ_WMF
+OS_LIBS += $(call EXPAND_LIBNAME,mfuuid wmcodecdspuuid strmiids)
 endif
 
 EXTRA_DEPS += \
   $(topsrcdir)/intl/unicharutil/util/objs.mk \
   $(topsrcdir)/rdf/util/src/objs.mk \
-  $(NULL)
-
-CPPSRCS += \
-  $(INTL_UNICHARUTIL_UTIL_LCPPSRCS) \
-  $(RDF_UTIL_SRC_LCPPSRCS) \
   $(NULL)
 
 GARBAGE += \
@@ -444,7 +491,7 @@ endif
 endif
 endif
 
-EXTRA_DSO_LDOPTS += $(LIBS_DIR) $(EXTRA_DSO_LIBS)
+EXTRA_DSO_LDOPTS += $(LIBS_DIR)
 
 DEFINES += -DIMPL_XREAPI
 
@@ -459,27 +506,6 @@ OS_LIBS += \
   -F/System/Library/PrivateFrameworks -framework CoreUI \
   $(TK_LIBS) \
   $(NULL)
-endif
-
-ifeq ($(OS_ARCH),Darwin)
-ifdef MOZ_SYDNEYAUDIO
-OS_LIBS += \
-  -framework Carbon \
-  -framework CoreAudio \
-  -framework AudioToolbox \
-  -framework AudioUnit \
-  -framework IOKit \
-  -framework Foundation \
-  -framework AppKit \
-  -framework Security \
-  $(NULL)
-endif
-endif
-
-ifneq (,$(filter NetBSD OpenBSD,$(OS_ARCH)))
-ifdef MOZ_SYDNEYAUDIO
-EXTRA_DSO_LDOPTS += -lossaudio
-endif
 endif
 
 ifeq (OpenBSD,$(OS_ARCH))
@@ -500,8 +526,9 @@ ifdef MOZ_ENABLE_DBUS
 EXTRA_DSO_LDOPTS += $(MOZ_DBUS_GLIB_LIBS)
 endif
 
-ifeq (gtk2,$(MOZ_WIDGET_TOOLKIT))
-EXTRA_DSO_LDOPTS += $(XLDFLAGS) $(XLIBS) $(XEXT_LIBS) $(XCOMPOSITE_LIBS) $(MOZ_PANGO_LIBS) $(MOZ_GTK2_LIBS) $(XT_LIBS) -lgthread-2.0
+ifdef MOZ_WIDGET_GTK
+EXTRA_DSO_LDOPTS += $(TK_LIBS)
+EXTRA_DSO_LDOPTS += $(XLDFLAGS) $(XLIBS) $(XEXT_LIBS) $(XCOMPOSITE_LIBS) $(MOZ_PANGO_LIBS) $(XT_LIBS) -lgthread-2.0
 EXTRA_DSO_LDOPTS += $(FT2_LIBS)
 endif
 
@@ -533,13 +560,19 @@ EXTRA_DSO_LDOPTS += -lelf -ldemangle
 endif
 endif
 
-ifeq ($(OS_ARCH),WINNT)
-OS_LIBS += $(call EXPAND_LIBNAME,shell32 ole32 version winspool comdlg32 imm32 msimg32 shlwapi psapi ws2_32 dbghelp rasapi32 rasdlg iphlpapi uxtheme setupapi secur32 sensorsapi portabledeviceguids windowscodecs)
-ifdef MOZ_CRASHREPORTER
-OS_LIBS += $(call EXPAND_LIBNAME,wininet)
+ifneq (,$(filter DragonFly FreeBSD NetBSD OpenBSD,$(OS_ARCH)))
+OS_LIBS += $(call EXPAND_LIBNAME,kvm)
+# keep `environ' unresolved, see bug 14426 for binutils
+EXTRA_DSO_LDOPTS += -Wl,--warn-unresolved-symbols
 endif
+
+ifeq ($(OS_ARCH),WINNT)
+OS_LIBS += $(call EXPAND_LIBNAME,shell32 ole32 version winspool comdlg32 imm32 msimg32 shlwapi psapi ws2_32 dbghelp rasapi32 rasdlg iphlpapi uxtheme setupapi secur32 sensorsapi portabledeviceguids windowscodecs wininet)
 ifdef ACCESSIBILITY
 OS_LIBS += $(call EXPAND_LIBNAME,oleacc)
+endif
+ifdef MOZ_METRO
+OS_LIBS += $(call EXPAND_LIBNAME,uiautomationcore runtimeobject)
 endif
 ifdef _MSC_VER
 OS_LIBS += $(call EXPAND_LIBNAME,delayimp)
@@ -551,6 +584,7 @@ EXTRA_DSO_LDOPTS += \
   -DELAYLOAD:comdlg32.dll \
   -DELAYLOAD:winspool.drv \
   -DELAYLOAD:secur32.dll \
+  -DELAYLOAD:wininet.dll \
   $(NULL)
 
 # See nsDllMain for an explanation
@@ -562,10 +596,25 @@ EXTRA_DSO_LDOPTS += -DELAYLOAD:VCCORLIB$(CRTDLLVERSION).DLL
 endif
 EXTRA_DSO_LDOPTS += -DELAYLOAD:API-MS-WIN-CORE-WINRT-L$(CRTEXPDLLVERSION).DLL
 EXTRA_DSO_LDOPTS += -DELAYLOAD:API-MS-WIN-CORE-WINRT-STRING-L$(CRTEXPDLLVERSION).DLL
+EXTRA_DSO_LDOPTS += -DELAYLOAD:uiautomationcore.dll
 endif
 
 ifdef ACCESSIBILITY
 EXTRA_DSO_LDOPTS += -DELAYLOAD:oleacc.dll
+endif
+ifdef MOZ_WEBRTC_IN_LIBXUL
+EXTRA_DSO_LDOPTS += -DELAYLOAD:msdmo.dll
+endif
+endif
+ifdef MOZ_GAMEPAD
+ifndef GNU_CC
+DXSDK := $(subst \,/,$(MOZ_DIRECTX_SDK_PATH))/Lib/$(MOZ_DIRECTX_SDK_CPU_SUFFIX)
+OS_LIBS += \
+  "$(DXSDK)/dxguid.lib" \
+  "$(DXSDK)/dinput8.lib" \
+  $(NULL)
+else
+OS_LIBS += $(call EXPAND_LIBNAME,dxguid dinput8)
 endif
 endif
 endif # WINNT
@@ -578,9 +627,33 @@ ifdef MOZ_ENABLE_QT
 EXTRA_DSO_LDOPTS += $(MOZ_QT_LDFLAGS) $(XEXT_LIBS)
 endif
 
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 ifdef MOZ_GSTREAMER
 EXTRA_DSO_LDOPTS += $(GSTREAMER_LIBS)
 endif
+endif
+
+# Generate GDB pretty printer-autoload files only on Linux. OSX's GDB is
+# too old to support Python pretty-printers; if this changes, we could make
+# this 'ifdef GNU_CC'.
+ifeq (Linux,$(OS_ARCH))
+# Create a GDB Python auto-load file alongside the libxul shared library in
+# the build directory.
+PP_TARGETS += LIBXUL_AUTOLOAD
+LIBXUL_AUTOLOAD = libxul.so-gdb.py.in
+LIBXUL_AUTOLOAD_FLAGS := -Dtopsrcdir=$(abspath $(topsrcdir))
+endif
+
+ifdef MAKE_FRAMEWORK
+EFFECTIVE_LIB_PREFIX=
+EFFECTIVE_LIB_SUFFIX=
+else
+EFFECTIVE_LIB_PREFIX=$(DLL_PREFIX)
+EFFECTIVE_LIB_SUFFIX=$(DLL_SUFFIX)
+endif
+
+GTEST_LIB = $(EFFECTIVE_LIB_PREFIX)gtest/$(EFFECTIVE_LIB_PREFIX)$(LIBRARY_NAME)$(EFFECTIVE_LIB_SUFFIX)
+EXTRA_MDDEPEND_FILES = $(GTEST_LIB).pp
 
 include $(topsrcdir)/config/rules.mk
 
@@ -608,11 +681,6 @@ ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 OS_LIBS += $(call EXPAND_LIBNAME,usp10 oleaut32)
 endif
 
-ifeq ($(OS_ARCH),OpenBSD)
-# Needed by nsAuthGSSAPI
-EXTRA_DSO_LDOPTS += -lkrb5 -lcrypto
-endif
-
 ifdef MOZ_DEBUG
 ifdef ENABLE_TESTS
 DEFINES += -DENABLE_LAYOUTDEBUG
@@ -623,3 +691,38 @@ ifeq (WINNT_1,$(OS_TARGET)_$(MOZ_PROFILE_USE))
 # Wrap linker to measure peak virtual memory usage.
 LD := $(PYTHON) $(topsrcdir)/build/link.py $(CURDIR)/linker-vsize $(LD)
 endif
+
+ifndef LINK_GTEST
+libs:: $(FINAL_TARGET)/dependentlibs.list
+else
+libs::
+endif
+
+.PHONY: gtestxul
+
+$(FINAL_TARGET)/dependentlibs.list.gtest: $(FINAL_TARGET)/dependentlibs.list
+	sed -e "s|$(SHARED_LIBRARY)|gtest/$(SHARED_LIBRARY)|" $< > $@
+
+# Remove this target when actually linking gtest to prevent redefining
+# the implicit rules.mk target
+ifndef LINK_GTEST
+
+gtestxul: $(GTEST_LIB)
+
+$(GTEST_LIB): $(FINAL_TARGET)/dependentlibs.list.gtest
+	$(MKDIR) -p $(EFFECTIVE_LIB_PREFIX)gtest
+	$(MAKE) libs SHARED_LIBRARY_NAME=gtest/$(EFFECTIVE_LIB_PREFIX)$(LIBRARY_NAME) FINAL_TARGET=$(FINAL_TARGET)/gtest SDK_LIBRARY= IMPORT_LIB_DEST=$(IMPORT_LIB_DEST)/gtest LINK_GTEST=true
+endif
+
+ifdef LINK_GTEST
+
+COMPONENT_LIBS += \
+  gtest \
+  gfxtest \
+  $(NULL)
+endif
+
+$(FINAL_TARGET)/dependentlibs.list: dependentlibs.py $(SHARED_LIBRARY) $(wildcard $(if $(wildcard $(FINAL_TARGET)/dependentlibs.list),$(addprefix $(FINAL_TARGET)/,$(shell cat $(FINAL_TARGET)/dependentlibs.list))))
+	$(PYTHON) $< $(SHARED_LIBRARY) -L $(FINAL_TARGET) $(if $(TOOLCHAIN_PREFIX),$(addprefix -p ,$(TOOLCHAIN_PREFIX))) > $@
+
+

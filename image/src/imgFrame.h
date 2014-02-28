@@ -38,8 +38,6 @@ public:
             const nsIntMargin &aPadding, const nsIntRect &aSubimage,
             uint32_t aImageFlags = imgIContainer::FLAG_NONE);
 
-  nsresult Extract(const nsIntRect& aRegion, imgFrame** aResult);
-
   nsresult ImageUpdated(const nsIntRect &aUpdateRect);
 
   nsIntRect GetRect() const;
@@ -50,7 +48,9 @@ public:
   bool GetIsPaletted() const;
   bool GetHasAlpha() const;
   void GetImageData(uint8_t **aData, uint32_t *length) const;
+  uint8_t* GetImageData() const;
   void GetPaletteData(uint32_t **aPalette, uint32_t *length) const;
+  uint32_t* GetPaletteData() const;
 
   int32_t GetTimeout() const;
   void SetTimeout(int32_t aTimeout);
@@ -69,6 +69,7 @@ public:
 
   nsresult LockImageData();
   nsresult UnlockImageData();
+  void MarkImageDataDirty();
 
   nsresult GetSurface(gfxASurface **aSurface) const
   {
@@ -106,11 +107,11 @@ public:
            nsMallocSizeOfFun aMallocSizeOf) const;
 
   uint8_t GetPaletteDepth() const { return mPaletteDepth; }
-
-private: // methods
   uint32_t PaletteDataLength() const {
     return ((1 << mPaletteDepth) * sizeof(uint32_t));
   }
+
+private: // methods
 
   struct SurfaceWithFormat {
     nsRefPtr<gfxDrawable> mDrawable;
@@ -157,6 +158,9 @@ private: // data
   int32_t      mTimeout; // -1 means display forever
   int32_t      mDisposalMethod;
 
+  /** Indicates how many readers currently have locked this frame */
+  int32_t mLockCount;
+
   gfxASurface::gfxImageFormat mFormat;
   uint8_t      mPaletteDepth;
   int8_t       mBlendMethod;
@@ -165,8 +169,6 @@ private: // data
   bool mFormatChanged;
   bool mCompositingFailed;
   bool mNonPremult;
-  /** Indicates if the image data is currently locked */
-  bool mLocked;
 
   /** Have we called DiscardTracker::InformAllocation()? */
   bool mInformedDiscardTracker;
@@ -175,5 +177,34 @@ private: // data
   bool mIsDDBSurface;
 #endif
 };
+
+namespace mozilla {
+namespace image {
+  // An RAII class to ensure it's easy to balance locks and unlocks on
+  // imgFrames.
+  class AutoFrameLocker
+  {
+  public:
+    AutoFrameLocker(imgFrame* frame)
+      : mFrame(frame)
+      , mSucceeded(NS_SUCCEEDED(frame->LockImageData()))
+    {}
+
+    ~AutoFrameLocker()
+    {
+      if (mSucceeded) {
+        mFrame->UnlockImageData();
+      }
+    }
+
+    // Whether the lock request succeeded.
+    bool Succeeded() { return mSucceeded; }
+
+  private:
+    imgFrame* mFrame;
+    bool mSucceeded;
+  };
+}
+}
 
 #endif /* imgFrame_h */

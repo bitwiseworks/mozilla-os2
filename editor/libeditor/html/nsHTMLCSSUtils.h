@@ -9,7 +9,6 @@
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsTArray.h"                   // for nsTArray
 #include "nscore.h"                     // for nsAString, nsresult, nullptr
-#include "prtypes.h"                    // for uint8_t, int32_t, uint32_t
 
 class ChangeCSSInlineStyleTxn;
 class nsComputedDOMStyle;
@@ -83,18 +82,9 @@ public:
     * @param aProperty      [IN] an atom containing a HTML tag name
     * @param aAttribute     [IN] a string containing the name of a HTML
     *                            attribute carried by the element above
-    * @param aValue         [IN] an optional string containing the attribute's
-    *                            HTML value -- this matters for <font size>,
-    *                            since size=7 has no CSS equivalent.  Make sure
-    *                            you pass the HTML value (e.g. "4"), not the
-    *                            CSS value (e.g. "large").
     */
-  bool IsCSSEditableProperty(nsIContent* aNode, nsIAtom* aProperty,
-                             const nsAString* aAttribute,
-                             const nsAString* aValue = nullptr);
-  bool IsCSSEditableProperty(nsIDOMNode* aNode, nsIAtom* aProperty,
-                             const nsAString* aAttribute,
-                             const nsAString* aValue = nullptr);
+  bool IsCSSEditableProperty(nsIContent* aNode, nsIAtom* aProperty, const nsAString* aAttribute);
+  bool IsCSSEditableProperty(nsIDOMNode* aNode, nsIAtom* aProperty, const nsAString* aAttribute);
 
   /** adds/remove a CSS declaration to the STYLE atrribute carried by a given element
     *
@@ -249,6 +239,20 @@ public:
                                              const nsAString *aAttribute,
                                              const nsAString *aValue,
                                              bool aSuppressTransaction);
+  /** removes from the node the CSS inline styles equivalent to the HTML style
+    *
+    * @param aElement       [IN] a DOM Element (must not be null)
+    * @param aHTMLProperty  [IN] an atom containing an HTML property
+    * @param aAttribute     [IN] a pointer to an attribute name or nullptr if irrelevant
+    * @param aValue         [IN] the attribute value
+    * @param aSuppressTransaction [IN] a boolean indicating, when true,
+    *                                  that no transaction should be recorded
+    */
+  nsresult    RemoveCSSEquivalentToHTMLStyle(mozilla::dom::Element* aElement,
+                                             nsIAtom* aHTMLProperty,
+                                             const nsAString* aAttribute,
+                                             const nsAString* aValue,
+                                             bool aSuppressTransaction);
 
   /** parses a "xxxx.xxxxxuuu" string where x is a digit and u an alpha char
     * we need such a parser because nsIDOMCSSStyleDeclaration::GetPropertyCSSValue() is not
@@ -292,9 +296,18 @@ public:
     * @param aCssDecl        [OUT] the CSS declaration corresponding to the style attr
     * @param aLength         [OUT] the number of declarations in aCssDecl
     */
-  nsresult GetInlineStyles(nsIDOMElement * aElement, nsIDOMCSSStyleDeclaration ** aCssDecl,
-                           uint32_t * aLength);
+  nsresult GetInlineStyles(mozilla::dom::Element* aElement,
+                           nsIDOMCSSStyleDeclaration** aCssDecl,
+                           uint32_t* aLength);
+  nsresult GetInlineStyles(nsIDOMElement* aElement,
+                           nsIDOMCSSStyleDeclaration** aCssDecl,
+                           uint32_t* aLength);
+private:
+  nsresult GetInlineStyles(nsISupports* aElement,
+                           nsIDOMCSSStyleDeclaration** aCssDecl,
+                           uint32_t* aLength);
 
+public:
   /** returns aNode itself if it is an element node, or the first ancestors being an element
     * node if aNode is not one itself
     *

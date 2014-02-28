@@ -77,13 +77,13 @@
  * are not exactly minidumps.
  */
 typedef struct {
-  u_int64_t	fpscr;      /* FPU status register */
+  uint64_t      fpscr;      /* FPU status register */
 
   /* 32 64-bit floating point registers, d0 .. d31. */
-  u_int64_t	regs[MD_FLOATINGSAVEAREA_ARM_FPR_COUNT];
+  uint64_t      regs[MD_FLOATINGSAVEAREA_ARM_FPR_COUNT];
 
   /* Miscellaneous control words */
-  u_int32_t     extra[MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT];
+  uint32_t     extra[MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT];
 } MDFloatingSaveAreaARM;
 
 #define MD_CONTEXT_ARM_GPR_COUNT 16
@@ -92,7 +92,7 @@ typedef struct {
   /* The next field determines the layout of the structure, and which parts
    * of it are populated
    */
-  u_int32_t	context_flags;
+  uint32_t      context_flags;
 
   /* 16 32-bit integer registers, r0 .. r15
    * Note the following fixed uses:
@@ -100,7 +100,7 @@ typedef struct {
    *   r14 is the link register
    *   r15 is the program counter
    */
-  u_int32_t     iregs[MD_CONTEXT_ARM_GPR_COUNT];
+  uint32_t     iregs[MD_CONTEXT_ARM_GPR_COUNT];
 
   /* CPSR (flags, basically): 32 bits:
         bit 31 - N (negative)
@@ -109,25 +109,36 @@ typedef struct {
         bit 28 - V (overflow)
         bit 27 - Q (saturation flag, sticky)
      All other fields -- ignore */
-  u_int32_t    cpsr;
+  uint32_t    cpsr;
 
   /* The next field is included with MD_CONTEXT_ARM_FLOATING_POINT */
   MDFloatingSaveAreaARM float_save;
 
 } MDRawContextARM;
 
-/* Indices into iregs for registers with a dedicated or conventional 
+/* Indices into iregs for registers with a dedicated or conventional
  * purpose.
  */
 enum MDARMRegisterNumbers {
-  MD_CONTEXT_ARM_REG_FP = 11,
-  MD_CONTEXT_ARM_REG_SP = 13,
-  MD_CONTEXT_ARM_REG_LR = 14,
-  MD_CONTEXT_ARM_REG_PC = 15
+  MD_CONTEXT_ARM_REG_IOS_FP = 7,
+  MD_CONTEXT_ARM_REG_FP     = 11,
+  MD_CONTEXT_ARM_REG_SP     = 13,
+  MD_CONTEXT_ARM_REG_LR     = 14,
+  MD_CONTEXT_ARM_REG_PC     = 15
 };
 
 /* For (MDRawContextARM).context_flags.  These values indicate the type of
  * context stored in the structure. */
+/* CONTEXT_ARM from the Windows CE 5.0 SDK. This value isn't correct
+ * because this bit can be used for flags. Presumably this value was
+ * never actually used in minidumps, but only in "CEDumps" which
+ * are a whole parallel minidump file format for Windows CE.
+ * Therefore, Breakpad defines its own value for ARM CPUs.
+ */
+#define MD_CONTEXT_ARM_OLD               0x00000040
+/* This value was chosen to avoid likely conflicts with MD_CONTEXT_*
+ * for other CPUs. */
+#define MD_CONTEXT_ARM                   0x40000000
 #define MD_CONTEXT_ARM_INTEGER           (MD_CONTEXT_ARM | 0x00000002)
 #define MD_CONTEXT_ARM_FLOATING_POINT    (MD_CONTEXT_ARM | 0x00000004)
 

@@ -14,8 +14,6 @@ include $(DEPTH)/config/autoconf.mk
 # internal linkage. Components that use frozen (external) linkage should use
 # unicharutil_external_s.
 
-MODULE=unicharutil
-LIBRARY_NAME=unicharutil_s
 DIST_INSTALL = 1
 EXPORT_LIBRARY = 1
 MOZILLA_INTERNAL_API = 1
@@ -27,8 +25,6 @@ EXTRA_DEPS += $(srcdir)/../objs.mk
 LOCAL_INCLUDES	+= -I$(srcdir)/.. \
   -I$(srcdir)/../../src
 
-
-CPPSRCS	= $(INTL_UNICHARUTIL_UTIL_LCPPSRCS)
 
 FORCE_STATIC_LIB = 1
 

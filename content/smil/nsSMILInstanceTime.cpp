@@ -138,7 +138,7 @@ nsSMILInstanceTime::UnmarkShouldPreserve()
 void
 nsSMILInstanceTime::AddRefFixedEndpoint()
 {
-  NS_ABORT_IF_FALSE(mFixedEndpointRefCnt < PR_UINT16_MAX,
+  NS_ABORT_IF_FALSE(mFixedEndpointRefCnt < UINT16_MAX,
       "Fixed endpoint reference count upper limit reached");
   ++mFixedEndpointRefCnt;
   mFlags &= ~kMayUpdate; // Once fixed, always fixed
@@ -167,9 +167,8 @@ nsSMILInstanceTime::IsDependentOn(const nsSMILInstanceTime& aOther) const
   if (myBaseTime == &aOther)
     return true;
 
-  // mVisited is mutable
-  mozilla::AutoRestore<bool> setVisited(const_cast<nsSMILInstanceTime*>(this)->mVisited);
-  const_cast<nsSMILInstanceTime*>(this)->mVisited = true;
+  mozilla::AutoRestore<bool> setVisited(mVisited);
+  mVisited = true;
   return myBaseTime->IsDependentOn(aOther);
 }
 

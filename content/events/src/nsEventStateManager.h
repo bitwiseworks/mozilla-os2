@@ -6,28 +6,27 @@
 #ifndef nsEventStateManager_h__
 #define nsEventStateManager_h__
 
+#include "mozilla/TypedEnum.h"
+
 #include "nsEvent.h"
 #include "nsGUIEvent.h"
-#include "nsIContent.h"
 #include "nsIObserver.h"
 #include "nsWeakReference.h"
-#include "nsHashtable.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
-#include "nsIDocument.h"
 #include "nsCOMArray.h"
 #include "nsIFrameLoader.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIMarkupDocumentViewer.h"
 #include "nsIScrollableFrame.h"
 #include "nsFocusManager.h"
-#include "nsIDocument.h"
 #include "nsEventStates.h"
 #include "mozilla/TimeStamp.h"
-#include "nsContentUtils.h"
 #include "nsIFrame.h"
 
 class nsIPresShell;
+class nsIContent;
+class nsIDocument;
 class nsIDocShell;
 class nsIDocShellTreeNode;
 class nsIDocShellTreeItem;
@@ -136,7 +135,7 @@ public:
   /**
    * Get accesskey registered on the given element or 0 if there is none.
    *
-   * @param  aContent  the given element
+   * @param  aContent  the given element (must not be null)
    * @return           registered accesskey
    */
   uint32_t GetRegisteredAccessKey(nsIContent* aContent);
@@ -163,28 +162,18 @@ public:
     }
   }
 
-  static bool IsHandlingUserInput()
-  {
-    if (sUserInputEventDepth <= 0) {
-      return false;
-    }
-    TimeDuration timeout = nsContentUtils::HandlingUserInputTimeout();
-    return timeout <= TimeDuration(0) ||
-           (TimeStamp::Now() - sHandlingInputStart) <= timeout;
-  }
-
   /**
    * Returns true if the current code is being executed as a result of user input.
    * This includes timers or anything else that is initiated from user input.
-   * However, mouse hover events are not counted as user input, nor are
+   * However, mouse over events are not counted as user input, nor are
    * page load events. If this method is called from asynchronously executed code,
    * such as during layout reflows, it will return false. If more time has elapsed
    * since the user input than is specified by the
    * dom.event.handling-user-input-time-limit pref (default 1 second), this
    * function also returns false.
    */
-  NS_IMETHOD_(bool) IsHandlingUserInputExternal() { return IsHandlingUserInput(); }
-  
+  static bool IsHandlingUserInput();
+
   nsPresContext* GetPresContext() { return mPresContext; }
 
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsEventStateManager,
@@ -203,6 +192,14 @@ public:
   static void SetFullScreenState(mozilla::dom::Element* aElement, bool aIsFullScreen);
 
   static bool IsRemoteTarget(nsIContent* aTarget);
+  static nsIntPoint GetChildProcessOffset(nsFrameLoader* aFrameLoader,
+                                          const nsEvent& aEvent);
+
+  static void MapEventCoordinatesForChildProcess(nsFrameLoader* aFrameLoader,
+                                                 nsEvent* aEvent);
+
+  static void MapEventCoordinatesForChildProcess(const nsIntPoint& aOffset,
+                                                 nsEvent* aEvent);
 
   // Holds the point in screen coords that a mouse event was dispatched to,
   // before we went into pointer lock mode. This is constantly updated while
@@ -349,7 +346,7 @@ protected:
     /**
      * Computes the default action for the aEvent with the prefs.
      */
-    enum Action
+    enum Action MOZ_ENUM_TYPE(uint8_t)
     {
       ACTION_NONE = 0,
       ACTION_SCROLL,
@@ -364,6 +361,13 @@ protected:
      * computed the lineOrPageDelta values.
      */
     bool NeedToComputeLineOrPageDelta(mozilla::widget::WheelEvent* aEvent);
+
+    /**
+     * IsOverOnePageScrollAllowed*() checks whether wheel scroll amount should
+     * be rounded down to the page width/height (false) or not (true).
+     */
+    bool IsOverOnePageScrollAllowedX(mozilla::widget::WheelEvent* aEvent);
+    bool IsOverOnePageScrollAllowedY(mozilla::widget::WheelEvent* aEvent);
 
   private:
     WheelPrefs();
@@ -406,11 +410,26 @@ protected:
 
     void Reset();
 
+    /**
+     * If the abosolute values of mMultiplierX and/or mMultiplierY are equals or
+     * larger than this value, the computed scroll amount isn't rounded down to
+     * the page width or height.
+     */
+    enum {
+      MIN_MULTIPLIER_VALUE_ALLOWING_OVER_ONE_PAGE_SCROLL = 1000
+    };
+
     bool mInit[COUNT_OF_MULTIPLIERS];
     double mMultiplierX[COUNT_OF_MULTIPLIERS];
     double mMultiplierY[COUNT_OF_MULTIPLIERS];
     double mMultiplierZ[COUNT_OF_MULTIPLIERS];
     Action mActions[COUNT_OF_MULTIPLIERS];
+    /**
+     * action values overridden by .override_x pref.
+     * If an .override_x value is -1, same as the
+     * corresponding mActions value.
+     */
+    Action mOverriddenActionsX[COUNT_OF_MULTIPLIERS];
 
     static WheelPrefs* sInstance;
   };
@@ -468,15 +487,41 @@ protected:
    *
    * @param aTargetFrame        The event target of the wheel event.
    * @param aEvent              The handling mouse wheel event.
-   * @param aForDefaultAction   Whether this uses wheel transaction or not.
-   *                            If true, returns the latest scrolled frame if
-   *                            there is it.  Otherwise, the nearest ancestor
-   *                            scrollable frame from aTargetFrame.
+   * @param aOptions            The options for finding the scroll target.
+   *                            Callers should use COMPUTE_*.
    * @return                    The scrollable frame which should be scrolled.
    */
+  // These flags are used in ComputeScrollTarget(). Callers should use
+  // COMPUTE_*.
+  enum
+  {
+    PREFER_MOUSE_WHEEL_TRANSACTION               = 1,
+    PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_X_AXIS = 2,
+    PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_Y_AXIS = 4,
+    START_FROM_PARENT                            = 8
+  };
+  enum ComputeScrollTargetOptions
+  {
+    // At computing scroll target for legacy mouse events, we should return
+    // first scrollable element even when it's not scrollable to the direction.
+    COMPUTE_LEGACY_MOUSE_SCROLL_EVENT_TARGET     = 0,
+    // Default action prefers the scrolled element immediately before if it's
+    // still under the mouse cursor.  Otherwise, it prefers the nearest
+    // scrollable ancestor which will be scrolled actually.
+    COMPUTE_DEFAULT_ACTION_TARGET                =
+      (PREFER_MOUSE_WHEEL_TRANSACTION |
+       PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_X_AXIS |
+       PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_Y_AXIS),
+    // Look for the nearest scrollable ancestor which can be scrollable with
+    // aEvent.
+    COMPUTE_SCROLLABLE_ANCESTOR_ALONG_X_AXIS     =
+      (PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_X_AXIS | START_FROM_PARENT),
+    COMPUTE_SCROLLABLE_ANCESTOR_ALONG_Y_AXIS     =
+      (PREFER_ACTUAL_SCROLLABLE_TARGET_ALONG_Y_AXIS | START_FROM_PARENT)
+  };
   nsIScrollableFrame* ComputeScrollTarget(nsIFrame* aTargetFrame,
                                           mozilla::widget::WheelEvent* aEvent,
-                                          bool aForDefaultAction);
+                                          ComputeScrollTargetOptions aOptions);
 
   /**
    * GetScrollAmount() returns the scroll amount in app uints of one line or
@@ -486,7 +531,7 @@ protected:
    * @param aScrollableFrame    A frame which will be scrolled by the event.
    *                            The result of ComputeScrollTarget() is
    *                            expected for this value.
-   *                            This can be NULL if there is no scrollable
+   *                            This can be nullptr if there is no scrollable
    *                            frame.  Then, this method uses root frame's
    *                            line height or visible area's width and height.
    */
@@ -529,7 +574,7 @@ protected:
       sInstance = nullptr;
     }
 
-    bool IsInTransaction() { return mHandlingDeltaMode != PR_UINT32_MAX; }
+    bool IsInTransaction() { return mHandlingDeltaMode != UINT32_MAX; }
 
     /**
      * InitLineOrPageDelta() stores pixel delta values of WheelEvents which are
@@ -556,7 +601,7 @@ protected:
   private:
     DeltaAccumulator() :
       mX(0.0), mY(0.0), mPendingScrollAmountX(0.0), mPendingScrollAmountY(0.0),
-      mHandlingDeltaMode(PR_UINT32_MAX), mHandlingPixelOnlyDevice(false)
+      mHandlingDeltaMode(UINT32_MAX), mHandlingPixelOnlyDevice(false)
     {
     }
 
@@ -668,6 +713,13 @@ private:
   // after unlocking.
   nsIntPoint  mPreLockPoint;
 
+  // Stores the refPoint of the last synthetic mouse move we dispatched
+  // to re-center the mouse when we were pointer locked. If this is (-1,-1) it
+  // means we've not recently dispatched a centering event. We use this to
+  // detect when we receive the synth event, so we can cancel and not send it
+  // to content.
+  static nsIntPoint sSynthCenteringPoint;
+
   nsWeakFrame mCurrentTarget;
   nsCOMPtr<nsIContent> mCurrentTargetContent;
   nsWeakFrame mLastMouseOverFrame;
@@ -766,7 +818,7 @@ public:
       if (mIsMouseDown) {
         nsIPresShell::SetCapturingContent(nullptr, 0);
         nsIPresShell::AllowMouseCapture(true);
-        if (aDocument && NS_IS_TRUSTED_EVENT(aEvent)) {
+        if (aDocument && aEvent->mFlags.mIsTrusted) {
           nsFocusManager* fm = nsFocusManager::GetFocusManager();
           if (fm) {
             fm->SetMouseButtonDownHandlingDocument(aDocument);

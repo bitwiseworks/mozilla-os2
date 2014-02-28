@@ -97,6 +97,12 @@ https://untrusted.example.com:443      privileged,cert=untrusted
 https://expired.example.com:443        privileged,cert=expired
 https://requestclientcert.example.com:443         privileged,clientauth=request
 https://requireclientcert.example.com:443         privileged,clientauth=require
+https://mismatch.expired.example.com:443	privileged,cert=expired
+https://mismatch.untrusted.example.com:443	privileged,cert=untrusted
+https://untrusted-expired.example.com:443	privileged,cert=untrustedandexpired
+https://mismatch.untrusted-expired.example.com:443	privileged,cert=untrustedandexpired
+https://ev-valid.example.com:443	privileged,cert=evvalid
+https://ev-invalid.example.com:443      priviliged,cert=evinvalid
 
 # This is here so that we don't load the default live bookmark over
 # the network in every test suite.
@@ -113,6 +119,8 @@ http://sub1.xn--lt-uia.example.org:8000   privileged
 http://sub2.xn--lt-uia.example.org:80     privileged
 http://xn--exmple-cua.test:80             privileged
 http://sub1.xn--exmple-cua.test:80        privileged
+http://xn--exaple-kqf.test:80             privileged
+http://sub1.xn--exaple-kqf.test:80        privileged
 
 https://xn--hxajbheg2az3al.xn--jxalpdlp:443        privileged
 https://sub1.xn--hxajbheg2az3al.xn--jxalpdlp:443   privileged

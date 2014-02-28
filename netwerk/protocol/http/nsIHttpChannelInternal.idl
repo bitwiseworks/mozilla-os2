@@ -34,7 +34,7 @@ interface nsIHttpUpgradeListener : nsISupports
  * using any feature exposed by this interface, be aware that this interface
  * will change and you will be broken.  You have been warned.
  */
-[scriptable, uuid(9363fd96-af59-47e8-bddf-1d5e91acd336)]
+[scriptable, uuid(2cd7f6a6-63f3-4bd6-a0f5-6e3d6dcff81b)]
 interface nsIHttpChannelInternal : nsISupports
 {
     /**
@@ -132,7 +132,7 @@ interface nsIHttpChannelInternal : nsISupports
     /**
      * HTTPUpgrade allows for the use of HTTP to bootstrap another protocol
      * via the RFC 2616 Upgrade request header in conjunction with a 101 level
-     * response. The nsIHttpUpgradeListener will have its 
+     * response. The nsIHttpUpgradeListener will have its
      * onTransportAvailable() method invoked if a matching 101 is processed.
      * The arguments to onTransportAvailable provide the new protocol the low
      * level tranport streams that are no longer used by HTTP.
@@ -155,5 +155,21 @@ interface nsIHttpChannelInternal : nsISupports
      * for starting spdy.
      */
     attribute boolean allowSpdy;
+
+    /**
+     * Set (e.g., by the docshell) to indicate whether or not the channel
+     * corresponds to content that should be given a degree of network exclusivity
+     * with respect to other members of its load group.
+     * Examples are js from the HTML head and css which are latency
+     * sensitive and should not compete with images for bandwidth. Default false.
+     */
+    attribute boolean loadAsBlocking;
+
+    /**
+     * If set, this channel will load in parallel with the rest of the load
+     * group even if a blocking subset of the group would normally be given
+     * exclusivity. Default false.
+     */
+    attribute boolean loadUnblocked;
 
 };

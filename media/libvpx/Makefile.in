@@ -12,8 +12,7 @@ include $(DEPTH)/config/autoconf.mk
 
 DEFINES += -DHAVE_CONFIG_H=vpx_config.h
 
-MODULE = vpx
-LIBRARY_NAME = vpx
+MSVC_ENABLE_PGO := 1
 FORCE_STATIC_LIB= 1
 ifeq (WINNT,$(OS_TARGET))
 VISIBILITY_FLAGS =
@@ -67,33 +66,6 @@ AS=$(VPX_AS)
 ASFLAGS=$(VPX_ASFLAGS) -I. -I$(topsrcdir)/media/libvpx/ -I$(topsrcdir)/media/libvpx/vpx_ports/
 AS_DASH_C_FLAG=$(VPX_DASH_C_FLAG)
 ASM_SUFFIX=$(VPX_ASM_SUFFIX)
-
-EXPORTS_NAMESPACES = vpx
-
-EXPORTS_vpx = \
-  vp8.h \
-  vp8cx.h \
-  vp8dx.h \
-  vp8e.h \
-  vpx_codec.h \
-  vpx_codec_impl_bottom.h \
-  vpx_codec_impl_top.h \
-  vpx_decoder.h \
-  vpx_decoder_compat.h \
-  vpx_encoder.h\
-  vpx_image.h \
-  vpx_mem_intrnl.h \
-  vpx_mem.h \
-  mem.h \
-  vpx_integer.h \
-  vpx_timer.h \
-  arm.h \
-  x86.h \
-  scale_mode.h \
-  vpxscale.h \
-  yv12config.h \
-  yv12extend.h \
-  $(NULL)
 
 CSRCS += \
   vpx_config_c.c \
@@ -285,11 +257,11 @@ DEFINES += -D__linux__
 
 # For cpu-features.h
 LOCAL_INCLUDES += -I$(ANDROID_NDK)/sources/android/cpufeatures
+ifndef MOZ_WEBRTC
 # For cpu-features.c
 VPATH += $(ANDROID_NDK)/sources/android/cpufeatures
-
 CSRCS += cpu-features.c
-
+endif
 endif
 
 CSRCS += \
@@ -437,7 +409,6 @@ else
 VPX_OIE_FORMAT := gas
 endif
 
-HOST_CSRCS = obj_int_extract.c
 HOST_PROGRAM = host_obj_int_extract$(HOST_BIN_SUFFIX)
 
 CSRCS += asm_com_offsets.c
@@ -478,6 +449,8 @@ GARBAGE += asm_enc_offsets.s asm_enc_offsets.asm
 endif
 
 endif
+
+EXTRA_MDDEPEND_FILES = asm_enc_offsets.s.pp asm_enc_offsets.$(OBJ_SUFFIX).pp asm_com_offsets.s.pp asm_com_offsets.$(OBJ_SUFFIX).pp
 
 include $(topsrcdir)/config/rules.mk
 

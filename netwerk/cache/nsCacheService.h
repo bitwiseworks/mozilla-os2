@@ -1,9 +1,8 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 
 #ifndef _nsCacheService_h_
 #define _nsCacheService_h_
@@ -12,6 +11,8 @@
 #include "nsCacheSession.h"
 #include "nsCacheDevice.h"
 #include "nsCacheEntry.h"
+#include "nsThreadUtils.h"
+#include "nsICacheListener.h"
 
 #include "prthread.h"
 #include "nsIObserver.h"
@@ -29,18 +30,44 @@ class nsMemoryCacheDevice;
 class nsOfflineCacheDevice;
 class nsCacheServiceAutoLock;
 class nsITimer;
+class mozIStorageService;
 
+
+/******************************************************************************
+ * nsNotifyDoomListener
+ *****************************************************************************/
+
+class nsNotifyDoomListener : public nsRunnable {
+public:
+    nsNotifyDoomListener(nsICacheListener *listener,
+                         nsresult status)
+        : mListener(listener)      // transfers reference
+        , mStatus(status)
+    {}
+
+    NS_IMETHOD Run()
+    {
+        mListener->OnCacheEntryDoomed(mStatus);
+        NS_RELEASE(mListener);
+        return NS_OK;
+    }
+
+private:
+    nsICacheListener *mListener;
+    nsresult          mStatus;
+};
 
 /******************************************************************************
  *  nsCacheService
  ******************************************************************************/
 
-class nsCacheService : public nsICacheService
+class nsCacheService : public nsICacheServiceInternal
 {
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSICACHESERVICE
-    
+    NS_DECL_NSICACHESERVICEINTERNAL
+
     nsCacheService();
     virtual ~nsCacheService();
 
@@ -95,6 +122,8 @@ public:
 
     static int32_t   CacheCompressionLevel();
 
+    static bool      GetClearingEntries();
+
     /**
      * Methods called by any cache classes
      */
@@ -102,8 +131,6 @@ public:
     static
     nsCacheService * GlobalInstance()   { return gService; }
 
-    static int64_t   MemoryDeviceSize();
-    
     static nsresult  DoomEntry(nsCacheEntry * entry);
 
     static bool      IsStorageEnabledForPolicy_Locked(nsCacheStoragePolicy policy);
@@ -168,18 +195,31 @@ public:
 
     static void      SetCacheCompressionLevel(int32_t level);
 
-    static void      OnEnterExitPrivateBrowsing();
-
     // Starts smart cache size computation if disk device is available
     static nsresult  SetDiskSmartSize();
+
+    static void      MoveOrRemoveDiskCache(nsIFile *aOldCacheDir,
+                                           nsIFile *aNewCacheDir,
+                                           const char *aCacheSubdir);
 
     nsresult         Init();
     void             Shutdown();
 
+    static bool      IsInitialized()
+    {
+      if (!gService) {
+          return false;
+      }
+      return gService->mInitialized;
+    }
+
     static void      AssertOwnsLock()
     { gService->mLock.AssertCurrentThreadOwns(); }
 
+    static void      LeavePrivateBrowsing();
     bool             IsDoomListEmpty();
+
+    typedef bool (*DoomCheckFn)(nsCacheEntry* entry);
 
 private:
     friend class nsCacheServiceAutoLock;
@@ -191,6 +231,8 @@ private:
     friend class nsDoomEvent;
     friend class nsDisableOldMaxSmartSizePrefEvent;
     friend class nsDiskCacheMap;
+    friend class nsAsyncDoomEvent;
+    friend class nsCacheEntryDescriptor;
 
     /**
      * Internal Methods
@@ -198,6 +240,8 @@ private:
 
     static void      Lock(::mozilla::Telemetry::ID mainThreadLockerID);
     static void      Unlock();
+    void             LockAcquired();
+    void             LockReleased();
 
     nsresult         CreateDiskDevice();
     nsresult         CreateOfflineDevice();
@@ -245,16 +289,15 @@ private:
 
     nsresult         ProcessPendingRequests(nsCacheEntry * entry);
 
-    void             ClearPendingRequests(nsCacheEntry * entry);
     void             ClearDoomList(void);
-    void             ClearActiveEntries(void);
-    void             DoomActiveEntries(void);
+    void             DoomActiveEntries(DoomCheckFn check);
+    void             CloseAllStreams();
 
     static
-    PLDHashOperator  DeactivateAndClearEntry(PLDHashTable *    table,
-                                             PLDHashEntryHdr * hdr,
-                                             uint32_t          number,
-                                             void *            arg);
+    PLDHashOperator  GetActiveEntries(PLDHashTable *    table,
+                                      PLDHashEntryHdr * hdr,
+                                      uint32_t          number,
+                                      void *            arg);
     static
     PLDHashOperator  RemoveActiveEntry(PLDHashTable *    table,
                                        PLDHashEntryHdr * hdr,
@@ -276,20 +319,25 @@ private:
      */
 
     static nsCacheService *         gService;  // there can be only one...
-    
+
+    nsCOMPtr<mozIStorageService>    mStorageService;
+
     nsCacheProfilePrefObserver *    mObserver;
-    
+
     mozilla::Mutex                  mLock;
     mozilla::CondVar                mCondVar;
+
+    mozilla::Mutex                  mTimeStampLock;
+    mozilla::TimeStamp              mLockAcquiredTimeStamp;
 
     nsCOMPtr<nsIThread>             mCacheIOThread;
 
     nsTArray<nsISupports*>          mDoomedObjects;
     nsCOMPtr<nsITimer>              mSmartSizeTimer;
-    
+
     bool                            mInitialized;
     bool                            mClearingEntries;
-    
+
     bool                            mEnableMemoryDevice;
     bool                            mEnableDiskDevice;
     bool                            mEnableOfflineDevice;
@@ -304,7 +352,7 @@ private:
     PRCList                         mDoomedEntries;
 
     // stats
-    
+
     uint32_t                        mTotalEntries;
     uint32_t                        mCacheHits;
     uint32_t                        mCacheMisses;

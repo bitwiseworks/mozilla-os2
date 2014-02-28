@@ -31,11 +31,6 @@ int ParseFTPList(const char *line, struct list_state *state,
     return 0;
 
   memset( result, 0, sizeof(*result) );
-  if (state->magic != ((void *)ParseFTPList))
-  {
-    memset( state, 0, sizeof(*state) );
-    state->magic = ((void *)ParseFTPList);
-  }
   state->numlines++;
 
   /* carry buffer is only valid from one line to the next */
@@ -137,7 +132,7 @@ int ParseFTPList(const char *line, struct list_state *state,
                 PRTime t;
                 PRTime seconds;
                 PR_sscanf(p+1, "%llu", &seconds);
-                LL_MUL(t, seconds, PR_USEC_PER_SEC);
+                t = seconds * PR_USEC_PER_SEC;
                 PR_ExplodeTime(t, PR_LocalTimeParameters, &(result->fe_time) );
               }
             }
@@ -491,10 +486,7 @@ int ParseFTPList(const char *line, struct list_state *state,
                * So its rounded up to the next block, so what, its better
                * than not showing the size at all.
               */
-              uint64_t fsz, factor;
-              LL_UI2L(fsz, strtoul(tokens[1], (char **)0, 10));
-              LL_UI2L(factor, 512);
-              LL_MUL(fsz, fsz, factor);
+              uint64_t fsz = uint64_t(strtoul(tokens[1], (char **)0, 10) * 512);
               PR_snprintf(result->fe_size, sizeof(result->fe_size), 
                           "%lld", fsz);
             } 

@@ -12,6 +12,7 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIProgressEventSink.h"
 #include "nsIStreamListener.h"
+#include "nsIRemoteOpenFileListener.h"
 #include "nsIZipReader.h"
 #include "nsIDownloader.h"
 #include "nsILoadGroup.h"
@@ -29,6 +30,7 @@ class nsJARInputThunk;
 class nsJARChannel : public nsIJARChannel
                    , public nsIDownloadObserver
                    , public nsIStreamListener
+                   , public nsIRemoteOpenFileListener
                    , public nsHashPropertyBag
 {
 public:
@@ -39,6 +41,7 @@ public:
     NS_DECL_NSIDOWNLOADOBSERVER
     NS_DECL_NSIREQUESTOBSERVER
     NS_DECL_NSISTREAMLISTENER
+    NS_DECL_NSIREMOTEOPENFILELISTENER
 
     nsJARChannel();
     virtual ~nsJARChannel();
@@ -46,12 +49,16 @@ public:
     nsresult Init(nsIURI *uri);
 
 private:
-    nsresult CreateJarInput(nsIZipReaderCache *);
-    nsresult EnsureJarInput(bool blocking);
+    nsresult CreateJarInput(nsIZipReaderCache *, nsJARInputThunk **);
+    nsresult LookupFile();
+    nsresult OpenLocalFile();
+    void NotifyError(nsresult aError);
 
 #if defined(PR_LOGGING)
     nsCString                       mSpec;
 #endif
+
+    bool                            mOpened;
 
     nsCOMPtr<nsIJARURI>             mJarURI;
     nsCOMPtr<nsIURI>                mOriginalURI;
@@ -69,13 +76,13 @@ private:
     /* mContentDisposition is uninitialized if mContentDispositionHeader is
      * empty */
     uint32_t                        mContentDisposition;
-    int32_t                         mContentLength;
+    int64_t                         mContentLength;
     uint32_t                        mLoadFlags;
     nsresult                        mStatus;
     bool                            mIsPending;
     bool                            mIsUnsafe;
+    bool                            mOpeningRemote;
 
-    nsJARInputThunk                *mJarInput;
     nsCOMPtr<nsIStreamListener>     mDownloader;
     nsCOMPtr<nsIInputStreamPump>    mPump;
     nsCOMPtr<nsIFile>               mJarFile;

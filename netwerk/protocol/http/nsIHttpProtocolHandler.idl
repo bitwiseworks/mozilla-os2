@@ -50,14 +50,14 @@ interface nsIHttpProtocolHandler : nsIProxiedProtocolHandler
 };
 
 %{C++
-// ----------- Categories ----------- 
+// ----------- Categories -----------
 /**
  * At initialization time, the HTTP handler will initialize each service
  * registered under this category:
  */
 #define NS_HTTP_STARTUP_CATEGORY "http-startup-category"
 
-// ----------- Observer topics ----------- 
+// ----------- Observer topics -----------
 /**
  * nsIObserver notification corresponding to startup category.  Services
  * registered under the startup category will receive this observer topic at
@@ -65,6 +65,24 @@ interface nsIHttpProtocolHandler : nsIProxiedProtocolHandler
  * is the nsIHttpProtocolHandler instance.
  */
 #define NS_HTTP_STARTUP_TOPIC "http-startup"
+
+/**
+ * This observer topic is notified when an HTTP channel is opened.
+ * It is similar to http-on-modify-request, except that
+ * 1) The notification is guaranteed to occur before on-modify-request, during
+ *    the AsyncOpen call itself.
+ * 2) It only occurs for the initial open of a channel, not for internal
+ *    asyncOpens that happen during redirects, etc.
+ * 3) Some information (most notably nsIProxiedChannel.proxyInfo) may not be set
+ *    on the channel object yet.
+ *
+ * The "subject" of the notification is the nsIHttpChannel instance.
+ *
+ * Generally the 'http-on-modify-request' notification is preferred unless the
+ * synchronous, during-asyncOpen behavior that this notification provides is
+ * required.
+ */
+#define NS_HTTP_ON_OPENING_REQUEST_TOPIC "http-on-opening-request"
 
 /**
  * Before an HTTP request is sent to the server, this observer topic is

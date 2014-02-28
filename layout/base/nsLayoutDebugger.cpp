@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 
+using namespace mozilla;
 using namespace mozilla::layers;
 
 #ifdef DEBUG
@@ -130,10 +131,6 @@ PrintDisplayListTo(nsDisplayListBuilder* aBuilder, const nsDisplayList& aList,
   }
 
   for (nsDisplayItem* i = aList.GetBottom(); i != nullptr; i = i->GetAbove()) {
-#ifdef DEBUG
-    if (aList.DidComputeVisibility() && i->GetVisibleRect().IsEmpty())
-      continue;
-#endif
     if (aDumpHtml) {
       fprintf(aOutput, "<li>");
     } else {
@@ -142,34 +139,19 @@ PrintDisplayListTo(nsDisplayListBuilder* aBuilder, const nsDisplayList& aList,
         fprintf(aOutput, "  ");
       }
     }
-    nsIFrame* f = i->GetUnderlyingFrame();
+    nsIFrame* f = i->Frame();
     nsAutoString fName;
 #ifdef DEBUG
-    if (f) {
-      f->GetFrameName(fName);
-    }
+    f->GetFrameName(fName);
 #endif
     bool snap;
     nsRect rect = i->GetBounds(aBuilder, &snap);
-    switch (i->GetType()) {
-      case nsDisplayItem::TYPE_CLIP:
-      case nsDisplayItem::TYPE_CLIP_ROUNDED_RECT: {
-        nsDisplayClip* c = static_cast<nsDisplayClip*>(i);
-        rect = c->GetClipRect();
-        break;
-      }
-      default:
-        break;
-    }
     nscolor color;
     nsRect vis = i->GetVisibleRect();
     nsRect component = i->GetComponentAlphaBounds(aBuilder);
-    nsDisplayList* list = i->GetList();
+    nsDisplayList* list = i->GetChildren();
+    const DisplayItemClip& clip = i->GetClip();
     nsRegion opaque;
-    if (i->GetType() == nsDisplayItem::TYPE_TRANSFORM) {
-        nsDisplayTransform* t = static_cast<nsDisplayTransform*>(i);
-        list = t->GetStoredList()->GetList();
-    }
 #ifdef DEBUG
     if (!list || list->DidComputeVisibility()) {
       opaque = i->GetOpaqueRegion(aBuilder, &snap);
@@ -181,28 +163,28 @@ PrintDisplayListTo(nsDisplayListBuilder* aBuilder, const nsDisplayList& aList,
       string.AppendInt((uint64_t)i);
       fprintf(aOutput, "<a href=\"javascript:ViewImage('%s')\">", string.BeginReading());
     }
-    fprintf(aOutput, "%s %p(%s) (%d,%d,%d,%d)(%d,%d,%d,%d)(%d,%d,%d,%d)%s",
+    fprintf(aOutput, "%s %p(%s) bounds(%d,%d,%d,%d) visible(%d,%d,%d,%d) componentAlpha(%d,%d,%d,%d) clip(%s) %s",
             i->Name(), (void*)f, NS_ConvertUTF16toUTF8(fName).get(),
             rect.x, rect.y, rect.width, rect.height,
             vis.x, vis.y, vis.width, vis.height,
             component.x, component.y, component.width, component.height,
+            clip.ToString().get(),
             i->IsUniform(aBuilder, &color) ? " uniform" : "");
     nsRegionRectIterator iter(opaque);
     for (const nsRect* r = iter.Next(); r; r = iter.Next()) {
-      printf("(opaque %d,%d,%d,%d)", r->x, r->y, r->width, r->height);
+      fprintf(aOutput, " (opaque %d,%d,%d,%d)", r->x, r->y, r->width, r->height);
     }
+    i->WriteDebugInfo(aOutput);
     if (aDumpHtml && i->Painted()) {
       fprintf(aOutput, "</a>");
     }
-    if (f) {
-      uint32_t key = i->GetPerFrameKey();
-      Layer* layer = mozilla::FrameLayerBuilder::GetDebugOldLayerFor(f, key);
-      if (layer) {
-        if (aDumpHtml) {
-          fprintf(aOutput, " <a href=\"#%p\">layer=%p</a>", layer, layer);
-        } else {
-          fprintf(aOutput, " layer=%p", layer);
-        }
+    uint32_t key = i->GetPerFrameKey();
+    Layer* layer = mozilla::FrameLayerBuilder::GetDebugOldLayerFor(f, key);
+    if (layer) {
+      if (aDumpHtml) {
+        fprintf(aOutput, " <a href=\"#%p\">layer=%p</a>", layer, layer);
+      } else {
+        fprintf(aOutput, " layer=%p", layer);
       }
     }
     if (i->GetType() == nsDisplayItem::TYPE_SVG_EFFECTS) {

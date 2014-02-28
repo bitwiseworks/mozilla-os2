@@ -10,12 +10,10 @@
 
 #include "mozilla/Attributes.h"
 
-#include "nsAString.h"
 #include "nsCSSProperty.h"
-#include "nsColor.h"
-#include "nsCOMArray.h"
 #include "nsCOMPtr.h"
-#include "nsTArray.h"
+#include "nsStringFwd.h"
+#include "nsTArrayForwardDeclare.h"
 
 class nsCSSStyleSheet;
 class nsIPrincipal;
@@ -36,7 +34,7 @@ class StyleRule;
 
 // Interface to the css parser.
 
-class NS_STACK_CLASS nsCSSParser {
+class MOZ_STACK_CLASS nsCSSParser {
 public:
   nsCSSParser(mozilla::css::Loader* aLoader = nullptr,
               nsCSSStyleSheet* aSheet = nullptr);
@@ -56,9 +54,6 @@ public:
 
   // Set whether or not to emulate Nav quirks
   nsresult SetQuirkMode(bool aQuirkMode);
-
-  // Set whether or not we are in an SVG element
-  nsresult SetSVGMode(bool aSVGMode);
 
   // Set loader to use for child sheets
   nsresult SetChildLoader(mozilla::css::Loader* aChildLoader);
@@ -111,16 +106,25 @@ public:
                      nsIURI*                 aSheetURL,
                      nsIURI*                 aBaseURL,
                      nsIPrincipal*           aSheetPrincipal,
-                     nsCOMArray<mozilla::css::Rule>& aResult);
+                     mozilla::css::Rule**    aResult);
 
+  // Parse the value of a single CSS property, and add or replace that
+  // property in aDeclaration.
+  //
+  // SVG "mapped attributes" (which correspond directly to CSS
+  // properties) are parsed slightly differently from regular CSS; in
+  // particular, units may be omitted from <length>.  The 'aIsSVGMode'
+  // argument controls this quirk.  Note that this *only* applies to
+  // mapped attributes, not inline styles or full style sheets in SVG.
   nsresult ParseProperty(const nsCSSProperty aPropID,
                          const nsAString&    aPropValue,
                          nsIURI*             aSheetURL,
                          nsIURI*             aBaseURL,
                          nsIPrincipal*       aSheetPrincipal,
                          mozilla::css::Declaration* aDeclaration,
-                         bool*             aChanged,
-                         bool                aIsImportant);
+                         bool*               aChanged,
+                         bool                aIsImportant,
+                         bool                aIsSVGMode = false);
 
   /**
    * Parse aBuffer into a media list |aMediaList|, which must be
@@ -173,6 +177,25 @@ public:
                                    nsIURI*            aURL,
                                    uint32_t           aLineNumber,
                                    InfallibleTArray<float>& aSelectorList);
+
+  /**
+   * Parse a property and value and return whether the property/value pair
+   * is supported.
+   */
+  bool EvaluateSupportsDeclaration(const nsAString& aProperty,
+                                   const nsAString& aValue,
+                                   nsIURI* aDocURL,
+                                   nsIURI* aBaseURL,
+                                   nsIPrincipal* aDocPrincipal);
+
+  /**
+   * Parse an @supports condition and returns the result of evaluating the
+   * condition.
+   */
+  bool EvaluateSupportsCondition(const nsAString& aCondition,
+                                 nsIURI* aDocURL,
+                                 nsIURI* aBaseURL,
+                                 nsIPrincipal* aDocPrincipal);
 
 protected:
   // This is a CSSParserImpl*, but if we expose that type name in this

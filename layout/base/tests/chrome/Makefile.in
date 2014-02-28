@@ -6,12 +6,11 @@ DEPTH     = @DEPTH@
 topsrcdir = @top_srcdir@
 srcdir    = @srcdir@
 VPATH     = @srcdir@
-relativesrcdir  = layout/base/test/chrome
+relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_CHROME_FILES = \
-	paint_listener.js \
 	test_bug370436.html \
 	test_bug396367-1.html \
 	test_bug396367-2.html \
@@ -36,6 +35,7 @@ MOCHITEST_CHROME_FILES = \
 	test_prerendered_transforms.html \
 	test_printpreview.xul \
 	     printpreview_helper.xul \
+	     animated.gif \
 	test_printpreview_bug396024.xul \
 	     printpreview_bug396024_helper.xul \
 	test_printpreview_bug482976.xul \
@@ -43,14 +43,25 @@ MOCHITEST_CHROME_FILES = \
 	test_scrolling_repaints.html \
 	test_transformed_scrolling_repaints.html \
 	test_transformed_scrolling_repaints_2.html \
+	test_transformed_scrolling_repaints_3.html \
+	transformed_scrolling_repaints_3_window.html \
+	     test_fixed_bg_scrolling_repaints.html \
 	test_dialog_with_positioning.html \
 	     dialog_with_positioning_window.xul \
+	blue-32x32.png \
+	test_passpointerevents.html \
+	     passpointerevents_window.html \
+	test_bug812817.xul \
+	test_bug847890_paintFlashing.html \
 	$(NULL)
 
 ifdef MOZ_DEBUG
+# Disabled on Mac because of Bug 748219
+ifneq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 MOCHITEST_CHROME_FILES += \
 	test_leaf_layers_partition_browser_window.xul \
 	$(NULL)
+endif
 endif
 
 include $(topsrcdir)/config/rules.mk

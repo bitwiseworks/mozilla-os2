@@ -25,8 +25,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef WTF_Platform_h
-#define WTF_Platform_h
+#ifndef assembler_wtf_Platform_h
+#define assembler_wtf_Platform_h
 
 /* ==== PLATFORM handles OS, operating environment, graphics API, and
    CPU. This macro will be phased out in favor of platform adaptation
@@ -245,6 +245,7 @@
 #endif
 
 #define WTF_ARM_ARCH_AT_LEAST(N) (CPU(ARM) && WTF_ARM_ARCH_VERSION >= N)
+#define WTF_ARM_ARCH_AT_LEAST_5 (WTF_CPU_ARM && WTF_ARM_ARCH_VERSION >= 5)
 
 /* Set WTF_ARM_ARCH_VERSION */
 #if   defined(__ARM_ARCH_4__) \
@@ -1176,6 +1177,11 @@
 #define WARN_UNUSED_RETURN
 #endif
 
+/* COMPILER(CLANG) - Clang  */
+#if defined(__clang__)
+#define WTF_COMPILER_CLANG 1
+#endif
+
 #if !ENABLE_NETSCAPE_PLUGIN_API || (ENABLE_NETSCAPE_PLUGIN_API && ((WTF_OS_UNIX && (WTF_PLATFORM_QT || WTF_PLATFORM_WX)) || WTF_PLATFORM_GTK))
 #define ENABLE_PLUGIN_PACKAGE_SIMPLE_HASH 1
 #endif
@@ -1227,4 +1233,4 @@
 #define WTF_USE_UNIX_DOMAIN_SOCKETS 1
 #endif
 
-#endif /* WTF_Platform_h */
+#endif /* assembler_wtf_Platform_h */

@@ -23,6 +23,8 @@
 */
 class SK_API SkXfermode : public SkFlattenable {
 public:
+    SK_DECLARE_INST_COUNT(SkXfermode)
+
     SkXfermode() {}
 
     virtual void xfer32(SkPMColor dst[], const SkPMColor src[], int count,
@@ -99,12 +101,12 @@ public:
         // all remaining modes are defined in the SVG Compositing standard
         // http://www.w3.org/TR/2009/WD-SVGCompositing-20090430/
         kPlus_Mode,
-        kMultiply_Mode, 
-        
+
         // all above modes can be expressed as pair of src/dst Coeffs
-        kCoeffModesCnt, 
-        
-        kScreen_Mode = kCoeffModesCnt,
+        kCoeffModesCnt,
+
+        kMultiply_Mode = kCoeffModesCnt,
+        kScreen_Mode,
         kOverlay_Mode,
         kDarken_Mode,
         kLighten_Mode,
@@ -114,8 +116,12 @@ public:
         kSoftLight_Mode,
         kDifference_Mode,
         kExclusion_Mode,
+        kHue_Mode,
+        kSaturation_Mode,
+        kColor_Mode,
+        kLuminosity_Mode,
 
-        kLastMode = kExclusion_Mode
+        kLastMode = kLuminosity_Mode
     };
 
     /**

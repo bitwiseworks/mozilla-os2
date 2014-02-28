@@ -15,16 +15,26 @@
 #include "nsString.h"
 #include "nsReadableUtils.h"
 #include "nsXPIDLString.h"
+#include "nsPrintfCString.h"
 #include "nsIStringBundle.h"
 #include "prefapi.h"
-#include "prmem.h"
 #include "pldhash.h"
 
-#include "plstr.h"
 #include "nsCRT.h"
 #include "mozilla/Services.h"
 
 #include "prefapi_private_data.h"
+
+#ifdef MOZ_CRASHREPORTER
+#include "nsICrashReporter.h"
+#endif
+
+#include "nsIConsoleService.h"
+
+// 1 MB should be enough for everyone.
+static const uint32_t MAX_PREF_LENGTH = 1 * 1024 * 1024;
+// Actually, 4kb should be enough for everyone.
+static const uint32_t MAX_ADVISABLE_PREF_LENGTH = 4 * 1024;
 
 // Definitions
 struct EnumerateData {
@@ -141,6 +151,19 @@ NS_IMETHODIMP nsPrefBranch::SetBoolPref(const char *aPrefName, bool aValue)
   return PREF_SetBoolPref(pref, aValue, mIsDefault);
 }
 
+NS_IMETHODIMP nsPrefBranch::GetFloatPref(const char *aPrefName, float *_retval)
+{
+  NS_ENSURE_ARG(aPrefName);
+  const char *pref = getPrefName(aPrefName);
+  nsAutoCString stringVal;
+  nsresult rv = GetCharPref(pref, getter_Copies(stringVal));
+  if (NS_SUCCEEDED(rv)) {
+    *_retval = stringVal.ToFloat(&rv);
+  }
+
+  return rv;
+}
+
 NS_IMETHODIMP nsPrefBranch::GetCharPref(const char *aPrefName, char **_retval)
 {
   NS_ENSURE_ARG(aPrefName);
@@ -149,6 +172,16 @@ NS_IMETHODIMP nsPrefBranch::GetCharPref(const char *aPrefName, char **_retval)
 }
 
 NS_IMETHODIMP nsPrefBranch::SetCharPref(const char *aPrefName, const char *aValue)
+{
+  nsresult rv = CheckSanityOfStringLength(aPrefName, aValue);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  return SetCharPrefInternal(aPrefName, aValue);
+}
+
+nsresult nsPrefBranch::SetCharPrefInternal(const char *aPrefName, const char *aValue)
+
 {
   if (GetContentChild()) {
     NS_ERROR("cannot set pref from content process");
@@ -267,7 +300,7 @@ NS_IMETHODIMP nsPrefBranch::GetComplexValue(const char *aPrefName, const nsIID &
     nsACString::const_iterator keyEnd(keyBegin);
     if (!FindCharInReadable(']', keyEnd, strEnd))
       return NS_ERROR_FAILURE;
-    nsCAutoString key(Substring(keyBegin, keyEnd));
+    nsAutoCString key(Substring(keyBegin, keyEnd));
     
     nsCOMPtr<nsIFile> fromFile;
     nsCOMPtr<nsIProperties> directoryService(do_GetService(NS_DIRECTORY_SERVICE_CONTRACTID, &rv));
@@ -297,7 +330,23 @@ NS_IMETHODIMP nsPrefBranch::GetComplexValue(const char *aPrefName, const nsIID &
     nsCOMPtr<nsISupportsString> theString(do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv));
 
     if (NS_SUCCEEDED(rv)) {
-      theString->SetData(NS_ConvertUTF8toUTF16(utf8String));
+      // Debugging to see why we end up with very long strings here with
+      // some addons, see bug 836263.
+      nsAutoString wdata;
+      if (!AppendUTF8toUTF16(utf8String, wdata, mozilla::fallible_t())) {
+#ifdef MOZ_CRASHREPORTER
+        nsCOMPtr<nsICrashReporter> cr =
+          do_GetService("@mozilla.org/toolkit/crash-reporter;1");
+        if (cr) {
+          cr->AnnotateCrashReport(NS_LITERAL_CSTRING("bug836263-size"),
+                                  nsPrintfCString("%x", utf8String.Length()));
+          cr->RegisterAppMemory(uint64_t(utf8String.BeginReading()),
+                                std::min(0x1000U, utf8String.Length()));
+        }
+#endif
+        NS_RUNTIMEABORT("bug836263");
+      }
+      theString->SetData(wdata);
       theString.forget(reinterpret_cast<nsISupportsString**>(_retval));
     }
     return rv;
@@ -306,6 +355,40 @@ NS_IMETHODIMP nsPrefBranch::GetComplexValue(const char *aPrefName, const nsIID &
   NS_WARNING("nsPrefBranch::GetComplexValue - Unsupported interface type");
   return NS_NOINTERFACE;
 }
+
+nsresult nsPrefBranch::CheckSanityOfStringLength(const char* aPrefName, const char* aValue) {
+  if (!aValue) {
+    return NS_OK;
+  }
+  return CheckSanityOfStringLength(aPrefName, strlen(aValue));
+}
+
+nsresult nsPrefBranch::CheckSanityOfStringLength(const char* aPrefName, const nsAString& aValue) {
+  return CheckSanityOfStringLength(aPrefName, aValue.Length());
+}
+
+nsresult nsPrefBranch::CheckSanityOfStringLength(const char* aPrefName, const uint32_t aLength) {
+  if (aLength > MAX_PREF_LENGTH) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  if (aLength <= MAX_ADVISABLE_PREF_LENGTH) {
+    return NS_OK;
+  }
+  nsresult rv;
+  nsCOMPtr<nsIConsoleService> console = do_GetService("@mozilla.org/consoleservice;1", &rv);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  nsAutoCString message(nsPrintfCString("Warning: attempting to write %d bytes to preference %s. This is bad for general performance and memory usage. Such an amount of data should rather be written to an external file.",
+                                        aLength,
+                                        aPrefName));
+  rv = console->LogStringMessage(NS_ConvertUTF8toUTF16(message).get());
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  return NS_OK;
+}
+
 
 NS_IMETHODIMP nsPrefBranch::SetComplexValue(const char *aPrefName, const nsIID & aType, nsISupports *aValue)
 {
@@ -323,11 +406,11 @@ NS_IMETHODIMP nsPrefBranch::SetComplexValue(const char *aPrefName, const nsIID &
     nsCOMPtr<nsIFile> file = do_QueryInterface(aValue);
     if (!file)
       return NS_NOINTERFACE;
-    nsCAutoString descriptorString;
+    nsAutoCString descriptorString;
 
     rv = file->GetPersistentDescriptor(descriptorString);
     if (NS_SUCCEEDED(rv)) {
-      rv = SetCharPref(aPrefName, descriptorString.get());
+      rv = SetCharPrefInternal(aPrefName, descriptorString.get());
     }
     return rv;
   }
@@ -336,12 +419,12 @@ NS_IMETHODIMP nsPrefBranch::SetComplexValue(const char *aPrefName, const nsIID &
     nsCOMPtr<nsIRelativeFilePref> relFilePref = do_QueryInterface(aValue);
     if (!relFilePref)
       return NS_NOINTERFACE;
-    
+
     nsCOMPtr<nsIFile> file;
     relFilePref->GetFile(getter_AddRefs(file));
     if (!file)
       return NS_NOINTERFACE;
-    nsCAutoString relativeToKey;
+    nsAutoCString relativeToKey;
     (void) relFilePref->GetRelativeToKey(relativeToKey);
 
     nsCOMPtr<nsIFile> relativeToFile;
@@ -352,28 +435,33 @@ NS_IMETHODIMP nsPrefBranch::SetComplexValue(const char *aPrefName, const nsIID &
     if (NS_FAILED(rv))
       return rv;
 
-    nsCAutoString relDescriptor;
+    nsAutoCString relDescriptor;
     rv = file->GetRelativeDescriptor(relativeToFile, relDescriptor);
     if (NS_FAILED(rv))
       return rv;
-    
-    nsCAutoString descriptorString;
+
+    nsAutoCString descriptorString;
     descriptorString.Append('[');
     descriptorString.Append(relativeToKey);
     descriptorString.Append(']');
     descriptorString.Append(relDescriptor);
-    return SetCharPref(aPrefName, descriptorString.get());
+    return SetCharPrefInternal(aPrefName, descriptorString.get());
   }
 
   if (aType.Equals(NS_GET_IID(nsISupportsString))) {
     nsCOMPtr<nsISupportsString> theString = do_QueryInterface(aValue);
 
     if (theString) {
-      nsAutoString wideString;
+      nsString wideString;
 
       rv = theString->GetData(wideString);
       if (NS_SUCCEEDED(rv)) {
-        rv = SetCharPref(aPrefName, NS_ConvertUTF16toUTF8(wideString).get());
+        // Check sanity of string length before any lengthy conversion
+        rv = CheckSanityOfStringLength(aPrefName, wideString);
+        if (NS_FAILED(rv)) {
+          return rv;
+        }
+        rv = SetCharPrefInternal(aPrefName, NS_ConvertUTF16toUTF8(wideString).get());
       }
     }
     return rv;
@@ -387,7 +475,12 @@ NS_IMETHODIMP nsPrefBranch::SetComplexValue(const char *aPrefName, const nsIID &
 
       rv = theString->GetData(getter_Copies(wideString));
       if (NS_SUCCEEDED(rv)) {
-        rv = SetCharPref(aPrefName, NS_ConvertUTF16toUTF8(wideString).get());
+        // Check sanity of string length before any lengthy conversion
+        rv = CheckSanityOfStringLength(aPrefName, wideString);
+        if (NS_FAILED(rv)) {
+          return rv;
+        }
+        rv = SetCharPrefInternal(aPrefName, NS_ConvertUTF16toUTF8(wideString).get());
       }
     }
     return rv;
@@ -624,7 +717,7 @@ nsresult nsPrefBranch::NotifyObserver(const char *newpref, void *data)
   // remove any root this string may contain so as to not confuse the observer
   // by passing them something other than what they passed us as a topic
   uint32_t len = pCallback->GetPrefBranch()->GetRootLength();
-  nsCAutoString suffix(newpref + len);
+  nsAutoCString suffix(newpref + len);
 
   observer->Observe(static_cast<nsIPrefBranch *>(pCallback->GetPrefBranch()),
                     NS_PREFBRANCH_PREFCHANGE_TOPIC_ID,

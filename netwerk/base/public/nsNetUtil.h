@@ -76,6 +76,13 @@
 #include "nsIMIMEHeaderParam.h"
 #include "nsILoadContext.h"
 #include "mozilla/Services.h"
+#include "nsIPrivateBrowsingChannel.h"
+#include "mozIApplicationClearPrivateDataParams.h"
+#include "nsIOfflineCacheUpdate.h"
+#include "nsIContentSniffer.h"
+#include "nsCategoryCache.h"
+
+#include <limits>
 
 #ifdef MOZILLA_INTERNAL_API
 
@@ -277,8 +284,7 @@ NS_OpenURI(nsIStreamListener     *listener,
 inline nsresult
 NS_MakeAbsoluteURI(nsACString       &result,
                    const nsACString &spec, 
-                   nsIURI           *baseURI, 
-                   nsIIOService     *unused = nullptr)
+                   nsIURI           *baseURI)
 {
     nsresult rv;
     if (!baseURI) {
@@ -296,11 +302,10 @@ NS_MakeAbsoluteURI(nsACString       &result,
 inline nsresult
 NS_MakeAbsoluteURI(char        **result,
                    const char   *spec, 
-                   nsIURI       *baseURI, 
-                   nsIIOService *unused = nullptr)
+                   nsIURI       *baseURI)
 {
     nsresult rv;
-    nsCAutoString resultBuf;
+    nsAutoCString resultBuf;
     rv = NS_MakeAbsoluteURI(resultBuf, nsDependentCString(spec), baseURI);
     if (NS_SUCCEEDED(rv)) {
         *result = ToNewCString(resultBuf);
@@ -313,8 +318,7 @@ NS_MakeAbsoluteURI(char        **result,
 inline nsresult
 NS_MakeAbsoluteURI(nsAString       &result,
                    const nsAString &spec, 
-                   nsIURI          *baseURI,
-                   nsIIOService    *unused = nullptr)
+                   nsIURI          *baseURI)
 {
     nsresult rv;
     if (!baseURI) {
@@ -323,7 +327,7 @@ NS_MakeAbsoluteURI(nsAString       &result,
         rv = NS_OK;
     }
     else {
-        nsCAutoString resultBuf;
+        nsAutoCString resultBuf;
         if (spec.IsEmpty())
             rv = baseURI->GetSpec(resultBuf);
         else
@@ -380,8 +384,7 @@ NS_StringToACE(const nsACString &idn, nsACString &result)
  * concept of ports or if there was an error getting the port.
  */
 inline int32_t
-NS_GetRealPort(nsIURI* aURI,
-               nsIIOService* ioService = nullptr)     // pass in nsIIOService to optimize callers
+NS_GetRealPort(nsIURI* aURI)
 {
     int32_t port;
     nsresult rv = aURI->GetPort(&port);
@@ -394,7 +397,7 @@ NS_GetRealPort(nsIURI* aURI,
     // Otherwise, we have to get the default port from the protocol handler
 
     // Need the scheme first
-    nsCAutoString scheme;
+    nsAutoCString scheme;
     rv = aURI->GetScheme(scheme);
     if (NS_FAILED(rv))
         return -1;
@@ -654,13 +657,13 @@ NS_ImplementChannelOpen(nsIChannel      *channel,
 inline nsresult
 NS_NewRequestObserverProxy(nsIRequestObserver **result,
                            nsIRequestObserver  *observer,
-                           nsIEventTarget      *target = nullptr)
+                           nsISupports         *context)
 {
     nsresult rv;
     nsCOMPtr<nsIRequestObserverProxy> proxy =
         do_CreateInstance(NS_REQUESTOBSERVERPROXY_CONTRACTID, &rv);
     if (NS_SUCCEEDED(rv)) {
-        rv = proxy->Init(observer, target);
+        rv = proxy->Init(observer, context);
         if (NS_SUCCEEDED(rv))
             NS_ADDREF(*result = proxy);  // cannot use nsCOMPtr::swap
     }
@@ -709,7 +712,7 @@ NS_CheckPortSafety(nsIURI *uri) {
     nsresult rv = uri->GetPort(&port);
     if (NS_FAILED(rv) || port == -1)  // port undefined or default-valued
         return NS_OK;
-    nsCAutoString scheme;
+    nsAutoCString scheme;
     uri->GetScheme(scheme);
     return NS_CheckPortSafety(port, scheme.get());
 }
@@ -725,7 +728,7 @@ NS_NewProxyInfo(const nsACString &type,
     nsCOMPtr<nsIProtocolProxyService> pps =
             do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID, &rv);
     if (NS_SUCCEEDED(rv))
-        rv = pps->NewProxyInfo(type, host, port, flags, PR_UINT32_MAX, nullptr,
+        rv = pps->NewProxyInfo(type, host, port, flags, UINT32_MAX, nullptr,
                                result);
     return rv; 
 }
@@ -850,40 +853,6 @@ NS_GetReferrerFromChannel(nsIChannel *channel,
     }
     return rv;
 }
-
-#ifdef MOZILLA_INTERNAL_API
-inline nsresult
-NS_ExamineForProxy(const char    *scheme,
-                   const char    *host,
-                   int32_t        port, 
-                   nsIProxyInfo **proxyInfo)
-{
-    nsresult rv;
-    nsCOMPtr<nsIProtocolProxyService> pps =
-            do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID, &rv);
-    if (NS_SUCCEEDED(rv)) {
-        nsCAutoString spec(scheme);
-        spec.Append("://");
-        spec.Append(host);
-        spec.Append(':');
-        spec.AppendInt(port);
-        // XXXXX - Under no circumstances whatsoever should any code which
-        // wants a uri do this. I do this here because I do not, in fact,
-        // actually want a uri (the dummy uris created here may not be 
-        // syntactically valid for the specific protocol), and all we need
-        // is something which has a valid scheme, hostname, and a string
-        // to pass to PAC if needed - bbaetz
-        nsCOMPtr<nsIURI> uri =
-                do_CreateInstance(NS_STANDARDURL_CONTRACTID, &rv);
-        if (NS_SUCCEEDED(rv)) {
-            rv = uri->SetSpec(spec);
-            if (NS_SUCCEEDED(rv))
-                rv = pps->Resolve(uri, 0, proxyInfo);
-        }
-    }
-    return rv;
-}
-#endif
 
 inline nsresult
 NS_ParseContentType(const nsACString &rawContentType,
@@ -1063,7 +1032,7 @@ NS_BackgroundOutputStream(nsIOutputStream **result,
     return rv;
 }
 
-inline nsresult
+MOZ_WARN_UNUSED_RESULT inline nsresult
 NS_NewBufferedInputStream(nsIInputStream **result,
                           nsIInputStream  *str,
                           uint32_t         bufferSize)
@@ -1120,17 +1089,15 @@ NS_BufferOutputStream(nsIOutputStream *aOutputStream,
     if (NS_SUCCEEDED(rv))
         return bos.forget();
 
-    NS_ADDREF(aOutputStream);
-    return aOutputStream;
+    bos = aOutputStream;
+    return bos.forget();
 }
 
 // returns an input stream compatible with nsIUploadChannel::SetUploadStream()
 inline nsresult
 NS_NewPostDataStream(nsIInputStream  **result,
                      bool              isFile,
-                     const nsACString &data,
-                     uint32_t          encodeFlags,
-                     nsIIOService     *unused = nullptr)
+                     const nsACString &data)
 {
     nsresult rv;
 
@@ -1325,10 +1292,23 @@ NS_QueryNotificationCallbacks(nsIInterfaceRequestor  *callbacks,
 inline bool
 NS_UsePrivateBrowsing(nsIChannel *channel)
 {
+    bool isPrivate = false;
+    bool isOverriden = false;
+    nsCOMPtr<nsIPrivateBrowsingChannel> pbChannel = do_QueryInterface(channel);
+    if (pbChannel &&
+        NS_SUCCEEDED(pbChannel->IsPrivateModeOverriden(&isPrivate, &isOverriden)) &&
+        isOverriden) {
+        return isPrivate;
+    }
     nsCOMPtr<nsILoadContext> loadContext;
     NS_QueryNotificationCallbacks(channel, loadContext);
     return loadContext && loadContext->UsePrivateBrowsing();
 }
+
+// Constants duplicated from nsIScriptSecurityManager so we avoid having necko
+// know about script security manager.
+#define NECKO_NO_APP_ID 0
+#define NECKO_UNKNOWN_APP_ID UINT32_MAX
 
 /**
  * Gets AppId and isInBrowserElement from channel's nsILoadContext.
@@ -1350,6 +1330,66 @@ NS_GetAppInfo(nsIChannel *aChannel, uint32_t *aAppID, bool *aIsInBrowserElement)
     NS_ENSURE_SUCCESS(rv, false);
 
     return true;
+}
+
+/**
+ *  Gets appId and browserOnly parameters from the TOPIC_WEB_APP_CLEAR_DATA
+ *  nsIObserverService notification.  Used when clearing user data or
+ *  uninstalling web apps.
+ */
+inline nsresult
+NS_GetAppInfoFromClearDataNotification(nsISupports *aSubject,
+                                       uint32_t *aAppID, bool* aBrowserOnly)
+{
+    nsresult rv;
+
+    nsCOMPtr<mozIApplicationClearPrivateDataParams>
+        clearParams(do_QueryInterface(aSubject));
+    MOZ_ASSERT(clearParams);
+    if (!clearParams) {
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    uint32_t appId;
+    rv = clearParams->GetAppId(&appId);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    MOZ_ASSERT(appId != NECKO_UNKNOWN_APP_ID);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (appId == NECKO_UNKNOWN_APP_ID) {
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    bool browserOnly = false;
+    rv = clearParams->GetBrowserOnly(&browserOnly);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    *aAppID = appId;
+    *aBrowserOnly = browserOnly;
+    return NS_OK;
+}
+
+/**
+ * Determines whether appcache should be checked for a given URI.
+ */
+inline bool
+NS_ShouldCheckAppCache(nsIURI *aURI, bool usePrivateBrowsing)
+{
+    if (usePrivateBrowsing) {
+        return false;
+    }
+
+    nsCOMPtr<nsIOfflineCacheUpdateService> offlineService =
+        do_GetService("@mozilla.org/offlinecacheupdate-service;1");
+    if (!offlineService) {
+        return false;
+    }
+
+    bool allowed;
+    nsresult rv = offlineService->OfflineAppAllowedForURI(aURI,
+                                                          nullptr,
+                                                          &allowed);
+    return NS_SUCCEEDED(rv) && allowed;
 }
 
 /**
@@ -1460,12 +1500,21 @@ NS_QueryNotificationCallbacks(const nsCOMPtr<nsIChannel> &aChannel,
 inline nsresult
 NS_NewNotificationCallbacksAggregation(nsIInterfaceRequestor  *callbacks,
                                        nsILoadGroup           *loadGroup,
+                                       nsIEventTarget         *target,
                                        nsIInterfaceRequestor **result)
 {
     nsCOMPtr<nsIInterfaceRequestor> cbs;
     if (loadGroup)
         loadGroup->GetNotificationCallbacks(getter_AddRefs(cbs));
-    return NS_NewInterfaceRequestorAggregation(callbacks, cbs, result);
+    return NS_NewInterfaceRequestorAggregation(callbacks, cbs, target, result);
+}
+
+inline nsresult
+NS_NewNotificationCallbacksAggregation(nsIInterfaceRequestor  *callbacks,
+                                       nsILoadGroup           *loadGroup,
+                                       nsIInterfaceRequestor **result)
+{
+    return NS_NewNotificationCallbacksAggregation(callbacks, loadGroup, nullptr, result);
 }
 
 /**
@@ -1577,21 +1626,21 @@ NS_TryToMakeImmutable(nsIURI* uri,
     nsresult rv;
     nsCOMPtr<nsINetUtil> util = do_GetNetUtil(&rv);
 
-    nsIURI* result = nullptr;
+    nsCOMPtr<nsIURI> result;
     if (NS_SUCCEEDED(rv)) {
         NS_ASSERTION(util, "do_GetNetUtil lied");
-        rv = util->ToImmutableURI(uri, &result);
+        rv = util->ToImmutableURI(uri, getter_AddRefs(result));
     }
 
     if (NS_FAILED(rv)) {
-        NS_IF_ADDREF(result = uri);
+        result = uri;
     }
 
     if (outRv) {
         *outRv = rv;
     }
 
-    return result;
+    return result.forget();
 }
 
 /**
@@ -1615,22 +1664,23 @@ NS_URIChainHasFlags(nsIURI   *uri,
  * value could be just the object passed in if it's not a nested URI.
  */
 inline already_AddRefed<nsIURI>
-NS_GetInnermostURI(nsIURI *uri)
+NS_GetInnermostURI(nsIURI* aURI)
 {
-    NS_PRECONDITION(uri, "Must have URI");
+    NS_PRECONDITION(aURI, "Must have URI");
+
+    nsCOMPtr<nsIURI> uri = aURI;
     
     nsCOMPtr<nsINestedURI> nestedURI(do_QueryInterface(uri));
     if (!nestedURI) {
-        NS_ADDREF(uri);
-        return uri;
+        return uri.forget();
     }
 
-    nsresult rv = nestedURI->GetInnermostURI(&uri);
+    nsresult rv = nestedURI->GetInnermostURI(getter_AddRefs(uri));
     if (NS_FAILED(rv)) {
         return nullptr;
     }
 
-    return uri;
+    return uri.forget();
 }
 
 /**
@@ -1664,7 +1714,7 @@ NS_SecurityHashURI(nsIURI* aURI)
 {
     nsCOMPtr<nsIURI> baseURI = NS_GetInnermostURI(aURI);
 
-    nsCAutoString scheme;
+    nsAutoCString scheme;
     uint32_t schemeHash = 0;
     if (NS_SUCCEEDED(baseURI->GetScheme(scheme)))
         schemeHash = mozilla::HashString(scheme);
@@ -1677,14 +1727,17 @@ NS_SecurityHashURI(nsIURI* aURI)
         scheme.EqualsLiteral("mailbox") ||
         scheme.EqualsLiteral("news"))
     {
-        nsCAutoString spec;
-        uint32_t specHash = baseURI->GetSpec(spec);
-        if (NS_SUCCEEDED(specHash))
+        nsAutoCString spec;
+        uint32_t specHash;
+        nsresult res = baseURI->GetSpec(spec);
+        if (NS_SUCCEEDED(res))
             specHash = mozilla::HashString(spec);
+        else
+            specHash = static_cast<uint32_t>(res);
         return specHash;
     }
 
-    nsCAutoString host;
+    nsAutoCString host;
     uint32_t hostHash = 0;
     if (NS_SUCCEEDED(baseURI->GetAsciiHost(host)))
         hostHash = mozilla::HashString(host);
@@ -1731,7 +1784,7 @@ NS_SecurityCompareURIs(nsIURI* aSourceURI,
         return false;
 
     // Compare schemes
-    nsCAutoString targetScheme;
+    nsAutoCString targetScheme;
     bool sameScheme = false;
     if (NS_FAILED( targetBaseURI->GetScheme(targetScheme) ) ||
         NS_FAILED( sourceBaseURI->SchemeIs(targetScheme.get(), &sameScheme) ) ||
@@ -1741,7 +1794,8 @@ NS_SecurityCompareURIs(nsIURI* aSourceURI,
         return false;
     }
 
-    // special handling for file: URIs
+    // For file scheme, reject unless the files are identical. See
+    // NS_RelaxStrictFileOriginPolicy for enforcing file same-origin checking
     if (targetScheme.EqualsLiteral("file"))
     {
         // in traditional unsafe behavior all files are the same origin
@@ -1775,16 +1829,16 @@ NS_SecurityCompareURIs(nsIURI* aSourceURI,
     {
         // Each message is a distinct trust domain; use the
         // whole spec for comparison
-        nsCAutoString targetSpec;
-        nsCAutoString sourceSpec;
+        nsAutoCString targetSpec;
+        nsAutoCString sourceSpec;
         return ( NS_SUCCEEDED( targetBaseURI->GetSpec(targetSpec) ) &&
                  NS_SUCCEEDED( sourceBaseURI->GetSpec(sourceSpec) ) &&
                  targetSpec.Equals(sourceSpec) );
     }
 
     // Compare hosts
-    nsCAutoString targetHost;
-    nsCAutoString sourceHost;
+    nsAutoCString targetHost;
+    nsAutoCString sourceHost;
     if (NS_FAILED( targetBaseURI->GetAsciiHost(targetHost) ) ||
         NS_FAILED( sourceBaseURI->GetAsciiHost(sourceHost) ))
     {
@@ -1808,6 +1862,100 @@ NS_SecurityCompareURIs(nsIURI* aSourceURI,
     }
 
     return NS_GetRealPort(targetBaseURI) == NS_GetRealPort(sourceBaseURI);
+}
+
+inline bool
+NS_URIIsLocalFile(nsIURI *aURI)
+{
+  nsCOMPtr<nsINetUtil> util = do_GetNetUtil();
+
+  bool isFile;
+  return util && NS_SUCCEEDED(util->ProtocolHasFlags(aURI,
+                                nsIProtocolHandler::URI_IS_LOCAL_FILE,
+                                &isFile)) &&
+         isFile;
+}
+
+// When strict file origin policy is enabled, SecurityCompareURIs will fail for
+// file URIs that do not point to the same local file. This call provides an
+// alternate file-specific origin check that allows target files that are
+// contained in the same directory as the source.
+//
+// https://developer.mozilla.org/en-US/docs/Same-origin_policy_for_file:_URIs
+inline bool
+NS_RelaxStrictFileOriginPolicy(nsIURI *aTargetURI,
+                               nsIURI *aSourceURI,
+                               bool aAllowDirectoryTarget = false)
+{
+  if (!NS_URIIsLocalFile(aTargetURI)) {
+    // This is probably not what the caller intended
+    NS_NOTREACHED("NS_RelaxStrictFileOriginPolicy called with non-file URI");
+    return false;
+  }
+
+  if (!NS_URIIsLocalFile(aSourceURI)) {
+    // If the source is not also a file: uri then forget it
+    // (don't want resource: principals in a file: doc)
+    //
+    // note: we're not de-nesting jar: uris here, we want to
+    // keep archive content bottled up in its own little island
+    return false;
+  }
+
+  //
+  // pull out the internal files
+  //
+  nsCOMPtr<nsIFileURL> targetFileURL(do_QueryInterface(aTargetURI));
+  nsCOMPtr<nsIFileURL> sourceFileURL(do_QueryInterface(aSourceURI));
+  nsCOMPtr<nsIFile> targetFile;
+  nsCOMPtr<nsIFile> sourceFile;
+  bool targetIsDir;
+
+  // Make sure targetFile is not a directory (bug 209234)
+  // and that it exists w/out unescaping (bug 395343)
+  if (!sourceFileURL || !targetFileURL ||
+      NS_FAILED(targetFileURL->GetFile(getter_AddRefs(targetFile))) ||
+      NS_FAILED(sourceFileURL->GetFile(getter_AddRefs(sourceFile))) ||
+      !targetFile || !sourceFile ||
+      NS_FAILED(targetFile->Normalize()) ||
+#ifndef MOZ_WIDGET_ANDROID
+      NS_FAILED(sourceFile->Normalize()) ||
+#endif
+      (!aAllowDirectoryTarget &&
+       (NS_FAILED(targetFile->IsDirectory(&targetIsDir)) || targetIsDir))) {
+    return false;
+  }
+
+  //
+  // If the file to be loaded is in a subdirectory of the source
+  // (or same-dir if source is not a directory) then it will
+  // inherit its source principal and be scriptable by that source.
+  //
+  bool sourceIsDir;
+  bool allowed = false;
+  nsresult rv = sourceFile->IsDirectory(&sourceIsDir);
+  if (NS_SUCCEEDED(rv) && sourceIsDir) {
+    rv = sourceFile->Contains(targetFile, true, &allowed);
+  } else {
+    nsCOMPtr<nsIFile> sourceParent;
+    rv = sourceFile->GetParent(getter_AddRefs(sourceParent));
+    if (NS_SUCCEEDED(rv) && sourceParent) {
+      rv = sourceParent->Equals(targetFile, &allowed);
+      if (NS_FAILED(rv) || !allowed) {
+        rv = sourceParent->Contains(targetFile, true, &allowed);
+      } else {
+        MOZ_ASSERT(aAllowDirectoryTarget,
+                   "sourceFile->Parent == targetFile, but targetFile "
+                   "should've been disallowed if it is a directory");
+      }
+    }
+  }
+
+  if (NS_SUCCEEDED(rv) && allowed) {
+    return true;
+  }
+
+  return false;
 }
 
 inline bool
@@ -1959,9 +2107,7 @@ NS_GetContentDispositionFromToken(const nsAString& aDispToken)
       // Broken sites just send
       // Content-Disposition: filename="file"
       // without a disposition token... screen those out.
-      StringHead(aDispToken, 8).LowerCaseEqualsLiteral("filename") ||
-      // Also in use is Content-Disposition: name="file"
-      StringHead(aDispToken, 4).LowerCaseEqualsLiteral("name"))
+      StringHead(aDispToken, 8).LowerCaseEqualsLiteral("filename"))
     return nsIChannel::DISPOSITION_INLINE;
 
   return nsIChannel::DISPOSITION_ATTACHMENT;
@@ -1980,7 +2126,7 @@ NS_GetContentDispositionFromHeader(const nsACString& aHeader, nsIChannel *aChan 
   if (NS_FAILED(rv))
     return nsIChannel::DISPOSITION_ATTACHMENT;
 
-  nsCAutoString fallbackCharset;
+  nsAutoCString fallbackCharset;
   if (aChan) {
     nsCOMPtr<nsIURI> uri;
     aChan->GetURI(getter_AddRefs(uri));
@@ -1989,8 +2135,8 @@ NS_GetContentDispositionFromHeader(const nsACString& aHeader, nsIChannel *aChan 
   }
 
   nsAutoString dispToken;
-  rv = mimehdrpar->GetParameter(aHeader, "", fallbackCharset, true, nullptr,
-                                dispToken);
+  rv = mimehdrpar->GetParameterHTTP(aHeader, "", fallbackCharset, true, nullptr,
+                                    dispToken);
 
   if (NS_FAILED(rv)) {
     // special case (see bug 272541): empty disposition type handled as "inline"
@@ -2023,18 +2169,13 @@ NS_GetFilenameFromDisposition(nsAString& aFilename,
 
   nsCOMPtr<nsIURL> url = do_QueryInterface(aURI);
 
-  nsCAutoString fallbackCharset;
+  nsAutoCString fallbackCharset;
   if (url)
     url->GetOriginCharset(fallbackCharset);
   // Get the value of 'filename' parameter
-  rv = mimehdrpar->GetParameter(aDisposition, "filename",
-                                fallbackCharset, true, nullptr,
-                                aFilename);
-  if (NS_FAILED(rv) || aFilename.IsEmpty()) {
-    // Try 'name' parameter, instead.
-    rv = mimehdrpar->GetParameter(aDisposition, "name", fallbackCharset,
-                                  true, nullptr, aFilename);
-  }
+  rv = mimehdrpar->GetParameterHTTP(aDisposition, "filename",
+                                    fallbackCharset, true, nullptr,
+                                    aFilename);
 
   if (NS_FAILED(rv)) {
     aFilename.Truncate();
@@ -2073,7 +2214,7 @@ NS_IsAboutBlank(nsIURI *uri)
         return false;
     }
 
-    nsCAutoString str;
+    nsAutoCString str;
     uri->GetSpec(str);
     return str.EqualsLiteral("about:blank");
 }
@@ -2103,6 +2244,50 @@ NS_GenerateHostPort(const nsCString& host, int32_t port,
         hostLine.AppendInt(port);
     }
     return NS_OK;
+}
+
+/**
+ * Sniff the content type for a given request or a given buffer.
+ *
+ * aSnifferType can be either NS_CONTENT_SNIFFER_CATEGORY or
+ * NS_DATA_SNIFFER_CATEGORY.  The function returns the sniffed content type
+ * in the aSniffedType argument.  This argument will not be modified if the
+ * content type could not be sniffed.
+ */
+inline void
+NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
+                const uint8_t* aData, uint32_t aLength,
+                nsACString& aSniffedType)
+{
+  typedef nsCategoryCache<nsIContentSniffer> ContentSnifferCache;
+  extern NS_HIDDEN_(ContentSnifferCache*) gNetSniffers;
+  extern NS_HIDDEN_(ContentSnifferCache*) gDataSniffers;
+  ContentSnifferCache* cache = nullptr;
+  if (!strcmp(aSnifferType, NS_CONTENT_SNIFFER_CATEGORY)) {
+    if (!gNetSniffers) {
+      gNetSniffers = new ContentSnifferCache(NS_CONTENT_SNIFFER_CATEGORY);
+    }
+    cache = gNetSniffers;
+  } else if (!strcmp(aSnifferType, NS_DATA_SNIFFER_CATEGORY)) {
+    if (!gDataSniffers) {
+      gDataSniffers = new ContentSnifferCache(NS_DATA_SNIFFER_CATEGORY);
+    }
+    cache = gDataSniffers;
+  } else {
+    // Invalid content sniffer type was requested
+    MOZ_ASSERT(false);
+    return;
+  }
+
+  const nsCOMArray<nsIContentSniffer>& sniffers = cache->GetEntries();
+  for (int32_t i = 0; i < sniffers.Count(); ++i) {
+    nsresult rv = sniffers[i]->GetMIMETypeFromContent(aRequest, aData, aLength, aSniffedType);
+    if (NS_SUCCEEDED(rv) && !aSniffedType.IsEmpty()) {
+      return;
+    }
+  }
+
+  aSniffedType.Truncate();
 }
 
 #endif // !nsNetUtil_h__

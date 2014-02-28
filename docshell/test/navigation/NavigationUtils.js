@@ -99,9 +99,8 @@ function isInaccessible(wnd, message) {
 
 function xpcEnumerateContentWindows(callback) {
 
-  var Ci = Components.interfaces;
-  var ww = SpecialPowers.wrap(Components)
-                        .classes["@mozilla.org/embedcomp/window-watcher;1"]
+  var Ci = SpecialPowers.Ci;
+  var ww = SpecialPowers.Cc["@mozilla.org/embedcomp/window-watcher;1"]
                         .getService(Ci.nsIWindowWatcher);
   var enumerator = ww.getWindowEnumerator();
 
@@ -185,8 +184,12 @@ function xpcWaitForFinishedFrames(callback, numFrames) {
         (win.document.body.textContent == body ||
          win.document.body.textContent == popup_body) && 
         win.document.readyState == "complete") {
-      if (!contains(win, finishedWindows)) {
-        finishedWindows.push(win);
+
+      var util = win.QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor)
+                    .getInterface(SpecialPowers.Ci.nsIDOMWindowUtils);
+      var windowId = util.outerWindowID;
+      if (!contains(windowId, finishedWindows)) {
+        finishedWindows.push(windowId);
         frameFinished();
       }
     }

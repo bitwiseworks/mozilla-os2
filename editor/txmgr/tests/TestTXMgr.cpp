@@ -7,6 +7,7 @@
 
 #include "nsITransactionManager.h"
 #include "nsComponentManagerUtils.h"
+#include "mozilla/Likely.h"
 
 static int32_t sConstructorCount     = 0;
 static int32_t sDestructorCount      = 0;
@@ -612,7 +613,7 @@ public:
       return NS_OK;
 
     if (mFlags & BATCH_FLAG) {
-      result = mTXMgr->BeginBatch();
+      result = mTXMgr->BeginBatch(nullptr);
       if (NS_FAILED(result)) {
         return result;
       }
@@ -646,7 +647,7 @@ public:
              i, mLevel, result);
 
         if (mFlags & BATCH_FLAG)
-          mTXMgr->EndBatch();
+          mTXMgr->EndBatch(false);
 
         return NS_ERROR_OUT_OF_MEMORY;
       }
@@ -658,7 +659,7 @@ public:
              i, mLevel, result);
 
         if (mFlags & BATCH_FLAG)
-          mTXMgr->EndBatch();
+          mTXMgr->EndBatch(false);
 
         return result;
       }
@@ -671,7 +672,7 @@ public:
         tx->Release();
 
         if (mFlags & BATCH_FLAG)
-          mTXMgr->EndBatch();
+          mTXMgr->EndBatch(false);
 
         return result;
       }
@@ -680,7 +681,7 @@ public:
     }
 
     if (mFlags & BATCH_FLAG)
-      mTXMgr->EndBatch();
+      mTXMgr->EndBatch(false);
 
     return result;
   }
@@ -2699,7 +2700,7 @@ quick_batch_test(TestTransactionFactory *factory)
 
   /*******************************************************************
    *
-   * Make sure an unbalanced call to EndBatch() with empty undo stack
+   * Make sure an unbalanced call to EndBatch(false) with empty undo stack
    * throws an error!
    *
    *******************************************************************/
@@ -2718,10 +2719,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (result != NS_ERROR_FAILURE) {
-    fail("EndBatch() returned unexpected status. (%d)\n", result);
+    fail("EndBatch(false) returned unexpected status. (%d)\n", result);
     return result;
   }
 
@@ -2739,7 +2740,7 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  passed("Test unbalanced EndBatch() with empty undo stack");
+  passed("Test unbalanced EndBatch(false) with empty undo stack");
 
   /*******************************************************************
    *
@@ -2762,10 +2763,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -2783,10 +2784,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -2817,10 +2818,10 @@ quick_batch_test(TestTransactionFactory *factory)
    *
    *******************************************************************/
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -2863,10 +2864,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -2916,10 +2917,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return result;
   }
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -2948,10 +2949,10 @@ quick_batch_test(TestTransactionFactory *factory)
     tx->Release();
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -3020,10 +3021,10 @@ quick_batch_test(TestTransactionFactory *factory)
    *
    *******************************************************************/
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3063,10 +3064,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3106,10 +3107,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3149,24 +3150,24 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -3322,15 +3323,15 @@ quick_batch_test(TestTransactionFactory *factory)
 
   /*******************************************************************
    *
-   * Make sure an unbalanced call to EndBatch() throws an error and
+   * Make sure an unbalanced call to EndBatch(false) throws an error and
    * doesn't affect the undo and redo stacks!
    *
    *******************************************************************/
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (result != NS_ERROR_FAILURE) {
-    fail("EndBatch() returned unexpected status. (%d)\n", result);
+    fail("EndBatch(false) returned unexpected status. (%d)\n", result);
     return result;
   }
 
@@ -3362,7 +3363,7 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  passed("Test effect of unbalanced EndBatch() on undo and redo stacks");
+  passed("Test effect of unbalanced EndBatch(false) on undo and redo stacks");
 
   /*******************************************************************
    *
@@ -3372,10 +3373,10 @@ quick_batch_test(TestTransactionFactory *factory)
    *
    *******************************************************************/
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3407,10 +3408,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -3450,10 +3451,10 @@ quick_batch_test(TestTransactionFactory *factory)
    *
    *******************************************************************/
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3510,10 +3511,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return NS_ERROR_FAILURE;
   }
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -3635,10 +3636,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return result;
   }
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3651,10 +3652,10 @@ quick_batch_test(TestTransactionFactory *factory)
 
   tx->Release();
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -3738,10 +3739,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return result;
   }
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3754,10 +3755,10 @@ quick_batch_test(TestTransactionFactory *factory)
 
   tx->Release();
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -3869,10 +3870,10 @@ quick_batch_test(TestTransactionFactory *factory)
     return result;
   }
 
-  result = mgr->BeginBatch();
+  result = mgr->BeginBatch(nullptr);
 
   if (NS_FAILED(result)) {
-    fail("BeginBatch() failed. (%d)\n", result);
+    fail("BeginBatch(nullptr) failed. (%d)\n", result);
     return result;
   }
 
@@ -3885,10 +3886,10 @@ quick_batch_test(TestTransactionFactory *factory)
 
   tx->Release();
 
-  result = mgr->EndBatch();
+  result = mgr->EndBatch(false);
 
   if (NS_FAILED(result)) {
-    fail("EndBatch() failed. (%d)\n", result);
+    fail("EndBatch(false) failed. (%d)\n", result);
     return result;
   }
 
@@ -4081,10 +4082,10 @@ quick_batch_test(TestTransactionFactory *factory)
       return result;
     }
 
-    result = mgr->BeginBatch();
+    result = mgr->BeginBatch(nullptr);
 
     if (NS_FAILED(result)) {
-      fail("BeginBatch() failed. (%d)\n", result);
+      fail("BeginBatch(nullptr) failed. (%d)\n", result);
       return result;
     }
 
@@ -4096,10 +4097,10 @@ quick_batch_test(TestTransactionFactory *factory)
 
     tx->Release();
 
-    result = mgr->EndBatch();
+    result = mgr->EndBatch(false);
 
     if (NS_FAILED(result)) {
-      fail("EndBatch() failed. (%d)\n", result);
+      fail("EndBatch(false) failed. (%d)\n", result);
       return result;
     }
 
@@ -4166,10 +4167,10 @@ quick_batch_test(TestTransactionFactory *factory)
       return result;
     }
 
-    result = mgr->BeginBatch();
+    result = mgr->BeginBatch(nullptr);
 
     if (NS_FAILED(result)) {
-      fail("BeginBatch() failed. (%d)\n", result);
+      fail("BeginBatch(nullptr) failed. (%d)\n", result);
       return result;
     }
 
@@ -4181,10 +4182,10 @@ quick_batch_test(TestTransactionFactory *factory)
 
     tx->Release();
 
-    result = mgr->EndBatch();
+    result = mgr->EndBatch(false);
 
     if (NS_FAILED(result)) {
-      fail("EndBatch() failed. (%d)\n", result);
+      fail("EndBatch(false) failed. (%d)\n", result);
       return result;
     }
 
@@ -4446,7 +4447,7 @@ stress_test(TestTransactionFactory *factory, int32_t iterations)
     }
 
     // Trivial feedback not to let the user think the test is stuck.
-    if (NS_UNLIKELY(j % 100 == 0))
+    if (MOZ_UNLIKELY(j % 100 == 0))
       printf("%i ", j);
   } // for, iterations.
 

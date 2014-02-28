@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/dom/SVGAnimationElement.h"
 #include "nsSMILTimeValueSpec.h"
 #include "nsSMILInterval.h"
 #include "nsSMILTimeContainer.h"
@@ -10,7 +11,6 @@
 #include "nsSMILTimedElement.h"
 #include "nsSMILInstanceTime.h"
 #include "nsSMILParserUtils.h"
-#include "nsISMILAnimationElement.h"
 #include "nsEventListenerManager.h"
 #include "nsGUIEvent.h"
 #include "nsIDOMTimeEvent.h"
@@ -279,14 +279,8 @@ nsSMILTimeValueSpec::UnregisterFromReferencedElement(Element* aElement)
 nsSMILTimedElement*
 nsSMILTimeValueSpec::GetTimedElement(Element* aElement)
 {
-  if (!aElement)
-    return nullptr;
-
-  nsCOMPtr<nsISMILAnimationElement> animElement = do_QueryInterface(aElement);
-  if (!animElement)
-    return nullptr;
-
-  return &animElement->TimedElement();
+  return aElement && aElement->IsNodeOfType(nsINode::eANIMATION) ?
+    &static_cast<SVGAnimationElement*>(aElement)->TimedElement() : nullptr;
 }
 
 // Indicates whether we're allowed to register an event-listener
@@ -339,9 +333,7 @@ nsSMILTimeValueSpec::RegisterEventListener(Element* aTarget)
 
   elm->AddEventListenerByType(mEventListener,
                               nsDependentAtomString(mParams.mEventSymbol),
-                              NS_EVENT_FLAG_BUBBLE |
-                              NS_PRIV_EVENT_UNTRUSTED_PERMITTED |
-                              NS_EVENT_FLAG_SYSTEM_EVENT);
+                              AllEventsAtSystemGroupBubble());
 }
 
 void
@@ -356,9 +348,7 @@ nsSMILTimeValueSpec::UnregisterEventListener(Element* aTarget)
 
   elm->RemoveEventListenerByType(mEventListener,
                                  nsDependentAtomString(mParams.mEventSymbol),
-                                 NS_EVENT_FLAG_BUBBLE |
-                                 NS_PRIV_EVENT_UNTRUSTED_PERMITTED |
-                                 NS_EVENT_FLAG_SYSTEM_EVENT);
+                                 AllEventsAtSystemGroupBubble());
 }
 
 nsEventListenerManager*
@@ -366,7 +356,7 @@ nsSMILTimeValueSpec::GetEventListenerManager(Element* aTarget)
 {
   NS_ABORT_IF_FALSE(aTarget, "null target; can't get EventListenerManager");
 
-  nsCOMPtr<nsIDOMEventTarget> target;
+  nsCOMPtr<EventTarget> target;
 
   if (mParams.mType == nsSMILTimeValueSpecParams::ACCESSKEY) {
     nsIDocument* doc = aTarget->GetCurrentDoc();

@@ -14,6 +14,7 @@ namespace dom {
 namespace devicestorage {
 
 DeviceStorageRequestChild::DeviceStorageRequestChild()
+  : mCallback(nullptr)
 {
   MOZ_COUNT_CTOR(DeviceStorageRequestChild);
 }
@@ -22,6 +23,7 @@ DeviceStorageRequestChild::DeviceStorageRequestChild(DOMRequest* aRequest,
                                                      DeviceStorageFile* aFile)
   : mRequest(aRequest)
   , mFile(aFile)
+  , mCallback(nullptr)
 {
   MOZ_COUNT_CTOR(DeviceStorageRequestChild);
 }
@@ -33,6 +35,11 @@ DeviceStorageRequestChild::~DeviceStorageRequestChild() {
 bool
 DeviceStorageRequestChild::Recv__delete__(const DeviceStorageResponseValue& aValue)
 {
+  if (mCallback) {
+    mCallback->RequestComplete();
+    mCallback = nullptr;
+  }
+
   switch (aValue.type()) {
 
     case DeviceStorageResponseValue::TErrorResponse:
@@ -44,7 +51,11 @@ DeviceStorageRequestChild::Recv__delete__(const DeviceStorageResponseValue& aVal
 
     case DeviceStorageResponseValue::TSuccessResponse:
     {
-      jsval result = StringToJsval(mRequest->GetOwner(), mFile->mPath);
+      nsString compositePath;
+      mFile->GetCompositePath(compositePath);
+      AutoJSContext cx;
+      JS::Rooted<JS::Value> result(cx,
+        StringToJsval(mRequest->GetOwner(), compositePath));
       mRequest->FireSuccess(result);
       break;
     }
@@ -55,17 +66,38 @@ DeviceStorageRequestChild::Recv__delete__(const DeviceStorageResponseValue& aVal
       BlobChild* actor = static_cast<BlobChild*>(r.blobChild());
       nsCOMPtr<nsIDOMBlob> blob = actor->GetBlob();
 
-      jsval result = InterfaceToJsval(mRequest->GetOwner(), blob, &NS_GET_IID(nsIDOMBlob));
+      nsCOMPtr<nsIDOMFile> file = do_QueryInterface(blob);
+      AutoJSContext cx;
+      JS::Rooted<JS::Value> result(cx,
+        InterfaceToJsval(mRequest->GetOwner(), file, &NS_GET_IID(nsIDOMFile)));
       mRequest->FireSuccess(result);
       break;
     }
 
-    case DeviceStorageResponseValue::TStatStorageResponse:
+    case DeviceStorageResponseValue::TFreeSpaceStorageResponse:
     {
-      StatStorageResponse r = aValue;
+      FreeSpaceStorageResponse r = aValue;
+      AutoJSContext cx;
+      JS::Rooted<JS::Value> result(cx, JS_NumberValue(double(r.freeBytes())));
+      mRequest->FireSuccess(result);
+      break;
+    }
 
-      nsRefPtr<nsIDOMDeviceStorageStat> domstat = new nsDOMDeviceStorageStat(r.freeBytes(), r.totalBytes(), r.mountState());
-      jsval result = InterfaceToJsval(mRequest->GetOwner(), domstat, &NS_GET_IID(nsIDOMDeviceStorageStat));
+    case DeviceStorageResponseValue::TUsedSpaceStorageResponse:
+    {
+      UsedSpaceStorageResponse r = aValue;
+      AutoJSContext cx;
+      JS::Rooted<JS::Value> result(cx, JS_NumberValue(double(r.usedBytes())));
+      mRequest->FireSuccess(result);
+      break;
+    }
+
+    case DeviceStorageResponseValue::TAvailableStorageResponse:
+    {
+      AvailableStorageResponse r = aValue;
+      AutoJSContext cx;
+      JS::Rooted<JS::Value> result(
+        cx, StringToJsval(mRequest->GetOwner(), r.mountState()));
       mRequest->FireSuccess(result);
       break;
     }
@@ -77,19 +109,15 @@ DeviceStorageRequestChild::Recv__delete__(const DeviceStorageResponseValue& aVal
 
       uint32_t count = r.paths().Length();
       for (uint32_t i = 0; i < count; i++) {
-        nsCOMPtr<nsIFile> f;
-        nsresult rv = NS_NewLocalFile(r.paths()[i].fullpath(), false, getter_AddRefs(f));
-        if (NS_FAILED(rv)) {
-          continue;
-        }
-
-        nsRefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(f);
-        dsf->SetPath(r.paths()[i].name());
+        nsRefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(r.type(),
+                                                                r.paths()[i].storageName(),
+                                                                r.rootdir(),
+                                                                r.paths()[i].name());
         cursor->mFiles.AppendElement(dsf);
       }
 
       nsCOMPtr<ContinueCursorEvent> event = new ContinueCursorEvent(cursor);
-      NS_DispatchToMainThread(event);
+      event->Continue();
       break;
     }
 
@@ -102,6 +130,11 @@ DeviceStorageRequestChild::Recv__delete__(const DeviceStorageResponseValue& aVal
   return true;
 }
 
+void
+DeviceStorageRequestChild::SetCallback(DeviceStorageRequestChildCallback *aCallback)
+{
+  mCallback = aCallback;
+}
 
 } // namespace devicestorage
 } // namespace dom

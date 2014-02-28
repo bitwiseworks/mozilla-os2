@@ -28,6 +28,11 @@ pref("browser.chromeURL", "chrome://browser/content/");
 
 pref("browser.tabs.remote", false);
 
+// If a tab has not been active for this long (seconds), then it may be
+// turned into a zombie tab to preemptively free up memory. -1 disables time-based
+// expiration (but low-memory conditions may still require the tab to be zombified).
+pref("browser.tabs.expireTime", 3600);
+
 // From libpref/src/init/all.js, extended to allow a slightly wider zoom range.
 pref("zoom.minPercent", 20);
 pref("zoom.maxPercent", 400);
@@ -39,6 +44,9 @@ pref("toolkit.storage.synchronous", 0);
 // Device pixel to CSS px ratio, in percent. Set to -1 to calculate based on display density.
 pref("browser.viewport.scaleRatio", -1);
 pref("browser.viewport.desktopWidth", 980);
+// The default fallback zoom level to render pages at. Set to -1 to fit page; otherwise
+// the value is divided by 1000 and clamped to hard-coded min/max scale values.
+pref("browser.viewport.defaultZoom", -1);
 
 /* allow scrollbars to float above chrome ui */
 pref("ui.scrollbarsCanOverlapContent", 1);
@@ -50,24 +58,30 @@ pref("browser.cache.disk.max_entry_size", 4096); // kilobytes
 pref("browser.cache.disk.smart_size.enabled", true);
 pref("browser.cache.disk.smart_size.first_run", true);
 
+#ifdef MOZ_PKG_SPECIAL
+// low memory devices
+pref("browser.cache.memory.enable", false);
+#else
 pref("browser.cache.memory.enable", true);
+#endif
 pref("browser.cache.memory.capacity", 1024); // kilobytes
 
 /* image cache prefs */
 pref("image.cache.size", 1048576); // bytes
+pref("image.high_quality_downscaling.enabled", false);
 
 /* offline cache prefs */
 pref("browser.offline-apps.notify", true);
 pref("browser.cache.offline.enable", true);
 pref("browser.cache.offline.capacity", 5120); // kilobytes
-pref("offline-apps.quota.max", 2048); // kilobytes
 pref("offline-apps.quota.warn", 1024); // kilobytes
 
 // cache compression turned off for now - see bug #715198
 pref("browser.cache.compression_level", 0);
 
-/* protocol warning prefs */
+/* disable some protocol warnings */
 pref("network.protocol-handler.warn-external.tel", false);
+pref("network.protocol-handler.warn-external.sms", false);
 pref("network.protocol-handler.warn-external.mailto", false);
 pref("network.protocol-handler.warn-external.vnd.youtube", false);
 
@@ -79,7 +93,10 @@ pref("network.http.pipelining.maxrequests" , 6);
 pref("network.http.keep-alive.timeout", 600);
 pref("network.http.max-connections", 20);
 pref("network.http.max-persistent-connections-per-server", 6);
-pref("network.http.max-persistent-connections-per-proxy", 8);
+pref("network.http.max-persistent-connections-per-proxy", 20);
+
+// spdy
+pref("network.http.spdy.push-allowance", 32768);
 
 // See bug 545869 for details on why these are set the way they are
 pref("network.buffer.cache.count", 24);
@@ -97,8 +114,7 @@ pref("browser.sessionhistory.max_entries", 50);
 
 /* session store */
 pref("browser.sessionstore.resume_session_once", false);
-pref("browser.sessionstore.resume_from_crash", false);
-pref("browser.sessionstore.resume_from_crash_timeout", 60); // minutes
+pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.interval", 10000); // milliseconds
 pref("browser.sessionstore.max_tabs_undo", 1);
 pref("browser.sessionstore.max_resumed_crashes", 1);
@@ -109,6 +125,7 @@ pref("mozilla.widget.force-24bpp", true);
 pref("mozilla.widget.use-buffer-pixmap", true);
 pref("mozilla.widget.disable-native-theme", true);
 pref("layout.reflow.synthMouseMove", false);
+pref("layout.css.report_errors", false);
 
 /* download manager (don't show the window or alert) */
 pref("browser.download.useDownloadDir", true);
@@ -122,12 +139,6 @@ pref("browser.download.manager.openDelay", 0);
 pref("browser.download.manager.focusWhenStarting", false);
 pref("browser.download.manager.flashCount", 2);
 pref("browser.download.manager.displayedHistoryDays", 7);
-
-/* download alerts (disabled above) */
-pref("alerts.slideIncrement", 1);
-pref("alerts.slideIncrementTime", 10);
-pref("alerts.totalOpenTime", 6000);
-pref("alerts.height", 50);
 
 /* download helper */
 pref("browser.helperApps.deleteTempFileOnExit", false);
@@ -211,7 +222,6 @@ pref("dom.disable_window_print", true);
 pref("dom.disable_window_find", true);
 
 pref("keyword.enabled", true);
-pref("keyword.URL", "");
 
 pref("accessibility.typeaheadfind", false);
 pref("accessibility.typeaheadfind.timeout", 5000);
@@ -246,6 +256,7 @@ pref("browser.search.updateinterval", 6);
 
 // disable search suggestions by default
 pref("browser.search.suggest.enabled", false);
+pref("browser.search.suggest.prompted", false);
 
 // Tell the search service to load search plugins from the locale JAR
 pref("browser.search.loadFromJars", true);
@@ -253,6 +264,16 @@ pref("browser.search.jarURIs", "chrome://browser/locale/searchplugins/");
 
 // tell the search service that we don't really expose the "current engine"
 pref("browser.search.noCurrentEngine", true);
+
+#ifdef MOZ_OFFICIAL_BRANDING
+// {moz:official} expands to "official"
+pref("browser.search.official", true);
+#endif
+
+// Enable sparse localization by setting a few package locale overrides
+pref("chrome.override_package.global", "browser");
+pref("chrome.override_package.mozapps", "browser");
+pref("chrome.override_package.passwordmgr", "browser");
 
 // enable xul error pages
 pref("browser.xul.error_pages.enabled", true);
@@ -319,12 +340,14 @@ pref("gfx.color_management.mode", 0);
 
 // 0=fixed margin, 1=velocity bias, 2=dynamic resolution, 3=no margins, 4=prediction bias
 pref("gfx.displayport.strategy", 1);
+
 // all of the following displayport strategy prefs will be divided by 1000
 // to obtain some multiplier which is then used in the strategy.
 // fixed margin strategy options
 pref("gfx.displayport.strategy_fm.multiplier", -1); // displayport dimension multiplier
 pref("gfx.displayport.strategy_fm.danger_x", -1); // danger zone on x-axis when multiplied by viewport width
 pref("gfx.displayport.strategy_fm.danger_y", -1); // danger zone on y-axis when multiplied by viewport height
+
 // velocity bias strategy options
 pref("gfx.displayport.strategy_vb.multiplier", -1); // displayport dimension multiplier
 pref("gfx.displayport.strategy_vb.threshold", -1); // velocity threshold in inches/frame
@@ -333,6 +356,7 @@ pref("gfx.displayport.strategy_vb.danger_x_base", -1); // danger zone on x-axis 
 pref("gfx.displayport.strategy_vb.danger_y_base", -1); // danger zone on y-axis when multiplied by viewport height
 pref("gfx.displayport.strategy_vb.danger_x_incr", -1); // additional danger zone on x-axis when multiplied by viewport width and velocity
 pref("gfx.displayport.strategy_vb.danger_y_incr", -1); // additional danger zone on y-axis when multiplied by viewport height and velocity
+
 // prediction bias strategy options
 pref("gfx.displayport.strategy_pb.threshold", -1); // velocity threshold in inches/frame
 
@@ -362,9 +386,6 @@ pref("privacy.item.geolocation", true);
 pref("privacy.item.siteSettings", true);
 pref("privacy.item.syncAccount", true);
 
-// URL to the Learn More link XXX this is the firefox one.  Bug 495578 fixes this.
-pref("browser.geolocation.warning.infoURL", "http://www.mozilla.com/%LOCALE%/firefox/geolocation/");
-
 // enable geo
 pref("geo.enabled", true);
 
@@ -390,6 +411,8 @@ pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 40);
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 10);
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 105);
 pref("javascript.options.mem.high_water_mark", 16);
+pref("javascript.options.mem.gc_allocation_threshold_mb", 3);
+pref("javascript.options.mem.gc_decommit_threshold_mb", 1);
 #else
 pref("javascript.options.mem.high_water_mark", 32);
 #endif
@@ -413,23 +436,26 @@ pref("browser.ui.touch.top", 48);
 pref("browser.ui.touch.bottom", 16);
 pref("browser.ui.touch.weight.visited", 120); // percentage
 
+// The percentage of the screen that needs to be scrolled before margins are exposed.
+pref("browser.ui.show-margins-threshold", 20);
+
 // plugins
 pref("plugin.disable", false);
 pref("dom.ipc.plugins.enabled", false);
 
+// This pref isn't actually used anymore, but we're leaving this here to avoid changing
+// the default so that we can migrate a user-set pref. See bug 885357.
 pref("plugins.click_to_play", true);
-// Disabled because of thread safety problem
-// in getting the bits from the surface.
-// Bug 756253
-pref("plugins.use_placeholder", 0);
+// The default value for nsIPluginTag.enabledState (STATE_CLICKTOPLAY = 1)
+pref("plugin.default.state", 1);
 
 // product URLs
 // The breakpad report server to link to in about:crashes
-pref("breakpad.reportURL", "http://crash-stats.mozilla.com/report/index/");
+pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
 pref("app.support.baseURL", "http://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
 // Used to submit data to input from about:feedback
-pref("app.feedback.postURL", "http://m.input.mozilla.org/%LOCALE%/feedback");
-pref("app.privacyURL", "http://www.mozilla.com/%LOCALE%/m/privacy.html");
+pref("app.feedback.postURL", "https://input.mozilla.org/%LOCALE%/feedback");
+pref("app.privacyURL", "https://www.mozilla.org/legal/privacy/firefox.html");
 pref("app.creditsURL", "http://www.mozilla.org/credits/");
 pref("app.channelURL", "http://www.mozilla.org/%LOCALE%/firefox/channel/");
 #if MOZ_UPDATE_CHANNEL == aurora
@@ -448,6 +474,11 @@ pref("app.marketplaceURL", "https://marketplace.mozilla.org/");
 pref("security.alternate_certificate_error_page", "certerror");
 
 pref("security.warn_viewing_mixed", false); // Warning is disabled.  See Bug 616712.
+
+#ifdef NIGHTLY_BUILD
+// Block insecure active content on https pages
+pref("security.mixed_content.block_active_content", true);
+#endif
 
 // Override some named colors to avoid inverse OS themes
 pref("ui.-moz-dialog", "#efebe7");
@@ -489,6 +520,10 @@ pref("browser.search.param.yahoo-fr-ja", "mozff");
 pref("app.update.timerFirstInterval", 30000); // milliseconds
 pref("app.update.timerMinimumDelay", 30); // seconds
 
+// used by update service to decide whether or not to
+// automatically download an update
+pref("app.update.autodownload", "wifi");
+
 #ifdef MOZ_UPDATER
 /* prefs used specifically for updating the app */
 pref("app.update.enabled", false);
@@ -509,8 +544,12 @@ pref("ui.dragThresholdY", 25);
 pref("layers.acceleration.disabled", false);
 pref("layers.offmainthreadcomposition.enabled", true);
 pref("layers.async-video.enabled", true);
+pref("layers.progressive-paint", true);
+pref("layers.low-precision-buffer", true);
+pref("layers.low-precision-resolution", 250);
 
 pref("notification.feature.enabled", true);
+pref("dom.webnotifications.enabled", true);
 
 // prevent tooltips from showing up
 pref("browser.chrome.toolbar_tips", false);
@@ -521,48 +560,33 @@ pref("dom.indexedDB.warningQuota", 5);
 pref("media.preload.default", 1); // default to preload none
 pref("media.preload.auto", 2);    // preload metadata if preload=auto
 
-//  0: don't show fullscreen keyboard
-//  1: always show fullscreen keyboard
-// -1: show fullscreen keyboard based on threshold pref
-pref("widget.ime.android.landscape_fullscreen", 1);
-pref("widget.ime.android.fullscreen_threshold", 250); // in hundreths of inches
-
 // optimize images memory usage
 pref("image.mem.decodeondraw", true);
 pref("content.image.allow_locking", false);
 pref("image.mem.min_discard_timeout_ms", 10000);
 
 // enable touch events interfaces
-pref("dom.w3c_touch_events.enabled", true);
+pref("dom.w3c_touch_events.enabled", 1);
 
 #ifdef MOZ_SAFE_BROWSING
-// Safe browsing does nothing unless this pref is set
 pref("browser.safebrowsing.enabled", true);
-
-// Prevent loading of pages identified as malware
 pref("browser.safebrowsing.malware.enabled", true);
+pref("browser.safebrowsing.debug", false);
 
-// Non-enhanced mode (local url lists) URL list to check for updates
-pref("browser.safebrowsing.provider.0.updateURL", "http://safebrowsing.clients.google.com/safebrowsing/downloads?client={moz:client}&appver={moz:version}&pver=2.2");
+pref("browser.safebrowsing.updateURL", "http://safebrowsing.clients.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.keyURL", "https://sb-ssl.google.com/safebrowsing/newkey?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.gethashURL", "http://safebrowsing.clients.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/report?");
+pref("browser.safebrowsing.reportGenericURL", "http://%LOCALE%.phish-generic.mozilla.com/?hl=%LOCALE%");
+pref("browser.safebrowsing.reportErrorURL", "http://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%");
+pref("browser.safebrowsing.reportPhishURL", "http://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%");
+pref("browser.safebrowsing.reportMalwareURL", "http://%LOCALE%.malware-report.mozilla.com/?hl=%LOCALE%");
+pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%");
 
-pref("browser.safebrowsing.dataProvider", 0);
+pref("browser.safebrowsing.warning.infoURL", "http://www.mozilla.com/%LOCALE%/firefox/phishing-protection/");
+pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 
-// Does the provider name need to be localizable?
-pref("browser.safebrowsing.provider.0.name", "Google");
-pref("browser.safebrowsing.provider.0.keyURL", "https://sb-ssl.google.com/safebrowsing/newkey?client={moz:client}&appver={moz:version}&pver=2.2");
-pref("browser.safebrowsing.provider.0.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/report?");
-pref("browser.safebrowsing.provider.0.gethashURL", "http://safebrowsing.clients.google.com/safebrowsing/gethash?client={moz:client}&appver={moz:version}&pver=2.2");
-
-// HTML report pages
-pref("browser.safebrowsing.provider.0.reportGenericURL", "http://{moz:locale}.phish-generic.mozilla.com/?hl={moz:locale}");
-pref("browser.safebrowsing.provider.0.reportErrorURL", "http://{moz:locale}.phish-error.mozilla.com/?hl={moz:locale}");
-pref("browser.safebrowsing.provider.0.reportPhishURL", "http://{moz:locale}.phish-report.mozilla.com/?hl={moz:locale}");
-pref("browser.safebrowsing.provider.0.reportMalwareURL", "http://{moz:locale}.malware-report.mozilla.com/?hl={moz:locale}");
-pref("browser.safebrowsing.provider.0.reportMalwareErrorURL", "http://{moz:locale}.malware-error.mozilla.com/?hl={moz:locale}");
-
-// FAQ URLs
-pref("browser.safebrowsing.warning.infoURL", "http://www.mozilla.com/%LOCALE%/%APP%/phishing-protection/");
-pref("browser.geolocation.warning.infoURL", "http://www.mozilla.com/%LOCALE%/%APP%/geolocation/");
+pref("browser.safebrowsing.id", @MOZ_APP_UA_NAME@);
 
 // Name of the about: page contributed by safebrowsing to handle display of error
 // pages on phishing/malware hits.  (bug 399233)
@@ -577,10 +601,7 @@ pref("urlclassifier.gethashtables", "goog-phish-shavar,goog-malware-shavar");
 // If an urlclassifier table has not been updated in this number of seconds,
 // a gethash request will be forced to check that the result is still in
 // the database.
-pref("urlclassifier.confirm-age", 2700);
-
-// URL for checking the reason for a malware warning.
-pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
+pref("urlclassifier.max-complete-age", 2700);
 #endif
 
 // True if this is the first time we are showing about:firstrun
@@ -597,6 +618,9 @@ pref("browser.firstrun.show.localepicker", false);
 // $ adb shell start
 pref("browser.dom.window.dump.enabled", true);
 
+// SimplePush
+pref("services.push.enabled", false);
+
 // controls if we want camera support
 pref("device.camera.enabled", true);
 pref("media.realtime_decoder.enabled", true);
@@ -609,16 +633,10 @@ pref("full-screen-api.enabled", true);
 pref("direct-texture.force.enabled", false);
 pref("direct-texture.force.disabled", false);
 
-// show checkerboard pattern on android; we use background colour instead
-pref("gfx.show_checkerboard_pattern", true);
-
 // This fraction in 1000ths of velocity remains after every animation frame when the velocity is low.
 pref("ui.scrolling.friction_slow", -1);
 // This fraction in 1000ths of velocity remains after every animation frame when the velocity is high.
 pref("ui.scrolling.friction_fast", -1);
-// Below this velocity (in pixels per frame), the friction starts increasing from friction_fast
-// to friction_slow.
-pref("ui.scrolling.velocity_threshold", -1);
 // The maximum velocity change factor between events, per ms, in 1000ths.
 // Direction changes are excluded.
 pref("ui.scrolling.max_event_acceleration", -1);
@@ -629,14 +647,17 @@ pref("ui.scrolling.overscroll_snap_limit", -1);
 // The minimum amount of space that must be present for an axis to be considered scrollable,
 // in 1/1000ths of pixels.
 pref("ui.scrolling.min_scrollable_distance", -1);
-// A comma-separated list of float values in the range [0.0, 1.0) that are used as
-// interpolation frames for zoom animations.
-pref("ui.zooming.animation_frames", "");
+// The axis lock mode for panning behaviour - set between standard, free and sticky
+pref("ui.scrolling.axis_lock_mode", "standard");
+
 
 // Enable accessibility mode if platform accessibility is enabled.
 pref("accessibility.accessfu.activate", 2);
-// Enable explore by touch if it is enabled in the platform
-pref("accessibility.accessfu.explorebytouch", 2);
+pref("accessibility.accessfu.quicknav_modes", "Link,Heading,FormElement,ListItem");
+// Setting for an utterance order (0 - description first, 1 - description last).
+pref("accessibility.accessfu.utterance", 0);
+// Whether to skip images with empty alt text
+pref("accessibility.accessfu.skip_empty_images", true);
 
 // Mobile manages state by autodetection
 pref("network.manage-offline-status", true);
@@ -644,14 +665,22 @@ pref("network.manage-offline-status", true);
 // increase the timeout clamp for background tabs to 15 minutes
 pref("dom.min_background_timeout_value", 900000);
 
-// The default of font size in reader (1-7)
-pref("reader.font_size", 4);
+// The default state of reader mode works on loaded a page.
+pref("reader.parse-on-load.enabled", true);
 
-// The default of margin size in reader (5%-25%)
-pref("reader.margin_size", 5);
+// Force to enable reader mode to parse on loaded a page.
+// Allow reader mode even on low-memory platforms
+pref("reader.parse-on-load.force-enabled", false);
 
-// The default color scheme in reader (light, dark, sepia)
-pref("reader.color_scheme", "light");
+// The default of font size in reader (1-5)
+pref("reader.font_size", 3);
+
+// The default color scheme in reader (light, dark, sepia, auto)
+// auto = color automatically adjusts according to ambient light level
+pref("reader.color_scheme", "auto");
+
+// The font type in reader (sans-serif, serif)
+pref("reader.font_type", "sans-serif");
 
 // Used to show a first-launch tip in reader
 pref("reader.has_used_toolbar", false);
@@ -666,8 +695,58 @@ pref("media.plugins.enabled", true);
 pref("media.stagefright.omxcodec.flags", 0);
 
 // Coalesce touch events to prevent them from flooding the event queue
-pref("dom.event.touch.coalescing.enabled", true);
+pref("dom.event.touch.coalescing.enabled", false);
 
 // default orientation for the app, default to undefined
 // the java GeckoScreenOrientationListener needs this to be defined
 pref("app.orientation.default", "");
+
+// On memory pressure, release dirty but unused pages held by jemalloc
+// back to the system.
+pref("memory.free_dirty_pages", true);
+
+pref("layout.imagevisibility.enabled", false);
+
+// Enable the dynamic toolbar
+pref("browser.chrome.dynamictoolbar", true);
+
+// The mode of browser titlebar
+// 0: Show a current page title.
+// 1: Show a current page url.
+pref("browser.chrome.titlebarMode", 0);
+
+#ifdef MOZ_PKG_SPECIAL
+// Disable webgl on ARMv6 because running the reftests takes
+// too long for some reason (bug 843738)
+pref("webgl.disabled", true);
+#endif
+
+// initial web feed readers list
+pref("browser.contentHandlers.types.0.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.0.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.0.type", "application/vnd.mozilla.maybe.feed");
+pref("browser.contentHandlers.types.1.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.1.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.1.type", "application/vnd.mozilla.maybe.feed");
+pref("browser.contentHandlers.types.2.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.2.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.2.type", "application/vnd.mozilla.maybe.feed");
+pref("browser.contentHandlers.types.3.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.3.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.3.type", "application/vnd.mozilla.maybe.feed");
+
+#ifndef RELEASE_BUILD
+// Enable Web Audio for Firefox for Android in Nightly and Aurora
+pref("media.webaudio.enabled", true);
+#endif
+
+#ifndef RELEASE_BUILD
+pref("dom.payment.provider.0.name", "Firefox Marketplace");
+pref("dom.payment.provider.0.description", "marketplace.firefox.com");
+pref("dom.payment.provider.0.uri", "https://marketplace.firefox.com/mozpay/?req=");
+pref("dom.payment.provider.0.type", "mozilla/payments/pay/v1");
+pref("dom.payment.provider.0.requestMethod", "GET");
+#endif
+
+// Make <audio> and <video> talk to the AudioChannelService.
+pref("media.useAudioChannelService", false);

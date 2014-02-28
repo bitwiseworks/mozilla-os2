@@ -18,6 +18,11 @@
 #include <mach/mach_init.h>
 #endif
 
+#if defined(OS_NETBSD)
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#endif
+
 #include "base/logging.h"
 #include "base/string_util.h"
 
@@ -26,7 +31,11 @@ namespace base {
 int SysInfo::NumberOfProcessors() {
   // It seems that sysconf returns the number of "logical" processors on both
   // mac and linux.  So we get the number of "online logical" processors.
+#ifdef _SC_NPROCESSORS_ONLN
   static long res = sysconf(_SC_NPROCESSORS_ONLN);
+#else
+  static long res = 1;
+#endif
   if (res == -1) {
     NOTREACHED();
     return 1;
@@ -36,7 +45,7 @@ int SysInfo::NumberOfProcessors() {
 }
 
 // static
-int64 SysInfo::AmountOfPhysicalMemory() {
+int64_t SysInfo::AmountOfPhysicalMemory() {
   // _SC_PHYS_PAGES is not part of POSIX and not available on OS X
 #if defined(OS_MACOSX)
   struct host_basic_info hostinfo;
@@ -51,7 +60,21 @@ int64 SysInfo::AmountOfPhysicalMemory() {
     return 0;
   }
 
-  return static_cast<int64>(hostinfo.max_mem);
+  return static_cast<int64_t>(hostinfo.max_mem);
+#elif defined(OS_NETBSD)
+  int mib[2];
+  int rc;
+  int64_t memSize;
+  size_t len = sizeof(memSize);
+
+  mib[0] = CTL_HW;
+  mib[1] = HW_PHYSMEM64;
+  rc = sysctl( mib, 2, &memSize, &len, NULL, 0 );
+  if (-1 != rc)  {
+    return memSize;
+  }
+  return 0;
+
 #else
   long pages = sysconf(_SC_PHYS_PAGES);
   long page_size = sysconf(_SC_PAGE_SIZE);
@@ -60,18 +83,18 @@ int64 SysInfo::AmountOfPhysicalMemory() {
     return 0;
   }
 
-  return static_cast<int64>(pages) * page_size;
+  return static_cast<int64_t>(pages) * page_size;
 #endif
 }
 
 // static
-int64 SysInfo::AmountOfFreeDiskSpace(const std::wstring& path) {
+int64_t SysInfo::AmountOfFreeDiskSpace(const std::wstring& path) {
 #ifndef ANDROID
   struct statvfs stats;
   if (statvfs(WideToUTF8(path).c_str(), &stats) != 0) {
     return -1;
   }
-  return static_cast<int64>(stats.f_bavail) * stats.f_frsize;
+  return static_cast<int64_t>(stats.f_bavail) * stats.f_frsize;
 #else
   return -1;
 #endif

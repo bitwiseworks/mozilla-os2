@@ -107,12 +107,6 @@ inDeepTreeWalker::GetFilter(nsIDOMNodeFilter** aFilter)
 }
 
 NS_IMETHODIMP
-inDeepTreeWalker::GetExpandEntityReferences(bool* aExpandEntityReferences)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 inDeepTreeWalker::GetCurrentNode(nsIDOMNode** aCurrentNode)
 {
   *aCurrentNode = mCurrentNode;
@@ -343,19 +337,13 @@ inDeepTreeWalker::PushNode(nsIDOMNode* aNode)
   }
   
   if (!kids) {
-    if (mShowAnonymousContent) {
-      nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
-      nsRefPtr<nsBindingManager> bindingManager;
-      if (content &&
-          (bindingManager = inLayoutUtils::GetBindingManagerFor(aNode))) {
-        bindingManager->GetAnonymousNodesFor(content, getter_AddRefs(kids));
-        if (!kids)
-          bindingManager->GetContentListFor(content, getter_AddRefs(kids));
-      } else {
-        aNode->GetChildNodes(getter_AddRefs(kids));
-      }
-    } else
-      aNode->GetChildNodes(getter_AddRefs(kids));
+    nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+    if (content && mShowAnonymousContent) {
+      kids = content->GetChildren(nsIContent::eAllChildren);
+    }
+  }
+  if (!kids) {
+    aNode->GetChildNodes(getter_AddRefs(kids));
   }
   
   item.kids = kids;

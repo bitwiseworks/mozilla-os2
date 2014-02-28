@@ -8,17 +8,31 @@
 #include "Accessible-inl.h"
 #include "nsAccUtils.h"
 
+namespace mozilla {
+namespace a11y {
+
 /**
  * Calculate and store group information.
  */
 class AccGroupInfo
 {
 public:
-  AccGroupInfo(Accessible* aItem, mozilla::a11y::role aRole);
   ~AccGroupInfo() { MOZ_COUNT_DTOR(AccGroupInfo); }
 
-  int32_t PosInSet() const { return mPosInSet; }
+  /**
+   * Return 1-based position in the group.
+   */
+  uint32_t PosInSet() const { return mPosInSet; }
+
+  /**
+   * Return a number of items in the group.
+   */
   uint32_t SetSize() const { return mSetSize; }
+
+  /**
+   * Return a direct or logical parent of the accessible that this group info is
+   * created for.
+   */
   Accessible* ConceptualParent() const { return mParent; }
 
   /**
@@ -47,9 +61,23 @@ public:
     return info;
   }
 
+  /**
+   * Return a first item for the given container.
+   */
+  static Accessible* FirstItemOf(Accessible* aContainer);
+
+  /**
+   * Return next item of the same group to the given item.
+   */
+  static Accessible* NextItemTo(Accessible* aItem);
+
+protected:
+  AccGroupInfo(Accessible* aItem, a11y::role aRole);
+
 private:
-  AccGroupInfo(const AccGroupInfo&);
-  AccGroupInfo& operator =(const AccGroupInfo&);
+  AccGroupInfo() MOZ_DELETE;
+  AccGroupInfo(const AccGroupInfo&) MOZ_DELETE;
+  AccGroupInfo& operator =(const AccGroupInfo&) MOZ_DELETE;
 
   static mozilla::a11y::role BaseRole(mozilla::a11y::role aRole)
   {
@@ -68,12 +96,14 @@ private:
    * Return true if the given parent role is conceptual parent of the given
    * role.
    */
-  static bool IsConceptualParent(mozilla::a11y::role aRole,
-				 mozilla::a11y::role aParentRole);
+  static bool IsConceptualParent(a11y::role aRole, a11y::role aParentRole);
 
   uint32_t mPosInSet;
   uint32_t mSetSize;
   Accessible* mParent;
 };
+
+} // namespace mozilla
+} // namespace a11y
 
 #endif

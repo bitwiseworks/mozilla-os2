@@ -8,6 +8,7 @@
 #ifndef mozilla_layout_RenderFrameParent_h
 #define mozilla_layout_RenderFrameParent_h
 
+#include "mozilla/Attributes.h"
 #include <map>
 
 #include "mozilla/layout/PRenderFrameParent.h"
@@ -27,7 +28,8 @@ namespace layers {
 class AsyncPanZoomController;
 class GestureEventListener;
 class TargetConfig;
-class ShadowLayersParent;
+class LayerTransactionParent;
+struct TextureFactoryIdentifier;
 }
 
 namespace layout {
@@ -42,7 +44,9 @@ class RenderFrameParent : public PRenderFrameParent,
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::layers::TargetConfig TargetConfig;
-  typedef mozilla::layers::ShadowLayersParent ShadowLayersParent;
+  typedef mozilla::layers::LayerTransactionParent LayerTransactionParent;
+  typedef mozilla::FrameLayerBuilder::ContainerParameters ContainerParameters;
+  typedef mozilla::layers::TextureFactoryIdentifier TextureFactoryIdentifier;
   typedef FrameMetrics::ViewID ViewID;
 
 public:
@@ -55,8 +59,7 @@ public:
    */
   RenderFrameParent(nsFrameLoader* aFrameLoader,
                     ScrollingBehavior aScrollingBehavior,
-                    mozilla::layers::LayersBackend* aBackendType,
-                    int* aMaxTextureSize,
+                    TextureFactoryIdentifier* aTextureFactoryIdentifier,
                     uint64_t* aId);
   virtual ~RenderFrameParent();
 
@@ -70,20 +73,21 @@ public:
 
   void ContentViewScaleChanged(nsContentView* aView);
 
-  virtual void ShadowLayersUpdated(ShadowLayersParent* aLayerTree,
+  virtual void ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
                                    const TargetConfig& aTargetConfig,
                                    bool isFirstPaint) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder* aBuilder,
-                              nsSubDocumentFrame* aFrame,
-                              const nsRect& aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  void BuildDisplayList(nsDisplayListBuilder* aBuilder,
+                        nsSubDocumentFrame* aFrame,
+                        const nsRect& aDirtyRect,
+                        const nsDisplayListSet& aLists);
 
   already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                      nsIFrame* aFrame,
                                      LayerManager* aManager,
                                      const nsIntRect& aVisibleRect,
-                                     nsDisplayItem* aItem);
+                                     nsDisplayItem* aItem,
+                                     const ContainerParameters& aContainerParameters);
 
   void OwnerContentChanged(nsIContent* aContent);
 
@@ -92,11 +96,13 @@ public:
   void NotifyInputEvent(const nsInputEvent& aEvent,
                         nsInputEvent* aOutEvent);
 
-  void NotifyDimensionsChanged(int width, int height);
+  void NotifyDimensionsChanged(ScreenIntSize size);
 
   void ZoomToRect(const gfxRect& aRect);
 
   void ContentReceivedTouch(bool aPreventDefault);
+
+  void UpdateZoomConstraints(bool aAllowZoom, float aMinZoom, float aMaxZoom);
 
 protected:
   void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
@@ -104,16 +110,17 @@ protected:
   virtual bool RecvNotifyCompositorTransaction() MOZ_OVERRIDE;
 
   virtual bool RecvCancelDefaultPanZoom() MOZ_OVERRIDE;
+  virtual bool RecvDetectScrollableSubframe() MOZ_OVERRIDE;
 
-  virtual PLayersParent* AllocPLayers() MOZ_OVERRIDE;
-  virtual bool DeallocPLayers(PLayersParent* aLayers) MOZ_OVERRIDE;
+  virtual PLayerTransactionParent* AllocPLayerTransaction() MOZ_OVERRIDE;
+  virtual bool DeallocPLayerTransaction(PLayerTransactionParent* aLayers) MOZ_OVERRIDE;
 
 private:
   void BuildViewMap();
   void TriggerRepaint();
   void DispatchEventForPanZoomController(const InputEvent& aEvent);
 
-  ShadowLayersParent* GetShadowLayers() const;
+  LayerTransactionParent* GetShadowLayers() const;
   uint64_t GetLayerTreeId() const;
   ContainerLayer* GetRootLayer() const;
 
@@ -215,7 +222,7 @@ public:
     return mRect;
   }
 
-  virtual uint32_t GetPerFrameKey()
+  virtual uint32_t GetPerFrameKey() MOZ_OVERRIDE
   {
     NS_ABORT();
     return 0;

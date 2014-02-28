@@ -10,7 +10,7 @@ static JSClass CustomClass = {
   "CustomClass",
   JSCLASS_HAS_RESERVED_SLOTS(1),
   JS_PropertyStub,
-  JS_PropertyStub,
+  JS_DeletePropertyStub,
   JS_PropertyStub,
   JS_StrictPropertyStub,
   JS_EnumerateStub,
@@ -54,8 +54,8 @@ BEGIN_TEST(test_CallNonGenericMethodOnProxy)
   JSFunction *customMethodA = JS_NewFunction(cx, CustomMethod, 0, 0, customA, "customMethodA");
   CHECK(customMethodA);
 
-  jsval rval;
-  CHECK(JS_CallFunction(cx, customA, customMethodA, 0, NULL, &rval));
+  JS::RootedValue rval(cx);
+  CHECK(JS_CallFunction(cx, customA, customMethodA, 0, NULL, rval.address()));
   CHECK_SAME(rval, Int32Value(17));
 
   // Now create the second global object and compartment...
@@ -69,18 +69,18 @@ BEGIN_TEST(test_CallNonGenericMethodOnProxy)
     CHECK(customB);
     JS_SetReservedSlot(customB, CUSTOM_SLOT, Int32Value(42));
 
-    JSFunction *customMethodB = JS_NewFunction(cx, CustomMethod, 0, 0, customB, "customMethodB");
+    JS::RootedFunction customMethodB(cx, JS_NewFunction(cx, CustomMethod, 0, 0, customB, "customMethodB"));
     CHECK(customMethodB);
 
-    jsval rval;
-    CHECK(JS_CallFunction(cx, customB, customMethodB, 0, NULL, &rval));
+    JS::RootedValue rval(cx);
+    CHECK(JS_CallFunction(cx, customB, customMethodB, 0, NULL, rval.address()));
     CHECK_SAME(rval, Int32Value(42));
 
     JS::RootedObject wrappedCustomA(cx, customA);
     CHECK(JS_WrapObject(cx, wrappedCustomA.address()));
 
-    jsval rval2;
-    CHECK(JS_CallFunction(cx, wrappedCustomA, customMethodB, 0, NULL, &rval2));
+    JS::RootedValue rval2(cx);
+    CHECK(JS_CallFunction(cx, wrappedCustomA, customMethodB, 0, NULL, rval2.address()));
     CHECK_SAME(rval, Int32Value(42));
   }
 

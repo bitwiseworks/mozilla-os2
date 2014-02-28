@@ -18,7 +18,7 @@
 class nsAString;
 class nsIContent;
 class nsINodeInfo;
-class imgIRequest;
+class imgRequestProxy;
 class nsNodeInfoManager;
 class nsGenericHTMLElement;
 
@@ -29,42 +29,6 @@ NS_NewElement(nsIContent** aResult,
 
 nsresult
 NS_NewXMLElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo);
-
-/**
- * aNodeInfoManager must not be null.
- */
-nsresult
-NS_NewTextNode(nsIContent **aResult, nsNodeInfoManager *aNodeInfoManager);
-
-/**
- * aNodeInfoManager must not be null.
- */
-nsresult
-NS_NewCommentNode(nsIContent **aResult, nsNodeInfoManager *aNodeInfoManager);
-
-/**
- * aNodeInfoManager must not be null.
- */
-nsresult
-NS_NewXMLProcessingInstruction(nsIContent** aInstancePtrResult,
-                               nsNodeInfoManager *aNodeInfoManager,
-                               const nsAString& aTarget,
-                               const nsAString& aData);
-
-/**
- * aNodeInfoManager must not be null.
- */
-nsresult
-NS_NewXMLStylesheetProcessingInstruction(nsIContent** aInstancePtrResult,
-                                         nsNodeInfoManager *aNodeInfoManager,
-                                         const nsAString& aData);
-
-/**
- * aNodeInfoManager must not be null.
- */
-nsresult
-NS_NewXMLCDATASection(nsIContent** aInstancePtrResult,
-                      nsNodeInfoManager *aNodeInfoManager);
 
 nsresult
 NS_NewHTMLElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo,
@@ -95,10 +59,6 @@ NS_NewSVGElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNodeInfo,
 nsresult
 NS_NewGenConImageContent(nsIContent** aResult,
                          already_AddRefed<nsINodeInfo> aNodeInfo,
-                         imgIRequest* aImageRequest);
-
-nsresult
-NS_NewXMLEventsElement(nsIContent** aResult,
-                       already_AddRefed<nsINodeInfo> aNodeInfo);
+                         imgRequestProxy* aImageRequest);
 
 #endif // nsContentCreatorFunctions_h__

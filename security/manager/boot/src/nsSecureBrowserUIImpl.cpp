@@ -9,7 +9,6 @@
 
 #include "nspr.h"
 #include "prlog.h"
-#include "prmem.h"
 
 #include "nsISecureBrowserUI.h"
 #include "nsSecureBrowserUIImpl.h"
@@ -20,6 +19,7 @@
 #include "nsIObserverService.h"
 #include "nsCURILoader.h"
 #include "nsIDocShell.h"
+#include "nsIDocShellTreeItem.h"
 #include "nsIDocument.h"
 #include "nsIPrincipal.h"
 #include "nsIDOMElement.h"
@@ -48,8 +48,6 @@
 
 using namespace mozilla;
 
-#define SECURITY_STRING_BUNDLE_URL "chrome://pipnss/locale/security.properties"
-
 #define IS_SECURE(state) ((state & 0xFFFF) == STATE_IS_SECURE)
 
 #if defined(PR_LOGGING)
@@ -71,7 +69,7 @@ struct RequestHashEntry : PLDHashEntryHdr {
     void *r;
 };
 
-PR_STATIC_CALLBACK(bool)
+static bool
 RequestMapMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
                          const void *key)
 {
@@ -79,7 +77,7 @@ RequestMapMatchEntry(PLDHashTable *table, const PLDHashEntryHdr *hdr,
   return entry->r == key;
 }
 
-PR_STATIC_CALLBACK(bool)
+static bool
 RequestMapInitEntry(PLDHashTable *table, PLDHashEntryHdr *hdr,
                      const void *key)
 {
@@ -127,8 +125,6 @@ nsSecureBrowserUIImpl::nsSecureBrowserUIImpl()
   , mNewToplevelIsEV(false)
   , mNewToplevelSecurityStateKnown(true)
   , mIsViewSource(false)
-  , mSubRequestsHighSecurity(0)
-  , mSubRequestsLowSecurity(0)
   , mSubRequestsBrokenSecurity(0)
   , mSubRequestsNoSecurity(0)
   , mRestoreSubrequests(false)
@@ -193,17 +189,6 @@ nsSecureBrowserUIImpl::Init(nsIDOMWindow *aWindow)
   mWindow = do_GetWeakReference(pwin, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIStringBundleService> service(do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv));
-  if (NS_FAILED(rv)) return rv;
-  
-  // We do not need to test for mStringBundle here...
-  // Anywhere we use it, we will test before using.  Some
-  // embedded users of PSM may want to reuse our
-  // nsSecureBrowserUIImpl implementation without the
-  // bundle.
-  service->CreateBundle(SECURITY_STRING_BUNDLE_URL, getter_AddRefs(mStringBundle));
-  
-  
   // hook up to the form post notifications:
   nsCOMPtr<nsIObserverService> svc(do_GetService("@mozilla.org/observer-service;1", &rv));
   if (NS_SUCCEEDED(rv)) {
@@ -247,18 +232,18 @@ nsSecureBrowserUIImpl::GetState(uint32_t* aState)
 already_AddRefed<nsISupports> 
 nsSecureBrowserUIImpl::ExtractSecurityInfo(nsIRequest* aRequest)
 {
-  nsISupports *retval = nullptr; 
+  nsCOMPtr<nsISupports> retval;
   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
   if (channel)
-    channel->GetSecurityInfo(&retval);
+    channel->GetSecurityInfo(getter_AddRefs(retval));
   
   if (!retval) {
     nsCOMPtr<nsISecurityInfoProvider> provider(do_QueryInterface(aRequest));
     if (provider)
-      provider->GetSecurityInfo(&retval);
+      provider->GetSecurityInfo(getter_AddRefs(retval));
   }
 
-  return retval;
+  return retval.forget();
 }
 
 nsresult
@@ -276,10 +261,6 @@ nsSecureBrowserUIImpl::MapInternalToExternalState(uint32_t* aState, lockIconStat
       *aState = STATE_IS_BROKEN;
       break;
 
-    case lis_low_security:
-      *aState = STATE_IS_SECURE | STATE_SECURE_LOW;
-      break;
-
     case lis_high_security:
       *aState = STATE_IS_SECURE | STATE_SECURE_HIGH;
       break;
@@ -292,38 +273,55 @@ nsSecureBrowserUIImpl::MapInternalToExternalState(uint32_t* aState, lockIconStat
 
   if (ev && (*aState & STATE_IS_SECURE))
     *aState |= nsIWebProgressListener::STATE_IDENTITY_EV_TOPLEVEL;
-  
+
+  nsCOMPtr<nsIDocShell> docShell = do_QueryReferent(mDocShell);
+  if (!docShell)
+    return NS_OK;
+
+  int32_t docShellType;
+  // For content docShell's, the mixed content security state is set on the root docShell.
+  if (NS_SUCCEEDED(docShell->GetItemType(&docShellType)) && docShellType == nsIDocShellTreeItem::typeContent) {
+    nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem(do_QueryInterface(docShell));
+    nsCOMPtr<nsIDocShellTreeItem> sameTypeRoot;
+    docShellTreeItem->GetSameTypeRootTreeItem(getter_AddRefs(sameTypeRoot));
+    NS_ASSERTION(sameTypeRoot, "No document shell root tree item from document shell tree item!");
+    docShell = do_QueryInterface(sameTypeRoot);
+    if (!docShell)
+      return NS_OK;
+  }
+
+  // Has a Mixed Content Load initiated in nsMixedContentBlocker?
+  // If so, the state should be broken; overriding the previous state
+  // set by the lock parameter.
+  if (docShell->GetHasMixedActiveContentLoaded() &&
+      docShell->GetHasMixedDisplayContentLoaded()) {
+      *aState = STATE_IS_BROKEN |
+                nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT |
+                nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
+  } else if (docShell->GetHasMixedActiveContentLoaded()) {
+      *aState = STATE_IS_BROKEN |
+                nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT;
+  } else if (docShell->GetHasMixedDisplayContentLoaded()) {
+      *aState = STATE_IS_BROKEN |
+                nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
+  }
+
+  // Has Mixed Content Been Blocked in nsMixedContentBlocker?
+  if (docShell->GetHasMixedActiveContentBlocked())
+    *aState |= nsIWebProgressListener::STATE_BLOCKED_MIXED_ACTIVE_CONTENT;
+
+  if (docShell->GetHasMixedDisplayContentBlocked())
+    *aState |= nsIWebProgressListener::STATE_BLOCKED_MIXED_DISPLAY_CONTENT;
+
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsSecureBrowserUIImpl::GetTooltipText(nsAString& aText)
+nsSecureBrowserUIImpl::SetDocShell(nsIDocShell *aDocShell)
 {
-  lockIconState state;
-  nsXPIDLString tooltip;
-
-  {
-    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
-    state = mNotifiedSecurityState;
-    tooltip = mInfoTooltip;
-  }
-
-  if (state == lis_mixed_security)
-  {
-    GetBundleString(NS_LITERAL_STRING("SecurityButtonMixedContentTooltipText").get(),
-                    aText);
-  }
-  else if (!tooltip.IsEmpty())
-  {
-    aText = tooltip;
-  }
-  else
-  {
-    GetBundleString(NS_LITERAL_STRING("SecurityButtonTooltipText").get(),
-                    aText);
-  }
-
-  return NS_OK;
+  nsresult rv;
+  mDocShell = do_GetWeakReference(aDocShell, &rv);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -424,7 +422,10 @@ nsSecureBrowserUIImpl::Notify(nsIDOMHTMLFormElement* aDOMForm,
   {
     ReentrantMonitorAutoEnter lock(mReentrantMonitor);
     window = do_QueryReferent(mWindow);
-    NS_ASSERTION(window, "Window has gone away?!");
+
+    // The window was destroyed, so we assume no form was submitted within it.
+    if (!window)
+      return NS_OK;
   }
 
   bool isChild;
@@ -460,7 +461,6 @@ void nsSecureBrowserUIImpl::ResetStateTracking()
 {
   ReentrantMonitorAutoEnter lock(mReentrantMonitor);
 
-  mInfoTooltip.Truncate();
   mDocumentRequestsInProgress = 0;
   if (mTransferringRequests.ops) {
     PL_DHashTableFinish(&mTransferringRequests);
@@ -484,9 +484,6 @@ nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsIS
   bool updateStatus = false;
   nsCOMPtr<nsISSLStatus> temp_SSLStatus;
 
-  bool updateTooltip = false;
-  nsXPIDLString temp_InfoTooltip;
-
     temp_NewToplevelSecurityState = GetSecurityStateFromSecurityInfo(info);
 
     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
@@ -506,14 +503,6 @@ nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsIS
       }
     }
 
-    if (info) {
-      nsCOMPtr<nsITransportSecurityInfo> secInfo(do_QueryInterface(info));
-      if (secInfo) {
-        updateTooltip = true;
-        secInfo->GetShortSecurityDescription(getter_Copies(temp_InfoTooltip));
-      }
-    }
-
   // assume temp_NewToplevelSecurityState was set in this scope!
   // see code that is directly above
 
@@ -524,9 +513,6 @@ nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsIS
     mNewToplevelIsEV = temp_NewToplevelIsEV;
     if (updateStatus) {
       mSSLStatus = temp_SSLStatus;
-    }
-    if (updateTooltip) {
-      mInfoTooltip = temp_InfoTooltip;
     }
     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
            ("SecureUI:%p: remember securityInfo %p\n", this,
@@ -544,8 +530,7 @@ nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsIS
     mRestoreSubrequests = false;
   }
 
-  return UpdateSecurityState(aRequest, withNewLocation, 
-                             updateStatus, updateTooltip);
+  return UpdateSecurityState(aRequest, withNewLocation, updateStatus);
 }
 
 void
@@ -559,15 +544,7 @@ nsSecureBrowserUIImpl::UpdateSubrequestMembers(nsISupports *securityInfo)
   ReentrantMonitorAutoEnter lock(mReentrantMonitor);
 
   if (reqState & STATE_IS_SECURE) {
-    if (reqState & STATE_SECURE_LOW || reqState & STATE_SECURE_MED) {
-      PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
-             ("SecureUI:%p: OnStateChange: subreq LOW\n", this));
-      ++mSubRequestsLowSecurity;
-    } else {
-      PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
-             ("SecureUI:%p: OnStateChange: subreq HIGH\n", this));
-      ++mSubRequestsHighSecurity;
-    }
+    // do nothing
   } else if (reqState & STATE_IS_BROKEN) {
     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
            ("SecureUI:%p: OnStateChange: subreq BROKEN\n", this));
@@ -936,16 +913,6 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
     f -= nsIWebProgressListener::STATE_SECURE_HIGH;
     info.Append("SECURE_HIGH ");
   }
-  if (f & nsIWebProgressListener::STATE_SECURE_MED)
-  {
-    f -= nsIWebProgressListener::STATE_SECURE_MED;
-    info.Append("SECURE_MED ");
-  }
-  if (f & nsIWebProgressListener::STATE_SECURE_LOW)
-  {
-    f -= nsIWebProgressListener::STATE_SECURE_LOW;
-    info.Append("SECURE_LOW ");
-  }
   if (f & nsIWebProgressListener::STATE_RESTORING)
   {
     f -= nsIWebProgressListener::STATE_RESTORING;
@@ -1038,14 +1005,10 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
   {
     bool inProgress;
 
-    int32_t saveSubHigh;
-    int32_t saveSubLow;
     int32_t saveSubBroken;
     int32_t saveSubNo;
     nsCOMPtr<nsIAssociatedContentSecurity> prevContentSecurity;
 
-    int32_t newSubHigh = 0;
-    int32_t newSubLow = 0;
     int32_t newSubBroken = 0;
     int32_t newSubNo = 0;
 
@@ -1055,8 +1018,6 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
 
       if (allowSecurityStateChange && !inProgress)
       {
-        saveSubHigh = mSubRequestsHighSecurity;
-        saveSubLow = mSubRequestsLowSecurity;
         saveSubBroken = mSubRequestsBrokenSecurity;
         saveSubNo = mSubRequestsNoSecurity;
         prevContentSecurity = do_QueryInterface(mCurrentToplevelSecurityInfo);
@@ -1077,13 +1038,11 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
   
         // before resetting our state, let's save information about
         // sub element loads, so we can restore it later
-        prevContentSecurity->SetCountSubRequestsHighSecurity(saveSubHigh);
-        prevContentSecurity->SetCountSubRequestsLowSecurity(saveSubLow);
         prevContentSecurity->SetCountSubRequestsBrokenSecurity(saveSubBroken);
         prevContentSecurity->SetCountSubRequestsNoSecurity(saveSubNo);
         prevContentSecurity->Flush();
-        PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI:%p: Saving subs in START to %p as %d,%d,%d,%d\n", 
-          this, prevContentSecurity.get(), saveSubHigh, saveSubLow, saveSubBroken, saveSubNo));      
+        PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI:%p: Saving subs in START to %p as %d,%d\n", 
+          this, prevContentSecurity.get(), saveSubBroken, saveSubNo));      
       }
 
       bool retrieveAssociatedState = false;
@@ -1113,12 +1072,10 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
                  ("SecureUI:%p: OnStateChange: start, loading old sub state\n", this
                   ));
     
-          newContentSecurity->GetCountSubRequestsHighSecurity(&newSubHigh);
-          newContentSecurity->GetCountSubRequestsLowSecurity(&newSubLow);
           newContentSecurity->GetCountSubRequestsBrokenSecurity(&newSubBroken);
           newContentSecurity->GetCountSubRequestsNoSecurity(&newSubNo);
-          PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI:%p: Restoring subs in START from %p to %d,%d,%d,%d\n", 
-            this, newContentSecurity.get(), newSubHigh, newSubLow, newSubBroken, newSubNo));      
+          PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI:%p: Restoring subs in START from %p to %d,%d\n", 
+            this, newContentSecurity.get(), newSubBroken, newSubNo));      
         }
       }
       else
@@ -1138,8 +1095,6 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       if (allowSecurityStateChange && !inProgress)
       {
         ResetStateTracking();
-        mSubRequestsHighSecurity = newSubHigh;
-        mSubRequestsLowSecurity = newSubLow;
         mSubRequestsBrokenSecurity = newSubBroken;
         mSubRequestsNoSecurity = newSubNo;
         mNewToplevelSecurityStateKnown = false;
@@ -1244,25 +1199,19 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
         mNewToplevelSecurityStateKnown = true;
       }
 
-      int32_t subHigh = 0;
-      int32_t subLow = 0;
       int32_t subBroken = 0;
       int32_t subNo = 0;
 
       if (currentContentSecurity)
       {
-        currentContentSecurity->GetCountSubRequestsHighSecurity(&subHigh);
-        currentContentSecurity->GetCountSubRequestsLowSecurity(&subLow);
         currentContentSecurity->GetCountSubRequestsBrokenSecurity(&subBroken);
         currentContentSecurity->GetCountSubRequestsNoSecurity(&subNo);
-        PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI:%p: Restoring subs in STOP from %p to %d,%d,%d,%d\n", 
-          this, currentContentSecurity.get(), subHigh, subLow, subBroken, subNo));      
+        PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI:%p: Restoring subs in STOP from %p to %d,%d\n", 
+          this, currentContentSecurity.get(), subBroken, subNo));      
       }
 
       {
         ReentrantMonitorAutoEnter lock(mReentrantMonitor);
-        mSubRequestsHighSecurity = subHigh;
-        mSubRequestsLowSecurity = subLow;
         mSubRequestsBrokenSecurity = subBroken;
         mSubRequestsNoSecurity = subNo;
       }
@@ -1303,7 +1252,7 @@ nsSecureBrowserUIImpl::OnStateChange(nsIWebProgress* aWebProgress,
       }
 
       if (temp_NewToplevelSecurityStateKnown)
-        return UpdateSecurityState(aRequest, false, false, false);
+        return UpdateSecurityState(aRequest, false, false);
     }
 
     return NS_OK;
@@ -1323,18 +1272,16 @@ void nsSecureBrowserUIImpl::ObtainEventSink(nsIChannel *channel,
 
 nsresult nsSecureBrowserUIImpl::UpdateSecurityState(nsIRequest* aRequest, 
                                                     bool withNewLocation, 
-                                                    bool withUpdateStatus, 
-                                                    bool withUpdateTooltip)
+                                                    bool withUpdateStatus)
 {
   lockIconState warnSecurityState = lis_no_security;
-  bool showWarning = false;
   nsresult rv = NS_OK;
 
   // both parameters are both input and outout
-  bool flagsChanged = UpdateMyFlags(showWarning, warnSecurityState);
+  bool flagsChanged = UpdateMyFlags(warnSecurityState);
 
-  if (flagsChanged || withNewLocation || withUpdateStatus || withUpdateTooltip)
-    rv = TellTheWorld(showWarning, warnSecurityState, aRequest);
+  if (flagsChanged || withNewLocation || withUpdateStatus)
+    rv = TellTheWorld(warnSecurityState, aRequest);
 
   return rv;
 }
@@ -1342,7 +1289,7 @@ nsresult nsSecureBrowserUIImpl::UpdateSecurityState(nsIRequest* aRequest,
 // must not fail, by definition, only trivial assignments
 // or string operations are allowed
 // returns true if our overall state has changed and we must send out notifications
-bool nsSecureBrowserUIImpl::UpdateMyFlags(bool &showWarning, lockIconState &warnSecurityState)
+bool nsSecureBrowserUIImpl::UpdateMyFlags(lockIconState &warnSecurityState)
 {
   ReentrantMonitorAutoEnter lock(mReentrantMonitor);
   bool mustTellTheWorld = false;
@@ -1351,39 +1298,15 @@ bool nsSecureBrowserUIImpl::UpdateMyFlags(bool &showWarning, lockIconState &warn
 
   if (mNewToplevelSecurityState & STATE_IS_SECURE)
   {
-    if (mNewToplevelSecurityState & STATE_SECURE_LOW
+    if (mSubRequestsBrokenSecurity
         ||
-        mNewToplevelSecurityState & STATE_SECURE_MED)
+        mSubRequestsNoSecurity)
     {
-      if (mSubRequestsBrokenSecurity
-          ||
-          mSubRequestsNoSecurity)
-      {
-        newSecurityState = lis_mixed_security;
-      }
-      else
-      {
-        newSecurityState = lis_low_security;
-      }
+      newSecurityState = lis_mixed_security;
     }
     else
     {
-      // toplevel is high security
-
-      if (mSubRequestsBrokenSecurity
-          ||
-          mSubRequestsNoSecurity)
-      {
-        newSecurityState = lis_mixed_security;
-      }
-      else if (mSubRequestsLowSecurity)
-      {
-        newSecurityState = lis_low_security;
-      }
-      else
-      {
-        newSecurityState = lis_high_security;
-      }
+      newSecurityState = lis_high_security;
     }
   }
   else
@@ -1408,72 +1331,22 @@ bool nsSecureBrowserUIImpl::UpdateMyFlags(bool &showWarning, lockIconState &warn
     mustTellTheWorld = true;
 
     // we'll treat "broken" exactly like "insecure",
-    // i.e. we do not show alerts when switching between broken and insecure
 
     /*
-      from                 to           shows alert
-    ------------------------------     ---------------
-
-    no or broken -> no or broken    => <NOTHING SHOWN>
-
-    no or broken -> mixed           => mixed alert
-    no or broken -> low             => low alert
-    no or broken -> high            => high alert
-    
-    mixed, high, low -> no, broken  => leaving secure
-
-    mixed        -> low             => low alert
-    mixed        -> high            => high alert
-
-    high         -> low             => low alert
-    high         -> mixed           => mixed
-    
-    low          -> high            => high
-    low          -> mixed           => mixed
-
-
       security    icon
       ----------------
     
       no          open
       mixed       broken
       broken      broken
-      low         low
       high        high
     */
 
-    showWarning = true;
-    
-    switch (mNotifiedSecurityState)
-    {
-      case lis_no_security:
-      case lis_broken_security:
-        switch (newSecurityState)
-        {
-          case lis_no_security:
-          case lis_broken_security:
-            showWarning = false;
-            break;
-          
-          default:
-            break;
-        }
-      
-      default:
-        break;
-    }
-
-    if (showWarning)
-    {
-      warnSecurityState = newSecurityState;
-    }
-    
     mNotifiedSecurityState = newSecurityState;
 
     if (lis_no_security == newSecurityState)
     {
       mSSLStatus = nullptr;
-      mInfoTooltip.Truncate();
     }
   }
 
@@ -1485,8 +1358,7 @@ bool nsSecureBrowserUIImpl::UpdateMyFlags(bool &showWarning, lockIconState &warn
   return mustTellTheWorld;
 }
 
-nsresult nsSecureBrowserUIImpl::TellTheWorld(bool showWarning, 
-                                             lockIconState warnSecurityState, 
+nsresult nsSecureBrowserUIImpl::TellTheWorld(lockIconState warnSecurityState, 
                                              nsIRequest* aRequest)
 {
   nsCOMPtr<nsISecurityEventSink> temp_ToplevelEventSink;
@@ -1519,29 +1391,6 @@ nsresult nsSecureBrowserUIImpl::TellTheWorld(bool showWarning,
            ("SecureUI:%p: UpdateSecurityState: NO mToplevelEventSink!\n", this
             ));
 
-  }
-
-  if (showWarning)
-  {
-    switch (warnSecurityState)
-    {
-      case lis_no_security:
-      case lis_broken_security:
-        ConfirmLeavingSecure();
-        break;
-
-      case lis_mixed_security:
-        ConfirmMixedMode();
-        break;
-
-      case lis_low_security:
-        ConfirmEnteringWeak();
-        break;
-
-      case lis_high_security:
-        ConfirmEnteringSecure();
-        break;
-    }
   }
 
   return NS_OK; 
@@ -1637,7 +1486,7 @@ nsSecureBrowserUIImpl::OnLocationChange(nsIWebProgress* aWebProgress,
   }
 
   if (temp_NewToplevelSecurityStateKnown)
-    return UpdateSecurityState(aRequest, true, false, false);
+    return UpdateSecurityState(aRequest, true, false);
 
   return NS_OK;
 }
@@ -1666,7 +1515,7 @@ nsSecureBrowserUIImpl::OnSecurityChange(nsIWebProgress *aWebProgress,
   channel->GetURI(getter_AddRefs(aURI));
   
   if (aURI) {
-    nsCAutoString temp;
+    nsAutoCString temp;
     aURI->GetSpec(temp);
     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
            ("SecureUI:%p: OnSecurityChange: (%x) %s\n", this,
@@ -1688,7 +1537,6 @@ nsSecureBrowserUIImpl::GetSSLStatus(nsISSLStatus** _result)
   switch (mNotifiedSecurityState)
   {
     case lis_mixed_security:
-    case lis_low_security:
     case lis_high_security:
       break;
 
@@ -1728,32 +1576,6 @@ nsSecureBrowserUIImpl::IsURLJavaScript(nsIURI* aURL, bool* value)
   return aURL->SchemeIs("javascript", value);
 }
 
-void
-nsSecureBrowserUIImpl::GetBundleString(const PRUnichar* name,
-                                       nsAString &outString)
-{
-  nsCOMPtr<nsIStringBundle> temp_StringBundle;
-
-  {
-    ReentrantMonitorAutoEnter lock(mReentrantMonitor);
-    temp_StringBundle = mStringBundle;
-  }
-
-  if (temp_StringBundle && name) {
-    PRUnichar *ptrv = nullptr;
-    if (NS_SUCCEEDED(temp_StringBundle->GetStringFromName(name,
-                                                          &ptrv)))
-      outString = ptrv;
-    else
-      outString.SetLength(0);
-
-    nsMemory::Free(ptrv);
-
-  } else {
-    outString.SetLength(0);
-  }
-}
-
 nsresult
 nsSecureBrowserUIImpl::CheckPost(nsIURI *formURL, nsIURI *actionURL, bool *okayToPost)
 {
@@ -1787,8 +1609,6 @@ nsSecureBrowserUIImpl::CheckPost(nsIURI *formURL, nsIURI *actionURL, bool *okayT
   // posting to insecure webpage from a secure webpage.
   if (formSecure) {
     *okayToPost = ConfirmPostToInsecureFromSecure();
-  } else {
-    *okayToPost = ConfirmPostToInsecure();
   }
 
   return NS_OK;
@@ -1869,93 +1689,6 @@ nsSecureBrowserUIImpl::GetNSSDialogs(nsCOMPtr<nsISecurityWarningDialogs> & dialo
   ctx = new nsUIContext(window);
   
   return true;
-}
-
-bool nsSecureBrowserUIImpl::
-ConfirmEnteringSecure()
-{
-  nsCOMPtr<nsISecurityWarningDialogs> dialogs;
-  nsCOMPtr<nsIInterfaceRequestor> ctx;
-
-  if (!GetNSSDialogs(dialogs, ctx)) {
-    return false; // Should this allow true for unimplemented?
-  }
-
-  bool confirms;
-  dialogs->ConfirmEnteringSecure(ctx, &confirms);
-
-  return confirms;
-}
-
-bool nsSecureBrowserUIImpl::
-ConfirmEnteringWeak()
-{
-  nsCOMPtr<nsISecurityWarningDialogs> dialogs;
-  nsCOMPtr<nsIInterfaceRequestor> ctx;
-
-  if (!GetNSSDialogs(dialogs, ctx)) {
-    return false; // Should this allow true for unimplemented?
-  }
-
-  bool confirms;
-  dialogs->ConfirmEnteringWeak(ctx, &confirms);
-
-  return confirms;
-}
-
-bool nsSecureBrowserUIImpl::
-ConfirmLeavingSecure()
-{
-  nsCOMPtr<nsISecurityWarningDialogs> dialogs;
-  nsCOMPtr<nsIInterfaceRequestor> ctx;
-
-  if (!GetNSSDialogs(dialogs, ctx)) {
-    return false; // Should this allow true for unimplemented?
-  }
-
-  bool confirms;
-  dialogs->ConfirmLeavingSecure(ctx, &confirms);
-
-  return confirms;
-}
-
-bool nsSecureBrowserUIImpl::
-ConfirmMixedMode()
-{
-  nsCOMPtr<nsISecurityWarningDialogs> dialogs;
-  nsCOMPtr<nsIInterfaceRequestor> ctx;
-
-  if (!GetNSSDialogs(dialogs, ctx)) {
-    return false; // Should this allow true for unimplemented?
-  }
-
-  bool confirms;
-  dialogs->ConfirmMixedMode(ctx, &confirms);
-
-  return confirms;
-}
-
-/**
- * ConfirmPostToInsecure - returns true if
- *   the user approves the submit (or doesn't care).
- *   returns false on errors.
- */
-bool nsSecureBrowserUIImpl::
-ConfirmPostToInsecure()
-{
-  nsCOMPtr<nsISecurityWarningDialogs> dialogs;
-  nsCOMPtr<nsIInterfaceRequestor> ctx;
-
-  if (!GetNSSDialogs(dialogs, ctx)) {
-    return false; // Should this allow true for unimplemented?
-  }
-
-  bool result;
-
-  nsresult rv = dialogs->ConfirmPostToInsecure(ctx, &result);
-  if (NS_FAILED(rv)) return false;
-
-  return result;
 }
 
 /**

@@ -1,19 +1,20 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsperf.h"
+
 #include "jscntxt.h" /* for error messages */
 #include "jsobj.h" /* for unwrapping without a context */
 
-#include "jsobjinlines.h"
+#include "vm/ObjectImpl-inl.h"
 
 using JS::PerfMeasurement;
 
 // You cannot forward-declare a static object in C++, so instead
 // we have to forward-declare the helper functions that refer to it.
-static PerfMeasurement* GetPM(JSContext* cx, JSHandleObject obj, const char* fname);
+static PerfMeasurement* GetPM(JSContext* cx, JS::HandleObject obj, const char* fname);
 static PerfMeasurement* GetPMFromThis(JSContext* cx, jsval* vp);
 
 // Property access
@@ -90,8 +91,8 @@ pm_canMeasureSomething(JSContext* cx, unsigned /*unused*/, jsval* vp)
     return JS_TRUE;
 }
 
-const uint8_t PM_FATTRS = JSPROP_READONLY | JSPROP_PERMANENT | JSPROP_SHARED;
-static JSFunctionSpec pm_fns[] = {
+const uint8_t PM_FATTRS = JSPROP_READONLY | JSPROP_PERMANENT;
+static const JSFunctionSpec pm_fns[] = {
     JS_FN("start",               pm_start,               0, PM_FATTRS),
     JS_FN("stop",                pm_stop,                0, PM_FATTRS),
     JS_FN("reset",               pm_reset,               0, PM_FATTRS),
@@ -105,7 +106,7 @@ const uint8_t PM_PATTRS =
 #define GETTER(name)                            \
     { #name, 0, PM_PATTRS, JSOP_WRAPPER(pm_get_##name), JSOP_NULLWRAPPER }
 
-static JSPropertySpec pm_props[] = {
+static const JSPropertySpec pm_props[] = {
     GETTER(cpu_cycles),
     GETTER(instructions),
     GETTER(cache_references),
@@ -156,7 +157,7 @@ static void pm_finalize(JSFreeOp* fop, JSObject* obj);
 
 static JSClass pm_class = {
     "PerfMeasurement", JSCLASS_HAS_PRIVATE,
-    JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+    JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, pm_finalize
 };
 
@@ -169,7 +170,7 @@ pm_construct(JSContext* cx, unsigned argc, jsval* vp)
     if (!JS_ConvertArguments(cx, argc, JS_ARGV(cx, vp), "u", &mask))
         return JS_FALSE;
 
-    js::RootedObject obj(cx, JS_NewObjectForConstructor(cx, &pm_class, vp));
+    JS::RootedObject obj(cx, JS_NewObjectForConstructor(cx, &pm_class, vp));
     if (!obj)
         return JS_FALSE;
 
@@ -196,7 +197,7 @@ pm_finalize(JSFreeOp* fop, JSObject* obj)
 // Helpers (declared above)
 
 static PerfMeasurement*
-GetPM(JSContext* cx, JSHandleObject obj, const char* fname)
+GetPM(JSContext* cx, JS::HandleObject obj, const char* fname)
 {
     PerfMeasurement* p = (PerfMeasurement*)
         JS_GetInstancePrivate(cx, obj, &pm_class, 0);
@@ -223,16 +224,16 @@ GetPMFromThis(JSContext* cx, jsval* vp)
 namespace JS {
 
 JSObject*
-RegisterPerfMeasurement(JSContext *cx, JSRawObject global)
+RegisterPerfMeasurement(JSContext *cx, JSObject *global)
 {
-    js::RootedObject prototype(cx);
+    RootedObject prototype(cx);
     prototype = JS_InitClass(cx, global, NULL /* parent */,
                              &pm_class, pm_construct, 1,
                              pm_props, pm_fns, 0, 0);
     if (!prototype)
         return 0;
 
-    js::RootedObject ctor(cx);
+    RootedObject ctor(cx);
     ctor = JS_GetConstructor(cx, prototype);
     if (!ctor)
         return 0;

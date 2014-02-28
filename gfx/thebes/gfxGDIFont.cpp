@@ -7,15 +7,19 @@
 #include "gfxGDIShaper.h"
 #include "gfxUniscribeShaper.h"
 #include "gfxHarfBuzzShaper.h"
-#ifdef MOZ_GRAPHITE
+#include <algorithm>
 #include "gfxGraphiteShaper.h"
-#endif
 #include "gfxWindowsPlatform.h"
 #include "gfxContext.h"
+#include "mozilla/Preferences.h"
+#include "nsUnicodeProperties.h"
 
 #include "cairo-win32.h"
 
 #define ROUND(x) floor((x) + 0.5)
+
+using namespace mozilla;
+using namespace mozilla::unicode;
 
 static inline cairo_antialias_t
 GetCairoAntialiasOption(gfxFont::AntialiasOption anAntialiasOption)
@@ -44,11 +48,9 @@ gfxGDIFont::gfxGDIFont(GDIFontEntry *aFontEntry,
       mSpaceGlyph(0),
       mNeedsBold(aNeedsBold)
 {
-#ifdef MOZ_GRAPHITE
     if (FontCanSupportGraphite()) {
         mGraphiteShaper = new gfxGraphiteShaper(this);
     }
-#endif
     if (FontCanSupportHarfBuzz()) {
         mHarfBuzzShaper = new gfxHarfBuzzShaper(this);
     }
@@ -82,10 +84,11 @@ gfxGDIFont::CopyWithAntialiasOption(AntialiasOption anAAOption)
 }
 
 static bool
-UseUniscribe(gfxShapedWord *aShapedWord,
-             const PRUnichar *aString)
+UseUniscribe(gfxShapedText *aShapedText,
+             const PRUnichar *aText,
+             uint32_t aLength)
 {
-    uint32_t flags = aShapedWord->Flags();
+    uint32_t flags = aShapedText->Flags();
     bool useGDI;
 
     bool isXP = (gfxWindowsPlatform::WindowsOSVersion() 
@@ -101,14 +104,17 @@ UseUniscribe(gfxShapedWord *aShapedWord,
              ) == gfxTextRunFactory::TEXT_OPTIMIZE_SPEED;
 
     return !useGDI ||
-        ScriptIsComplex(aString, aShapedWord->Length(), SIC_COMPLEX) == S_OK;
+        ScriptIsComplex(aText, aLength, SIC_COMPLEX) == S_OK;
 }
 
 bool
-gfxGDIFont::ShapeWord(gfxContext *aContext,
-                      gfxShapedWord *aShapedWord,
-                      const PRUnichar *aString,
-                      bool aPreferPlatformShaping)
+gfxGDIFont::ShapeText(gfxContext      *aContext,
+                      const PRUnichar *aText,
+                      uint32_t         aOffset,
+                      uint32_t         aLength,
+                      int32_t          aScript,
+                      gfxShapedText   *aShapedText,
+                      bool             aPreferPlatformShaping)
 {
     if (!mMetrics) {
         Initialize();
@@ -128,15 +134,21 @@ gfxGDIFont::ShapeWord(gfxContext *aContext,
         return false;
     }
 
-#ifdef MOZ_GRAPHITE
     if (mGraphiteShaper && gfxPlatform::GetPlatform()->UseGraphiteShaping()) {
-        ok = mGraphiteShaper->ShapeWord(aContext, aShapedWord, aString);
+        ok = mGraphiteShaper->ShapeText(aContext, aText,
+                                        aOffset, aLength,
+                                        aScript, aShapedText);
     }
-#endif
 
     if (!ok && mHarfBuzzShaper) {
-        if (gfxPlatform::GetPlatform()->UseHarfBuzzForScript(aShapedWord->Script())) {
-            ok = mHarfBuzzShaper->ShapeWord(aContext, aShapedWord, aString);
+        if (gfxPlatform::GetPlatform()->UseHarfBuzzForScript(aScript) ||
+            (gfxWindowsPlatform::WindowsOSVersion() <
+                 gfxWindowsPlatform::kWindowsVista &&
+             ScriptShapingType(aScript) == SHAPING_INDIC &&
+             !Preferences::GetBool("gfx.font_rendering.winxp-indic-uniscribe",
+                                   false))) {
+            ok = mHarfBuzzShaper->ShapeText(aContext, aText, aOffset, aLength,
+                                            aScript, aShapedText);
         }
     }
 
@@ -145,41 +157,42 @@ gfxGDIFont::ShapeWord(gfxContext *aContext,
         bool preferUniscribe =
             (!fe->IsTrueType() || fe->IsSymbolFont()) && !fe->mForceGDI;
 
-        if (preferUniscribe || UseUniscribe(aShapedWord, aString)) {
+        if (preferUniscribe || UseUniscribe(aShapedText, aText, aLength)) {
             // first try Uniscribe
             if (!mUniscribeShaper) {
                 mUniscribeShaper = new gfxUniscribeShaper(this);
             }
 
-            ok = mUniscribeShaper->ShapeWord(aContext, aShapedWord, aString);
-            if (ok) {
-                return true;
-            }
+            ok = mUniscribeShaper->ShapeText(aContext, aText, aOffset, aLength,
+                                             aScript, aShapedText);
+            if (!ok) {
+                // fallback to GDI shaping
+                if (!mPlatformShaper) {
+                    CreatePlatformShaper();
+                }
 
-            // fallback to GDI shaping
-            if (!mPlatformShaper) {
-                CreatePlatformShaper();
+                ok = mPlatformShaper->ShapeText(aContext, aText, aOffset,
+                                                aLength, aScript, aShapedText);
             }
-
-            ok = mPlatformShaper->ShapeWord(aContext, aShapedWord, aString);
         } else {
             // first use GDI
             if (!mPlatformShaper) {
                 CreatePlatformShaper();
             }
 
-            ok = mPlatformShaper->ShapeWord(aContext, aShapedWord, aString);
-            if (ok) {
-                return true;
-            }
+            ok = mPlatformShaper->ShapeText(aContext, aText, aOffset, aLength,
+                                            aScript, aShapedText);
+            if (!ok) {
+                // try Uniscribe if GDI failed
+                if (!mUniscribeShaper) {
+                    mUniscribeShaper = new gfxUniscribeShaper(this);
+                }
 
-            // try Uniscribe if GDI failed
-            if (!mUniscribeShaper) {
-                mUniscribeShaper = new gfxUniscribeShaper(this);
+                // use Uniscribe shaping
+                ok = mUniscribeShaper->ShapeText(aContext, aText,
+                                                 aOffset, aLength,
+                                                 aScript, aShapedText);
             }
-
-            // use Uniscribe shaping
-            ok = mUniscribeShaper->ShapeWord(aContext, aShapedWord, aString);
         }
 
 #if DEBUG
@@ -196,11 +209,7 @@ gfxGDIFont::ShapeWord(gfxContext *aContext,
 #endif
     }
 
-    if (ok && IsSyntheticBold()) {
-        float synBoldOffset =
-                GetSyntheticBoldOffset() * CalcXScale(aContext);
-        aShapedWord->AdjustAdvancesForSyntheticBold(synBoldOffset);
-    }
+    PostShapingFixup(aContext, aText, aOffset, aLength, aShapedText);
 
     return ok;
 }
@@ -285,12 +294,11 @@ gfxGDIFont::Initialize()
     // GDI to italicize, because that would use a different face and result
     // in a possible glyph ID mismatch between shaping and rendering.
     //
-    // The font entry's mFamilyHasItalicFace flag is needed for user fonts
+    // We use the mFamilyHasItalicFace flag in the entry in case of user fonts,
     // where the *CSS* family may not know about italic faces that are present
     // in the *GDI* family, and which GDI would use if we asked it to perform
     // the "italicization".
-    bool useCairoFakeItalic = wantFakeItalic &&
-        (fe->Family()->HasItalicFace() || fe->mFamilyHasItalicFace);
+    bool useCairoFakeItalic = wantFakeItalic && fe->mFamilyHasItalicFace;
 
     if (mAdjustedSize == 0.0) {
         mAdjustedSize = mStyle.size;
@@ -400,7 +408,7 @@ gfxGDIFont::Initialize()
         mMetrics->maxAscent = metrics.tmAscent;
         mMetrics->maxDescent = metrics.tmDescent;
         mMetrics->maxAdvance = metrics.tmMaxCharWidth;
-        mMetrics->aveCharWidth = NS_MAX<gfxFloat>(1, metrics.tmAveCharWidth);
+        mMetrics->aveCharWidth = std::max<gfxFloat>(1, metrics.tmAveCharWidth);
         // The font is monospace when TMPF_FIXED_PITCH is *not* set!
         // See http://msdn2.microsoft.com/en-us/library/ms534202(VS.85).aspx
         if (!(metrics.tmPitchAndFamily & TMPF_FIXED_PITCH)) {
@@ -422,14 +430,11 @@ gfxGDIFont::Initialize()
             mMetrics->zeroOrAveCharWidth = mMetrics->aveCharWidth;
         }
 
-        mSpaceGlyph = 0;
-        if (metrics.tmPitchAndFamily & TMPF_TRUETYPE) {
-            WORD glyph;
-            DWORD ret = GetGlyphIndicesW(dc.GetDC(), L" ", 1, &glyph,
-                                         GGI_MARK_NONEXISTING_GLYPHS);
-            if (ret != GDI_ERROR && glyph != 0xFFFF) {
-                mSpaceGlyph = glyph;
-            }
+        WORD glyph;
+        DWORD ret = GetGlyphIndicesW(dc.GetDC(), L" ", 1, &glyph,
+                                     GGI_MARK_NONEXISTING_GLYPHS);
+        if (ret != GDI_ERROR && glyph != 0xFFFF) {
+            mSpaceGlyph = glyph;
         }
 
         SanitizeMetrics(mMetrics, GetFontEntry()->mIsBadUnderlineFont);

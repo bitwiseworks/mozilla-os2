@@ -14,6 +14,7 @@ interface nsISAXDTDHandler;
 interface nsISAXEntityResolver;
 interface nsISAXErrorHandler;
 interface nsISAXLexicalHandler;
+interface nsIMozSAXXMLDeclarationHandler;
 
 /**
  * Interface for reading an XML document using callbacks.
@@ -24,7 +25,7 @@ interface nsISAXLexicalHandler;
  * handlers for document processing, and to initiate a document
  * parse.
  */
-[scriptable, uuid(5556997e-d816-4218-8b54-803d4261206e)]
+[scriptable, uuid(5b1de802-9091-454f-9972-5753c0d0c70e)]
 interface nsISAXXMLReader : nsIStreamListener {
 
   /**
@@ -68,6 +69,14 @@ interface nsISAXXMLReader : nsIStreamListener {
   attribute nsISAXErrorHandler errorHandler;
 
   /**
+   * A handler for the (optional) XML declaration of a document.
+   * <?xml version='1.0'?>
+   *
+   * @note This is not part of the SAX standard.
+   */
+  attribute nsIMozSAXXMLDeclarationHandler declarationHandler;
+
+  /**
    * If the application does not register a lexical handler, all
    * lexical events (e.g. startDTD) reported by the SAX parser will be
    * silently ignored.
@@ -79,7 +88,7 @@ interface nsISAXXMLReader : nsIStreamListener {
   attribute nsISAXLexicalHandler lexicalHandler;
 
   /**
-   * Set the value of a feature flag. NOT CURRENTLY IMPLEMENTED.
+   * Set the value of a feature flag.
    *
    * The feature name is any fully-qualified URI.  It is possible
    * for an XMLReader to expose a feature value but to be unable to
@@ -93,11 +102,15 @@ interface nsISAXXMLReader : nsIStreamListener {
    *
    * @param name String flag for a parser feature.
    * @param value Turn the feature on/off.
+   *
+   * @note This is currently supported only for
+   * http://xml.org/sax/features/namespace-prefixes .  All other
+   * features will result in a NOT_IMPLEMENTED exception.
    */
   void setFeature(in AString name, in boolean value);
 
   /**
-   * Look up the value of a feature flag. NOT CURRENTLY IMPLEMENTED.
+   * Look up the value of a feature flag.
    *
    * The feature name is any fully-qualified URI.  It is
    * possible for an XMLReader to recognize a feature name but
@@ -110,6 +123,10 @@ interface nsISAXXMLReader : nsIStreamListener {
    * http://xml.org/sax/features/namespace-prefixes feature names.
    *
    * @param name String flag for a parser feature.
+   *
+   * @note This is currently supported only for
+   * http://xml.org/sax/features/namespace-prefixes .  All other
+   * features will result in a NOT_IMPLEMENTED exception.
    */
   boolean getFeature(in AString name);
 

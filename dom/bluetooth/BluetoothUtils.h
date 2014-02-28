@@ -9,22 +9,39 @@
 
 #include "BluetoothCommon.h"
 
-class JSContext;
+struct JSContext;
 class JSObject;
 
 BEGIN_BLUETOOTH_NAMESPACE
 
-class BluetoothDevice;
+class BluetoothNamedValue;
+class BluetoothValue;
+class BluetoothReplyRunnable;
 
-nsresult
-StringArrayToJSArray(JSContext* aCx, JSObject* aGlobal,
-                     const nsTArray<nsString>& aSourceArray,
-                     JSObject** aResultArray);
+bool
+SetJsObject(JSContext* aContext,
+            const BluetoothValue& aValue,
+            JSObject* aObj);
 
-nsresult
-BluetoothDeviceArrayToJSArray(JSContext* aCx, JSObject* aGlobal,
-                              const nsTArray<nsRefPtr<BluetoothDevice> >& aSourceArray,
-                              JSObject** aResultArray);
+nsString
+GetObjectPathFromAddress(const nsAString& aAdapterPath,
+                         const nsAString& aDeviceAddress);
+
+nsString
+GetAddressFromObjectPath(const nsAString& aObjectPath);
+
+bool
+BroadcastSystemMessage(const nsAString& aType,
+                       const InfallibleTArray<BluetoothNamedValue>& aData);
+
+void
+DispatchBluetoothReply(BluetoothReplyRunnable* aRunnable,
+                       const BluetoothValue& aValue,
+                       const nsAString& aErrorStr);
+
+void
+ParseAtCommand(const nsACString& aAtCommand, const int aStart,
+               nsTArray<nsCString>& aRetValues);
 
 END_BLUETOOTH_NAMESPACE
 

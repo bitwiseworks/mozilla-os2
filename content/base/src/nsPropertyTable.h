@@ -26,7 +26,6 @@
 #include "nscore.h"
 
 class nsIAtom;
-typedef PRUptrdiff PtrBits;
 
 typedef void
 (*NSPropertyFunc)(void           *aObject,

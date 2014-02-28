@@ -7,13 +7,17 @@
 
 #include "xptcprivate.h"
 
+#include "mozilla/Compiler.h"
+
 #if !defined(__arm__) && !(defined(LINUX) || defined(ANDROID))
 #error "This code is for Linux ARM only. Check that it works on your system, too.\nBeware that this code is highly compiler dependent."
 #endif
 
-#if defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 5)) \
+#if MOZ_IS_GCC
+#if MOZ_GCC_VERSION_AT_LEAST(4, 5, 0) \
     && defined(__ARM_EABI__) && !defined(__ARM_PCS_VFP) && !defined(__ARM_PCS)
 #error "Can't identify floating point calling conventions.\nPlease ensure that your toolchain defines __ARM_PCS or __ARM_PCS_VFP."
+#endif
 #endif
 
 #ifndef __ARM_PCS_VFP
@@ -108,7 +112,7 @@ invoke_copy_to_stack(uint32_t* stk, uint32_t *end,
     }
 }
 
-typedef uint32_t (*vtable_func)(nsISupports *, uint32_t, uint32_t, uint32_t);
+typedef nsresult (*vtable_func)(nsISupports *, uint32_t, uint32_t, uint32_t);
 
 EXPORT_XPCOM_API(nsresult)
 NS_InvokeByIndex(nsISupports* that, uint32_t methodIndex,
@@ -351,7 +355,7 @@ NS_InvokeByIndex(nsISupports* that, uint32_t methodIndex,
   vtable_func func = vtable[methodIndex];
   // 'register uint32_t result asm("r0")' could be used here, but it does not
   //  seem to be reliable in all cases: http://gcc.gnu.org/PR46164
-  uint32_t result;
+  nsresult result;
   asm (
     "mov    r3, sp\n"
     "mov    %[stack_space_size], %[param_count_plus_2], lsl #3\n"

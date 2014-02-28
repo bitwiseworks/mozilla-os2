@@ -48,23 +48,26 @@ public:
 
   // Accessible
   virtual void Value(nsString& aValue);
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual a11y::role NativeRole();
 
   // ActionAccessible
   virtual uint8_t ActionCount();
+
+protected:
+  // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
 };
 
 
 /**
  * A container of tab panels, xul:tabpanels element.
  */
-class XULDeckAccessible : public AccessibleWrap
+class XULTabpanelsAccessible : public AccessibleWrap
 {
 public:
-  XULDeckAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+  XULTabpanelsAccessible(nsIContent* aContent, DocAccessible* aDoc) :
     AccessibleWrap(aContent, aDoc)
-    { mFlags |= eXULDeckAccessible; }
+    { mType = eXULTabpanelsType; }
 
   // Accessible
   virtual a11y::role NativeRole();

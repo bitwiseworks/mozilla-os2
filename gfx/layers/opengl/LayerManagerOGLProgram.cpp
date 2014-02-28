@@ -2,9 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "LayerManagerOGLProgram.h"
+
 #include "LayerManagerOGLShaders.h"
 #include "LayerManagerOGL.h"
+
+#include "GLContext.h"
 
 namespace mozilla {
 namespace layers {
@@ -227,6 +232,28 @@ ProgramProfileOGL::GetProfileFor(gl::ShaderProgramType aType,
 const char* const ShaderProgramOGL::VertexCoordAttrib = "aVertexCoord";
 const char* const ShaderProgramOGL::TexCoordAttrib = "aTexCoord";
 
+ShaderProgramOGL::ShaderProgramOGL(GLContext* aGL, const ProgramProfileOGL& aProfile)
+  : mIsProjectionMatrixStale(false)
+  , mGL(aGL)
+  , mProgram(0)
+  , mProfile(aProfile)
+  , mProgramState(STATE_NEW)
+{}
+
+ShaderProgramOGL::~ShaderProgramOGL()
+{
+  if (mProgram <= 0) {
+    return;
+  }
+
+  nsRefPtr<GLContext> ctx = mGL->GetSharedContext();
+  if (!ctx) {
+    ctx = mGL;
+  }
+  ctx->MakeCurrent();
+  ctx->fDeleteProgram(mProgram);
+}
+
 bool
 ShaderProgramOGL::Initialize()
 {
@@ -279,7 +306,7 @@ ShaderProgramOGL::CreateShader(GLenum aShaderType, const char *aShaderSource)
 #endif
       )
   {
-    nsCAutoString log;
+    nsAutoCString log;
     log.SetCapacity(len);
     mGL->fGetShaderInfoLog(sh, len, (GLint*) &len, (char*) log.BeginWriting());
     log.SetLength(len);
@@ -332,7 +359,7 @@ ShaderProgramOGL::CreateProgram(const char *aVertexShaderString,
 #endif
       )
   {
-    nsCAutoString log;
+    nsAutoCString log;
     log.SetCapacity(len);
     mGL->fGetProgramInfoLog(result, len, (GLint*) &len, (char*) log.BeginWriting());
     log.SetLength(len);
@@ -393,6 +420,97 @@ ShaderProgramOGL::LoadMask(Layer* aMaskLayer)
 
   return true;
 }
+
+void
+ShaderProgramOGL::Activate()
+{
+  if (mProgramState == STATE_NEW) {
+    if (!Initialize()) {
+      NS_WARNING("Shader could not be initialised");
+      return;
+    }
+  }
+  NS_ASSERTION(HasInitialized(), "Attempting to activate a program that's not in use!");
+  mGL->fUseProgram(mProgram);
+#if CHECK_CURRENT_PROGRAM
+  mGL->SetUserData(&sCurrentProgramKey, this);
+#endif
+  // check and set the projection matrix
+  if (mIsProjectionMatrixStale) {
+    SetProjectionMatrix(mProjectionMatrix);
+  }
+}
+
+
+void
+ShaderProgramOGL::SetUniform(GLint aLocation, float aFloatValue)
+{
+  ASSERT_THIS_PROGRAM;
+  NS_ASSERTION(aLocation >= 0, "Invalid location");
+
+  mGL->fUniform1f(aLocation, aFloatValue);
+}
+
+void
+ShaderProgramOGL::SetUniform(GLint aLocation, const gfxRGBA& aColor)
+{
+  ASSERT_THIS_PROGRAM;
+  NS_ASSERTION(aLocation >= 0, "Invalid location");
+
+  mGL->fUniform4f(aLocation, float(aColor.r), float(aColor.g), float(aColor.b), float(aColor.a));
+}
+
+void
+ShaderProgramOGL::SetUniform(GLint aLocation, int aLength, float *aFloatValues)
+{
+  ASSERT_THIS_PROGRAM;
+  NS_ASSERTION(aLocation >= 0, "Invalid location");
+
+  if (aLength == 1) {
+    mGL->fUniform1fv(aLocation, 1, aFloatValues);
+  } else if (aLength == 2) {
+    mGL->fUniform2fv(aLocation, 1, aFloatValues);
+  } else if (aLength == 3) {
+    mGL->fUniform3fv(aLocation, 1, aFloatValues);
+  } else if (aLength == 4) {
+    mGL->fUniform4fv(aLocation, 1, aFloatValues);
+  } else {
+    NS_NOTREACHED("Bogus aLength param");
+  }
+}
+
+void
+ShaderProgramOGL::SetUniform(GLint aLocation, GLint aIntValue)
+{
+  ASSERT_THIS_PROGRAM;
+  NS_ASSERTION(aLocation >= 0, "Invalid location");
+
+  mGL->fUniform1i(aLocation, aIntValue);
+}
+
+void
+ShaderProgramOGL::SetMatrixUniform(GLint aLocation, const gfx3DMatrix& aMatrix)
+{
+  SetMatrixUniform(aLocation, &aMatrix._11);
+}
+
+void
+ShaderProgramOGL::SetMatrixUniform(GLint aLocation, const float *aFloatValues)
+{
+  ASSERT_THIS_PROGRAM;
+  NS_ASSERTION(aLocation >= 0, "Invalid location");
+
+  mGL->fUniformMatrix4fv(aLocation, 1, false, aFloatValues);
+}
+
+void
+ShaderProgramOGL::SetUniform(GLint aLocation, const gfx::Color& aColor) {
+  ASSERT_THIS_PROGRAM;
+  NS_ASSERTION(aLocation >= 0, "Invalid location");
+
+  mGL->fUniform4f(aLocation, float(aColor.r), float(aColor.g), float(aColor.b), float(aColor.a));
+}
+
 
 } /* layers */
 } /* mozilla */

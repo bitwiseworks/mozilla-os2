@@ -20,14 +20,18 @@
         ondialogextra2="checkCert();"
         persist="screenX screenY width height"
         defaultButton="extra2">
-  
-  <script type="application/javascript" src="chrome://global/content/strres.js"/>
+
+  <stringbundleset id="stringbundleset">
+    <stringbundle id="pippki_bundle" src="chrome://pippki/locale/pippki.properties"/>
+    <stringbundle id="brand_bundle" src="chrome://branding/locale/brand.properties"/>
+  </stringbundleset>
+
   <script type="application/javascript" src="chrome://pippki/content/pippki.js"/>
   <script type="application/javascript" src="chrome://pippki/content/exceptionDialog.js"/>
   
   <hbox>
     <vbox>
-#ifdef MOZ_WIDGET_GTK2
+#ifdef MOZ_WIDGET_GTK
       <image src="moz-icon://stock/gtk-dialog-warning?size=dialog"/>
 #else
       <image src="chrome://global/skin/icons/warning-large.png"/>

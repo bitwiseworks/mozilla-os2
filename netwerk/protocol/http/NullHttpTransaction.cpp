@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttp.h"
 #include "NullHttpTransaction.h"
 #include "nsProxyRelease.h"
@@ -16,12 +19,10 @@ NS_IMPL_THREADSAFE_ISUPPORTS0(NullHttpTransaction)
 
 NullHttpTransaction::NullHttpTransaction(nsHttpConnectionInfo *ci,
                                          nsIInterfaceRequestor *callbacks,
-                                         nsIEventTarget *target,
-                                         uint8_t caps)
+                                         uint32_t caps)
   : mStatus(NS_OK)
   , mCaps(caps | NS_HTTP_ALLOW_KEEPALIVE)
   , mCallbacks(callbacks)
-  , mEventTarget(target)
   , mConnectionInfo(ci)
   , mRequestHead(nullptr)
   , mIsDone(false)
@@ -30,11 +31,7 @@ NullHttpTransaction::NullHttpTransaction(nsHttpConnectionInfo *ci,
 
 NullHttpTransaction::~NullHttpTransaction()
 {
-  if (mCallbacks) {
-    nsIInterfaceRequestor *cbs = nullptr;
-    mCallbacks.swap(cbs);
-    NS_ProxyRelease(mEventTarget, cbs);
-  }
+  mCallbacks = nullptr;
   delete mRequestHead;
 }
 
@@ -51,18 +48,11 @@ NullHttpTransaction::Connection()
 }
 
 void
-NullHttpTransaction::GetSecurityCallbacks(nsIInterfaceRequestor **outCB,
-                                           nsIEventTarget **outTarget)
+NullHttpTransaction::GetSecurityCallbacks(nsIInterfaceRequestor **outCB)
 {
   nsCOMPtr<nsIInterfaceRequestor> copyCB(mCallbacks);
   *outCB = copyCB;
   copyCB.forget();
-
-  if (outTarget) {
-    nsCOMPtr<nsIEventTarget> copyET(mEventTarget);
-    *outTarget = copyET;
-    copyET.forget();
-  }
 }
 
 void
@@ -83,7 +73,7 @@ NullHttpTransaction::Status()
   return mStatus;
 }
 
-uint8_t
+uint32_t
 NullHttpTransaction::Caps()
 {
   return mCaps;
@@ -127,7 +117,7 @@ NullHttpTransaction::RequestHead()
   if (!mRequestHead) {
     mRequestHead = new nsHttpRequestHead();
 
-    nsCAutoString hostHeader;
+    nsAutoCString hostHeader;
     nsCString host(mConnectionInfo->GetHost());
     nsresult rv = nsHttpHandler::GenerateHostPort(host,
                                                   mConnectionInfo->Port(),
@@ -140,7 +130,7 @@ NullHttpTransaction::RequestHead()
     // the NullHttpTransaction and let them be retried from the pending queue
     // with a bound transcation
   }
-  
+
   return mRequestHead;
 }
 
@@ -181,7 +171,7 @@ NullHttpTransaction::SetPipelinePosition(int32_t position)
 {
     return NS_OK;
 }
- 
+
 int32_t
 NullHttpTransaction::PipelinePosition()
 {

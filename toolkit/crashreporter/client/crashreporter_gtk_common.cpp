@@ -5,6 +5,7 @@
 
 #include "crashreporter.h"
 
+#include <unistd.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <glib.h>
@@ -144,7 +145,7 @@ void LoadProxyinfo()
     host = gconf_client_get_string(conf, HTTP_PROXY_DIR "/host", NULL);
     port = gconf_client_get_int(conf, HTTP_PROXY_DIR "/port", NULL);
 
-    if (port && host && host != '\0') {
+    if (port && host && *host != '\0') {
       httpproxy = g_strdup_printf("http://%s:%d/", host, port);
       gHttpProxy = httpproxy;
     }
@@ -183,6 +184,7 @@ void LoadProxyinfo()
 gpointer SendThread(gpointer args)
 {
   string response, error;
+  long response_code;
 
   bool success = google_breakpad::HTTPUpload::SendRequest
     (gSendURL,
@@ -192,6 +194,7 @@ gpointer SendThread(gpointer args)
      gHttpProxy, gAuth,
      gCACertificateFile,
      &response,
+     &response_code,
      &error);
   if (success) {
     LogMessage("Crash report submitted successfully");

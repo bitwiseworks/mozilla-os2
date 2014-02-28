@@ -53,12 +53,8 @@ public:
 
   HTMLAreaAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
-  // nsAccessNode
-  virtual bool IsPrimaryForNode() const;
-
   // Accessible
   virtual void Description(nsString& aDescription);
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
                                    EWhichChildAtPoint aWhichChild);
   virtual void GetBoundsRect(nsRect& aBounds, nsIFrame** aBoundingFrame);
@@ -68,22 +64,22 @@ public:
   virtual uint32_t EndOffset();
 
 protected:
-
   // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
   virtual void CacheChildren();
 };
 
-} // namespace a11y
-} // namespace mozilla
 
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible downcasting method
 
-inline mozilla::a11y::HTMLImageMapAccessible*
+inline HTMLImageMapAccessible*
 Accessible::AsImageMap()
 {
-  return IsImageMapAccessible() ?
-    static_cast<mozilla::a11y::HTMLImageMapAccessible*>(this) : nullptr;
+  return IsImageMap() ? static_cast<HTMLImageMapAccessible*>(this) : nullptr;
 }
+
+} // namespace a11y
+} // namespace mozilla
 
 #endif

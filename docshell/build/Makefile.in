@@ -8,25 +8,14 @@ topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
 
-MODULE		= docshell
 IS_COMPONENT = 1
 MODULE_NAME	= docshell_provider
 
 include $(DEPTH)/config/autoconf.mk
 
-LIBRARY_NAME	= docshell
 EXPORT_LIBRARY = 1
-GRE_MODULE	= 1
 LIBXUL_LIBRARY	= 1
 
-
-EXPORTS = \
-		  nsDocShellCID.h \
-		  $(NULL)
-
-CPPSRCS		= \
-		nsDocShellModule.cpp		\
-		$(NULL)
 
 SHARED_LIBRARY_LIBS= \
 		../base/$(LIB_PREFIX)basedocshell_s.$(LIB_SUFFIX) \

@@ -31,7 +31,7 @@ function getBrowser() {
   return gBrowser;
 }
 
-__defineGetter__("gPageLoader", function () {
+this.__defineGetter__("gPageLoader", function () {
   var webnav = getWebNavigation();
   if (!webnav)
     return null;
@@ -326,8 +326,8 @@ function ViewSourceReload()
 function ViewSourceSavePage()
 {
   internalSave(window.content.location.href.substring(12), 
-               null, null, null, null, null,
-               "SaveLinkTitle", null, null, null, gPageLoader);
+               null, null, null, null, null, "SaveLinkTitle",
+               null, null, window.content.document, null, gPageLoader);
 }
 
 var PrintPreviewListener = {
@@ -546,7 +546,7 @@ function findLocation(pre, line, node, offset, interlinePosition, result)
 
   // Walk through each of the text nodes and count newlines.
   var treewalker = window.content.document
-      .createTreeWalker(pre, NodeFilter.SHOW_TEXT, null, false);
+      .createTreeWalker(pre, NodeFilter.SHOW_TEXT, null);
 
   // The column number of the first character in the current text node.
   var firstCol = 1;
@@ -698,41 +698,6 @@ function UpdateBackForwardCommands() {
     forwardBroadcaster.removeAttribute("disabled");
   else
     forwardBroadcaster.setAttribute("disabled", "true");
-}
-
-// FIXME copied and modified from browser.js.
-// Deduplication is part of bug 480356.
-function FillInHTMLTooltip(tipElement)
-{
-  var retVal = false;
-  var titleText = null;
-  var direction = tipElement.ownerDocument.dir;
-
-  while (!titleText && tipElement) {
-    if (tipElement.nodeType == Node.ELEMENT_NODE) {
-      titleText = tipElement.getAttribute("title");
-      var defView = tipElement.ownerDocument.defaultView;
-      // XXX Work around bug 350679:
-      // "Tooltips can be fired in documents with no view".
-      if (!defView)
-        return retVal;
-      direction = defView.getComputedStyle(tipElement, "")
-        .getPropertyValue("direction");
-    }
-    tipElement = tipElement.parentNode;
-  }
-
-  var tipNode = document.getElementById("aHTMLTooltip");
-  tipNode.style.direction = direction;
-
-  if (titleText && /\S/.test(titleText)) {
-    // Make CRLF and CR render one line break each.  
-    titleText = titleText.replace(/\r\n/g, '\n');
-    titleText = titleText.replace(/\r/g, '\n');
-    tipNode.setAttribute("label", titleText);
-    retVal = true;
-  }
-  return retVal;
 }
 
 function contextMenuShowing() {

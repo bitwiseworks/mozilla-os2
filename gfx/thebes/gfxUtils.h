@@ -17,7 +17,7 @@ class gfxDrawable;
 class nsIntRegion;
 struct nsIntRect;
 
-class THEBES_API gfxUtils {
+class gfxUtils {
 public:
     /*
      * Premultiply or Unpremultiply aSourceSurface, writing the result
@@ -72,6 +72,11 @@ public:
     static void ClipToRegionSnapped(gfxContext* aContext, const nsIntRegion& aRegion);
 
     /**
+     * Clip aContext to the region aRegion, snapping the rectangles.
+     */
+    static void ClipToRegionSnapped(mozilla::gfx::DrawTarget* aTarget, const nsIntRegion& aRegion);
+
+    /**
      * Create a path consisting of rectangles in |aRegion|.
      */
     static void PathFromRegion(gfxContext* aContext, const nsIntRegion& aRegion);
@@ -85,6 +90,16 @@ public:
      * Convert image format to depth value
      */
     static int ImageFormatToDepth(gfxASurface::gfxImageFormat aFormat);
+
+    /**
+     * Return the transform matrix that maps aFrom to the rectangle defined by
+     * aToTopLeft/aToTopRight/aToBottomRight. aFrom must be
+     * nonempty and the destination rectangle must be axis-aligned.
+     */
+    static gfxMatrix TransformRectToRect(const gfxRect& aFrom,
+                                         const gfxPoint& aToTopLeft,
+                                         const gfxPoint& aToTopRight,
+                                         const gfxPoint& aToBottomRight);
 
     /**
      * If aIn can be represented exactly using an nsIntRect (i.e.
@@ -125,6 +140,8 @@ public:
                       unsigned char* aDestBuffer,
                       int32_t aStride);
 
+    static const uint8_t sUnpremultiplyTable[256*256];
+    static const uint8_t sPremultiplyTable[256*256];
 #ifdef MOZ_DUMP_PAINTING
     /**
      * Writes a binary PNG file.
@@ -152,15 +169,12 @@ namespace mozilla {
 namespace gfx {
 
 
-/*
- * Copyright 2008 The Android Open Source Project
- *
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
+/* These techniques are suggested by "Bit Twiddling Hacks"
  */
 
 /**
  * Returns true if |aNumber| is a power of two
+ * 0 is incorreclty considered a power of two
  */
 static inline bool
 IsPowerOfTwo(int aNumber)

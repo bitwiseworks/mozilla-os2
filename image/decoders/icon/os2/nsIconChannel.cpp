@@ -11,6 +11,7 @@
 #include "nsReadableUtils.h"
 #include "nsMemory.h"
 #include "nsNetUtil.h"
+#include "nsMimeTypes.h"
 #include "nsIFile.h"
 #include "nsIFileURL.h"
 #include "nsDirectoryServiceDefs.h"
@@ -222,7 +223,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream **_retval,
   nsCOMPtr<nsIFile> localFile;
   uint32_t desiredImageSize;
   nsXPIDLCString contentType;
-  nsCAutoString filePath;
+  nsAutoCString filePath;
   nsresult rv = ExtractIconInfoFromUrl(getter_AddRefs(localFile),
                                        &desiredImageSize, contentType,
                                        filePath);
@@ -456,7 +457,7 @@ static HPOINTER GetIcon(nsCString& file, bool fExists,
       NS_FAILED(tempPath->AppendNative(file)))
     return 0;
 
-  nsCAutoString pathStr;
+  nsAutoCString pathStr;
   tempPath->GetNativePath(pathStr);
   FILE* fp = fopen(pathStr.get(), "wb+");
   if (fp) {
@@ -573,7 +574,7 @@ void ConvertMaskBitMap(uint8_t *inBuf, PBITMAPINFO2 pBMInfo,
 
 NS_IMETHODIMP nsIconChannel::GetContentType(nsACString &aContentType) 
 {
-  aContentType.AssignLiteral("image/icon");
+  aContentType.AssignLiteral(IMAGE_ICON_MS);
   return NS_OK;
 }
 
@@ -606,7 +607,19 @@ nsIconChannel::GetContentDisposition(uint32_t *aContentDisposition)
 }
 
 NS_IMETHODIMP
+nsIconChannel::SetContentDisposition(uint32_t aContentDisposition)
+{
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 nsIconChannel::GetContentDispositionFilename(nsAString &aContentDispositionFilename)
+{
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+nsIconChannel::SetContentDispositionFilename(const nsAString &aContentDispositionFilename)
 {
   return NS_ERROR_NOT_AVAILABLE;
 }
@@ -617,13 +630,13 @@ nsIconChannel::GetContentDispositionHeader(nsACString &aContentDispositionHeader
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-NS_IMETHODIMP nsIconChannel::GetContentLength(int32_t *aContentLength)
+NS_IMETHODIMP nsIconChannel::GetContentLength(int64_t *aContentLength)
 {
   *aContentLength = mContentLength;
   return NS_OK;
 }
 
-NS_IMETHODIMP nsIconChannel::SetContentLength(int32_t aContentLength)
+NS_IMETHODIMP nsIconChannel::SetContentLength(int64_t aContentLength)
 {
   NS_NOTREACHED("nsIconChannel::SetContentLength");
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -691,7 +704,7 @@ NS_IMETHODIMP nsIconChannel::OnStopRequest(nsIRequest* aRequest, nsISupports* aC
 NS_IMETHODIMP nsIconChannel::OnDataAvailable(nsIRequest* aRequest,
                                              nsISupports* aContext,
                                              nsIInputStream* aStream,
-                                             uint32_t aOffset,
+                                             uint64_t aOffset,
                                              uint32_t aCount)
 {
   if (mListener)

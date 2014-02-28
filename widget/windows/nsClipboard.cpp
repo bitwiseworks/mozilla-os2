@@ -32,6 +32,7 @@
 #include "nsCRT.h"
 #include "nsNetUtil.h"
 #include "nsEscape.h"
+#include "nsIObserverService.h"
 
 #ifdef PR_LOGGING
 PRLogModuleInfo* gWin32ClipboardLog = nullptr;
@@ -56,6 +57,13 @@ nsClipboard::nsClipboard() : nsBaseClipboard()
 
   mIgnoreEmptyNotification = false;
   mWindow         = nullptr;
+
+  // Register for a shutdown notification so that we can flush data
+ // to the OS clipboard.
+  nsCOMPtr<nsIObserverService> observerService =
+    do_GetService("@mozilla.org/observer-service;1");
+  if (observerService)
+    observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, PR_FALSE);
 }
 
 //-------------------------------------------------------------------------
@@ -64,6 +72,19 @@ nsClipboard::nsClipboard() : nsBaseClipboard()
 nsClipboard::~nsClipboard()
 {
 
+}
+
+NS_IMPL_ISUPPORTS_INHERITED1(nsClipboard, nsBaseClipboard, nsIObserver)
+
+NS_IMETHODIMP
+nsClipboard::Observe(nsISupports *aSubject, const char *aTopic,
+                     const PRUnichar *aData)
+{
+  // This will be called on shutdown.
+  ::OleFlushClipboard();
+  ::CloseClipboard();
+
+  return NS_OK;
 }
 
 //-------------------------------------------------------------------------
@@ -272,8 +293,10 @@ nsresult nsClipboard::GetGlobalData(HGLOBAL aHGBL, void ** aData, uint32_t * aLe
 
       result = NS_OK;
     }
-  } 
-  else {
+  } else {
+#ifdef MOZ_METRO
+    return result;
+#endif
     // We really shouldn't ever get here
     // but just in case
     *aData = nullptr;
@@ -301,12 +324,12 @@ nsresult nsClipboard::GetGlobalData(HGLOBAL aHGBL, void ** aData, uint32_t * aLe
 }
 
 //-------------------------------------------------------------------------
-nsresult nsClipboard::GetNativeDataOffClipboard(nsIWidget * aWindow, UINT /*aIndex*/, UINT aFormat, void ** aData, uint32_t * aLen)
+nsresult nsClipboard::GetNativeDataOffClipboard(nsIWidget * aWidget, UINT /*aIndex*/, UINT aFormat, void ** aData, uint32_t * aLen)
 {
   HGLOBAL   hglb; 
   nsresult  result = NS_ERROR_FAILURE;
 
-  HWND nativeWin = nullptr;//(HWND)aWindow->GetNativeData(NS_NATIVE_WINDOW);
+  HWND nativeWin = nullptr;
   if (::OpenClipboard(nativeWin)) { 
     hglb = ::GetClipboardData(aFormat); 
     result = GetGlobalData(hglb, aData, aLen);
@@ -777,7 +800,7 @@ nsClipboard :: FindURLFromLocalFile ( IDataObject* inDataObject, UINT inIndex, v
 
     if ( IsInternetShortcut(filepath) ) {
       nsMemory::Free(*outData);
-      nsCAutoString url;
+      nsAutoCString url;
       ResolveShortcut( file, url );
       if ( !url.IsEmpty() ) {
         // convert it to unicode and pass it out
@@ -798,7 +821,7 @@ nsClipboard :: FindURLFromLocalFile ( IDataObject* inDataObject, UINT inIndex, v
     }
     else {
       // we have a normal file, use some Necko objects to get our file path
-      nsCAutoString urlSpec;
+      nsAutoCString urlSpec;
       NS_GetURLSpecFromFile(file, urlSpec);
 
       // convert it to unicode and pass it out
@@ -922,6 +945,14 @@ nsClipboard::GetNativeClipboardData ( nsITransferable * aTransferable, int32_t a
 
 }
 
+NS_IMETHODIMP
+nsClipboard::EmptyClipboard(int32_t aWhichClipboard)
+{
+  if (aWhichClipboard == kGlobalClipboard && !mEmptyingForSetData) {
+    OleSetClipboard(NULL);
+  }
+  return nsBaseClipboard::EmptyClipboard(aWhichClipboard);
+}
 
 //-------------------------------------------------------------------------
 NS_IMETHODIMP nsClipboard::HasDataMatchingFlavors(const char** aFlavorList,

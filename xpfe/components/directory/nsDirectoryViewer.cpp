@@ -20,8 +20,8 @@
 #include "jsapi.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
+#include "nsEnumeratorUtils.h"
 #include "nsEscape.h"
-#include "nsIEnumerator.h"
 #include "nsIRDFService.h"
 #include "nsRDFCID.h"
 #include "rdf.h"
@@ -50,6 +50,8 @@
 #include "nsXPCOMCID.h"
 #include "nsIDocument.h"
 #include "mozilla/Preferences.h"
+#include "nsContentUtils.h"
+#include "nsCxPusher.h"
 
 using namespace mozilla;
 
@@ -156,29 +158,29 @@ nsHTTPIndex::OnFTPControlLog(bool server, const char *msg)
     nsIScriptContext *context = scriptGlobal->GetContext();
     NS_ENSURE_TRUE(context, NS_OK);
 
-    JSContext* cx = context->GetNativeContext();
+    AutoPushJSContext cx(context->GetNativeContext());
     NS_ENSURE_TRUE(cx, NS_OK);
 
-    JSObject* global = JS_GetGlobalObject(cx);
+    JS::Rooted<JSObject*> global(cx, JS_GetGlobalForScopeChain(cx));
     NS_ENSURE_TRUE(global, NS_OK);
 
-    jsval params[2];
+    JS::Value params[2];
 
     nsString unicodeMsg;
     unicodeMsg.AssignWithConversion(msg);
-    JSAutoRequest ar(cx);
     JSString* jsMsgStr = JS_NewUCStringCopyZ(cx, (jschar*) unicodeMsg.get());
+    NS_ENSURE_TRUE(jsMsgStr, NS_ERROR_OUT_OF_MEMORY);
 
     params[0] = BOOLEAN_TO_JSVAL(server);
     params[1] = STRING_TO_JSVAL(jsMsgStr);
-    
-    jsval val;
+
+    JS::Rooted<JS::Value> val(cx);
     JS_CallFunctionName(cx,
-                        global, 
+                        global,
                         "OnFTPControlLog",
-                        2, 
-                        params, 
-                        &val);
+                        2,
+                        params,
+                        val.address());
     return NS_OK;
 }
 
@@ -233,8 +235,8 @@ nsHTTPIndex::OnStartRequest(nsIRequest *request, nsISupports* aContext)
     nsIScriptContext *context = scriptGlobal->GetContext();
     NS_ENSURE_TRUE(context, NS_ERROR_FAILURE);
 
-    JSContext* cx = context->GetNativeContext();
-    JSObject* global = JS_GetGlobalObject(cx);
+    AutoPushJSContext cx(context->GetNativeContext());
+    JS::Rooted<JSObject*> global(cx, JS_GetGlobalForScopeChain(cx));
 
     // Using XPConnect, wrap the HTTP index object...
     static NS_DEFINE_CID(kXPConnectCID, NS_XPCONNECT_CID);
@@ -251,17 +253,15 @@ nsHTTPIndex::OnStartRequest(nsIRequest *request, nsISupports* aContext)
     NS_ASSERTION(NS_SUCCEEDED(rv), "unable to xpconnect-wrap http-index");
     if (NS_FAILED(rv)) return rv;
 
-    JSObject* jsobj;
-    rv = wrapper->GetJSObject(&jsobj);
-    NS_ASSERTION(NS_SUCCEEDED(rv),
+    JS::Rooted<JSObject*> jsobj(cx, wrapper->GetJSObject());
+    NS_ASSERTION(jsobj,
                  "unable to get jsobj from xpconnect wrapper");
-    if (NS_FAILED(rv)) return rv;
+    if (!jsobj) return NS_ERROR_UNEXPECTED;
 
-    jsval jslistener = OBJECT_TO_JSVAL(jsobj);
+    JS::Rooted<JS::Value> jslistener(cx, OBJECT_TO_JSVAL(jsobj));
 
     // ...and stuff it into the global context
-    JSAutoRequest ar(cx);
-    bool ok = JS_SetProperty(cx, global, "HTTPIndex", &jslistener);
+    bool ok = JS_SetProperty(cx, global, "HTTPIndex", jslistener.address());
     NS_ASSERTION(ok, "unable to set Listener property");
     if (!ok)
       return NS_ERROR_FAILURE;
@@ -278,7 +278,7 @@ nsHTTPIndex::OnStartRequest(nsIRequest *request, nsISupports* aContext)
     nsCOMPtr<nsIURI> uri;
     channel->GetURI(getter_AddRefs(uri));
       
-    nsCAutoString entryuriC;
+    nsAutoCString entryuriC;
     uri->GetSpec(entryuriC);
 
     nsCOMPtr<nsIRDFResource> entry;
@@ -348,7 +348,7 @@ NS_IMETHODIMP
 nsHTTPIndex::OnDataAvailable(nsIRequest *request,
                              nsISupports* aContext,
                              nsIInputStream* aStream,
-                             uint32_t aSourceOffset,
+                             uint64_t aSourceOffset,
                              uint32_t aCount)
 {
   // If mDirectory isn't set, then we should just bail. Either an
@@ -379,7 +379,7 @@ nsHTTPIndex::OnIndexAvailable(nsIRequest* aRequest, nsISupports *aContext,
   }
 
   // we found the filename; construct a resource for its entry
-  nsCAutoString entryuriC(baseStr);
+  nsAutoCString entryuriC(baseStr);
 
   nsXPIDLCString filename;
   nsresult rv = aIndex->GetLocation(getter_Copies(filename));
@@ -434,10 +434,9 @@ nsHTTPIndex::OnIndexAvailable(nsIRequest* aRequest, nsISupports *aContext,
       int64_t size;
       rv = aIndex->GetSize(&size);
       if (NS_FAILED(rv)) return rv;
-      int64_t minus1 = LL_MAXUINT;
-      if (LL_NE(size, minus1)) {
-        int32_t intSize;
-        LL_L2I(intSize, size);
+      int64_t minus1 = UINT64_MAX;
+      if (size != minus1) {
+        int32_t intSize = int32_t(size);
         // XXX RDF should support 64 bit integers (bug 240160)
         nsCOMPtr<nsIRDFInt> val;
         rv = mDirRDF->GetIntLiteral(intSize, getter_AddRefs(val));
@@ -1172,32 +1171,18 @@ nsHTTPIndex::ArcLabelsOut(nsIRDFResource *aSource, nsISimpleEnumerator **_retval
 
 	*_retval = nullptr;
 
-	nsCOMPtr<nsISupportsArray> array;
-	rv = NS_NewISupportsArray(getter_AddRefs(array));
-	if (NS_FAILED(rv)) return rv;
-
+	nsCOMPtr<nsISimpleEnumerator> child, anonArcs;
 	if (isWellknownContainerURI(aSource))
 	{
-		array->AppendElement(kNC_Child);
+		NS_NewSingletonEnumerator(getter_AddRefs(child), kNC_Child);
 	}
 
 	if (mInner)
 	{
-		nsCOMPtr<nsISimpleEnumerator>	anonArcs;
 		rv = mInner->ArcLabelsOut(aSource, getter_AddRefs(anonArcs));
-		bool hasResults;
-		while (NS_SUCCEEDED(rv) &&
-		       NS_SUCCEEDED(anonArcs->HasMoreElements(&hasResults)) &&
-		       hasResults)
-		{
-			nsCOMPtr<nsISupports>	anonArc;
-			if (NS_FAILED(anonArcs->GetNext(getter_AddRefs(anonArc))))
-				break;
-			array->AppendElement(anonArc);
-		}
 	}
 
-        return NS_NewArrayEnumerator(_retval, array);
+	return NS_NewUnionEnumerator(_retval, child, anonArcs);
 }
 
 NS_IMETHODIMP

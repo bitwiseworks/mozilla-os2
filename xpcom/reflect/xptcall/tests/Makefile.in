@@ -10,10 +10,7 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= TestXPTC
 SIMPLE_PROGRAMS	= TestXPTCInvoke$(BIN_SUFFIX)
-
-CPPSRCS		= TestXPTCInvoke.cpp
 
 LIBS		= \
 		$(XPCOM_GLUE_LDOPTS) \
@@ -21,10 +18,3 @@ LIBS		= \
 		$(NULL)
 
 include $(topsrcdir)/config/rules.mk
-
-# For _write().
-ifeq ($(OS_ARCH),BSD_OS)
-OS_LIBS		+= -lgcc
-endif
-
-

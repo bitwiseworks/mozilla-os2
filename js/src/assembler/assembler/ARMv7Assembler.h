@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * ***** BEGIN LICENSE BLOCK *****
  * Copyright (C) 2009 Apple Inc. All rights reserved.
@@ -28,8 +28,8 @@
  * 
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef ARMAssembler_h
-#define ARMAssembler_h
+#ifndef assembler_assembler_ARMv7Assembler_h
+#define assembler_assembler_ARMv7Assembler_h
 
 #include "assembler/wtf/Platform.h"
 
@@ -455,6 +455,10 @@ public:
         JmpSrc()
             : m_offset(-1)
         {
+        }
+
+        bool isSet() const {
+            return m_offset != -1;
         }
 
     private:
@@ -1925,4 +1929,4 @@ private:
 
 #endif // ENABLE(ASSEMBLER) && CPU(ARM_THUMB2)
 
-#endif // ARMAssembler_h
+#endif /* assembler_assembler_ARMv7Assembler_h */

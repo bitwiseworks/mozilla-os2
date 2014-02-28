@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+                android:layout_width="fill_parent"
+                android:layout_height="fill_parent">
+
+    <org.mozilla.gecko.TabsPanel android:id="@+id/tabs_panel"
+                                 android:layout_width="fill_parent"
+                                 android:layout_height="fill_parent"
+                                 android:background="@color/background_tabs"
+                                 android:visibility="invisible"/>
+
+   <view class="org.mozilla.gecko.GeckoApp$MainLayout"
+         android:id="@+id/main_layout"
+         android:layout_width="fill_parent"
+         android:layout_height="fill_parent"
+         android:background="@android:color/transparent">
+
+        <RelativeLayout android:id="@+id/gecko_layout"
+                        android:layout_width="fill_parent"
+                        android:layout_height="fill_parent"
+                        android:layout_above="@+id/find_in_page">
+
+            <include layout="@layout/shared_ui_components"/>
+
+        </RelativeLayout>
+
+        <org.mozilla.gecko.FindInPageBar android:id="@+id/find_in_page"
+                                         android:layout_width="fill_parent"
+                                         android:layout_height="wrap_content"
+                                         android:layout_alignParentBottom="true"
+                                         style="@style/FindBar"
+                                         android:visibility="gone"/>
+
+        <RelativeLayout android:id="@+id/camera_layout"
+                        android:layout_height="wrap_content"
+                        android:layout_width="wrap_content"
+                        android:layout_alignParentRight="true"
+                        android:layout_alignParentBottom="true">
+        </RelativeLayout>
+
+        <include layout="@layout/browser_toolbar"
+                 android:layout_width="fill_parent"
+                 android:layout_height="@dimen/browser_toolbar_height"/>
+    </view>
+
+    <LinearLayout android:id="@+id/toast"
+                  style="@style/Toast">
+
+        <TextView android:id="@+id/toast_message"
+                  style="@style/ToastMessage" />
+
+        <ImageView android:id="@+id/toast_divider"
+                   style="@style/ToastDivider" />
+
+        <Button android:id="@+id/toast_button"
+                style="@style/ToastButton" />
+
+    </LinearLayout>
+
+</RelativeLayout>

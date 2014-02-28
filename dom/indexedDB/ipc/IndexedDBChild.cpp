@@ -11,6 +11,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 
 #include "AsyncConnectionHelper.h"
 #include "DatabaseInfo.h"
@@ -19,11 +20,11 @@
 #include "IDBIndex.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
-#include "IndexedDatabaseManager.h"
 
 USING_INDEXEDDB_NAMESPACE
 
 using namespace mozilla::dom;
+using mozilla::dom::quota::QuotaManager;
 
 namespace {
 
@@ -41,10 +42,10 @@ public:
                                             MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
-  GetSuccessResult(JSContext* aCx, jsval* aVal) MOZ_OVERRIDE;
+  GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual nsresult
   OnSuccess() MOZ_OVERRIDE
@@ -86,16 +87,16 @@ public:
                                             MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   DoDatabaseWork(mozIStorageConnection* aConnection) MOZ_OVERRIDE;
 
-  virtual already_AddRefed<nsDOMEvent>
-  CreateSuccessEvent() MOZ_OVERRIDE;
+  virtual already_AddRefed<nsIDOMEvent>
+  CreateSuccessEvent(mozilla::dom::EventTarget* aOwner) MOZ_OVERRIDE;
 
   virtual nsresult
-  GetSuccessResult(JSContext* aCx, jsval* aVal) MOZ_OVERRIDE;
+  GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 };
 
 class IPCDeleteDatabaseHelper : public AsyncConnectionHelper
@@ -110,10 +111,10 @@ public:
                                             MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
-  GetSuccessResult(JSContext* aCx, jsval* aVal) MOZ_OVERRIDE;
+  GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual nsresult
   DoDatabaseWork(mozIStorageConnection* aConnection) MOZ_OVERRIDE;
@@ -140,7 +141,7 @@ public:
     }
 
     nsRefPtr<nsDOMEvent> event =
-      IDBVersionChangeEvent::Create(mOldVersion, mNewVersion);
+      IDBVersionChangeEvent::Create(mDatabase, mOldVersion, mNewVersion);
     MOZ_ASSERT(event);
 
     bool dummy;
@@ -159,6 +160,9 @@ public:
 
 IndexedDBChild::IndexedDBChild(const nsCString& aASCIIOrigin)
 : mFactory(nullptr), mASCIIOrigin(aASCIIOrigin)
+#ifdef DEBUG
+  , mDisconnected(false)
+#endif
 {
   MOZ_COUNT_CTOR(IndexedDBChild);
 }
@@ -177,6 +181,21 @@ IndexedDBChild::SetFactory(IDBFactory* aFactory)
 
   aFactory->SetActor(this);
   mFactory = aFactory;
+}
+
+void
+IndexedDBChild::Disconnect()
+{
+#ifdef DEBUG
+  MOZ_ASSERT(!mDisconnected);
+  mDisconnected = true;
+#endif
+
+  const InfallibleTArray<PIndexedDBDatabaseChild*>& databases =
+    ManagedPIndexedDBDatabaseChild();
+  for (uint32_t i = 0; i < databases.Length(); ++i) {
+    static_cast<IndexedDBDatabaseChild*>(databases[i])->Disconnect();
+  }
 }
 
 void
@@ -246,9 +265,19 @@ IndexedDBDatabaseChild::SetRequest(IDBOpenDBRequest* aRequest)
   mRequest = aRequest;
 }
 
+void
+IndexedDBDatabaseChild::Disconnect()
+{
+  const InfallibleTArray<PIndexedDBTransactionChild*>& transactions =
+    ManagedPIndexedDBTransactionChild();
+  for (uint32_t i = 0; i < transactions.Length(); ++i) {
+    static_cast<IndexedDBTransactionChild*>(transactions[i])->Disconnect();
+  }
+}
+
 bool
 IndexedDBDatabaseChild::EnsureDatabase(
-                           IDBRequest* aRequest,
+                           IDBOpenDBRequest* aRequest,
                            const DatabaseInfoGuts& aDBInfo,
                            const InfallibleTArray<ObjectStoreInfoGuts>& aOSInfo)
 {
@@ -257,8 +286,7 @@ IndexedDBDatabaseChild::EnsureDatabase(
     databaseId = mDatabase->Id();
   }
   else {
-    databaseId =
-      IndexedDatabaseManager::GetDatabaseId(aDBInfo.origin, aDBInfo.name);
+    databaseId = QuotaManager::GetStorageId(aDBInfo.origin, aDBInfo.name);
   }
   NS_ENSURE_TRUE(databaseId, false);
 
@@ -293,8 +321,8 @@ IndexedDBDatabaseChild::EnsureDatabase(
 
   if (!mDatabase) {
     nsRefPtr<IDBDatabase> database =
-      IDBDatabase::Create(aRequest, dbInfo.forget(), aDBInfo.origin, NULL,
-                          NULL);
+      IDBDatabase::Create(aRequest, aRequest->Factory(), dbInfo.forget(),
+                          aDBInfo.origin, NULL, NULL);
     if (!database) {
       NS_WARNING("Failed to create database!");
       return false;
@@ -358,7 +386,7 @@ IndexedDBDatabaseChild::RecvSuccess(
     openHelper = new IPCOpenDatabaseHelper(mDatabase, request);
   }
 
-  MainThreadEventTarget target;
+  ImmediateRunEventTarget target;
   if (NS_FAILED(openHelper->Dispatch(&target))) {
     NS_WARNING("Dispatch of IPCOpenDatabaseHelper failed!");
     return false;
@@ -390,7 +418,7 @@ IndexedDBDatabaseChild::RecvError(const nsresult& aRv)
 
   openHelper->SetError(aRv);
 
-  MainThreadEventTarget target;
+  ImmediateRunEventTarget target;
   if (NS_FAILED(openHelper->Dispatch(&target))) {
     NS_WARNING("Dispatch of IPCOpenDatabaseHelper failed!");
     return false;
@@ -406,10 +434,9 @@ IndexedDBDatabaseChild::RecvBlocked(const uint64_t& aOldVersion)
   MOZ_ASSERT(!mDatabase);
 
   nsCOMPtr<nsIRunnable> runnable =
-    IDBVersionChangeEvent::CreateBlockedRunnable(aOldVersion, mVersion,
-                                                 mRequest);
+    IDBVersionChangeEvent::CreateBlockedRunnable(mRequest, aOldVersion, mVersion);
 
-  MainThreadEventTarget target;
+  ImmediateRunEventTarget target;
   if (NS_FAILED(target.Dispatch(runnable, NS_DISPATCH_NORMAL))) {
     NS_WARNING("Dispatch of blocked event failed!");
   }
@@ -426,11 +453,20 @@ IndexedDBDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
   nsCOMPtr<nsIRunnable> runnable =
     new VersionChangeRunnable(mDatabase, aOldVersion, aNewVersion);
 
-  MainThreadEventTarget target;
+  ImmediateRunEventTarget target;
   if (NS_FAILED(target.Dispatch(runnable, NS_DISPATCH_NORMAL))) {
     NS_WARNING("Dispatch of versionchange event failed!");
   }
 
+  return true;
+}
+
+bool
+IndexedDBDatabaseChild::RecvInvalidate()
+{
+  if (mDatabase) {
+    mDatabase->Invalidate();
+  }
   return true;
 }
 
@@ -485,13 +521,13 @@ IndexedDBDatabaseChild::RecvPIndexedDBTransactionConstructor(
   mDatabase->EnterSetVersionTransaction();
   mDatabase->mPreviousDatabaseInfo->version = oldVersion;
 
-  MainThreadEventTarget target;
+  actor->SetTransaction(transaction);
+
+  ImmediateRunEventTarget target;
   if (NS_FAILED(versionHelper->Dispatch(&target))) {
     NS_WARNING("Dispatch of IPCSetVersionHelper failed!");
     return false;
   }
-
-  actor->SetTransaction(transaction);
 
   mOpenHelper = helper.forget();
   return true;
@@ -544,6 +580,16 @@ IndexedDBTransactionChild::SetTransaction(IDBTransaction* aTransaction)
 }
 
 void
+IndexedDBTransactionChild::Disconnect()
+{
+  const InfallibleTArray<PIndexedDBObjectStoreChild*>& objectStores =
+    ManagedPIndexedDBObjectStoreChild();
+  for (uint32_t i = 0; i < objectStores.Length(); ++i) {
+    static_cast<IndexedDBObjectStoreChild*>(objectStores[i])->Disconnect();
+  }
+}
+
+void
 IndexedDBTransactionChild::FireCompleteEvent(nsresult aRv)
 {
   MOZ_ASSERT(mTransaction);
@@ -558,7 +604,7 @@ IndexedDBTransactionChild::FireCompleteEvent(nsresult aRv)
 
   nsRefPtr<CommitHelper> helper = new CommitHelper(transaction, aRv);
 
-  MainThreadEventTarget target;
+  ImmediateRunEventTarget target;
   if (NS_FAILED(target.Dispatch(helper, NS_DISPATCH_NORMAL))) {
     NS_WARNING("Dispatch of CommitHelper failed!");
   }
@@ -584,9 +630,30 @@ IndexedDBTransactionChild::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 bool
-IndexedDBTransactionChild::RecvComplete(const nsresult& aRv)
+IndexedDBTransactionChild::RecvComplete(const CompleteParams& aParams)
 {
-  FireCompleteEvent(aRv);
+  MOZ_ASSERT(mTransaction);
+  MOZ_ASSERT(mStrongTransaction);
+
+  nsresult resultCode;
+
+  switch (aParams.type()) {
+    case CompleteParams::TCompleteResult:
+      resultCode = NS_OK;
+      break;
+    case CompleteParams::TAbortResult:
+      resultCode = aParams.get_AbortResult().errorCode();
+      if (NS_SUCCEEDED(resultCode)) {
+        resultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
+      }
+      break;
+
+    default:
+      MOZ_NOT_REACHED("Unknown union type!");
+      return false;
+  }
+
+  FireCompleteEvent(resultCode);
   return true;
 }
 
@@ -622,6 +689,28 @@ IndexedDBObjectStoreChild::~IndexedDBObjectStoreChild()
 {
   MOZ_COUNT_DTOR(IndexedDBObjectStoreChild);
   MOZ_ASSERT(!mObjectStore);
+}
+
+void
+IndexedDBObjectStoreChild::Disconnect()
+{
+  const InfallibleTArray<PIndexedDBRequestChild*>& requests =
+    ManagedPIndexedDBRequestChild();
+  for (uint32_t i = 0; i < requests.Length(); ++i) {
+    static_cast<IndexedDBRequestChildBase*>(requests[i])->Disconnect();
+  }
+
+  const InfallibleTArray<PIndexedDBIndexChild*>& indexes =
+    ManagedPIndexedDBIndexChild();
+  for (uint32_t i = 0; i < indexes.Length(); ++i) {
+    static_cast<IndexedDBIndexChild*>(indexes[i])->Disconnect();
+  }
+
+  const InfallibleTArray<PIndexedDBCursorChild*>& cursors =
+    ManagedPIndexedDBCursorChild();
+  for (uint32_t i = 0; i < cursors.Length(); ++i) {
+    static_cast<IndexedDBCursorChild*>(cursors[i])->Disconnect();
+  }
 }
 
 void
@@ -728,6 +817,22 @@ IndexedDBIndexChild::~IndexedDBIndexChild()
 {
   MOZ_COUNT_DTOR(IndexedDBIndexChild);
   MOZ_ASSERT(!mIndex);
+}
+
+void
+IndexedDBIndexChild::Disconnect()
+{
+  const InfallibleTArray<PIndexedDBRequestChild*>& requests =
+    ManagedPIndexedDBRequestChild();
+  for (uint32_t i = 0; i < requests.Length(); ++i) {
+    static_cast<IndexedDBRequestChildBase*>(requests[i])->Disconnect();
+  }
+
+  const InfallibleTArray<PIndexedDBCursorChild*>& cursors =
+    ManagedPIndexedDBCursorChild();
+  for (uint32_t i = 0; i < cursors.Length(); ++i) {
+    static_cast<IndexedDBCursorChild*>(cursors[i])->Disconnect();
+  }
 }
 
 void
@@ -853,6 +958,16 @@ IndexedDBCursorChild::SetCursor(IDBCursor* aCursor)
 }
 
 void
+IndexedDBCursorChild::Disconnect()
+{
+  const InfallibleTArray<PIndexedDBRequestChild*>& requests =
+    ManagedPIndexedDBRequestChild();
+  for (uint32_t i = 0; i < requests.Length(); ++i) {
+    static_cast<IndexedDBRequestChildBase*>(requests[i])->Disconnect();
+  }
+}
+
+void
 IndexedDBCursorChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   if (mCursor) {
@@ -896,7 +1011,24 @@ IndexedDBRequestChildBase::~IndexedDBRequestChildBase()
 IDBRequest*
 IndexedDBRequestChildBase::GetRequest() const
 {
-  return mHelper ? mHelper->GetRequest() : NULL;
+  return mHelper ? mHelper->GetRequest() : nullptr;
+}
+
+void
+IndexedDBRequestChildBase::Disconnect()
+{
+  if (mHelper) {
+    IDBRequest* request = mHelper->GetRequest();
+
+    if (request->IsPending()) {
+      request->SetError(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+      IDBTransaction* transaction = mHelper->GetTransaction();
+      if (transaction) {
+        transaction->OnRequestDisconnected();
+      }
+    }
+  }
 }
 
 bool
@@ -1108,7 +1240,7 @@ IndexedDBDeleteDatabaseRequestChild::Recv__delete__(const nsresult& aRv)
     helper->SetError(aRv);
   }
 
-  MainThreadEventTarget target;
+  ImmediateRunEventTarget target;
   if (NS_FAILED(helper->Dispatch(&target))) {
     NS_WARNING("Dispatch of IPCSetVersionHelper failed!");
     return false;
@@ -1124,10 +1256,10 @@ IndexedDBDeleteDatabaseRequestChild::RecvBlocked(
   MOZ_ASSERT(mOpenRequest);
 
   nsCOMPtr<nsIRunnable> runnable =
-    IDBVersionChangeEvent::CreateBlockedRunnable(aCurrentVersion, 0,
-                                                 mOpenRequest);
+    IDBVersionChangeEvent::CreateBlockedRunnable(mOpenRequest,
+                                                 aCurrentVersion, 0);
 
-  MainThreadEventTarget target;
+  ImmediateRunEventTarget target;
   if (NS_FAILED(target.Dispatch(runnable, NS_DISPATCH_NORMAL))) {
     NS_WARNING("Dispatch of blocked event failed!");
   }
@@ -1147,8 +1279,8 @@ IPCOpenDatabaseHelper::UnpackResponseFromParentProcess(
   return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
 }
 
-HelperBase::ChildProcessSendResult
-IPCOpenDatabaseHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+IPCOpenDatabaseHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   MOZ_NOT_REACHED("Don't call me!");
   return Error;
@@ -1162,9 +1294,9 @@ IPCOpenDatabaseHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 }
 
 nsresult
-IPCOpenDatabaseHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
+IPCOpenDatabaseHelper::GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
 {
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(nsIDOMEventTarget*, mDatabase),
+  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mDatabase),
                     aVal);
 }
 
@@ -1176,8 +1308,8 @@ IPCSetVersionHelper::UnpackResponseFromParentProcess(
   return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
 }
 
-HelperBase::ChildProcessSendResult
-IPCSetVersionHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+IPCSetVersionHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   MOZ_NOT_REACHED("Don't call me!");
   return Error;
@@ -1190,19 +1322,20 @@ IPCSetVersionHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   return NS_ERROR_FAILURE;
 }
 
-already_AddRefed<nsDOMEvent>
-IPCSetVersionHelper::CreateSuccessEvent()
+already_AddRefed<nsIDOMEvent>
+IPCSetVersionHelper::CreateSuccessEvent(mozilla::dom::EventTarget* aOwner)
 {
-  return IDBVersionChangeEvent::CreateUpgradeNeeded(mOldVersion,
+  return IDBVersionChangeEvent::CreateUpgradeNeeded(aOwner,
+                                                    mOldVersion,
                                                     mRequestedVersion);
 }
 
 nsresult
-IPCSetVersionHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
+IPCSetVersionHelper::GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
 {
   mOpenRequest->SetTransaction(mTransaction);
 
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(nsIDOMEventTarget*, mDatabase),
+  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mDatabase),
                     aVal);
 }
 
@@ -1214,17 +1347,17 @@ IPCDeleteDatabaseHelper::UnpackResponseFromParentProcess(
   return NS_ERROR_FAILURE;
 }
 
-HelperBase::ChildProcessSendResult
-IPCDeleteDatabaseHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+IPCDeleteDatabaseHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   MOZ_NOT_REACHED("Don't call me!");
   return Error;
 }
 
 nsresult
-IPCDeleteDatabaseHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
+IPCDeleteDatabaseHelper::GetSuccessResult(JSContext* aCx, JS::MutableHandle<JS::Value> aVal)
 {
-  *aVal = JSVAL_VOID;
+  aVal.setUndefined();
   return NS_OK;
 }
 

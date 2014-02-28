@@ -34,7 +34,7 @@ function errorHandler(evt) {
   evt.target.parentNode._error++;
 }
 
-var extenstion = {
+var extension = {
   "audio/wav" : "wav",
   "audio/x-wav": "wav",
   "video/ogg" : "ogv",
@@ -53,7 +53,7 @@ function startTest(test, token) {
   
   var s1 = document.createElement("source");
   s1.type = test.type;
-  s1.src = "404." + extenstion[test.type];
+  s1.src = "404." + extension[test.type];
   s1.addEventListener("error", errorHandler, false);
   v.appendChild(s1);
   

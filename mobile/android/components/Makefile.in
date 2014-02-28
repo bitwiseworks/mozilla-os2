@@ -9,23 +9,6 @@ VPATH      = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = MobileComponents
-XPIDL_MODULE = MobileComponents
-
-XPIDLSRCS = \
-        SessionStore.idl \
-        $(NULL)
-
-EXTRA_PP_COMPONENTS = \
-        MobileComponents.manifest \
-        AboutRedirector.js \
-        BrowserCLH.js \
-        DirectoryProvider.js\
-        HelperAppDialog.js \
-        Sidebar.js \
-        SessionStore.js \
-        $(NULL)
-
 EXTRA_COMPONENTS = \
         AlertsService.js \
         ContentPermissionPrompt.js \
@@ -34,13 +17,16 @@ EXTRA_COMPONENTS = \
         PromptService.js \
         ContentDispatchChooser.js \
         AddonUpdateService.js \
-        FormAutoComplete.js \
         LoginManagerPrompter.js \
         BlocklistPrompt.js \
+        NSSDialogService.js \
+        SiteSpecificUserAgent.js \
+        PaymentsUI.js \
+        FilePicker.js \
         $(NULL)
 
-ifdef MOZ_SAFE_BROWSING
-EXTRA_COMPONENTS += SafeBrowsing.js
-endif
+DEFINES += \
+  -DANDROID_PACKAGE_NAME=$(ANDROID_PACKAGE_NAME) \
+  $(NULL)
 
 include $(topsrcdir)/config/rules.mk

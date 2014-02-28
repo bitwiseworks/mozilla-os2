@@ -183,10 +183,7 @@ function testtag_tree_columns(tree, expectedColumns, testid)
     is(column.getNext(), c < columns.length - 1 ? columns[c + 1] : null, adjtestid + "getNext");
 
     // check the view's getColumnProperties method
-    var properties = Components.classes["@mozilla.org/supports-array;1"].
-                       createInstance(Components.interfaces.nsISupportsArray);
-    tree.view.getColumnProperties(column, properties);
-    properties = convertProperties(properties);
+    var properties = tree.view.getColumnProperties(column);
     var expectedProperties = expectedColumn.properties;
     is(properties,  expectedProperties ? expectedProperties : "", adjtestid + "getColumnProperties");
   }
@@ -605,7 +602,7 @@ function testtag_tree_TreeSelection_UI(tree, testid, multiple)
   }
 
   // restore the scroll position to the start of the page
-  synthesizeKey("VK_HOME", {});
+  sendKey("HOME");
 
   window.removeEventListener("keypress", keyPressListener, false);
   is(keyPressDefaultPrevented, multiple ? 63 : 40, "key press default prevented");
@@ -640,10 +637,10 @@ function testtag_tree_UI_editing(tree, testid, rowInfo)
     tree.currentIndex = rowIndex;
 
     const isMac = (navigator.platform.indexOf("Mac") >= 0);
-    const StartEditingKey = isMac ? "VK_ENTER" : "VK_F2";
-    synthesizeKey(StartEditingKey, {});
+    const StartEditingKey = isMac ? "ENTER" : "F2";
+    sendKey(StartEditingKey);
     is(tree.editingColumn, ecolumn, "Should be editing tree cell now");
-    synthesizeKey("VK_ESCAPE", {});
+    sendKey("ESCAPE");
     ok(!tree.editingColumn, "Should not be editing tree cell now");
     is(tree.currentIndex, rowIndex, "Current index should not have changed");
     is(tree.view.selection.currentColumn, ecolumn, "Current column should not have changed");
@@ -860,7 +857,7 @@ function testtag_tree_TreeSelection_UI_cell(tree, testid, rowInfo)
   }
 
   // restore the scroll position to the start of the page
-  synthesizeKey("VK_HOME", {});
+  sendKey("HOME");
 }
 
 function testtag_tree_TreeView(tree, testid, rowInfo)
@@ -926,15 +923,7 @@ function testtag_tree_TreeView_rows(tree, testid, rowInfo, startRow)
 
       for (checkMethod in checkCellMethods) {
         expected = checkCellMethods[checkMethod](row, cell);
-        if (checkMethod == "getCellProperties") {
-          var properties = Components.classes["@mozilla.org/supports-array;1"].
-                             createInstance(Components.interfaces.nsISupportsArray);
-          view.getCellProperties(r, columns[c], properties);
-          actual = convertProperties(properties);
-        }
-        else {
-          actual = view[checkMethod](r, columns[c]);
-        }
+        actual = view[checkMethod](r, columns[c]);
         if (actual !== expected) {
           failedMethods[checkMethod] = true;
           is(actual, expected, testid + "row " + r + " column " + c + " " + checkMethod + " is incorrect");
@@ -945,13 +934,7 @@ function testtag_tree_TreeView_rows(tree, testid, rowInfo, startRow)
     // compare row properties
     for (checkMethod in checkRowMethods) {
       expected = checkRowMethods[checkMethod](row, r);
-      if (checkMethod == "getRowProperties") {
-        var properties = Components.classes["@mozilla.org/supports-array;1"].
-                           createInstance(Components.interfaces.nsISupportsArray);
-        view.getRowProperties(r, properties);
-        actual = convertProperties(properties);
-      }
-      else if (checkMethod == "hasNextSibling") {
+      if (checkMethod == "hasNextSibling") {
         actual = view[checkMethod](r, r);
       }
       else {

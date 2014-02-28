@@ -8,6 +8,7 @@
 
 #include "ImageContainer.h"
 #include "GLContext.h"
+#include "GLContextProvider.h"
 
 // Split into a separate header from ImageLayers.h due to GLContext.h dependence
 // Implementation remains in ImageLayers.cpp
@@ -16,11 +17,11 @@ namespace mozilla {
 
 namespace layers {
 
-class THEBES_API SharedTextureImage : public Image {
+class SharedTextureImage : public Image {
 public:
   struct Data {
     gl::SharedTextureHandle mHandle;
-    gl::TextureImage::TextureShareType mShareType;
+    gl::GLContext::SharedTextureShareType mShareType;
     gfxIntSize mSize;
     bool mInverted;
   };
@@ -30,7 +31,9 @@ public:
 
   gfxIntSize GetSize() { return mData.mSize; }
 
-  virtual already_AddRefed<gfxASurface> GetAsSurface() { return NULL; }
+  virtual already_AddRefed<gfxASurface> GetAsSurface() { 
+    return gl::GLContextProvider::GetSharedHandleAsSurface(mData.mShareType, mData.mHandle);
+  }
 
   SharedTextureImage() : Image(NULL, SHARED_TEXTURE) {}
 

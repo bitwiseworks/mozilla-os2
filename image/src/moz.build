@@ -1,0 +1,38 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'imglib2'
+
+EXPORTS += [
+    'ImageOps.h',
+    'imgLoader.h',
+    'imgRequest.h',
+    'imgRequestProxy.h',
+]
+
+CPP_SOURCES += [
+    'ClippedImage.cpp',
+    'Decoder.cpp',
+    'DiscardTracker.cpp',
+    'FrameBlender.cpp',
+    'FrozenImage.cpp',
+    'Image.cpp',
+    'ImageFactory.cpp',
+    'ImageMetadata.cpp',
+    'ImageOps.cpp',
+    'ImageWrapper.cpp',
+    'RasterImage.cpp',
+    'SVGDocumentWrapper.cpp',
+    'ScriptedNotificationObserver.cpp',
+    'VectorImage.cpp',
+    'imgFrame.cpp',
+    'imgLoader.cpp',
+    'imgRequest.cpp',
+    'imgRequestProxy.cpp',
+    'imgStatusTracker.cpp',
+    'imgTools.cpp',
+]
+

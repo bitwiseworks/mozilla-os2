@@ -26,7 +26,8 @@ using namespace mozilla::a11y;
 ApplicationAccessible::ApplicationAccessible() :
   AccessibleWrap(nullptr, nullptr)
 {
-  mFlags |= eApplicationAccessible;
+  mType = eApplicationType;
+  mAppInfo = do_GetService("@mozilla.org/xre/app-info;1");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -110,12 +111,10 @@ ApplicationAccessible::State()
   return IsDefunct() ? states::DEFUNCT : 0;
 }
 
-NS_IMETHODIMP
-ApplicationAccessible::GetAttributes(nsIPersistentProperties** aAttributes)
+already_AddRefed<nsIPersistentProperties>
+ApplicationAccessible::NativeAttributes()
 {
-  NS_ENSURE_ARG_POINTER(aAttributes);
-  *aAttributes = nullptr;
-  return NS_OK;
+  return nullptr;
 }
 
 GroupPos
@@ -218,7 +217,7 @@ ApplicationAccessible::GetAppName(nsAString& aName)
   if (!mAppInfo)
     return NS_ERROR_FAILURE;
 
-  nsCAutoString cname;
+  nsAutoCString cname;
   nsresult rv = mAppInfo->GetName(cname);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -234,7 +233,7 @@ ApplicationAccessible::GetAppVersion(nsAString& aVersion)
   if (!mAppInfo)
     return NS_ERROR_FAILURE;
 
-  nsCAutoString cversion;
+  nsAutoCString cversion;
   nsresult rv = mAppInfo->GetVersion(cversion);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -257,7 +256,7 @@ ApplicationAccessible::GetPlatformVersion(nsAString& aVersion)
   if (!mAppInfo)
     return NS_ERROR_FAILURE;
 
-  nsCAutoString cversion;
+  nsAutoCString cversion;
   nsresult rv = mAppInfo->GetPlatformVersion(cversion);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -269,22 +268,11 @@ ApplicationAccessible::GetPlatformVersion(nsAString& aVersion)
 // nsAccessNode public methods
 
 void
-ApplicationAccessible::Init()
-{
-  mAppInfo = do_GetService("@mozilla.org/xre/app-info;1");
-}
-
-void
 ApplicationAccessible::Shutdown()
 {
   mAppInfo = nullptr;
 }
 
-bool
-ApplicationAccessible::IsPrimaryForNode() const
-{
-  return false;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible public methods
@@ -374,22 +362,6 @@ ApplicationAccessible::GetSiblingAtOffset(int32_t aOffset,
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIAccessible
-
-NS_IMETHODIMP
-ApplicationAccessible::GetDOMNode(nsIDOMNode** aDOMNode)
-{
-  NS_ENSURE_ARG_POINTER(aDOMNode);
-  *aDOMNode = nullptr;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-ApplicationAccessible::GetDocument(nsIAccessibleDocument** aDocument)
-{
-  NS_ENSURE_ARG_POINTER(aDocument);
-  *aDocument = nullptr;
-  return NS_OK;
-}
 
 NS_IMETHODIMP
 ApplicationAccessible::GetRootDocument(nsIAccessibleDocument** aRootDocument)

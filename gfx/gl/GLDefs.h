@@ -47,6 +47,28 @@ typedef uint64_t GLuint64;
 // OES_EGL_image (GLES)
 typedef void* GLeglImage;
 
+// EGL types
+typedef void* EGLImage;
+typedef int EGLint;
+typedef unsigned int EGLBoolean;
+typedef unsigned int EGLenum;
+typedef void *EGLConfig;
+typedef void *EGLContext;
+typedef void *EGLDisplay;
+typedef void *EGLSurface;
+typedef void *EGLClientBuffer;
+typedef void *EGLCastToRelevantPtr;
+typedef void *EGLImage;
+typedef void *EGLSync;
+typedef uint64_t EGLTime;
+
+#define EGL_NO_CONTEXT       ((EGLContext)0)
+#define EGL_NO_DISPLAY       ((EGLDisplay)0)
+#define EGL_NO_SURFACE       ((EGLSurface)0)
+#define EGL_NO_CONFIG        ((EGLConfig)nullptr)
+#define EGL_NO_SYNC          ((EGLSync)0)
+#define EGL_NO_IMAGE         ((EGLImage)0)
+
 #ifndef GLAPIENTRY
 # ifdef WIN32
 #  define GLAPIENTRY APIENTRY
@@ -3093,6 +3115,17 @@ typedef void* GLeglImage;
 #define LOCAL_WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB     0x00000002
 #define LOCAL_WGL_CONTEXT_ROBUST_ACCESS_BIT_ARB             0x00000004
 
+// AMD_compressed_ATC_texture
+#define LOCAL_GL_ATC_RGB                                0x8C92
+#define LOCAL_GL_ATC_RGBA_EXPLICIT_ALPHA                0x8C93
+#define LOCAL_GL_ATC_RGBA_INTERPOLATED_ALPHA            0x87EE
+
+// IMG_texture_compression_pvrtc
+#define LOCAL_GL_COMPRESSED_RGB_PVRTC_4BPPV1            0x8C00
+#define LOCAL_GL_COMPRESSED_RGB_PVRTC_2BPPV1            0x8C01
+#define LOCAL_GL_COMPRESSED_RGBA_PVRTC_4BPPV1           0x8C02
+#define LOCAL_GL_COMPRESSED_RGBA_PVRTC_2BPPV1           0x8C03
+
 #define LOCAL_WGL_NUMBER_PIXEL_FORMATS_ARB 0x2000
 #define LOCAL_WGL_DRAW_TO_WINDOW_ARB 0x2001
 #define LOCAL_WGL_DRAW_TO_BITMAP_ARB 0x2002
@@ -3264,6 +3297,9 @@ typedef void* GLeglImage;
 // EGL_KHR_gl_texture_2D_image
 #define LOCAL_EGL_GL_TEXTURE_2D               0x30B1
 
+// EGL_KHR_gl_renderbuffer_image
+#define LOCAL_EGL_GL_RENDERBUFFER             0x30B9
+
 // OES_EGL_image_external
 #define LOCAL_GL_TEXTURE_EXTERNAL             0x8D65
 
@@ -3280,5 +3316,14 @@ typedef void* GLeglImage;
 #define LOCAL_EGL_TIMEOUT_EXPIRED             0x30F5
 #define LOCAL_EGL_CONDITION_SATISFIED         0x30F6
 #define LOCAL_EGL_SUCCESS                     0x3000
+
+// EGL_ANGLE_surface_d3d_texture_2d_share_handle
+#define LOCAL_EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE 0x3200
+
+// FAKE_EGL_image_android
+#define LOCAL_EGL_NATIVE_BUFFER_ANDROID       0x3140
+
+// EGL_ANDROID_framebuffer_target
+#define LOCAL_EGL_FRAMEBUFFER_TARGET_ANDROID  0x3147
 
 #endif

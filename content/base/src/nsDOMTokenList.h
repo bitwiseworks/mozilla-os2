@@ -3,45 +3,67 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /*
- * Implementation of nsIDOMDOMTokenList specified by HTML5.
+ * Implementation of DOMTokenList specified by HTML5.
  */
 
 #ifndef nsDOMTokenList_h___
 #define nsDOMTokenList_h___
 
-#include "nsGenericElement.h"
-#include "nsIDOMDOMTokenList.h"
+#include "nsCOMPtr.h"
+#include "nsDOMString.h"
+#include "nsWrapperCache.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/BindingDeclarations.h"
+
+namespace mozilla {
+class ErrorResult;
+
+} // namespace mozilla
 
 class nsAttrValue;
+class nsIAtom;
 
-// nsISupports must be on the primary inheritance chain 
-// because nsDOMSettableTokenList is traversed by nsGenericElement.
-class nsDOMTokenList : public nsIDOMDOMTokenList,
+// nsISupports must be on the primary inheritance chain
+// because nsDOMSettableTokenList is traversed by Element.
+class nsDOMTokenList : public nsISupports,
                        public nsWrapperCache
 {
+protected:
+  typedef mozilla::dom::Element Element;
+
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsDOMTokenList)
-  NS_DECL_NSIDOMDOMTOKENLIST
 
-  nsDOMTokenList(nsGenericElement* aElement, nsIAtom* aAttrAtom);
+  nsDOMTokenList(Element* aElement, nsIAtom* aAttrAtom);
 
   void DropReference();
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
-  nsINode *GetParentObject()
+  Element* GetParentObject()
   {
     return mElement;
   }
 
-  const nsAttrValue* GetParsedAttr() {
-    if (!mElement) {
-      return nullptr;
+  uint32_t Length();
+  void Item(uint32_t aIndex, nsAString& aResult)
+  {
+    bool found;
+    IndexedGetter(aIndex, found, aResult);
+    if (!found) {
+      SetDOMStringToNull(aResult);
     }
-    return mElement->GetAttrInfo(kNameSpaceID_None, mAttrAtom).mValue;
   }
+  void IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aResult);
+  bool Contains(const nsAString& aToken, mozilla::ErrorResult& aError);
+  void Add(const nsAString& aToken, mozilla::ErrorResult& aError);
+  void Remove(const nsAString& aToken, mozilla::ErrorResult& aError);
+  bool Toggle(const nsAString& aToken,
+              const mozilla::dom::Optional<bool>& force,
+              mozilla::ErrorResult& aError);
+  void Stringify(nsAString& aResult);
 
 protected:
   virtual ~nsDOMTokenList();
@@ -49,8 +71,9 @@ protected:
   nsresult CheckToken(const nsAString& aStr);
   void AddInternal(const nsAttrValue* aAttr, const nsAString& aToken);
   void RemoveInternal(const nsAttrValue* aAttr, const nsAString& aToken);
+  inline const nsAttrValue* GetParsedAttr();
 
-  nsGenericElement* mElement;
+  Element* mElement;
   nsCOMPtr<nsIAtom> mAttrAtom;
 };
 

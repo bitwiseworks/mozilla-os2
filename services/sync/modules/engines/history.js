@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const EXPORTED_SYMBOLS = ['HistoryEngine', 'HistoryRec'];
+this.EXPORTED_SYMBOLS = ['HistoryEngine', 'HistoryRec'];
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -12,14 +12,14 @@ const Cr = Components.results;
 const HISTORY_TTL = 5184000; // 60 days
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://services-common/async.js");
+Cu.import("resource://services-common/log4moz.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/engines.js");
 Cu.import("resource://services-sync/record.js");
-Cu.import("resource://services-common/async.js");
 Cu.import("resource://services-sync/util.js");
-Cu.import("resource://services-common/log4moz.js");
 
-function HistoryRec(collection, id) {
+this.HistoryRec = function HistoryRec(collection, id) {
   CryptoWrapper.call(this, collection, id);
 }
 HistoryRec.prototype = {
@@ -31,8 +31,8 @@ HistoryRec.prototype = {
 Utils.deferGetSet(HistoryRec, "cleartext", ["histUri", "title", "visits"]);
 
 
-function HistoryEngine() {
-  SyncEngine.call(this, "History");
+this.HistoryEngine = function HistoryEngine(service) {
+  SyncEngine.call(this, "History", service);
 }
 HistoryEngine.prototype = {
   __proto__: SyncEngine.prototype,
@@ -43,8 +43,8 @@ HistoryEngine.prototype = {
   applyIncomingBatchSize: HISTORY_STORE_BATCH_SIZE
 };
 
-function HistoryStore(name) {
-  Store.call(this, name);
+function HistoryStore(name, engine) {
+  Store.call(this, name, engine);
 
   // Explicitly nullify our references to our cached services so we don't leak
   Svc.Obs.add("places-shutdown", function() {
@@ -326,14 +326,6 @@ HistoryStore.prototype = {
     return !!this._findURLByGUID(id);
   },
 
-  urlExists: function HistStore_urlExists(url) {
-    if (typeof(url) == "string") {
-      url = Utils.makeURI(url);
-    }
-    // Don't call isVisited on a null URL to work around crasher bug 492442.
-    return url ? PlacesUtils.history.isVisited(url) : false;
-  },
-
   createRecord: function createRecord(id, collection) {
     let foo = this._findURLByGUID(id);
     let record = new HistoryRec(collection, id);
@@ -354,8 +346,8 @@ HistoryStore.prototype = {
   }
 };
 
-function HistoryTracker(name) {
-  Tracker.call(this, name);
+function HistoryTracker(name, engine) {
+  Tracker.call(this, name, engine);
   Svc.Obs.add("weave:engine:start-tracking", this);
   Svc.Obs.add("weave:engine:stop-tracking", this);
 }
@@ -385,43 +377,47 @@ HistoryTracker.prototype = {
     Ci.nsISupportsWeakReference
   ]),
 
-  onBeginUpdateBatch: function HT_onBeginUpdateBatch() {},
-  onEndUpdateBatch: function HT_onEndUpdateBatch() {},
-  onPageChanged: function HT_onPageChanged() {},
-  onTitleChanged: function HT_onTitleChanged() {},
-  onDeleteVisits: function () {},
-  onDeleteURI: function () {},
-
-  /* Every add is worth 1 point.
-   * OnBeforeDeleteURI will triggger a sync for MULTI-DEVICE (see below)
-   * Clearing all history will trigger a sync for MULTI-DEVICE (see below)
-   */
-  _upScoreXLarge: function HT__upScoreXLarge() {
-    this.score += SCORE_INCREMENT_XLARGE;
-  },
-
-  onVisit: function HT_onVisit(uri, vid, time, session, referrer, trans, guid) {
-    if (this.ignoreAll) {
+  onDeleteAffectsGUID: function (uri, guid, reason, source, increment) {
+    if (this.ignoreAll || reason == Ci.nsINavHistoryObserver.REASON_EXPIRED) {
       return;
     }
+    this._log.trace(source + ": " + uri.spec + ", reason " + reason);
+    if (this.addChangedID(guid)) {
+      this.score += increment;
+    }
+  },
+
+  onDeleteVisits: function (uri, visitTime, guid, reason) {
+    this.onDeleteAffectsGUID(uri, guid, reason, "onDeleteVisits", SCORE_INCREMENT_SMALL);
+  },
+
+  onDeleteURI: function (uri, guid, reason) {
+    this.onDeleteAffectsGUID(uri, guid, reason, "onDeleteURI", SCORE_INCREMENT_XLARGE);
+  },
+
+  onVisit: function (uri, vid, time, session, referrer, trans, guid) {
+    if (this.ignoreAll) {
+      this._log.trace("ignoreAll: ignoring visit for " + guid);
+      return;
+    }
+
     this._log.trace("onVisit: " + uri.spec);
     if (this.addChangedID(guid)) {
       this.score += SCORE_INCREMENT_SMALL;
     }
   },
 
-  onBeforeDeleteURI: function onBeforeDeleteURI(uri, guid, reason) {
-    if (this.ignoreAll || reason == Ci.nsINavHistoryObserver.REASON_EXPIRED) {
-      return;
-    }
-    this._log.trace("onBeforeDeleteURI: " + uri.spec);
-    if (this.addChangedID(guid)) {
-      this._upScoreXLarge();
-    }
+  onClearHistory: function () {
+    this._log.trace("onClearHistory");
+    // Note that we're going to trigger a sync, but none of the cleared
+    // pages are tracked, so the deletions will not be propagated.
+    // See Bug 578694.
+    this.score += SCORE_INCREMENT_XLARGE;
   },
 
-  onClearHistory: function HT_onClearHistory() {
-    this._log.trace("onClearHistory");
-    this._upScoreXLarge();
-  }
+  onBeginUpdateBatch: function () {},
+  onEndUpdateBatch: function () {},
+  onPageChanged: function () {},
+  onTitleChanged: function () {},
+  onBeforeDeleteURI: function () {},
 };

@@ -7,7 +7,6 @@
 
 #include "nsFind.h"
 #include "nsContentCID.h"
-#include "nsIEnumerator.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsISelection.h"
@@ -27,6 +26,9 @@
 #include "nsCRT.h"
 #include "nsRange.h"
 #include "nsContentUtils.h"
+#include "mozilla/DebugOnly.h"
+
+using namespace mozilla;
 
 // Yikes!  Casting a char to unichar can fill with ones!
 #define CHAR_TO_UNICHAR(c) ((PRUnichar)(const unsigned char)c)
@@ -63,7 +65,7 @@ PR_STATIC_ASSERT(CH_SHY <= 255);
 // called via FindNext with the current selection inside a <textarea>
 // or a text <input>. This means that we can be given an initial search
 // range that stretches across the anonymous DOM and the normal DOM. To
-// cater for this situation, we split the anonymous part into the 
+// cater for this situation, we split the anonymous part into the
 // inner-iterator and then reposition the outer-iterator outside.
 //
 // 5) The implementation assumes that First() and Next() are only called
@@ -84,7 +86,8 @@ public:
   }
 
   // nsISupports
-  NS_DECL_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_CLASS(nsFindContentIterator)
 
   // nsIContentIterator
   virtual nsresult Init(nsINode* aRoot)
@@ -117,7 +120,7 @@ private:
   int32_t mStartOffset;
   nsCOMPtr<nsIDOMNode> mEndNode;
   int32_t mEndOffset;
-  
+
   nsCOMPtr<nsIContent> mStartOuterContent;
   nsCOMPtr<nsIContent> mEndOuterContent;
   bool mFindBackward;
@@ -127,12 +130,24 @@ private:
   void SetupInnerIterator(nsIContent* aContent);
 };
 
-NS_IMPL_ISUPPORTS1(nsFindContentIterator, nsIContentIterator)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFindContentIterator)
+  NS_INTERFACE_MAP_ENTRY(nsIContentIterator)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFindContentIterator)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFindContentIterator)
+
+NS_IMPL_CYCLE_COLLECTION_6(nsFindContentIterator, mOuterIterator, mInnerIterator,
+                           mStartOuterContent, mEndOuterContent, mEndNode, mStartNode)
+
 
 nsresult
 nsFindContentIterator::Init(nsIDOMNode* aStartNode, int32_t aStartOffset,
                             nsIDOMNode* aEndNode, int32_t aEndOffset)
 {
+  NS_ENSURE_ARG_POINTER(aStartNode);
+  NS_ENSURE_ARG_POINTER(aEndNode);
   if (!mOuterIterator) {
     if (mFindBackward) {
       // Use post-order in the reverse case, so we get parents
@@ -183,7 +198,7 @@ nsFindContentIterator::Next()
   else {
     mOuterIterator->Next();
   }
-  MaybeSetupInnerIterator();  
+  MaybeSetupInnerIterator();
 }
 
 void
@@ -248,19 +263,22 @@ nsFindContentIterator::Reset()
   // see if the start node is an anonymous text node inside a text control
   nsCOMPtr<nsIContent> startContent(do_QueryInterface(mStartNode));
   if (startContent) {
-    mStartOuterContent = startContent->FindFirstNonNativeAnonymous();
+    mStartOuterContent = startContent->FindFirstNonChromeOnlyAccessContent();
   }
 
   // see if the end node is an anonymous text node inside a text control
   nsCOMPtr<nsIContent> endContent(do_QueryInterface(mEndNode));
   if (endContent) {
-    mEndOuterContent = endContent->FindFirstNonNativeAnonymous();
+    mEndOuterContent = endContent->FindFirstNonChromeOnlyAccessContent();
   }
 
   // Note: OK to just set up the outer iterator here; if our range has a native
   // anonymous endpoint we'll end up setting up an inner iterator, and
   // reset the outer one in the process.
-  nsCOMPtr<nsIDOMRange> range = nsFind::CreateRange();
+  nsCOMPtr<nsINode> node = do_QueryInterface(mStartNode);
+  NS_ENSURE_TRUE_VOID(node);
+
+  nsCOMPtr<nsIDOMRange> range = nsFind::CreateRange(node);
   range->SetStart(mStartNode, mStartOffset);
   range->SetEnd(mEndNode, mEndOffset);
   mOuterIterator->Init(range);
@@ -352,14 +370,13 @@ nsFindContentIterator::SetupInnerIterator(nsIContent* aContent)
 
   nsCOMPtr<nsIDOMElement> rootElement;
   editor->GetRootElement(getter_AddRefs(rootElement));
-  nsCOMPtr<nsIContent> rootContent(do_QueryInterface(rootElement));
 
-  nsCOMPtr<nsIDOMRange> innerRange = nsFind::CreateRange();
-  nsCOMPtr<nsIDOMRange> outerRange = nsFind::CreateRange();
+  nsCOMPtr<nsIDOMRange> innerRange = nsFind::CreateRange(aContent);
+  nsCOMPtr<nsIDOMRange> outerRange = nsFind::CreateRange(aContent);
   if (!innerRange || !outerRange) {
     return;
   }
-     
+
   // now create the inner-iterator
   mInnerIterator = do_CreateInstance(kCPreContentIteratorCID);
 
@@ -374,7 +391,7 @@ nsFindContentIterator::SetupInnerIterator(nsIContent* aContent)
     if (aContent == mEndOuterContent) {
       innerRange->SetEnd(mEndNode, mEndOffset);
     }
-    // Note: we just init here. We do First() or Last() later. 
+    // Note: we just init here. We do First() or Last() later.
     mInnerIterator->Init(innerRange);
 
     // make sure to place the outer-iterator outside
@@ -392,7 +409,7 @@ nsFindContentIterator::SetupInnerIterator(nsIContent* aContent)
       res2 = outerRange->SetEndBefore(outerNode);
     }
     if (NS_FAILED(res1) || NS_FAILED(res2)) {
-      // we are done with the outer-iterator, the 
+      // we are done with the outer-iterator, the
       // inner-iterator will traverse what we want
       outerRange->Collapse(true);
     }
@@ -422,7 +439,15 @@ NS_NewFindContentIterator(bool aFindBackward,
 }
 // --------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS1(nsFind, nsIFind)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFind)
+  NS_INTERFACE_MAP_ENTRY(nsIFind)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFind)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFind)
+
+  NS_IMPL_CYCLE_COLLECTION_3(nsFind, mLastBlockParent, mIterNode, mIterator)
 
 nsFind::nsFind()
   : mFindBackward(false)
@@ -473,7 +498,7 @@ nsFind::InitIterator(nsIDOMNode* aStartNode, int32_t aStartOffset,
   NS_ENSURE_ARG_POINTER(aEndNode);
 
 #ifdef DEBUG_FIND
-  printf("InitIterator search range:\n"); 
+  printf("InitIterator search range:\n");
   printf(" -- start %d, ", aStartOffset); DumpNode(aStartNode);
   printf(" -- end %d, ", aEndOffset); DumpNode(aEndNode);
 #endif
@@ -549,7 +574,7 @@ nsFind::SetWordBreaker(nsIWordBreaker* aWordBreaker)
 // iterator to go back to a previously visited node,
 // so we always save the "match anchor" node and offset.
 //
-// Text nodes store their text in an nsTextFragment, which is 
+// Text nodes store their text in an nsTextFragment, which is
 // effectively a union of a one-byte string or a two-byte string.
 // Single and double strings are intermixed in the dom.
 // We don't have string classes which can deal with intermixed strings,
@@ -739,7 +764,7 @@ bool nsFind::IsVisibleNode(nsIDOMNode *aDOMNode)
     return false;
   }
 
-  return frame->GetStyleVisibility()->IsVisible();
+  return frame->StyleVisibility()->IsVisible();
 }
 
 bool nsFind::SkipNode(nsIContent* aContent)
@@ -859,7 +884,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
   if (!mCaseSensitive)
     ToLowerCase(patAutoStr);
 
-  // Ignore soft hyphens in the pattern  
+  // Ignore soft hyphens in the pattern
   static const char kShy[] = { char(CH_SHY), 0 };
   patAutoStr.StripChars(kShy);
 
@@ -945,7 +970,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
         pindex = (mFindBackward ? patLen : 0);
         inWhitespace = false;
       }
- 
+
       // Get the text content:
       tc = do_QueryInterface(mIterNode);
       if (!tc || !(frag = tc->GetText())) // Out of nodes
@@ -1008,7 +1033,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
         t1b = frag->Get1b();
         t2b = nullptr;
 #ifdef DEBUG_FIND
-        nsCAutoString str1(t1b, fragLen);
+        nsAutoCString str1(t1b, fragLen);
         printf("1 byte, '%s'\n", str1.get());
 #endif
       }
@@ -1065,7 +1090,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
       // were at the end of the pat string, then we should have
       // caught it in the last iteration and returned success.
       if (OVERFLOW_PINDEX)
-        NS_ASSERTION(false, "Missed a whitespace match\n");
+        NS_ASSERTION(false, "Missed a whitespace match");
 #endif
       patc = patStr[pindex];
     }
@@ -1119,7 +1144,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
         // Make the range:
         nsCOMPtr<nsIDOMNode> startParent;
         nsCOMPtr<nsIDOMNode> endParent;
-        nsCOMPtr<nsIDOMRange> range = CreateRange();
+        nsCOMPtr<nsIDOMRange> range = CreateRange(tc);
         if (range)
         {
           int32_t matchStartOffset, matchEndOffset;
@@ -1139,7 +1164,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
             matchStartOffset = mao;
             matchEndOffset = findex+1;
           }
-          if (startParent && endParent && 
+          if (startParent && endParent &&
               IsVisibleNode(startParent) && IsVisibleNode(endParent))
           {
             range->SetStart(startParent, matchStartOffset);
@@ -1180,7 +1205,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
           printf("Advancing pindex to %d\n", pindex);
 #endif
         }
-      
+
         continue;
       }
     }
@@ -1202,7 +1227,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
       if (matchAnchorNode != mIterNode)
       {
         nsCOMPtr<nsIContent> content (do_QueryInterface(matchAnchorNode));
-        nsresult rv = NS_ERROR_UNEXPECTED;
+        DebugOnly<nsresult> rv = NS_ERROR_UNEXPECTED;
         if (content)
           rv = mIterator->PositionAt(content);
         frag = 0;
@@ -1222,7 +1247,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
     pindex = (mFindBackward ? patLen : 0);
 #ifdef DEBUG_FIND
     printf("Setting findex back to %d, pindex to %d\n", findex, pindex);
-           
+
 #endif
   } // end while loop
 
@@ -1233,9 +1258,9 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
 
 /* static */
 already_AddRefed<nsIDOMRange>
-nsFind::CreateRange()
+nsFind::CreateRange(nsINode* aNode)
 {
-  nsRefPtr<nsRange> range = new nsRange();
+  nsRefPtr<nsRange> range = new nsRange(aNode);
   range->SetMaySpanAnonymousSubtrees(true);
   return range.forget();
 }

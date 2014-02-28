@@ -48,6 +48,9 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] =
   { "ui.menusCanOverlapOSBar",
     eIntID_MenusCanOverlapOSBar,
     false, 0 },
+  { "ui.useOverlayScrollbars",
+    eIntID_UseOverlayScrollbars,
+    false, 0 },
   { "ui.showHideScrollbars",
     eIntID_ShowHideScrollbars,
     false, 0 },
@@ -712,9 +715,11 @@ LookAndFeel::GetFloat(FloatID aID, float* aResult)
 
 // static
 bool
-LookAndFeel::GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle)
+LookAndFeel::GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle,
+                     float aDevPixPerCSSPixel)
 {
-  return nsLookAndFeel::GetInstance()->GetFontImpl(aID, aName, aStyle);
+  return nsLookAndFeel::GetInstance()->GetFontImpl(aID, aName, aStyle,
+                                                   aDevPixPerCSSPixel);
 }
 
 // static

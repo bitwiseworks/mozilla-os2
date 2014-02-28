@@ -11,11 +11,26 @@ relativesrcdir = @relativesrcdir@
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_FILES = \
+  test_constructor.html \
+  test_constructor-assignment.html \
+  test_document.all_unqualified.html \
   test_domrequest.html \
+  test_e4x_for_each.html \
   test_gsp-standards.html \
   test_gsp-quirks.html \
+  test_gsp-qualified.html \
   test_nondomexception.html \
   test_screen_orientation.html \
+  test_window_constructor.html \
+  test_window_enumeration.html \
+  test_window_extensible.html \
+  test_window_indexing.html \
+  test_writable-replaceable.html \
+  test_domcursor.html \
+  test_named_frames.html \
+  test_Image_constructor.html \
+  test_setting_opener.html \
+  test_error.html \
   $(NULL)
 
 MOCHITEST_CHROME_FILES = \

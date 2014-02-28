@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -9,7 +9,6 @@
 
 #include <limits.h>
 
-#include "prmem.h"
 #include "prenv.h"
 
 #include "gfxPlatform.h"
@@ -18,7 +17,8 @@
 static bool gDisableOptimize = false;
 
 #include "cairo.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
+#include "mozilla/Likely.h"
 
 #if defined(XP_WIN)
 
@@ -43,30 +43,30 @@ static bool AllowedImageSize(int32_t aWidth, int32_t aHeight)
 {
   // reject over-wide or over-tall images
   const int32_t k64KLimit = 0x0000FFFF;
-  if (NS_UNLIKELY(aWidth > k64KLimit || aHeight > k64KLimit )) {
+  if (MOZ_UNLIKELY(aWidth > k64KLimit || aHeight > k64KLimit )) {
     NS_WARNING("image too big");
     return false;
   }
 
   // protect against invalid sizes
-  if (NS_UNLIKELY(aHeight <= 0 || aWidth <= 0)) {
+  if (MOZ_UNLIKELY(aHeight <= 0 || aWidth <= 0)) {
     return false;
   }
 
   // check to make sure we don't overflow a 32-bit
   int32_t tmp = aWidth * aHeight;
-  if (NS_UNLIKELY(tmp / aHeight != aWidth)) {
+  if (MOZ_UNLIKELY(tmp / aHeight != aWidth)) {
     NS_WARNING("width or height too large");
     return false;
   }
   tmp = tmp * 4;
-  if (NS_UNLIKELY(tmp / 4 != aWidth * aHeight)) {
+  if (MOZ_UNLIKELY(tmp / 4 != aWidth * aHeight)) {
     NS_WARNING("width or height too large");
     return false;
   }
 #if defined(XP_MACOSX)
   // CoreGraphics is limited to images < 32K in *height*, so clamp all surfaces on the Mac to that height
-  if (NS_UNLIKELY(aHeight > SHRT_MAX)) {
+  if (MOZ_UNLIKELY(aHeight > SHRT_MAX)) {
     NS_WARNING("image too big");
     return false;
   }
@@ -109,6 +109,7 @@ imgFrame::imgFrame() :
   mSinglePixelColor(0),
   mTimeout(100),
   mDisposalMethod(0), /* imgIContainer::kDisposeNotSpecified */
+  mLockCount(0),
   mBlendMethod(1), /* imgIContainer::kBlendOver */
   mSinglePixel(false),
   mNeverUseDeviceSurface(false),
@@ -118,7 +119,6 @@ imgFrame::imgFrame() :
 #ifdef USE_WIN_SURFACE
   mIsDDBSurface(false),
 #endif
-  mLocked(false),
   mInformedDiscardTracker(false)
 {
   static bool hasCheckedOptimize = false;
@@ -132,7 +132,8 @@ imgFrame::imgFrame() :
 
 imgFrame::~imgFrame()
 {
-  PR_FREEIF(mPalettedImageData);
+  moz_free(mPalettedImageData);
+  mPalettedImageData = nullptr;
 #ifdef USE_WIN_SURFACE
   if (mIsDDBSurface) {
       gTotalDDBs--;
@@ -145,12 +146,14 @@ imgFrame::~imgFrame()
   }
 }
 
-nsresult imgFrame::Init(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight, 
+nsresult imgFrame::Init(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
                         gfxASurface::gfxImageFormat aFormat, uint8_t aPaletteDepth /* = 0 */)
 {
   // assert for properties that should be verified by decoders, warn for properties related to bad content
-  if (!AllowedImageSize(aWidth, aHeight))
+  if (!AllowedImageSize(aWidth, aHeight)) {
+    NS_WARNING("Should have legal image size");
     return NS_ERROR_FAILURE;
+  }
 
   mOffset.MoveTo(aX, aY);
   mSize.SizeTo(aWidth, aHeight);
@@ -161,12 +164,15 @@ nsresult imgFrame::Init(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
   if (aPaletteDepth != 0) {
     // We're creating for a paletted image.
     if (aPaletteDepth > 8) {
+      NS_WARNING("Should have legal palette depth");
       NS_ERROR("This Depth is not supported");
       return NS_ERROR_FAILURE;
     }
 
     // Use the fallible allocator here
     mPalettedImageData = (uint8_t*)moz_malloc(PaletteDataLength() + GetImageDataLength());
+    if (!mPalettedImageData)
+      NS_WARNING("moz_malloc for paletted image data should succeed");
     NS_ENSURE_TRUE(mPalettedImageData, NS_ERROR_OUT_OF_MEMORY);
   } else {
     // For Windows, we must create the device surface first (if we're
@@ -194,6 +200,11 @@ nsresult imgFrame::Init(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
     if (!mImageSurface || mImageSurface->CairoStatus()) {
       mImageSurface = nullptr;
       // guess
+      if (!mImageSurface) {
+        NS_WARNING("Allocation of gfxImageSurface should succeed");
+      } else if (!mImageSurface->CairoStatus()) {
+        NS_WARNING("gfxImageSurface should have good CairoStatus");
+      }
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
@@ -217,6 +228,8 @@ nsresult imgFrame::Init(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
 
 nsresult imgFrame::Optimize()
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   if (gDisableOptimize)
     return NS_OK;
 
@@ -437,7 +450,7 @@ void imgFrame::Draw(gfxContext *aContext, gfxPattern::GraphicsFilter aFilter,
                     const nsIntMargin &aPadding, const nsIntRect &aSubimage,
                     uint32_t aImageFlags)
 {
-  SAMPLE_LABEL("image", "imgFrame::Draw");
+  PROFILER_LABEL("image", "imgFrame::Draw");
   NS_ASSERTION(!aFill.IsEmpty(), "zero dest size --- fix caller");
   NS_ASSERTION(!aSubimage.IsEmpty(), "zero source size --- fix caller");
   NS_ASSERTION(!mPalettedImageData, "Directly drawing a paletted image!");
@@ -475,57 +488,7 @@ void imgFrame::Draw(gfxContext *aContext, gfxPattern::GraphicsFilter aFilter,
   }
 }
 
-nsresult imgFrame::Extract(const nsIntRect& aRegion, imgFrame** aResult)
-{
-  nsAutoPtr<imgFrame> subImage(new imgFrame());
-
-  // The scaling problems described in bug 468496 are especially
-  // likely to be visible for the sub-image, as at present the only
-  // user is the border-image code and border-images tend to get
-  // stretched a lot.  At the same time, the performance concerns
-  // that prevent us from just using Cairo's fallback scaler when
-  // accelerated graphics won't cut it are less relevant to such
-  // images, since they also tend to be small.  Thus, we forcibly
-  // disable the use of anything other than a client-side image
-  // surface for the sub-image; this ensures that the correct
-  // (albeit slower) Cairo fallback scaler will be used.
-  subImage->mNeverUseDeviceSurface = true;
-
-  nsresult rv = subImage->Init(0, 0, aRegion.width, aRegion.height, 
-                               mFormat, mPaletteDepth);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  subImage->SetAsNonPremult(mNonPremult);
-
-  // scope to destroy ctx
-  {
-    gfxContext ctx(subImage->ThebesSurface());
-    ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
-    if (mSinglePixel) {
-      ctx.SetDeviceColor(mSinglePixelColor);
-    } else {
-      // SetSource() places point (0,0) of its first argument at
-      // the coordinages given by its second argument.  We want
-      // (x,y) of the image to be (0,0) of source space, so we
-      // put (0,0) of the image at (-x,-y).
-      ctx.SetSource(this->ThebesSurface(), gfxPoint(-aRegion.x, -aRegion.y));
-    }
-    ctx.Rectangle(gfxRect(0, 0, aRegion.width, aRegion.height));
-    ctx.Fill();
-  }
-
-  nsIntRect filled(0, 0, aRegion.width, aRegion.height);
-
-  rv = subImage->ImageUpdated(filled);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  subImage->Optimize();
-
-  *aResult = subImage.forget();
-
-  return NS_OK;
-}
-
+// This can be called from any thread, but not simultaneously.
 nsresult imgFrame::ImageUpdated(const nsIntRect &aUpdateRect)
 {
   mDecoded.UnionRect(mDecoded, aUpdateRect);
@@ -535,10 +498,6 @@ nsresult imgFrame::ImageUpdated(const nsIntRect &aUpdateRect)
   nsIntRect boundsRect(mOffset, mSize);
   mDecoded.IntersectRect(mDecoded, boundsRect);
 
-#ifdef XP_MACOSX
-  if (mQuartzSurface)
-    mQuartzSurface->Flush();
-#endif
   return NS_OK;
 }
 
@@ -578,6 +537,8 @@ uint32_t imgFrame::GetImageDataLength() const
 
 void imgFrame::GetImageData(uint8_t **aData, uint32_t *length) const
 {
+  NS_ABORT_IF_FALSE(mLockCount != 0, "Can't GetImageData unless frame is locked");
+
   if (mImageSurface)
     *aData = mImageSurface->Data();
   else if (mPalettedImageData)
@@ -586,6 +547,14 @@ void imgFrame::GetImageData(uint8_t **aData, uint32_t *length) const
     *aData = nullptr;
 
   *length = GetImageDataLength();
+}
+
+uint8_t* imgFrame::GetImageData() const
+{
+  uint8_t *data;
+  uint32_t length;
+  GetImageData(&data, &length);
+  return data;
 }
 
 bool imgFrame::GetIsPaletted() const
@@ -600,6 +569,8 @@ bool imgFrame::GetHasAlpha() const
 
 void imgFrame::GetPaletteData(uint32_t **aPalette, uint32_t *length) const
 {
+  NS_ABORT_IF_FALSE(mLockCount != 0, "Can't GetPaletteData unless frame is locked");
+
   if (!mPalettedImageData) {
     *aPalette = nullptr;
     *length = 0;
@@ -609,16 +580,33 @@ void imgFrame::GetPaletteData(uint32_t **aPalette, uint32_t *length) const
   }
 }
 
+uint32_t* imgFrame::GetPaletteData() const
+{
+  uint32_t* data;
+  uint32_t length;
+  GetPaletteData(&data, &length);
+  return data;
+}
+
 nsresult imgFrame::LockImageData()
 {
-  if (mPalettedImageData)
-    return NS_ERROR_NOT_AVAILABLE;
+  MOZ_ASSERT(NS_IsMainThread());
 
-  NS_ABORT_IF_FALSE(!mLocked, "Trying to lock already locked image data.");
-  if (mLocked) {
+  NS_ABORT_IF_FALSE(mLockCount >= 0, "Unbalanced locks and unlocks");
+  if (mLockCount < 0) {
     return NS_ERROR_FAILURE;
   }
-  mLocked = true;
+
+  mLockCount++;
+
+  // If we are not the first lock, there's nothing to do.
+  if (mLockCount != 1) {
+    return NS_OK;
+  }
+
+  // Paletted images don't have surfaces, so there's nothing to do.
+  if (mPalettedImageData)
+    return NS_OK;
 
   if ((mOptSurface || mSinglePixel) && !mImageSurface) {
     // Recover the pixels
@@ -659,15 +647,28 @@ nsresult imgFrame::LockImageData()
 
 nsresult imgFrame::UnlockImageData()
 {
-  if (mPalettedImageData)
-    return NS_ERROR_NOT_AVAILABLE;
+  MOZ_ASSERT(NS_IsMainThread());
 
-  NS_ABORT_IF_FALSE(mLocked, "Unlocking an unlocked image!");
-  if (!mLocked) {
+  NS_ABORT_IF_FALSE(mLockCount != 0, "Unlocking an unlocked image!");
+  if (mLockCount == 0) {
     return NS_ERROR_FAILURE;
   }
 
-  mLocked = false;
+  mLockCount--;
+
+  NS_ABORT_IF_FALSE(mLockCount >= 0, "Unbalanced locks and unlocks");
+  if (mLockCount < 0) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // If we are not the last lock, there's nothing to do.
+  if (mLockCount != 0) {
+    return NS_OK;
+  }
+
+  // Paletted images don't have surfaces, so there's nothing to do.
+  if (mPalettedImageData)
+    return NS_OK;
 
   // Assume we've been written to.
   if (mImageSurface)
@@ -684,7 +685,36 @@ nsresult imgFrame::UnlockImageData()
   if (mQuartzSurface)
     mQuartzSurface->Flush();
 #endif
+
   return NS_OK;
+}
+
+void imgFrame::MarkImageDataDirty()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mImageSurface)
+    mImageSurface->Flush();
+
+#ifdef USE_WIN_SURFACE
+  if (mWinSurface)
+    mWinSurface->Flush();
+#endif
+
+  if (mImageSurface)
+    mImageSurface->MarkDirty();
+
+#ifdef USE_WIN_SURFACE
+  if (mWinSurface)
+    mWinSurface->MarkDirty();
+#endif
+
+#ifdef XP_MACOSX
+  // The quartz image surface (ab)uses the flush method to get the
+  // cairo_image_surface data into a CGImage, so we have to call Flush() here.
+  if (mQuartzSurface)
+    mQuartzSurface->Flush();
+#endif
 }
 
 int32_t imgFrame::GetTimeout() const
@@ -767,6 +797,9 @@ void imgFrame::SetCompositingFailed(bool val)
   mCompositingFailed = val;
 }
 
+// If |aLocation| indicates this is heap memory, we try to measure things with
+// |aMallocSizeOf|.  If that fails (because the platform doesn't support it) or
+// it's non-heap memory, we fall back to computing the size analytically.
 size_t
 imgFrame::SizeOfExcludingThisWithComputedFallbackIfHeap(gfxASurface::MemoryLocation aLocation, nsMallocSizeOfFun aMallocSizeOf) const
 {
@@ -780,14 +813,13 @@ imgFrame::SizeOfExcludingThisWithComputedFallbackIfHeap(gfxASurface::MemoryLocat
   size_t n = 0;
 
   if (mPalettedImageData && aLocation == gfxASurface::MEMORY_IN_PROCESS_HEAP) {
-    size_t usable = aMallocSizeOf(mPalettedImageData);
-    if (!usable) {
-      usable = GetImageDataLength() + PaletteDataLength();
+    size_t n2 = aMallocSizeOf(mPalettedImageData);
+    if (n2 == 0) {
+      n2 = GetImageDataLength() + PaletteDataLength();
     }
-    n += usable;
+    n += n2;
   }
 
-  // XXX: should pass aMallocSizeOf here.  See bug 723827.
 #ifdef USE_WIN_SURFACE
   if (mWinSurface && aLocation == mWinSurface->GetMemoryLocation()) {
     n += mWinSurface->KnownMemoryUsed();
@@ -799,11 +831,27 @@ imgFrame::SizeOfExcludingThisWithComputedFallbackIfHeap(gfxASurface::MemoryLocat
   } else
 #endif
   if (mImageSurface && aLocation == mImageSurface->GetMemoryLocation()) {
-    n += mImageSurface->KnownMemoryUsed();
+    size_t n2 = 0;
+    if (aLocation == gfxASurface::MEMORY_IN_PROCESS_HEAP) { // HEAP: measure
+      n2 = mImageSurface->SizeOfIncludingThis(aMallocSizeOf);
+    }
+    if (n2 == 0) {  // non-HEAP or computed fallback for HEAP
+      n2 = mImageSurface->KnownMemoryUsed();
+    }
+    n += n2;
   }
 
   if (mOptSurface && aLocation == mOptSurface->GetMemoryLocation()) {
-    n += mOptSurface->KnownMemoryUsed();
+    size_t n2 = 0;
+    if (aLocation == gfxASurface::MEMORY_IN_PROCESS_HEAP &&
+        mOptSurface->SizeOfIsMeasured()) {
+      // HEAP: measure (but only if the sub-class is capable of measuring)
+      n2 = mOptSurface->SizeOfIncludingThis(aMallocSizeOf);
+    }
+    if (n2 == 0) {  // non-HEAP or computed fallback for HEAP
+      n2 = mOptSurface->KnownMemoryUsed();
+    }
+    n += n2;
   }
 
   return n;

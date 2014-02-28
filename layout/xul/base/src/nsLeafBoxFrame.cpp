@@ -20,9 +20,10 @@
 #include "nsINameSpaceManager.h"
 #include "nsBoxLayoutState.h"
 #include "nsWidgetsCID.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsContainerFrame.h"
 #include "nsDisplayList.h"
+#include <algorithm>
 
 //
 // NS_NewLeafBoxFrame
@@ -54,22 +55,19 @@ nsLeafBoxFrame::GetBoxName(nsAutoString& aName)
 /**
  * Initialize us. This is a good time to get the alignment of the box
  */
-NS_IMETHODIMP
+void
 nsLeafBoxFrame::Init(
               nsIContent*      aContent,
               nsIFrame*        aParent,
               nsIFrame*        aPrevInFlow)
 {
-  nsresult  rv = nsLeafFrame::Init(aContent, aParent, aPrevInFlow);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsLeafFrame::Init(aContent, aParent, aPrevInFlow);
 
   if (GetStateBits() & NS_FRAME_FONT_INFLATION_CONTAINER) {
     AddStateBits(NS_FRAME_FONT_INFLATION_FLOW_ROOT);
   }
 
   UpdateMouseThrough();
-
-  return rv;
 }
 
 NS_IMETHODIMP
@@ -105,7 +103,7 @@ void nsLeafBoxFrame::UpdateMouseThrough()
   }
 }
 
-NS_IMETHODIMP
+void
 nsLeafBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                  const nsRect&           aDirtyRect,
                                  const nsDisplayListSet& aLists)
@@ -115,14 +113,13 @@ nsLeafBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // BlockBorderBackground() list. But I don't see any need to preserve
   // that anomalous behaviour. The important thing I'm preserving is that
   // leaf boxes continue to receive events in the foreground layer.
-  nsresult rv = DisplayBorderBackgroundOutline(aBuilder, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   if (!aBuilder->IsForEventDelivery() || !IsVisibleForPainting(aBuilder))
-    return NS_OK;
+    return;
 
-  return aLists.Content()->AppendNewToTop(new (aBuilder)
-      nsDisplayEventReceiver(aBuilder, this));
+  aLists.Content()->AppendNewToTop(new (aBuilder)
+    nsDisplayEventReceiver(aBuilder, this));
 }
 
 /* virtual */ nscoord
@@ -282,7 +279,7 @@ nsLeafBoxFrame::Reflow(nsPresContext*   aPresContext,
   // height.  The only problem is that those are content-box sizes,
   // while computedSize.height is a border-box size.  So subtract off
   // m.TopBottom() before adjusting, then readd it.
-  computedSize.height = NS_MAX(0, computedSize.height - m.TopBottom());
+  computedSize.height = std::max(0, computedSize.height - m.TopBottom());
   computedSize.height = NS_CSS_MINMAX(computedSize.height,
                                       aReflowState.mComputedMinHeight,
                                       aReflowState.mComputedMaxHeight);

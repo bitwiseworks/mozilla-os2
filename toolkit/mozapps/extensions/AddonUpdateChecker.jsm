@@ -13,7 +13,7 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-var EXPORTED_SYMBOLS = [ "AddonUpdateChecker" ];
+this.EXPORTED_SYMBOLS = [ "AddonUpdateChecker" ];
 
 const TIMEOUT               = 2 * 60 * 1000;
 const PREFIX_NS_RDF         = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -35,7 +35,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
                                   "resource://gre/modules/AddonRepository.jsm");
 
 // Shared code for suppressing bad cert dialogs.
-XPCOMUtils.defineLazyGetter(this, "CertUtils", function() {
+XPCOMUtils.defineLazyGetter(this, "CertUtils", function certUtilsLazyGetter() {
   let certUtils = {};
   Components.utils.import("resource://gre/modules/CertUtils.jsm", certUtils);
   return certUtils;
@@ -45,7 +45,7 @@ var gRDF = Cc["@mozilla.org/rdf/rdf-service;1"].
            getService(Ci.nsIRDFService);
 
 ["LOG", "WARN", "ERROR"].forEach(function(aName) {
-  this.__defineGetter__(aName, function() {
+  this.__defineGetter__(aName, function logFuncGetter() {
     Components.utils.import("resource://gre/modules/AddonLogging.jsm");
 
     LogManager.getLogger("addons.updates", this);
@@ -157,7 +157,7 @@ RDFSerializer.prototype = {
                      target.Value + "</em:" + prop + ">\n");
         }
         else {
-          throw new Error("Cannot serialize unknown literal type");
+          throw Components.Exception("Cannot serialize unknown literal type");
         }
       }
     }
@@ -184,7 +184,7 @@ RDFSerializer.prototype = {
   serializeResource: function RDFS_serializeResource(aDs, aResource, aIndent) {
     if (this.resources.indexOf(aResource) != -1 ) {
       // We cannot output multiple references to the same resource.
-      throw new Error("Cannot serialize multiple references to " + aResource.Value);
+      throw Components.Exception("Cannot serialize multiple references to " + aResource.Value);
     }
     if (aIndent === undefined)
       aIndent = "";
@@ -225,8 +225,6 @@ RDFSerializer.prototype = {
  *
  * @param  aId
  *         The ID of the add-on being checked for updates
- * @param  aType
- *         The type of the add-on being checked for updates
  * @param  aUpdateKey
  *         An optional update key for the add-on
  * @param  aRequest
@@ -234,7 +232,7 @@ RDFSerializer.prototype = {
  * @return an array of update objects
  * @throws if the update manifest is invalid in any way
  */
-function parseRDFManifest(aId, aType, aUpdateKey, aRequest) {
+function parseRDFManifest(aId, aUpdateKey, aRequest) {
   function EM_R(aProp) {
     return gRDF.GetResource(PREFIX_NS_EM + aProp);
   }
@@ -256,7 +254,7 @@ function parseRDFManifest(aId, aType, aUpdateKey, aRequest) {
   function getRequiredProperty(aDs, aSource, aProperty) {
     let value = getProperty(aDs, aSource, aProperty);
     if (!value)
-      throw new Error("Update manifest is missing a required " + aProperty + " property.");
+      throw Components.Exception("Update manifest is missing a required " + aProperty + " property.");
     return value;
   }
 
@@ -266,33 +264,28 @@ function parseRDFManifest(aId, aType, aUpdateKey, aRequest) {
            createInstance(Ci.nsIRDFDataSource);
   rdfParser.parseString(ds, aRequest.channel.URI, aRequest.responseText);
 
-  switch (aType) {
-  case "extension":
-    var item = PREFIX_EXTENSION + aId;
-    break;
-  case "theme":
-    item = PREFIX_THEME + aId;
-    break;
-  default:
-    item = PREFIX_ITEM + aId;
-    break;
-  }
-
-  let extensionRes  = gRDF.GetResource(item);
+  // Differentiating between add-on types is deprecated
+  let extensionRes = gRDF.GetResource(PREFIX_EXTENSION + aId);
+  let themeRes = gRDF.GetResource(PREFIX_THEME + aId);
+  let itemRes = gRDF.GetResource(PREFIX_ITEM + aId);
+  let addonRes = ds.ArcLabelsOut(extensionRes).hasMoreElements() ? extensionRes
+               : ds.ArcLabelsOut(themeRes).hasMoreElements() ? themeRes
+               : itemRes;
 
   // If we have an update key then the update manifest must be signed
   if (aUpdateKey) {
-    let signature = getProperty(ds, extensionRes, "signature");
+    let signature = getProperty(ds, addonRes, "signature");
     if (!signature)
-      throw new Error("Update manifest for " + aId + " does not contain a required signature");
+      throw Components.Exception("Update manifest for " + aId + " does not contain a required signature");
     let serializer = new RDFSerializer();
     let updateString = null;
 
     try {
-      updateString = serializer.serializeResource(ds, extensionRes);
+      updateString = serializer.serializeResource(ds, addonRes);
     }
     catch (e) {
-      throw new Error("Failed to generate signed string for " + aId + ". Serializer threw " + e);
+      throw Components.Exception("Failed to generate signed string for " + aId + ". Serializer threw " + e,
+                                 e.result);
     }
 
     let result = false;
@@ -303,14 +296,15 @@ function parseRDFManifest(aId, aType, aUpdateKey, aRequest) {
       result = verifier.verifyData(updateString, signature, aUpdateKey);
     }
     catch (e) {
-      throw new Error("The signature or updateKey for " + aId + " is malformed");
+      throw Components.Exception("The signature or updateKey for " + aId + " is malformed." +
+                                 "Verifier threw " + e, e.result);
     }
 
     if (!result)
-      throw new Error("The signature for " + aId + " was not created by the add-on's updateKey");
+      throw Components.Exception("The signature for " + aId + " was not created by the add-on's updateKey");
   }
 
-  let updates = ds.GetTarget(extensionRes, EM_R("updates"), true);
+  let updates = ds.GetTarget(addonRes, EM_R("updates"), true);
 
   // A missing updates property doesn't count as a failure, just as no avialable
   // update information
@@ -320,12 +314,12 @@ function parseRDFManifest(aId, aType, aUpdateKey, aRequest) {
   }
 
   if (!(updates instanceof Ci.nsIRDFResource))
-    throw new Error("Missing updates property for " + extensionRes.Value);
+    throw Components.Exception("Missing updates property for " + addonRes.Value);
 
   let cu = Cc["@mozilla.org/rdf/container-utils;1"].
            getService(Ci.nsIRDFContainerUtils);
   if (!cu.IsContainer(ds, updates))
-    throw new Error("Updates property was not an RDF container");
+    throw Components.Exception("Updates property was not an RDF container");
 
   let results = [];
   let ctr = Cc["@mozilla.org/rdf/container;1"].
@@ -387,8 +381,6 @@ function parseRDFManifest(aId, aType, aUpdateKey, aRequest) {
  *
  * @param  aId
  *         The ID of the add-on being checked for updates
- * @param  aType
- *         The type of add-on being checked for updates
  * @param  aUpdateKey
  *         An optional update key for the add-on
  * @param  aUrl
@@ -396,11 +388,11 @@ function parseRDFManifest(aId, aType, aUpdateKey, aRequest) {
  * @param  aObserver
  *         An observer to pass results to
  */
-function UpdateParser(aId, aType, aUpdateKey, aUrl, aObserver) {
+function UpdateParser(aId, aUpdateKey, aUrl, aObserver) {
   this.id = aId;
-  this.type = aType;
   this.updateKey = aUpdateKey;
   this.observer = aObserver;
+  this.url = aUrl;
 
   this.timer = Cc["@mozilla.org/timer;1"].
                createInstance(Ci.nsITimer);
@@ -417,13 +409,15 @@ function UpdateParser(aId, aType, aUpdateKey, aUrl, aObserver) {
   try {
     this.request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].
                    createInstance(Ci.nsIXMLHttpRequest);
-    this.request.open("GET", aUrl, true);
+    this.request.open("GET", this.url, true);
     this.request.channel.notificationCallbacks = new CertUtils.BadCertHandler(!requireBuiltIn);
     this.request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
+    // Prevent the request from writing to cache.
+    this.request.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
     this.request.overrideMimeType("text/xml");
     var self = this;
-    this.request.addEventListener("load", function(event) { self.onLoad() }, false);
-    this.request.addEventListener("error", function(event) { self.onError() }, false);
+    this.request.addEventListener("load", function loadEventListener(event) { self.onLoad() }, false);
+    this.request.addEventListener("error", function errorEventListener(event) { self.onError() }, false);
     this.request.send(null);
   }
   catch (e) {
@@ -433,11 +427,11 @@ function UpdateParser(aId, aType, aUpdateKey, aUrl, aObserver) {
 
 UpdateParser.prototype = {
   id: null,
-  type: null,
   updateKey: null,
   observer: null,
   request: null,
   timer: null,
+  url: null,
 
   /**
    * Called when the manifest has been successfully loaded.
@@ -464,14 +458,15 @@ UpdateParser.prototype = {
     }
 
     if (!Components.isSuccessCode(request.status)) {
-      WARN("Request failed: " + request.status);
+      WARN("Request failed: " + this.url + " - " + request.status);
       this.notifyError(AddonUpdateChecker.ERROR_DOWNLOAD_ERROR);
       return;
     }
 
     let channel = request.channel;
     if (channel instanceof Ci.nsIHttpChannel && !channel.requestSucceeded) {
-      WARN("Request failed: " + channel.responseStatus + ": " + channel.responseStatusText);
+      WARN("Request failed: " + this.url + " - " + channel.responseStatus +
+           ": " + channel.responseStatusText);
       this.notifyError(AddonUpdateChecker.ERROR_DOWNLOAD_ERROR);
       return;
     }
@@ -488,7 +483,7 @@ UpdateParser.prototype = {
       let results = null;
 
       try {
-        results = parseRDFManifest(this.id, this.type, this.updateKey, request);
+        results = parseRDFManifest(this.id, this.updateKey, request);
       }
       catch (e) {
         WARN(e);
@@ -512,12 +507,13 @@ UpdateParser.prototype = {
     this.timer = null;
 
     if (!Components.isSuccessCode(this.request.status)) {
-      WARN("Request failed: " + this.request.status);
+      WARN("Request failed: " + this.url + " - " + this.request.status);
     }
     else if (this.request.channel instanceof Ci.nsIHttpChannel) {
       try {
         if (this.request.channel.requestSucceeded) {
-          WARN("Request failed: " + this.request.channel.responseStatus + ": " +
+          WARN("Request failed: " + this.url + " - " +
+               this.request.channel.responseStatus + ": " +
                this.request.channel.responseStatusText);
         }
       }
@@ -602,7 +598,7 @@ function matchesVersions(aUpdate, aAppVersion, aPlatformVersion,
   return result;
 }
 
-var AddonUpdateChecker = {
+this.AddonUpdateChecker = {
   // These must be kept in sync with AddonManager
   // The update check timed out
   ERROR_TIMEOUT: -1,
@@ -719,8 +715,6 @@ var AddonUpdateChecker = {
    *
    * @param  aId
    *         The ID of the add-on being checked for updates
-   * @param  aType
-   *         The type of add-on being checked for updates
    * @param  aUpdateKey
    *         An optional update key for the add-on
    * @param  aUrl
@@ -728,8 +722,8 @@ var AddonUpdateChecker = {
    * @param  aObserver
    *         An observer to notify of results
    */
-  checkForUpdates: function AUC_checkForUpdates(aId, aType, aUpdateKey, aUrl,
+  checkForUpdates: function AUC_checkForUpdates(aId, aUpdateKey, aUrl,
                                                 aObserver) {
-    new UpdateParser(aId, aType, aUpdateKey, aUrl, aObserver);
+    new UpdateParser(aId, aUpdateKey, aUrl, aObserver);
   }
 };

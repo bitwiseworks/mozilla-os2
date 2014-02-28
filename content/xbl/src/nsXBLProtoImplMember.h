@@ -11,10 +11,11 @@
 #include "jsapi.h"
 #include "nsString.h"
 #include "nsIServiceManager.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // For NS_CONTENT_DELETE_LIST_MEMBER.
 #include "nsCycleCollectionParticipant.h"
 
 class nsIContent;
+class nsIObjectOutputStream;
 class nsIScriptContext;
 
 struct nsXBLTextWithLineNumber
@@ -62,7 +63,12 @@ struct nsXBLTextWithLineNumber
 class nsXBLProtoImplMember
 {
 public:
-  nsXBLProtoImplMember(const PRUnichar* aName) :mNext(nullptr) { mName = ToNewUnicode(nsDependentString(aName)); }
+  nsXBLProtoImplMember(const PRUnichar* aName)
+    : mNext(nullptr)
+    , mExposeToUntrustedContent(false)
+  {
+    mName = ToNewUnicode(nsDependentString(aName));
+  }
   virtual ~nsXBLProtoImplMember() {
     nsMemory::Free(mName);
     NS_CONTENT_DELETE_LIST_MEMBER(nsXBLProtoImplMember, this, mNext);
@@ -70,17 +76,17 @@ public:
 
   nsXBLProtoImplMember* GetNext() { return mNext; }
   void SetNext(nsXBLProtoImplMember* aNext) { mNext = aNext; }
+  bool ShouldExposeToUntrustedContent() { return mExposeToUntrustedContent; }
+  void SetExposeToUntrustedContent(bool aExpose) { mExposeToUntrustedContent = aExpose; }
+  const PRUnichar* GetName() { return mName; }
 
-  virtual nsresult InstallMember(nsIScriptContext* aContext,
-                                 nsIContent* aBoundElement, 
-                                 JSObject* aScriptObject, // Unused
-                                 JSObject* aTargetClassObject,
-                                 const nsCString& aClassStr) = 0;
+  virtual nsresult InstallMember(JSContext* aCx,
+                                 JS::Handle<JSObject*> aTargetClassObject) = 0;
   virtual nsresult CompileMember(nsIScriptContext* aContext,
                                  const nsCString& aClassStr,
-                                 JSObject* aClassObject) = 0;
+                                 JS::Handle<JSObject*> aClassObject) = 0;
 
-  virtual void Trace(TraceCallback aCallback, void *aClosure) const = 0;
+  virtual void Trace(const TraceCallbacks& aCallbacks, void *aClosure) = 0;
 
   virtual nsresult Write(nsIScriptContext* aContext,
                          nsIObjectOutputStream* aStream)
@@ -91,6 +97,11 @@ public:
 protected:
   nsXBLProtoImplMember* mNext;  // The members of an implementation are chained.
   PRUnichar* mName;               // The name of the field, method, or property.
+
+  bool mExposeToUntrustedContent; // If this binding is installed on an element
+                                  // in an untrusted scope, should this
+                                  // implementation member be accessible to the
+                                  // content?
 };
 
 #endif // nsXBLProtoImplMember_h__

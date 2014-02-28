@@ -11,6 +11,8 @@
 #include "nsITreeColumns.h"
 #include "XULListboxAccessible.h"
 
+class nsTreeBodyFrame;
+
 namespace mozilla {
 namespace a11y {
 
@@ -29,7 +31,8 @@ class XULTreeAccessible : public AccessibleWrap
 public:
   using Accessible::GetChildAt;
 
-  XULTreeAccessible(nsIContent* aContent, DocAccessible* aDoc);
+  XULTreeAccessible(nsIContent* aContent, DocAccessible* aDoc,
+                    nsTreeBodyFrame* aTreeframe);
 
   // nsISupports and cycle collection
   NS_DECL_ISUPPORTS_INHERITED
@@ -47,9 +50,9 @@ public:
 
   virtual Accessible* GetChildAt(uint32_t aIndex);
   virtual uint32_t ChildCount() const;
+  virtual Relation RelationByType(uint32_t aType);
 
   // SelectAccessible
-  virtual bool IsSelect();
   virtual already_AddRefed<nsIArray> SelectedItems();
   virtual uint32_t SelectedItemCount();
   virtual Accessible* GetSelectedItem(uint32_t aIndex);
@@ -154,7 +157,6 @@ public:
 
   // nsAccessNode
   virtual void Shutdown();
-  virtual bool IsPrimaryForNode() const;
 
   // Accessible
   virtual GroupPos GroupPosition();
@@ -235,7 +237,6 @@ public:
                                            XULTreeItemAccessibleBase)
 
   // nsAccessNode
-  virtual void Init();
   virtual void Shutdown();
 
   // Accessible
@@ -271,17 +272,17 @@ protected:
                                          nsresult *aError = nullptr) const;
 };
 
-} // namespace a11y
-} // namespace mozilla
 
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible downcasting method
 
-inline mozilla::a11y::XULTreeAccessible*
+inline XULTreeAccessible*
 Accessible::AsXULTree()
 {
-  return IsXULTree() ?
-    static_cast<mozilla::a11y::XULTreeAccessible*>(this) : nullptr;
+  return IsXULTree() ? static_cast<XULTreeAccessible*>(this) : nullptr;
 }
+
+} // namespace a11y
+} // namespace mozilla
 
 #endif

@@ -6,43 +6,93 @@
 #include "nsIDOMEventTarget.idl"
 
 interface nsIDOMDOMRequest;
-interface nsIArray;
 
-[scriptable, uuid(9583b825-46b1-4e8f-bb48-9fed660a95e6)]
+[scriptable, uuid(8bdeef38-e9cd-46f8-b8de-ed9e6b4d01ea)]
 interface mozIDOMApplication  : nsISupports
 {
   readonly attribute jsval manifest;
+  readonly attribute jsval updateManifest;
   readonly attribute DOMString manifestURL;
   readonly attribute jsval receipts; /* an array of strings */
   readonly attribute DOMString origin;
   readonly attribute DOMString installOrigin;
   readonly attribute unsigned long long installTime;
+  readonly attribute boolean removable;
 
-  /* 
+  /**
    * The current progress when downloading an offline cache.
    */
   readonly attribute double progress;
 
-  /*
-   * The application status :
-   * "installed"   : The app is in the registry, but we have no offline cache.
-   * "downlading"  : We are downloading the offline cache.
-   * "cached"      : We are done with the offline cache download.
-   * "cache-error" : An error occured while downloading the offline-cache.
+  /**
+   * The application installation state :
+   * "pending"   : The application is being installed (eg, we're downloading the
+   *               offline cache or the package).
+   * "installed" : The application is installed and ready to be launched.
+   * "updating"  : We are updating the offline-cache or the package.
    */
-  readonly attribute DOMString status;
+  readonly attribute DOMString installState;
 
-  /*
-   * fires a nsIDOMApplicationEvent when a change in appcache download or status happens
+  /**
+   * fires a nsIDOMApplicationEvent when a change in appcache download or
+   * package download happens.
    */
   attribute nsIDOMEventListener onprogress;
 
+  /**
+   * The date of the last update check.
+   */
+  readonly attribute unsigned long long lastUpdateCheck;
+
+  /**
+   * The date of the last updated manifest.
+   */
+  readonly attribute unsigned long long updateTime;
+
+  /**
+   * Starts the process of looking for an update.
+   */
+  nsIDOMDOMRequest checkForUpdate();
+
+  readonly attribute boolean downloadAvailable;
+  readonly attribute boolean downloading;
+  readonly attribute boolean readyToApplyDownload;
+  readonly attribute long downloadSize;
+
+  // This is a DOMError
+  readonly attribute nsISupports downloadError;
+
+  attribute nsIDOMEventListener ondownloadsuccess;
+  attribute nsIDOMEventListener ondownloaderror;
+  attribute nsIDOMEventListener ondownloadavailable;
+
+  /**
+   * Will fire once the mgmt.applyDownload() call succeeds.
+   */
+  attribute nsIDOMEventListener ondownloadapplied;
+
+  /**
+   * Starts to download an update. If |downloading| is true, this
+   * is a no-op.
+   */
+  void download();
+
+  /**
+   * Cancels an ongoing update download.
+   */
+  void cancelDownload();
+
   /* startPoint will be used when several launch_path exists for an app */
   nsIDOMDOMRequest launch([optional] in DOMString startPoint);
-  nsIDOMDOMRequest uninstall();
+
+  /**
+   * Clear data that has been collected through mozbrowser elements.
+   * onsuccess will be called once data is actually cleared.
+   */
+  nsIDOMDOMRequest clearBrowserData();
 };
 
-[scriptable, uuid(4c36ca48-841e-4d5a-8c46-dda14ac633ca)]
+[scriptable, uuid(cf742022-5ba3-11e2-868f-03310341b006)]
 interface mozIDOMApplicationMgmt : nsISupports
 {
   /**
@@ -70,9 +120,25 @@ interface mozIDOMApplicationMgmt : nsISupports
    * the event will be a mozIDOMApplicationEvent
    */
   attribute nsIDOMEventListener onuninstall;
+
+  /**
+   * Applies a downloaded update.
+   * This function is a no-op if it's passed an app object which doesn't have
+   * |readyToApplyDownload| set to true.
+   */
+  void applyDownload(in mozIDOMApplication app);
+
+  /**
+   * Uninstall a web app.
+   *
+   * @param app : the app object of the web app to be uninstalled.
+   * @returns   : A DOMRequest object, returning the app's origin in |result|
+   *              if uninstall succeeds; returning "NOT_INSTALLED" error otherwise.
+   */
+  nsIDOMDOMRequest uninstall(in mozIDOMApplication app);
 };
 
-[scriptable, uuid(dd9a044c-1073-4d2b-a17d-c9b5834b3420)]
+[scriptable, uuid(abfc6c15-8b92-4b9a-b892-52e6ae76f379)]
 interface mozIDOMApplicationRegistry : nsISupports
 {
   /**
@@ -92,6 +158,11 @@ interface mozIDOMApplicationRegistry : nsISupports
    * the request will return the application currently installed, or null.
    */
   nsIDOMDOMRequest getSelf();
+
+  /**
+   * the request will return the application if the app from that origin is installed
+   */
+  nsIDOMDOMRequest checkInstalled(in DOMString manifestUrl);
 
   /**
    * the request will return the applications installed from this origin, or null.

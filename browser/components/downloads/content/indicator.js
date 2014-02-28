@@ -156,6 +156,9 @@ const DownloadsButton = {
     if (!placeholder) {
       // The placeholder has been removed from the browser window.
       indicator.collapsed = true;
+      // Move the indicator to a safe position on the toolbar, since otherwise
+      // it may break the merge of adjacent items, like back/forward + urlbar.
+      indicator.parentNode.appendChild(indicator);
       return null;
     }
 
@@ -177,15 +180,25 @@ const DownloadsButton = {
   },
 
   /**
-   * Indicates whether the indicator is visible in the browser window.
+   * Checks whether the indicator is, or will soon be visible in the browser
+   * window.
+   *
+   * @param aCallback
+   *        Called once the indicator overlay has loaded. Gets a boolean
+   *        argument representing the indicator visibility.
    */
-  get isVisible()
+  checkIsVisible: function DB_checkIsVisible(aCallback)
   {
-    if (!this._placeholder) {
-      return false;
+    function DB_CEV_callback() {
+      if (!this._placeholder) {
+        aCallback(false);
+      } else {
+        let element = DownloadsIndicatorView.indicator || this._placeholder;
+        aCallback(isElementVisible(element.parentNode));
+      }
     }
-    let element = DownloadsIndicatorView.indicator || this._placeholder;
-    return isElementVisible(element.parentNode);
+    DownloadsOverlayLoader.ensureOverlayLoaded(this.kIndicatorOverlay,
+                                               DB_CEV_callback.bind(this));
   },
 
   /**
@@ -273,7 +286,7 @@ const DownloadsIndicatorView = {
     this._initialized = true;
 
     window.addEventListener("unload", this.onWindowUnload, false);
-    DownloadsCommon.indicatorData.addView(this);
+    DownloadsCommon.getIndicatorData(window).addView(this);
   },
 
   /**
@@ -287,7 +300,7 @@ const DownloadsIndicatorView = {
     this._initialized = false;
 
     window.removeEventListener("unload", this.onWindowUnload, false);
-    DownloadsCommon.indicatorData.removeView(this);
+    DownloadsCommon.getIndicatorData(window).removeView(this);
 
     // Reset the view properties, so that a neutral indicator is displayed if we
     // are visible only temporarily as an anchor.
@@ -314,7 +327,7 @@ const DownloadsIndicatorView = {
       // If the view is initialized, we need to update the elements now that
       // they are finally available in the document.
       if (this._initialized) {
-        DownloadsCommon.indicatorData.refreshView(this);
+        DownloadsCommon.getIndicatorData(window).refreshView(this);
       }
 
       aCallback();
@@ -336,10 +349,22 @@ const DownloadsIndicatorView = {
   /**
    * If the status indicator is visible in its assigned position, shows for a
    * brief time a visual notification of a relevant event, like a new download.
+   *
+   * @param aType
+   *        Set to "start" for new downloads, "finish" for completed downloads.
    */
-  showEventNotification: function DIV_showEventNotification()
+  showEventNotification: function DIV_showEventNotification(aType)
   {
     if (!this._initialized) {
+      return;
+    }
+
+    if (!DownloadsCommon.animateNotifications) {
+      return;
+    }
+
+    // No need to show visual notification if the panel is visible.
+    if (DownloadsPanel.isPanelShowing) {
       return;
     }
 
@@ -353,7 +378,7 @@ const DownloadsIndicatorView = {
       DownloadsButton.updatePosition();
 
       let indicator = this.indicator;
-      indicator.setAttribute("notification", "true");
+      indicator.setAttribute("notification", aType);
       this._notificationTimeout = setTimeout(
         function () indicator.removeAttribute("notification"), 1000);
     }
@@ -473,7 +498,7 @@ const DownloadsIndicatorView = {
     if (this._attention != aValue) {
       this._attention = aValue;
       if (aValue) {
-        this.indicator.setAttribute("attention", "true")
+        this.indicator.setAttribute("attention", "true");
       } else {
         this.indicator.removeAttribute("attention");
       }
@@ -495,7 +520,7 @@ const DownloadsIndicatorView = {
   {
     if (DownloadsCommon.useToolkitUI) {
       // The panel won't suppress attention for us, we need to clear now.
-      DownloadsCommon.indicatorData.attention = false;
+      DownloadsCommon.getIndicatorData(window).attention = false;
       BrowserDownloadsUI();
     } else {
       DownloadsPanel.showPanel();
@@ -509,14 +534,23 @@ const DownloadsIndicatorView = {
     browserDragAndDrop.dragOver(aEvent);
   },
 
-  onDragExit: function () { },
-
   onDrop: function DIV_onDrop(aEvent)
   {
+    let dt = aEvent.dataTransfer;
+    // If dragged item is from our source, do not try to
+    // redownload already downloaded file.
+    if (dt.mozGetDataAt("application/x-moz-file", 0))
+      return;
+
     let name = {};
     let url = browserDragAndDrop.drop(aEvent, name);
     if (url) {
-      saveURL(url, name.value, null, true, true);
+      if (url.startsWith("about:")) {
+        return;
+      }
+
+      let sourceDoc = dt.mozSourceNode ? dt.mozSourceNode.ownerDocument : document;
+      saveURL(url, name.value, null, true, true, null, sourceDoc);
       aEvent.preventDefault();
     }
   },

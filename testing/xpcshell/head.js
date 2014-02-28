@@ -17,6 +17,7 @@ var _passedChecks = 0, _falsePassedChecks = 0;
 var _todoChecks = 0;
 var _cleanupFunctions = [];
 var _pendingTimers = [];
+var _profileInitialized = false;
 
 function _dump(str) {
   let start = /^TEST-/.test(str) ? "\n" : "";
@@ -35,16 +36,38 @@ let (ios = Components.classes["@mozilla.org/network/io-service;1"]
   ios.offline = false;
 }
 
-// Disable IPv6 lookups for 'localhost' on windows.
+// Determine if we're running on parent or child
+let runningInParent = true;
 try {
-  if ("@mozilla.org/windows-registry-key;1" in Components.classes) {
-    let processType = Components.classes["@mozilla.org/xre/runtime;1"].
-      getService(Components.interfaces.nsIXULRuntime).processType;
-    if (processType == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
-      let (prefs = Components.classes["@mozilla.org/preferences-service;1"]
-                   .getService(Components.interfaces.nsIPrefBranch)) {
-        prefs.setCharPref("network.dns.ipv4OnlyDomains", "localhost");
-      }
+  runningInParent = Components.classes["@mozilla.org/xre/runtime;1"].
+                    getService(Components.interfaces.nsIXULRuntime).processType
+                    == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+} 
+catch (e) { }
+
+// Only if building of places is enabled.
+if (runningInParent &&
+    "mozIAsyncHistory" in Components.interfaces) {
+  // Ensure places history is enabled for xpcshell-tests as some non-FF
+  // apps disable it.
+  let (prefs = Components.classes["@mozilla.org/preferences-service;1"]
+               .getService(Components.interfaces.nsIPrefBranch)) {
+    prefs.setBoolPref("places.history.enabled", true);
+  };
+}
+
+try {
+  if (runningInParent) {
+    let prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                .getService(Components.interfaces.nsIPrefBranch);
+
+    // disable necko IPC security checks for xpcshell, as they lack the
+    // docshells needed to pass them
+    prefs.setBoolPref("network.disable.ipc.security", true);
+
+    // Disable IPv6 lookups for 'localhost' on windows.
+    if ("@mozilla.org/windows-registry-key;1" in Components.classes) {
+      prefs.setCharPref("network.dns.ipv4OnlyDomains", "localhost");
     }
   }
 }
@@ -56,9 +79,7 @@ catch (e) { }
 // Note that if we're in a child process, we don't want to init the
 // crashreporter component.
 try { // nsIXULRuntime is not available in some configurations.
-  let processType = Components.classes["@mozilla.org/xre/runtime;1"].
-    getService(Components.interfaces.nsIXULRuntime).processType;
-  if (processType == Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT &&
+  if (runningInParent &&
       "@mozilla.org/toolkit/crash-reporter;1" in Components.classes) {
     // Remember to update </toolkit/crashreporter/test/unit/test_crashreporter.js>
     // too if you change this initial setting.
@@ -101,8 +122,8 @@ function _Timer(func, delay) {
 }
 _Timer.prototype = {
   QueryInterface: function(iid) {
-    if (iid.Equals(Components.interfaces.nsITimerCallback) ||
-        iid.Equals(Components.interfaces.nsISupports))
+    if (iid.equals(Components.interfaces.nsITimerCallback) ||
+        iid.equals(Components.interfaces.nsISupports))
       return this;
 
     throw Components.results.NS_ERROR_NO_INTERFACE;
@@ -179,7 +200,7 @@ function _dump_exception_stack(stack) {
  * @note Idle service is overridden by default.  If a test requires it, it will
  *       have to call do_get_idle() function at least once before use.
  */
-_fakeIdleService = {
+var _fakeIdleService = {
   get registrar() {
     delete this.registrar;
     return this.registrar =
@@ -311,9 +332,9 @@ function _execute_test() {
   _load_files(_TEST_FILE);
 
   try {
-    do_test_pending();
+    do_test_pending("MAIN run_test");
     run_test();
-    do_test_finished();
+    do_test_finished("MAIN run_test");
     _do_main();
   } catch (e) {
     _passed = false;
@@ -382,6 +403,9 @@ function _load_files(aFiles) {
   aFiles.forEach(loadTailFile);
 }
 
+function _wrap_with_quotes_if_necessary(val) {
+  return typeof val == "string" ? '"' + val + '"' : val;
+}
 
 /************** Functions to be used from the tests **************/
 
@@ -390,6 +414,7 @@ function _load_files(aFiles) {
  */
 function do_print(msg) {
   var caller_stack = Components.stack.caller;
+  msg = _wrap_with_quotes_if_necessary(msg);
   _dump("TEST-INFO | " + caller_stack.filename + " | " + msg + "\n");
 }
 
@@ -407,8 +432,9 @@ function do_timeout(delay, func) {
   new _Timer(func, Number(delay));
 }
 
-function do_execute_soon(callback) {
-  do_test_pending();
+function do_execute_soon(callback, aName) {
+  let funcName = (aName ? aName : callback.name);
+  do_test_pending(funcName);
   var tm = Components.classes["@mozilla.org/thread-manager;1"]
                      .getService(Components.interfaces.nsIThreadManager);
 
@@ -435,25 +461,51 @@ function do_execute_soon(callback) {
         }
       }
       finally {
-        do_test_finished();
+        do_test_finished(funcName);
       }
     }
   }, Components.interfaces.nsIThread.DISPATCH_NORMAL);
 }
 
-function do_throw(text, stack) {
-  if (!stack)
-    stack = Components.stack.caller;
-
-  _passed = false;
-  _dump("TEST-UNEXPECTED-FAIL | " + stack.filename + " | " + text +
-        " - See following stack:\n");
-  var frame = Components.stack;
-  while (frame != null) {
-    _dump(frame + "\n");
-    frame = frame.caller;
+/**
+ * Shows an error message and the current stack and aborts the test.
+ *
+ * @param error  A message string or an Error object.
+ * @param stack  null or nsIStackFrame object or a string containing
+ *               \n separated stack lines (as in Error().stack).
+ */
+function do_throw(error, stack) {
+  let filename = "";
+  if (!stack) {
+    if (error instanceof Error) {
+      // |error| is an exception object
+      filename = error.fileName;
+      stack = error.stack;
+    } else {
+      stack = Components.stack.caller;
+    }
   }
 
+  if (stack instanceof Components.interfaces.nsIStackFrame)
+    filename = stack.filename;
+
+  _dump("TEST-UNEXPECTED-FAIL | " + filename + " | " + error +
+        " - See following stack:\n");
+
+  if (stack instanceof Components.interfaces.nsIStackFrame) {
+    let frame = stack;
+    while (frame != null) {
+      _dump(frame + "\n");
+      frame = frame.caller;
+    }
+  } else if (typeof stack == "string") {
+    let stackLines = stack.split("\n");
+    for (let line of stackLines) {
+      _dump(line + "\n");
+    }
+  }
+
+  _passed = false;
   _do_quit();
   throw Components.results.NS_ERROR_ABORT;
 }
@@ -501,24 +553,9 @@ function _do_check_neq(left, right, stack, todo) {
   if (!stack)
     stack = Components.stack.caller;
 
-  var text = left + " != " + right;
-  if (left == right) {
-    if (!todo) {
-      do_throw(text, stack);
-    } else {
-      ++_todoChecks;
-      _dump("TEST-KNOWN-FAIL | " + stack.filename + " | [" + stack.name +
-            " : " + stack.lineNumber + "] " + text +"\n");
-    }
-  } else {
-    if (!todo) {
-      ++_passedChecks;
-      _dump("TEST-PASS | " + stack.filename + " | [" + stack.name + " : " +
-            stack.lineNumber + "] " + text + "\n");
-    } else {
-      do_throw_todo(text, stack);
-    }
-  }
+  var text = _wrap_with_quotes_if_necessary(left) + " != " +
+             _wrap_with_quotes_if_necessary(right);
+  do_report_result(left != right, text, stack, todo);
 }
 
 function do_check_neq(left, right, stack) {
@@ -535,28 +572,33 @@ function todo_check_neq(left, right, stack) {
   _do_check_neq(left, right, stack, true);
 }
 
+function do_report_result(passed, text, stack, todo) {
+  if (passed) {
+    if (todo) {
+      do_throw_todo(text, stack);
+    } else {
+      ++_passedChecks;
+      _dump("TEST-PASS | " + stack.filename + " | [" + stack.name + " : " +
+            stack.lineNumber + "] " + text + "\n");
+    }
+  } else {
+    if (todo) {
+      ++_todoChecks;
+      _dump("TEST-KNOWN-FAIL | " + stack.filename + " | [" + stack.name +
+            " : " + stack.lineNumber + "] " + text +"\n");
+    } else {
+      do_throw(text, stack);
+    }
+  }
+}
+
 function _do_check_eq(left, right, stack, todo) {
   if (!stack)
     stack = Components.stack.caller;
 
-  var text = left + " == " + right;
-  if (left != right) {
-    if (!todo) {
-      do_throw(text, stack);
-    } else {
-      ++_todoChecks;
-      _dump("TEST-KNOWN-FAIL | " + stack.filename + " | [" + stack.name +
-            " : " + stack.lineNumber + "] " + text +"\n");
-    }
-  } else {
-    if (!todo) {
-      ++_passedChecks;
-      _dump("TEST-PASS | " + stack.filename + " | [" + stack.name + " : " +
-            stack.lineNumber + "] " + text + "\n");
-    } else {
-      do_throw_todo(text, stack);
-    }
-  }
+  var text = _wrap_with_quotes_if_necessary(left) + " == " +
+             _wrap_with_quotes_if_necessary(right);
+  do_report_result(left == right, text, stack, todo);
 }
 
 function do_check_eq(left, right, stack) {
@@ -609,16 +651,167 @@ function todo_check_null(condition, stack=Components.stack.caller) {
   todo_check_eq(condition, null, stack);
 }
 
-function do_test_pending() {
-  ++_tests_pending;
-
-  _dump("TEST-INFO | (xpcshell/head.js) | test " + _tests_pending +
-         " pending\n");
+/**
+ * Check that |value| matches |pattern|.
+ *
+ * A |value| matches a pattern |pattern| if any one of the following is true:
+ *
+ * - |value| and |pattern| are both objects; |pattern|'s enumerable
+ *   properties' values are valid patterns; and for each enumerable
+ *   property |p| of |pattern|, plus 'length' if present at all, |value|
+ *   has a property |p| whose value matches |pattern.p|. Note that if |j|
+ *   has other properties not present in |p|, |j| may still match |p|.
+ *
+ * - |value| and |pattern| are equal string, numeric, or boolean literals
+ *
+ * - |pattern| is |undefined| (this is a wildcard pattern)
+ *
+ * - typeof |pattern| == "function", and |pattern(value)| is true.
+ *
+ * For example:
+ *
+ * do_check_matches({x:1}, {x:1})       // pass
+ * do_check_matches({x:1}, {})          // fail: all pattern props required
+ * do_check_matches({x:1}, {x:2})       // fail: values must match
+ * do_check_matches({x:1}, {x:1, y:2})  // pass: extra props tolerated
+ *
+ * // Property order is irrelevant.
+ * do_check_matches({x:"foo", y:"bar"}, {y:"bar", x:"foo"}) // pass
+ *
+ * do_check_matches({x:undefined}, {x:1}) // pass: 'undefined' is wildcard
+ * do_check_matches({x:undefined}, {x:2})
+ * do_check_matches({x:undefined}, {y:2}) // fail: 'x' must still be there
+ *
+ * // Patterns nest.
+ * do_check_matches({a:1, b:{c:2,d:undefined}}, {a:1, b:{c:2,d:3}})
+ *
+ * // 'length' property counts, even if non-enumerable.
+ * do_check_matches([3,4,5], [3,4,5])     // pass
+ * do_check_matches([3,4,5], [3,5,5])     // fail; value doesn't match
+ * do_check_matches([3,4,5], [3,4,5,6])   // fail; length doesn't match
+ *
+ * // functions in patterns get applied.
+ * do_check_matches({foo:function (v) v.length == 2}, {foo:"hi"}) // pass
+ * do_check_matches({foo:function (v) v.length == 2}, {bar:"hi"}) // fail
+ * do_check_matches({foo:function (v) v.length == 2}, {foo:"hello"}) // fail
+ *
+ * // We don't check constructors, prototypes, or classes. However, if
+ * // pattern has a 'length' property, we require values to match that as
+ * // well, even if 'length' is non-enumerable in the pattern. So arrays
+ * // are useful as patterns.
+ * do_check_matches({0:0, 1:1, length:2}, [0,1])  // pass
+ * do_check_matches({0:1}, [1,2])                 // pass
+ * do_check_matches([0], {0:0, length:1})         // pass
+ *
+ * Notes:
+ *
+ * The 'length' hack gives us reasonably intuitive handling of arrays.
+ *
+ * This is not a tight pattern-matcher; it's only good for checking data
+ * from well-behaved sources. For example:
+ * - By default, we don't mind values having extra properties.
+ * - We don't check for proxies or getters.
+ * - We don't check the prototype chain.
+ * However, if you know the values are, say, JSON, which is pretty
+ * well-behaved, and if you want to tolerate additional properties
+ * appearing on the JSON for backward-compatibility, then do_check_matches
+ * is ideal. If you do want to be more careful, you can use function
+ * patterns to implement more stringent checks.
+ */
+function do_check_matches(pattern, value, stack=Components.stack.caller, todo=false) {
+  var matcher = pattern_matcher(pattern);
+  var text = "VALUE: " + uneval(value) + "\nPATTERN: " + uneval(pattern) + "\n";
+  var diagnosis = []
+  if (matcher(value, diagnosis)) {
+    do_report_result(true, "value matches pattern:\n" + text, stack, todo);
+  } else {
+    text = ("value doesn't match pattern:\n" +
+            text +
+            "DIAGNOSIS: " +
+            format_pattern_match_failure(diagnosis[0]) + "\n");
+    do_report_result(false, text, stack, todo);
+  }
 }
 
-function do_test_finished() {
-  _dump("TEST-INFO | (xpcshell/head.js) | test " + _tests_pending +
-         " finished\n");
+function todo_check_matches(pattern, value, stack=Components.stack.caller) {
+  do_check_matches(pattern, value, stack, true);
+}
+
+// Return a pattern-matching function of one argument, |value|, that
+// returns true if |value| matches |pattern|.
+//
+// If the pattern doesn't match, and the pattern-matching function was
+// passed its optional |diagnosis| argument, the pattern-matching function
+// sets |diagnosis|'s '0' property to a JSON-ish description of the portion
+// of the pattern that didn't match, which can be formatted legibly by
+// format_pattern_match_failure.
+function pattern_matcher(pattern) {
+  function explain(diagnosis, reason) {
+    if (diagnosis) {
+      diagnosis[0] = reason;
+    }
+    return false;
+  }
+  if (typeof pattern == "function") {
+    return pattern;
+  } else if (typeof pattern == "object" && pattern) {
+    var matchers = [[p, pattern_matcher(pattern[p])] for (p in pattern)];
+    // Kludge: include 'length', if not enumerable. (If it is enumerable,
+    // we picked it up in the array comprehension, above.
+    ld = Object.getOwnPropertyDescriptor(pattern, 'length');
+    if (ld && !ld.enumerable) {
+      matchers.push(['length', pattern_matcher(pattern.length)])
+    }
+    return function (value, diagnosis) {
+      if (!(value && typeof value == "object")) {
+        return explain(diagnosis, "value not object");
+      }
+      for (let [p, m] of matchers) {
+        var element_diagnosis = [];
+        if (!(p in value && m(value[p], element_diagnosis))) {
+          return explain(diagnosis, { property:p,
+                                      diagnosis:element_diagnosis[0] });
+        }
+      }
+      return true;
+    };
+  } else if (pattern === undefined) {
+    return function(value) { return true; };
+  } else {
+    return function (value, diagnosis) {
+      if (value !== pattern) {
+        return explain(diagnosis, "pattern " + uneval(pattern) + " not === to value " + uneval(value));
+      }
+      return true;
+    };
+  }
+}
+
+// Format an explanation for a pattern match failure, as stored in the
+// second argument to a matching function.
+function format_pattern_match_failure(diagnosis, indent="") {
+  var a;
+  if (!diagnosis) {
+    a = "Matcher did not explain reason for mismatch.";
+  } else if (typeof diagnosis == "string") {
+    a = diagnosis;
+  } else if (diagnosis.property) {
+    a = "Property " + uneval(diagnosis.property) + " of object didn't match:\n";
+    a += format_pattern_match_failure(diagnosis.diagnosis, indent + "  ");
+  }
+  return indent + a;
+}
+
+function do_test_pending(aName) {
+  ++_tests_pending;
+
+  _dump("TEST-INFO | (xpcshell/head.js) | test" + (aName ? " " + aName : "") +
+         " pending (" + _tests_pending + ")\n");
+}
+
+function do_test_finished(aName) {
+  _dump("TEST-INFO | (xpcshell/head.js) | test" + (aName ? " " + aName : "") +
+         " finished (" + _tests_pending + ")\n");
 
   if (--_tests_pending == 0)
     _do_quit();
@@ -728,15 +921,22 @@ function do_register_cleanup(aFunction)
  * @return nsILocalFile of the profile directory.
  */
 function do_get_profile() {
-  // Since we have a profile, we will notify profile shutdown topics at
-  // the end of the current test, to ensure correct cleanup on shutdown.
-  do_register_cleanup(function() {
-    let obsSvc = Components.classes["@mozilla.org/observer-service;1"].
-                 getService(Components.interfaces.nsIObserverService);
-    obsSvc.notifyObservers(null, "profile-change-net-teardown", null);
-    obsSvc.notifyObservers(null, "profile-change-teardown", null);
-    obsSvc.notifyObservers(null, "profile-before-change", null);
-  });
+  if (!runningInParent) {
+    _dump("TEST-INFO | (xpcshell/head.js) | Ignoring profile creation from child process.\n");
+    return null;
+  }
+
+  if (!_profileInitialized) {
+    // Since we have a profile, we will notify profile shutdown topics at
+    // the end of the current test, to ensure correct cleanup on shutdown.
+    do_register_cleanup(function() {
+      let obsSvc = Components.classes["@mozilla.org/observer-service;1"].
+                   getService(Components.interfaces.nsIObserverService);
+      obsSvc.notifyObservers(null, "profile-change-net-teardown", null);
+      obsSvc.notifyObservers(null, "profile-change-teardown", null);
+      obsSvc.notifyObservers(null, "profile-before-change", null);
+    });
+  }
 
   let env = Components.classes["@mozilla.org/process/environment;1"]
                       .getService(Components.interfaces.nsIEnvironment);
@@ -768,12 +968,21 @@ function do_get_profile() {
   dirSvc.QueryInterface(Components.interfaces.nsIDirectoryService)
         .registerProvider(provider);
 
-  // The methods of 'provider' will entrain this scope so null out everything
+  let obsSvc = Components.classes["@mozilla.org/observer-service;1"].
+        getService(Components.interfaces.nsIObserverService);
+
+  if (!_profileInitialized) {
+    obsSvc.notifyObservers(null, "profile-do-change", "xpcshell-do-get-profile");
+    _profileInitialized = true;
+  }
+
+  // The methods of 'provider' will retain this scope so null out everything
   // to avoid spurious leak reports.
   env = null;
   profd = null;
   dirSvc = null;
   provider = null;
+  obsSvc = null;
   return file.clone();
 }
 
@@ -788,11 +997,7 @@ function do_get_profile() {
 function do_load_child_test_harness()
 {
   // Make sure this isn't called from child process
-  var runtime = Components.classes["@mozilla.org/xre/app-info;1"]
-                  .getService(Components.interfaces.nsIXULRuntime);
-  if (runtime.processType != 
-            Components.interfaces.nsIXULRuntime.PROCESS_TYPE_DEFAULT) 
-  {
+  if (!runningInParent) {
     do_throw("run_test_in_child cannot be called from child!");
   }
 
@@ -800,28 +1005,21 @@ function do_load_child_test_harness()
   if (typeof do_load_child_test_harness.alreadyRun != "undefined")
     return;
   do_load_child_test_harness.alreadyRun = 1;
-  
-  function addQuotes (str)  { 
-    return '"' + str + '"'; 
-  }
-  var quoted_head_files = _HEAD_FILES.map(addQuotes);
-  var quoted_tail_files = _TAIL_FILES.map(addQuotes);
 
   _XPCSHELL_PROCESS = "parent";
 
   let command =
-        "const _HEAD_JS_PATH='" + _HEAD_JS_PATH + "'; "
-      + "const _HTTPD_JS_PATH='" + _HTTPD_JS_PATH + "'; "
-      + "const _HEAD_FILES=[" + quoted_head_files.join() + "];"
-      + "const _TAIL_FILES=[" + quoted_tail_files.join() + "];"
+        "const _HEAD_JS_PATH=" + uneval(_HEAD_JS_PATH) + "; "
+      + "const _HTTPD_JS_PATH=" + uneval(_HTTPD_JS_PATH) + "; "
+      + "const _HEAD_FILES=" + uneval(_HEAD_FILES) + "; "
+      + "const _TAIL_FILES=" + uneval(_TAIL_FILES) + "; "
       + "const _XPCSHELL_PROCESS='child';";
 
   if (this._TESTING_MODULES_DIR) {
-    normalized = this._TESTING_MODULES_DIR.replace('\\', '\\\\', 'g');
-    command += "const _TESTING_MODULES_DIR='" + normalized + "'; ";
+    command += " const _TESTING_MODULES_DIR=" + uneval(_TESTING_MODULES_DIR) + ";";
   }
 
-  command += "load(_HEAD_JS_PATH);";
+  command += " load(_HEAD_JS_PATH);";
 
   sendCommand(command);
 }
@@ -846,7 +1044,7 @@ function run_test_in_child(testFile, optionalCallback)
   do_load_child_test_harness();
 
   var testPath = do_get_file(testFile).path.replace(/\\/g, "/");
-  do_test_pending();
+  do_test_pending("run in child");
   sendCommand("_dump('CHILD-TEST-STARTED'); "
               + "const _TEST_FILE=['" + testPath + "']; _execute_test(); "
               + "_dump('CHILD-TEST-COMPLETED');", 
@@ -863,32 +1061,86 @@ function run_test_in_child(testFile, optionalCallback)
  *
  * @return the test function that was passed in.
  */
-let gTests = [];
+let _gTests = [];
 function add_test(func) {
-  gTests.push(func);
+  _gTests.push([false, func]);
   return func;
+}
+
+// We lazy import Task.jsm so we don't incur a run-time penalty for all tests.
+let _Task;
+
+/**
+ * Add a test function which is a Task function.
+ *
+ * Task functions are functions fed into Task.jsm's Task.spawn(). They are
+ * generators that emit promises.
+ *
+ * If an exception is thrown, a do_check_* comparison fails, or if a rejected
+ * promise is yielded, the test function aborts immediately and the test is
+ * reported as a failure.
+ *
+ * Unlike add_test(), there is no need to call run_next_test(). The next test
+ * will run automatically as soon the task function is exhausted. To trigger
+ * premature (but successful) termination of the function, simply return or
+ * throw a Task.Result instance.
+ *
+ * Example usage:
+ *
+ * add_task(function test() {
+ *   let result = yield Promise.resolve(true);
+ *
+ *   do_check_true(result);
+ *
+ *   let secondary = yield someFunctionThatReturnsAPromise(result);
+ *   do_check_eq(secondary, "expected value");
+ * });
+ *
+ * add_task(function test_early_return() {
+ *   let result = yield somethingThatReturnsAPromise();
+ *
+ *   if (!result) {
+ *     // Test is ended immediately, with success.
+ *     return;
+ *   }
+ *
+ *   do_check_eq(result, "foo");
+ * });
+ */
+function add_task(func) {
+  if (!_Task) {
+    let ns = {};
+    _Task = Components.utils.import("resource://gre/modules/Task.jsm", ns).Task;
+  }
+
+  _gTests.push([true, func]);
 }
 
 /**
  * Runs the next test function from the list of async tests.
  */
-let gRunningTest = null;
-let gTestIndex = 0; // The index of the currently running test.
+let _gRunningTest = null;
+let _gTestIndex = 0; // The index of the currently running test.
 function run_next_test()
 {
   function _run_next_test()
   {
-    if (gTestIndex < gTests.length) {
-      do_test_pending();
-      gRunningTest = gTests[gTestIndex++];
-      print("TEST-INFO | " + _TEST_FILE + " | Starting " +
-            gRunningTest.name);
-      // Exceptions do not kill asynchronous tests, so they'll time out.
-      try {
-        gRunningTest();
-      }
-      catch (e) {
-        do_throw(e);
+    if (_gTestIndex < _gTests.length) {
+      let _isTask;
+      [_isTask, _gRunningTest] = _gTests[_gTestIndex++];
+      print("TEST-INFO | " + _TEST_FILE + " | Starting " + _gRunningTest.name);
+      do_test_pending(_gRunningTest.name);
+
+      if (_isTask) {
+        _Task.spawn(_gRunningTest)
+             .then(run_next_test, do_report_unexpected_exception);
+      } else {
+        // Exceptions do not kill asynchronous tests, so they'll time out.
+        try {
+          _gRunningTest();
+        } catch (e) {
+          do_throw(e);
+        }
       }
     }
   }
@@ -897,10 +1149,10 @@ function run_next_test()
   // We do this now, before we call do_test_finished(), to ensure the pending
   // counter (_tests_pending) never reaches 0 while we still have tests to run
   // (do_execute_soon bumps that counter).
-  do_execute_soon(_run_next_test);
+  do_execute_soon(_run_next_test, "run_next_test " + _gTestIndex);
 
-  if (gRunningTest !== null) {
+  if (_gRunningTest !== null) {
     // Close the previous test do_test_pending call.
-    do_test_finished();
+    do_test_finished(_gRunningTest.name);
   }
 }

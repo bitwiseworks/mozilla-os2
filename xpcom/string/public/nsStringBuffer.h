@@ -7,6 +7,7 @@
 #ifndef nsStringBuffer_h__
 #define nsStringBuffer_h__
 
+template<class T> struct already_AddRefed;
 
 /**
  * This structure precedes the string buffers "we" allocate.  It may be the
@@ -41,7 +42,7 @@ class nsStringBuffer
        *
        * @return new string buffer or null if out of memory.
        */
-      static nsStringBuffer* Alloc(size_t storageSize);
+      static already_AddRefed<nsStringBuffer> Alloc(size_t storageSize);
 
       /**
        * Resizes the given string buffer to the specified storage size.  This
@@ -148,6 +149,17 @@ class nsStringBuffer
        * This measures the size only if the StringBuffer is unshared.
        */
       size_t SizeOfIncludingThisIfUnshared(nsMallocSizeOfFun aMallocSizeOf) const;
+
+      /**
+       * This measures the size regardless of whether the StringBuffer is
+       * unshared.
+       *
+       * WARNING: Only use this if you really know what you are doing, because
+       * it can easily lead to double-counting strings.  If you do use them,
+       * please explain clearly in a comment why it's safe and won't lead to
+       * double-counting.
+       */
+      size_t SizeOfIncludingThisEvenIfShared(nsMallocSizeOfFun aMallocSizeOf) const;
   };
 
 #endif /* !defined(nsStringBuffer_h__ */

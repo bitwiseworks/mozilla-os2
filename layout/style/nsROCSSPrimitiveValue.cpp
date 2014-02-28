@@ -7,18 +7,22 @@
 
 #include "nsROCSSPrimitiveValue.h"
 
+#include "mozilla/dom/CSSPrimitiveValueBinding.h"
+#include "nsContentUtils.h"
 #include "nsPresContext.h"
 #include "nsStyleUtil.h"
 #include "nsDOMCSSRGBColor.h"
-#include "nsIDOMRect.h"
-#include "nsDOMClassInfoID.h" // DOMCI_DATA
+#include "nsDOMCSSRect.h"
 #include "nsIURI.h"
 #include "nsError.h"
 
+using namespace mozilla;
+
 nsROCSSPrimitiveValue::nsROCSSPrimitiveValue()
-  : mType(CSS_PX)
+  : CSSValue(), mType(CSS_PX)
 {
   mValue.mAppUnits = 0;
+  SetIsDOMBinding();
 }
 
 
@@ -27,20 +31,41 @@ nsROCSSPrimitiveValue::~nsROCSSPrimitiveValue()
   Reset();
 }
 
-NS_IMPL_ADDREF(nsROCSSPrimitiveValue)
-NS_IMPL_RELEASE(nsROCSSPrimitiveValue)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsROCSSPrimitiveValue)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsROCSSPrimitiveValue)
 
-
-DOMCI_DATA(ROCSSPrimitiveValue, nsROCSSPrimitiveValue)
 
 // QueryInterface implementation for nsROCSSPrimitiveValue
-NS_INTERFACE_MAP_BEGIN(nsROCSSPrimitiveValue)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsROCSSPrimitiveValue)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSPrimitiveValue)
   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSValue)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ROCSSPrimitiveValue)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, CSSValue)
 NS_INTERFACE_MAP_END
 
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(nsROCSSPrimitiveValue)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsROCSSPrimitiveValue)
+  if (tmp->mType == CSS_URI) {
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mValue.mURI)
+  } else if (tmp->mType == CSS_RGBCOLOR) {
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mValue.mColor)
+  } else if (tmp->mType == CSS_RECT) {
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mValue.mRect)
+  }
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsROCSSPrimitiveValue)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+  tmp->Reset();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+JSObject*
+nsROCSSPrimitiveValue::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+{
+  return dom::CSSPrimitiveValueBinding::Wrap(cx, scope, this);
+}
 
 // nsIDOMCSSValue
 
@@ -75,7 +100,7 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
     case CSS_URI :
       {
         if (mValue.mURI) {
-          nsCAutoString specUTF8;
+          nsAutoCString specUTF8;
           mValue.mURI->GetSpec(specUTF8);
 
           tmpStr.AssignLiteral("url(");
@@ -83,9 +108,11 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
                                               tmpStr);
           tmpStr.AppendLiteral(")");
         } else {
-          // XXXldb Any better ideas?  It's good to have something that
-          // doesn't parse so that things round-trip "correctly".
-          tmpStr.Assign(NS_LITERAL_STRING("url(invalid-url:)"));
+          // http://dev.w3.org/csswg/css3-values/#attr defines
+          // 'about:invalid' as the default value for url attributes,
+          // so let's also use it here as the default computed value
+          // for invalid URLs.
+          tmpStr.Assign(NS_LITERAL_STRING("url(about:invalid)"));
         }
         break;
       }
@@ -151,8 +178,8 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
     case CSS_RGBCOLOR :
       {
         NS_ASSERTION(mValue.mColor, "mValue.mColor should never be null");
+        ErrorResult error;
         NS_NAMED_LITERAL_STRING(comma, ", ");
-        nsCOMPtr<nsIDOMCSSPrimitiveValue> colorCSSValue;
         nsAutoString colorValue;
         if (mValue.mColor->HasAlpha())
           tmpStr.AssignLiteral("rgba(");
@@ -160,39 +187,27 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
           tmpStr.AssignLiteral("rgb(");
 
         // get the red component
-        result = mValue.mColor->GetRed(getter_AddRefs(colorCSSValue));
-        if (NS_FAILED(result))
-          break;
-        result = colorCSSValue->GetCssText(colorValue);
-        if (NS_FAILED(result))
+        mValue.mColor->Red()->GetCssText(colorValue, error);
+        if (error.Failed())
           break;
         tmpStr.Append(colorValue + comma);
 
         // get the green component
-        result = mValue.mColor->GetGreen(getter_AddRefs(colorCSSValue));
-        if (NS_FAILED(result))
-          break;
-        result = colorCSSValue->GetCssText(colorValue);
-        if (NS_FAILED(result))
+        mValue.mColor->Green()->GetCssText(colorValue, error);
+        if (error.Failed())
           break;
         tmpStr.Append(colorValue + comma);
 
         // get the blue component
-        result = mValue.mColor->GetBlue(getter_AddRefs(colorCSSValue));
-        if (NS_FAILED(result))
-          break;
-        result = colorCSSValue->GetCssText(colorValue);
-        if (NS_FAILED(result))
+        mValue.mColor->Blue()->GetCssText(colorValue, error);
+        if (error.Failed())
           break;
         tmpStr.Append(colorValue);
 
         if (mValue.mColor->HasAlpha()) {
           // get the alpha component
-          result = mValue.mColor->GetAlpha(getter_AddRefs(colorCSSValue));
-          if (NS_FAILED(result))
-            break;
-          result = colorCSSValue->GetCssText(colorValue);
-          if (NS_FAILED(result))
+          mValue.mColor->Alpha()->GetCssText(colorValue, error);
+          if (error.Failed())
             break;
           tmpStr.Append(comma + colorValue);
         }
@@ -233,11 +248,22 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
   return NS_OK;
 }
 
+void
+nsROCSSPrimitiveValue::GetCssText(nsString& aText, ErrorResult& aRv)
+{
+  aRv = GetCssText(aText);
+}
 
 NS_IMETHODIMP
 nsROCSSPrimitiveValue::SetCssText(const nsAString& aCssText)
 {
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+}
+
+void
+nsROCSSPrimitiveValue::SetCssText(const nsAString& aText, ErrorResult& aRv)
+{
+  aRv = SetCssText(aText);
 }
 
 
@@ -247,6 +273,12 @@ nsROCSSPrimitiveValue::GetCssValueType(uint16_t* aValueType)
   NS_ENSURE_ARG_POINTER(aValueType);
   *aValueType = nsIDOMCSSValue::CSS_PRIMITIVE_VALUE;
   return NS_OK;
+}
+
+uint16_t
+nsROCSSPrimitiveValue::CssValueType() const
+{
+  return nsIDOMCSSValue::CSS_PRIMITIVE_VALUE;
 }
 
 
@@ -268,57 +300,68 @@ nsROCSSPrimitiveValue::SetFloatValue(uint16_t aUnitType, float aFloatValue)
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
 
-
-NS_IMETHODIMP
-nsROCSSPrimitiveValue::GetFloatValue(uint16_t aUnitType, float* aReturn)
+void
+nsROCSSPrimitiveValue::SetFloatValue(uint16_t aType, float aVal,
+                                     ErrorResult& aRv)
 {
-  NS_ENSURE_ARG_POINTER(aReturn);
-  *aReturn = 0;
+  aRv = SetFloatValue(aType, aVal);
+}
 
+float
+nsROCSSPrimitiveValue::GetFloatValue(uint16_t aUnitType, ErrorResult& aRv)
+{
   switch(aUnitType) {
     case CSS_PX :
-      if (mType != CSS_PX)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = nsPresContext::AppUnitsToFloatCSSPixels(mValue.mAppUnits);
+      if (mType == CSS_PX) {
+        return nsPresContext::AppUnitsToFloatCSSPixels(mValue.mAppUnits);
+      }
+
       break;
     case CSS_CM :
-      if (mType != CSS_PX)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = mValue.mAppUnits * CM_PER_INCH_FLOAT /
-        nsPresContext::AppUnitsPerCSSInch();
+      if (mType == CSS_PX) {
+        return mValue.mAppUnits * CM_PER_INCH_FLOAT /
+          nsPresContext::AppUnitsPerCSSInch();
+      }
+
       break;
     case CSS_MM :
-      if (mType != CSS_PX)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = mValue.mAppUnits * MM_PER_INCH_FLOAT /
-        nsPresContext::AppUnitsPerCSSInch();
+      if (mType == CSS_PX) {
+        return mValue.mAppUnits * MM_PER_INCH_FLOAT /
+          nsPresContext::AppUnitsPerCSSInch();
+      }
+
       break;
     case CSS_IN :
-      if (mType != CSS_PX)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = mValue.mAppUnits / nsPresContext::AppUnitsPerCSSInch();
+      if (mType == CSS_PX) {
+        return mValue.mAppUnits / nsPresContext::AppUnitsPerCSSInch();
+      }
+
       break;
     case CSS_PT :
-      if (mType != CSS_PX)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = mValue.mAppUnits * POINTS_PER_INCH_FLOAT / 
-        nsPresContext::AppUnitsPerCSSInch();
+      if (mType == CSS_PX) {
+        return mValue.mAppUnits * POINTS_PER_INCH_FLOAT /
+          nsPresContext::AppUnitsPerCSSInch();
+      }
+
       break;
     case CSS_PC :
-      if (mType != CSS_PX)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = mValue.mAppUnits * 6.0f /
-        nsPresContext::AppUnitsPerCSSInch();
+      if (mType == CSS_PX) {
+        return mValue.mAppUnits * 6.0f /
+          nsPresContext::AppUnitsPerCSSInch();
+      }
+
       break;
     case CSS_PERCENTAGE :
-      if (mType != CSS_PERCENTAGE)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = mValue.mFloat * 100;
+      if (mType == CSS_PERCENTAGE) {
+        return mValue.mFloat * 100;
+      }
+
       break;
     case CSS_NUMBER :
-      if (mType != CSS_NUMBER)
-        return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-      *aReturn = mValue.mFloat;
+      if (mType == CSS_NUMBER) {
+        return mValue.mFloat;
+      }
+
       break;
     case CSS_UNKNOWN :
     case CSS_EMS :
@@ -338,10 +381,19 @@ nsROCSSPrimitiveValue::GetFloatValue(uint16_t aUnitType, float* aReturn)
     case CSS_COUNTER :
     case CSS_RECT :
     case CSS_RGBCOLOR :
-      return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+      break;
   }
 
-  return NS_OK;
+  aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+  return 0;
+}
+
+NS_IMETHODIMP
+nsROCSSPrimitiveValue::GetFloatValue(uint16_t aType, float *aVal)
+{
+  ErrorResult rv;
+  *aVal = GetFloatValue(aType, rv);
+  return rv.ErrorCode();
 }
 
 
@@ -350,6 +402,13 @@ nsROCSSPrimitiveValue::SetStringValue(uint16_t aStringType,
                                       const nsAString& aStringValue)
 {
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+}
+
+void
+nsROCSSPrimitiveValue::SetStringValue(uint16_t aType, const nsAString& aString,
+                                      mozilla::ErrorResult& aRv)
+{
+  aRv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
 }
 
 
@@ -365,7 +424,7 @@ nsROCSSPrimitiveValue::GetStringValue(nsAString& aReturn)
       aReturn.Assign(mValue.mString);
       break;
     case CSS_URI: {
-      nsCAutoString spec;
+      nsAutoCString spec;
       if (mValue.mURI)
         mValue.mURI->GetSpec(spec);
       CopyUTF8toUTF16(spec, aReturn);
@@ -377,6 +436,12 @@ nsROCSSPrimitiveValue::GetStringValue(nsAString& aReturn)
   return NS_OK;
 }
 
+void
+nsROCSSPrimitiveValue::GetStringValue(nsString& aString, ErrorResult& aRv)
+{
+  aRv = GetStringValue(aString);
+}
+
 
 NS_IMETHODIMP
 nsROCSSPrimitiveValue::GetCounterValue(nsIDOMCounter** aReturn)
@@ -384,30 +449,43 @@ nsROCSSPrimitiveValue::GetCounterValue(nsIDOMCounter** aReturn)
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
 
-
-NS_IMETHODIMP
-nsROCSSPrimitiveValue::GetRectValue(nsIDOMRect** aReturn)
+already_AddRefed<nsIDOMCounter>
+nsROCSSPrimitiveValue::GetCounterValue(ErrorResult& aRv)
 {
-  if (mType != CSS_RECT) {
-    *aReturn = nullptr;
-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-  }
-  NS_ASSERTION(mValue.mRect, "mValue.mRect should never be null");
-  NS_ADDREF(*aReturn = mValue.mRect);
-  return NS_OK;
+  aRv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+  return nullptr;
 }
 
+nsDOMCSSRect*
+nsROCSSPrimitiveValue::GetRectValue(ErrorResult& aRv)
+{
+  if (mType != CSS_RECT) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    return nullptr;
+  }
 
-NS_IMETHODIMP 
-nsROCSSPrimitiveValue::GetRGBColorValue(nsIDOMRGBColor** aReturn)
+  NS_ASSERTION(mValue.mRect, "mValue.mRect should never be null");
+  return mValue.mRect;
+}
+
+NS_IMETHODIMP
+nsROCSSPrimitiveValue::GetRectValue(nsIDOMRect** aRect)
+{
+  ErrorResult error;
+  NS_IF_ADDREF(*aRect = GetRectValue(error));
+  return error.ErrorCode();
+}
+
+nsDOMCSSRGBColor*
+nsROCSSPrimitiveValue::GetRGBColorValue(ErrorResult& aRv)
 {
   if (mType != CSS_RGBCOLOR) {
-    *aReturn = nullptr;
-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+    aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    return nullptr;
   }
+
   NS_ASSERTION(mValue.mColor, "mValue.mColor should never be null");
-  NS_ADDREF(*aReturn = mValue.mColor);
-  return NS_OK;
+  return mValue.mColor;
 }
 
 void
@@ -520,7 +598,7 @@ nsROCSSPrimitiveValue::SetColor(nsDOMCSSRGBColor* aColor)
 }
 
 void
-nsROCSSPrimitiveValue::SetRect(nsIDOMRect* aRect)
+nsROCSSPrimitiveValue::SetRect(nsDOMCSSRect* aRect)
 {
   NS_PRECONDITION(aRect, "Null rect being set!");
   Reset();
@@ -567,4 +645,6 @@ nsROCSSPrimitiveValue::Reset()
       NS_RELEASE(mValue.mColor);
       break;
   }
+
+  mType = CSS_UNKNOWN;
 }

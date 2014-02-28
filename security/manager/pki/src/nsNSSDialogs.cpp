@@ -31,7 +31,9 @@
 #include "nsNSSDialogHelper.h"
 #include "nsIWindowWatcher.h"
 #include "nsIX509CertValidity.h"
-#include "nsICRLInfo.h"
+
+#include "nsEmbedCID.h"
+#include "nsIPromptService.h"
 
 #define PIPSTRING_BUNDLE_URL "chrome://pippki/locale/pippki.properties"
 
@@ -137,27 +139,6 @@ nsNSSDialogs::GetPassword(nsIInterfaceRequestor *ctx,
 }
 
 NS_IMETHODIMP 
-nsNSSDialogs::CrlImportStatusDialog(nsIInterfaceRequestor *ctx, nsICRLInfo *crl)
-{
-  nsresult rv;
-
-  nsCOMPtr<nsIPKIParamBlock> block =
-           do_CreateInstance(NS_PKIPARAMBLOCK_CONTRACTID,&rv);
-  if (NS_FAILED(rv))
-    return rv;
-  
-  rv = block->SetISupportAtIndex(1, crl);
-  if (NS_FAILED(rv))
-    return rv;
-
-  rv = nsNSSDialogHelper::openDialog(nullptr,
-                             "chrome://pippki/content/crlImportDialog.xul",
-                             block,
-                             false);
-  return NS_OK;
-}
-
-NS_IMETHODIMP 
 nsNSSDialogs::ConfirmDownloadCACert(nsIInterfaceRequestor *ctx, 
                                     nsIX509Cert *cert,
                                     uint32_t *_trust,
@@ -214,17 +195,24 @@ nsNSSDialogs::NotifyCACertExists(nsIInterfaceRequestor *ctx)
 {
   nsresult rv;
 
+  nsCOMPtr<nsIPromptService> promptSvc(do_GetService(NS_PROMPTSERVICE_CONTRACTID));
+  if (!promptSvc)
+    return NS_ERROR_FAILURE;
+
   // Get the parent window for the dialog
   nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(ctx);
 
-  nsCOMPtr<nsIDialogParamBlock> block =
-           do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);
-  if (!block) return NS_ERROR_FAILURE;
+  nsAutoString title;
+  rv = mPIPStringBundle->GetStringFromName(NS_LITERAL_STRING("caCertExistsTitle").get(),
+                                           getter_Copies(title));
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  
-  rv = nsNSSDialogHelper::openDialog(parent, 
-                                     "chrome://pippki/content/cacertexists.xul",
-                                     block);
+  nsAutoString msg;
+  rv = mPIPStringBundle->GetStringFromName(NS_LITERAL_STRING("caCertExistsMessage").get(),
+                                           getter_Copies(msg));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = promptSvc->Alert(parent, title.get(), msg.get());
 
   return rv;
 }

@@ -18,7 +18,7 @@ namespace {
 class ImageData
 {
   static JSClass sClass;
-  static JSPropertySpec sProperties[];
+  static const JSPropertySpec sProperties[];
 
   enum SLOT {
     SLOT_width = 0,
@@ -37,11 +37,12 @@ public:
   }
 
   static JSObject*
-  Create(JSContext* aCx, uint32_t aWidth, uint32_t aHeight, JSObject *aData)
+  Create(JSContext* aCx, uint32_t aWidth,
+         uint32_t aHeight, JS::Handle<JSObject*> aData)
   {
     MOZ_ASSERT(aData);
-    MOZ_ASSERT(JS_IsTypedArrayObject(aData, aCx));
-    MOZ_ASSERT(JS_IsUint8ClampedArray(aData, aCx));
+    MOZ_ASSERT(JS_IsTypedArrayObject(aData));
+    MOZ_ASSERT(JS_IsUint8ClampedArray(aData));
 
     JSObject* obj = JS_NewObject(aCx, &sClass, NULL, NULL);
     if (!obj) {
@@ -114,7 +115,8 @@ private:
   }
 
   static JSBool
-  GetProperty(JSContext* aCx, JSHandleObject aObj, JSHandleId aIdval, JSMutableHandleValue aVp)
+  GetProperty(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
+              JS::MutableHandle<JS::Value> aVp)
   {
     JSClass* classPtr = JS_GetClass(aObj);
     if (classPtr != &sClass) {
@@ -135,11 +137,11 @@ private:
 JSClass ImageData::sClass = {
   "ImageData",
   JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(SLOT_COUNT),
-  JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Finalize
 };
 
-JSPropertySpec ImageData::sProperties[] = {
+const JSPropertySpec ImageData::sProperties[] = {
   // These properties are read-only per spec, which means that sets must throw
   // in strict mode and silently fail otherwise. This is a problem for workers
   // in general (because js_GetterOnlyPropertyStub throws unconditionally). The
@@ -167,7 +169,8 @@ InitClass(JSContext* aCx, JSObject* aGlobal)
 }
 
 JSObject*
-Create(JSContext* aCx, uint32_t aWidth, uint32_t aHeight, JSObject* aData)
+Create(JSContext* aCx, uint32_t aWidth,
+       uint32_t aHeight, JS::Handle<JSObject*> aData)
 {
   return ImageData::Create(aCx, aWidth, aHeight, aData);
 }

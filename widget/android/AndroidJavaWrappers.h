@@ -7,13 +7,19 @@
 #define AndroidJavaWrappers_h__
 
 #include <jni.h>
+#include <android/input.h>
 #include <android/log.h>
 
 #include "nsGeoPosition.h"
 #include "nsPoint.h"
 #include "nsRect.h"
 #include "nsString.h"
+#include "nsTArray.h"
+#include "nsIObserver.h"
 #include "mozilla/gfx/Rect.h"
+#include "mozilla/dom/Touch.h"
+#include "InputData.h"
+#include "Units.h"
 
 //#define FORCE_ALOG 1
 
@@ -21,9 +27,13 @@
 #if defined(DEBUG) || defined(FORCE_ALOG)
 #define ALOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gecko" , ## args)
 #else
-#define ALOG(args...)
+#define ALOG(args...) ((void)0)
 #endif
 #endif
+
+class nsIAndroidDisplayport;
+class nsIAndroidViewport;
+class nsIWidget;
 
 namespace mozilla {
 
@@ -144,6 +154,38 @@ protected:
     static jfieldID jTopField;
 };
 
+class AndroidRectF : public WrappedJavaObject
+{
+public:
+    static void InitRectFClass(JNIEnv *jEnv);
+
+    AndroidRectF() { }
+    AndroidRectF(JNIEnv *jenv, jobject jobj) {
+        Init(jenv, jobj);
+    }
+
+    void Init(JNIEnv *jenv, jobject jobj);
+
+    float Bottom() { return mBottom; }
+    float Left() { return mLeft; }
+    float Right() { return mRight; }
+    float Top() { return mTop; }
+    float Width() { return mRight - mLeft; }
+    float Height() { return mBottom - mTop; }
+
+protected:
+    float mBottom;
+    float mLeft;
+    float mRight;
+    float mTop;
+
+    static jclass jRectClass;
+    static jfieldID jBottomField;
+    static jfieldID jLeftField;
+    static jfieldID jRightField;
+    static jfieldID jTopField;
+};
+
 class AndroidViewTransform : public WrappedJavaObject {
 public:
     static void InitViewTransformClass(JNIEnv *jEnv);
@@ -156,12 +198,47 @@ public:
     float GetX(JNIEnv *env);
     float GetY(JNIEnv *env);
     float GetScale(JNIEnv *env);
+    void GetFixedLayerMargins(JNIEnv *env, gfx::Margin &aFixedLayerMargins);
+    float GetOffsetX(JNIEnv *env);
+    float GetOffsetY(JNIEnv *env);
 
 private:
     static jclass jViewTransformClass;
     static jfieldID jXField;
     static jfieldID jYField;
     static jfieldID jScaleField;
+    static jfieldID jFixedLayerMarginLeft;
+    static jfieldID jFixedLayerMarginTop;
+    static jfieldID jFixedLayerMarginRight;
+    static jfieldID jFixedLayerMarginBottom;
+    static jfieldID jOffsetXField;
+    static jfieldID jOffsetYField;
+};
+
+class AndroidProgressiveUpdateData : public WrappedJavaObject {
+public:
+    static void InitProgressiveUpdateDataClass(JNIEnv *jEnv);
+
+    void Init(jobject jobj);
+
+    AndroidProgressiveUpdateData() {}
+    AndroidProgressiveUpdateData(jobject jobj) { Init(jobj); }
+
+    float GetX(JNIEnv *env);
+    float GetY(JNIEnv *env);
+    float GetWidth(JNIEnv *env);
+    float GetHeight(JNIEnv *env);
+    float GetScale(JNIEnv *env);
+    bool GetShouldAbort(JNIEnv *env);
+
+private:
+    static jclass jProgressiveUpdateDataClass;
+    static jfieldID jXField;
+    static jfieldID jYField;
+    static jfieldID jWidthField;
+    static jfieldID jHeightField;
+    static jfieldID jScaleField;
+    static jfieldID jShouldAbortField;
 };
 
 class AndroidLayerRendererFrame : public WrappedJavaObject {
@@ -193,313 +270,173 @@ public:
     AndroidGeckoLayerClient() {}
     AndroidGeckoLayerClient(jobject jobj) { Init(jobj); }
 
-    void SetFirstPaintViewport(const nsIntPoint& aOffset, float aZoom, const nsIntRect& aPageRect, const gfx::Rect& aCssPageRect);
-    void SetPageRect(const gfx::Rect& aCssPageRect);
-    void SyncViewportInfo(const nsIntRect& aDisplayPort, float aDisplayResolution, bool aLayersUpdated,
-                          nsIntPoint& aScrollOffset, float& aScaleX, float& aScaleY);
+    void SetFirstPaintViewport(const LayerIntPoint& aOffset, const CSSToLayerScale& aZoom, const CSSRect& aCssPageRect);
+    void SetPageRect(const CSSRect& aCssPageRect);
+    void SyncViewportInfo(const LayerIntRect& aDisplayPort, const CSSToLayerScale& aDisplayResolution,
+                          bool aLayersUpdated, ScreenPoint& aScrollOffset, CSSToScreenScale& aScale,
+                          gfx::Margin& aFixedLayerMargins, ScreenPoint& aOffset);
+    void SyncFrameMetrics(const ScreenPoint& aScrollOffset, float aZoom, const CSSRect& aCssPageRect,
+                          bool aLayersUpdated, const CSSRect& aDisplayPort, const CSSToLayerScale& aDisplayResolution,
+                          bool aIsFirstPaint, gfx::Margin& aFixedLayerMargins, ScreenPoint& aOffset);
+    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const LayerRect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical, gfx::Rect& aViewport, float& aScaleX, float& aScaleY);
     bool CreateFrame(AutoLocalJNIFrame *jniFrame, AndroidLayerRendererFrame& aFrame);
     bool ActivateProgram(AutoLocalJNIFrame *jniFrame);
     bool DeactivateProgram(AutoLocalJNIFrame *jniFrame);
+    void GetDisplayPort(AutoLocalJNIFrame *jniFrame, bool aPageSizeUpdate, bool aIsBrowserContentDisplayed, int32_t tabId, nsIAndroidViewport* metrics, nsIAndroidDisplayport** displayPort);
+    void ContentDocumentChanged(AutoLocalJNIFrame *jniFrame);
+    bool IsContentDocumentDisplayed(AutoLocalJNIFrame *jniFrame);
 
 protected:
     static jclass jGeckoLayerClientClass;
     static jmethodID jSetFirstPaintViewport;
     static jmethodID jSetPageRect;
     static jmethodID jSyncViewportInfoMethod;
+    static jmethodID jSyncFrameMetricsMethod;
     static jmethodID jCreateFrameMethod;
     static jmethodID jActivateProgramMethod;
     static jmethodID jDeactivateProgramMethod;
+    static jmethodID jGetDisplayPort;
+    static jmethodID jContentDocumentChanged;
+    static jmethodID jIsContentDocumentDisplayed;
+    static jmethodID jProgressiveUpdateCallbackMethod;
+
+public:
+    static jclass jViewportClass;
+    static jclass jDisplayportClass;
+    static jmethodID jViewportCtor;
+    static jfieldID jDisplayportPosition;
+    static jfieldID jDisplayportResolution;
 };
 
-class AndroidGeckoSurfaceView : public WrappedJavaObject
-{
-public:
-    static void InitGeckoSurfaceViewClass(JNIEnv *jEnv);
+enum {
+    // These keycode masks are not defined in android/keycodes.h:
+    AKEYCODE_ESCAPE             = 111,
+    AKEYCODE_FORWARD_DEL        = 112,
+    AKEYCODE_CTRL_LEFT          = 113,
+    AKEYCODE_CTRL_RIGHT         = 114,
+    AKEYCODE_CAPS_LOCK          = 115,
+    AKEYCODE_SCROLL_LOCK        = 116,
+    AKEYCODE_META_LEFT          = 117,
+    AKEYCODE_META_RIGHT         = 118,
+    AKEYCODE_FUNCTION           = 119,
+    AKEYCODE_SYSRQ              = 120,
+    AKEYCODE_BREAK              = 121,
+    AKEYCODE_MOVE_HOME          = 122,
+    AKEYCODE_MOVE_END           = 123,
+    AKEYCODE_INSERT             = 124,
+    AKEYCODE_FORWARD            = 125,
+    AKEYCODE_MEDIA_PLAY         = 126,
+    AKEYCODE_MEDIA_PAUSE        = 127,
+    AKEYCODE_MEDIA_CLOSE        = 128,
+    AKEYCODE_MEDIA_EJECT        = 129,
+    AKEYCODE_MEDIA_RECORD       = 130,
+    AKEYCODE_F1                 = 131,
+    AKEYCODE_F2                 = 132,
+    AKEYCODE_F3                 = 133,
+    AKEYCODE_F4                 = 134,
+    AKEYCODE_F5                 = 135,
+    AKEYCODE_F6                 = 136,
+    AKEYCODE_F7                 = 137,
+    AKEYCODE_F8                 = 138,
+    AKEYCODE_F9                 = 139,
+    AKEYCODE_F10                = 140,
+    AKEYCODE_F11                = 141,
+    AKEYCODE_F12                = 142,
+    AKEYCODE_NUM_LOCK           = 143,
+    AKEYCODE_NUMPAD_0           = 144,
+    AKEYCODE_NUMPAD_1           = 145,
+    AKEYCODE_NUMPAD_2           = 146,
+    AKEYCODE_NUMPAD_3           = 147,
+    AKEYCODE_NUMPAD_4           = 148,
+    AKEYCODE_NUMPAD_5           = 149,
+    AKEYCODE_NUMPAD_6           = 150,
+    AKEYCODE_NUMPAD_7           = 151,
+    AKEYCODE_NUMPAD_8           = 152,
+    AKEYCODE_NUMPAD_9           = 153,
+    AKEYCODE_NUMPAD_DIVIDE      = 154,
+    AKEYCODE_NUMPAD_MULTIPLY    = 155,
+    AKEYCODE_NUMPAD_SUBTRACT    = 156,
+    AKEYCODE_NUMPAD_ADD         = 157,
+    AKEYCODE_NUMPAD_DOT         = 158,
+    AKEYCODE_NUMPAD_COMMA       = 159,
+    AKEYCODE_NUMPAD_ENTER       = 160,
+    AKEYCODE_NUMPAD_EQUALS      = 161,
+    AKEYCODE_NUMPAD_LEFT_PAREN  = 162,
+    AKEYCODE_NUMPAD_RIGHT_PAREN = 163,
+    AKEYCODE_VOLUME_MUTE        = 164,
+    AKEYCODE_INFO               = 165,
+    AKEYCODE_CHANNEL_UP         = 166,
+    AKEYCODE_CHANNEL_DOWN       = 167,
+    AKEYCODE_ZOOM_IN            = 168,
+    AKEYCODE_ZOOM_OUT           = 169,
+    AKEYCODE_TV                 = 170,
+    AKEYCODE_WINDOW             = 171,
+    AKEYCODE_GUIDE              = 172,
+    AKEYCODE_DVR                = 173,
+    AKEYCODE_BOOKMARK           = 174,
+    AKEYCODE_CAPTIONS           = 175,
+    AKEYCODE_SETTINGS           = 176,
+    AKEYCODE_TV_POWER           = 177,
+    AKEYCODE_TV_INPUT           = 178,
+    AKEYCODE_STB_POWER          = 179,
+    AKEYCODE_STB_INPUT          = 180,
+    AKEYCODE_AVR_POWER          = 181,
+    AKEYCODE_AVR_INPUT          = 182,
+    AKEYCODE_PROG_RED           = 183,
+    AKEYCODE_PROG_GREEN         = 184,
+    AKEYCODE_PROG_YELLOW        = 185,
+    AKEYCODE_PROG_BLUE          = 186,
+    AKEYCODE_APP_SWITCH         = 187,
+    AKEYCODE_BUTTON_1           = 188,
+    AKEYCODE_BUTTON_2           = 189,
+    AKEYCODE_BUTTON_3           = 190,
+    AKEYCODE_BUTTON_4           = 191,
+    AKEYCODE_BUTTON_5           = 192,
+    AKEYCODE_BUTTON_6           = 193,
+    AKEYCODE_BUTTON_7           = 194,
+    AKEYCODE_BUTTON_8           = 195,
+    AKEYCODE_BUTTON_9           = 196,
+    AKEYCODE_BUTTON_10          = 197,
+    AKEYCODE_BUTTON_11          = 198,
+    AKEYCODE_BUTTON_12          = 199,
+    AKEYCODE_BUTTON_13          = 200,
+    AKEYCODE_BUTTON_14          = 201,
+    AKEYCODE_BUTTON_15          = 202,
+    AKEYCODE_BUTTON_16          = 203,
+    AKEYCODE_LANGUAGE_SWITCH    = 204,
+    AKEYCODE_MANNER_MODE        = 205,
+    AKEYCODE_3D_MODE            = 206,
+    AKEYCODE_CONTACTS           = 207,
+    AKEYCODE_CALENDAR           = 208,
+    AKEYCODE_MUSIC              = 209,
+    AKEYCODE_CALCULATOR         = 210,
+    AKEYCODE_ZENKAKU_HANKAKU    = 211,
+    AKEYCODE_EISU               = 212,
+    AKEYCODE_MUHENKAN           = 213,
+    AKEYCODE_HENKAN             = 214,
+    AKEYCODE_KATAKANA_HIRAGANA  = 215,
+    AKEYCODE_YEN                = 216,
+    AKEYCODE_RO                 = 217,
+    AKEYCODE_KANA               = 218,
+    AKEYCODE_ASSIST             = 219,
 
-    AndroidGeckoSurfaceView() { }
-    AndroidGeckoSurfaceView(jobject jobj) {
-        Init(jobj);
-    }
+    AMETA_CTRL_ON               = 0x00001000,
+    AMETA_CTRL_LEFT_ON          = 0x00002000,
+    AMETA_CTRL_RIGHT_ON         = 0x00004000,
+    AMETA_META_ON               = 0x00010000,
+    AMETA_META_LEFT_ON          = 0x00020000,
+    AMETA_META_RIGHT_ON         = 0x00040000,
 
-    void Init(jobject jobj);
-
-    enum {
-        DRAW_ERROR = 0,
-        DRAW_GLES_2 = 1,
-        DRAW_2D = 2,
-        DRAW_DISABLED = 3
-    };
-
-    int BeginDrawing();
-    jobject GetSoftwareDrawBitmap(AutoLocalJNIFrame *jniFrame);
-    jobject GetSoftwareDrawBuffer(AutoLocalJNIFrame *jniFrame);
-    void EndDrawing();
-    void Draw2D(jobject bitmap, int width, int height);
-    void Draw2D(jobject buffer, int stride);
-
-    jobject GetSurface(AutoLocalJNIFrame *jniFrame);
-    jobject GetSurfaceHolder(AutoLocalJNIFrame *jniFrame);
-
-protected:
-    static jclass jGeckoSurfaceViewClass;
-    static jmethodID jBeginDrawingMethod;
-    static jmethodID jEndDrawingMethod;
-    static jmethodID jDraw2DBitmapMethod;
-    static jmethodID jDraw2DBufferMethod;
-    static jmethodID jGetSoftwareDrawBitmapMethod;
-    static jmethodID jGetSoftwareDrawBufferMethod;
-    static jmethodID jGetSurfaceMethod;
-    static jmethodID jGetHolderMethod;
-};
-
-class AndroidKeyEvent
-{
-public:
-    enum {
-        KEYCODE_UNKNOWN            = 0,
-        KEYCODE_SOFT_LEFT          = 1,
-        KEYCODE_SOFT_RIGHT         = 2,
-        KEYCODE_HOME               = 3,
-        KEYCODE_BACK               = 4,
-        KEYCODE_CALL               = 5,
-        KEYCODE_ENDCALL            = 6,
-        KEYCODE_0                  = 7,
-        KEYCODE_1                  = 8,
-        KEYCODE_2                  = 9,
-        KEYCODE_3                  = 10,
-        KEYCODE_4                  = 11,
-        KEYCODE_5                  = 12,
-        KEYCODE_6                  = 13,
-        KEYCODE_7                  = 14,
-        KEYCODE_8                  = 15,
-        KEYCODE_9                  = 16,
-        KEYCODE_STAR               = 17,
-        KEYCODE_POUND              = 18,
-        KEYCODE_DPAD_UP            = 19,
-        KEYCODE_DPAD_DOWN          = 20,
-        KEYCODE_DPAD_LEFT          = 21,
-        KEYCODE_DPAD_RIGHT         = 22,
-        KEYCODE_DPAD_CENTER        = 23,
-        KEYCODE_VOLUME_UP          = 24,
-        KEYCODE_VOLUME_DOWN        = 25,
-        KEYCODE_POWER              = 26,
-        KEYCODE_CAMERA             = 27,
-        KEYCODE_CLEAR              = 28,
-        KEYCODE_A                  = 29,
-        KEYCODE_B                  = 30,
-        KEYCODE_C                  = 31,
-        KEYCODE_D                  = 32,
-        KEYCODE_E                  = 33,
-        KEYCODE_F                  = 34,
-        KEYCODE_G                  = 35,
-        KEYCODE_H                  = 36,
-        KEYCODE_I                  = 37,
-        KEYCODE_J                  = 38,
-        KEYCODE_K                  = 39,
-        KEYCODE_L                  = 40,
-        KEYCODE_M                  = 41,
-        KEYCODE_N                  = 42,
-        KEYCODE_O                  = 43,
-        KEYCODE_P                  = 44,
-        KEYCODE_Q                  = 45,
-        KEYCODE_R                  = 46,
-        KEYCODE_S                  = 47,
-        KEYCODE_T                  = 48,
-        KEYCODE_U                  = 49,
-        KEYCODE_V                  = 50,
-        KEYCODE_W                  = 51,
-        KEYCODE_X                  = 52,
-        KEYCODE_Y                  = 53,
-        KEYCODE_Z                  = 54,
-        KEYCODE_COMMA              = 55,
-        KEYCODE_PERIOD             = 56,
-        KEYCODE_ALT_LEFT           = 57,
-        KEYCODE_ALT_RIGHT          = 58,
-        KEYCODE_SHIFT_LEFT         = 59,
-        KEYCODE_SHIFT_RIGHT        = 60,
-        KEYCODE_TAB                = 61,
-        KEYCODE_SPACE              = 62,
-        KEYCODE_SYM                = 63,
-        KEYCODE_EXPLORER           = 64,
-        KEYCODE_ENVELOPE           = 65,
-        KEYCODE_ENTER              = 66,
-        KEYCODE_DEL                = 67,
-        KEYCODE_GRAVE              = 68,
-        KEYCODE_MINUS              = 69,
-        KEYCODE_EQUALS             = 70,
-        KEYCODE_LEFT_BRACKET       = 71,
-        KEYCODE_RIGHT_BRACKET      = 72,
-        KEYCODE_BACKSLASH          = 73,
-        KEYCODE_SEMICOLON          = 74,
-        KEYCODE_APOSTROPHE         = 75,
-        KEYCODE_SLASH              = 76,
-        KEYCODE_AT                 = 77,
-        KEYCODE_NUM                = 78,
-        KEYCODE_HEADSETHOOK        = 79,
-        KEYCODE_FOCUS              = 80,
-        KEYCODE_PLUS               = 81,
-        KEYCODE_MENU               = 82,
-        KEYCODE_NOTIFICATION       = 83,
-        KEYCODE_SEARCH             = 84,
-        KEYCODE_MEDIA_PLAY_PAUSE   = 85,
-        KEYCODE_MEDIA_STOP         = 86,
-        KEYCODE_MEDIA_NEXT         = 87,
-        KEYCODE_MEDIA_PREVIOUS     = 88,
-        KEYCODE_MEDIA_REWIND       = 89,
-        KEYCODE_MEDIA_FAST_FORWARD = 90,
-        KEYCODE_MUTE               = 91,
-        KEYCODE_PAGE_UP            = 92,
-        KEYCODE_PAGE_DOWN          = 93,
-        KEYCODE_PICTSYMBOLS        = 94,
-        KEYCODE_SWITCH_CHARSET     = 95,
-        KEYCODE_BUTTON_A           = 96,
-        KEYCODE_BUTTON_B           = 97,
-        KEYCODE_BUTTON_C           = 98,
-        KEYCODE_BUTTON_X           = 99,
-        KEYCODE_BUTTON_Y           = 100,
-        KEYCODE_BUTTON_Z           = 101,
-        KEYCODE_BUTTON_L1          = 102,
-        KEYCODE_BUTTON_R1          = 103,
-        KEYCODE_BUTTON_L2          = 104,
-        KEYCODE_BUTTON_R2          = 105,
-        KEYCODE_BUTTON_THUMBL      = 106,
-        KEYCODE_BUTTON_THUMBR      = 107,
-        KEYCODE_BUTTON_START       = 108,
-        KEYCODE_BUTTON_SELECT      = 109,
-        KEYCODE_BUTTON_MODE        = 110,
-        KEYCODE_ESCAPE             = 111,
-        KEYCODE_FORWARD_DEL        = 112,
-        KEYCODE_CTRL_LEFT          = 113,
-        KEYCODE_CTRL_RIGHT         = 114,
-        KEYCODE_CAPS_LOCK          = 115,
-        KEYCODE_SCROLL_LOCK        = 116,
-        KEYCODE_META_LEFT          = 117,
-        KEYCODE_META_RIGHT         = 118,
-        KEYCODE_FUNCTION           = 119,
-        KEYCODE_SYSRQ              = 120,
-        KEYCODE_BREAK              = 121,
-        KEYCODE_MOVE_HOME          = 122,
-        KEYCODE_MOVE_END           = 123,
-        KEYCODE_INSERT             = 124,
-        KEYCODE_FORWARD            = 125,
-        KEYCODE_MEDIA_PLAY         = 126,
-        KEYCODE_MEDIA_PAUSE        = 127,
-        KEYCODE_MEDIA_CLOSE        = 128,
-        KEYCODE_MEDIA_EJECT        = 129,
-        KEYCODE_MEDIA_RECORD       = 130,
-        KEYCODE_F1                 = 131,
-        KEYCODE_F2                 = 132,
-        KEYCODE_F3                 = 133,
-        KEYCODE_F4                 = 134,
-        KEYCODE_F5                 = 135,
-        KEYCODE_F6                 = 136,
-        KEYCODE_F7                 = 137,
-        KEYCODE_F8                 = 138,
-        KEYCODE_F9                 = 139,
-        KEYCODE_F10                = 140,
-        KEYCODE_F11                = 141,
-        KEYCODE_F12                = 142,
-        KEYCODE_NUM_LOCK           = 143,
-        KEYCODE_NUMPAD_0           = 144,
-        KEYCODE_NUMPAD_1           = 145,
-        KEYCODE_NUMPAD_2           = 146,
-        KEYCODE_NUMPAD_3           = 147,
-        KEYCODE_NUMPAD_4           = 148,
-        KEYCODE_NUMPAD_5           = 149,
-        KEYCODE_NUMPAD_6           = 150,
-        KEYCODE_NUMPAD_7           = 151,
-        KEYCODE_NUMPAD_8           = 152,
-        KEYCODE_NUMPAD_9           = 153,
-        KEYCODE_NUMPAD_DIVIDE      = 154,
-        KEYCODE_NUMPAD_MULTIPLY    = 155,
-        KEYCODE_NUMPAD_SUBTRACT    = 156,
-        KEYCODE_NUMPAD_ADD         = 157,
-        KEYCODE_NUMPAD_DOT         = 158,
-        KEYCODE_NUMPAD_COMMA       = 159,
-        KEYCODE_NUMPAD_ENTER       = 160,
-        KEYCODE_NUMPAD_EQUALS      = 161,
-        KEYCODE_NUMPAD_LEFT_PAREN  = 162,
-        KEYCODE_NUMPAD_RIGHT_PAREN = 163,
-        KEYCODE_VOLUME_MUTE        = 164,
-        KEYCODE_INFO               = 165,
-        KEYCODE_CHANNEL_UP         = 166,
-        KEYCODE_CHANNEL_DOWN       = 167,
-        KEYCODE_ZOOM_IN            = 168,
-        KEYCODE_ZOOM_OUT           = 169,
-        KEYCODE_TV                 = 170,
-        KEYCODE_WINDOW             = 171,
-        KEYCODE_GUIDE              = 172,
-        KEYCODE_DVR                = 173,
-        KEYCODE_BOOKMARK           = 174,
-        KEYCODE_CAPTIONS           = 175,
-        KEYCODE_SETTINGS           = 176,
-        KEYCODE_TV_POWER           = 177,
-        KEYCODE_TV_INPUT           = 178,
-        KEYCODE_STB_POWER          = 179,
-        KEYCODE_STB_INPUT          = 180,
-        KEYCODE_AVR_POWER          = 181,
-        KEYCODE_AVR_INPUT          = 182,
-        KEYCODE_PROG_RED           = 183,
-        KEYCODE_PROG_GREEN         = 184,
-        KEYCODE_PROG_YELLOW        = 185,
-        KEYCODE_PROG_BLUE          = 186,
-        KEYCODE_APP_SWITCH         = 187,
-        KEYCODE_BUTTON_1           = 188,
-        KEYCODE_BUTTON_2           = 189,
-        KEYCODE_BUTTON_3           = 190,
-        KEYCODE_BUTTON_4           = 191,
-        KEYCODE_BUTTON_5           = 192,
-        KEYCODE_BUTTON_6           = 193,
-        KEYCODE_BUTTON_7           = 194,
-        KEYCODE_BUTTON_8           = 195,
-        KEYCODE_BUTTON_9           = 196,
-        KEYCODE_BUTTON_10          = 197,
-        KEYCODE_BUTTON_11          = 198,
-        KEYCODE_BUTTON_12          = 199,
-        KEYCODE_BUTTON_13          = 200,
-        KEYCODE_BUTTON_14          = 201,
-        KEYCODE_BUTTON_15          = 202,
-        KEYCODE_BUTTON_16          = 203,
-        KEYCODE_LANGUAGE_SWITCH    = 204,
-        KEYCODE_MANNER_MODE        = 205,
-        KEYCODE_3D_MODE            = 206,
-        KEYCODE_CONTACTS           = 207,
-        KEYCODE_CALENDAR           = 208,
-        KEYCODE_MUSIC              = 209,
-        KEYCODE_CALCULATOR         = 210,
-
-        ACTION_DOWN                = 0,
-        ACTION_UP                  = 1,
-        ACTION_MULTIPLE            = 2,
-        META_ALT_ON                = 0x00000002,
-        META_ALT_LEFT_ON           = 0x00000010,
-        META_ALT_RIGHT_ON          = 0x00000020,
-        META_ALT_MASK              = META_ALT_RIGHT_ON | META_ALT_LEFT_ON | META_ALT_ON,
-        META_SHIFT_ON              = 0x00000001,
-        META_SHIFT_LEFT_ON         = 0x00000040,
-        META_SHIFT_RIGHT_ON        = 0x00000080,
-        META_SHIFT_MASK            = META_SHIFT_RIGHT_ON | META_SHIFT_LEFT_ON | META_SHIFT_ON,
-        META_SYM_ON                = 0x00000004,
-        FLAG_WOKE_HERE             = 0x00000001,
-        FLAG_SOFT_KEYBOARD         = 0x00000002,
-        FLAG_KEEP_TOUCH_MODE       = 0x00000004,
-        FLAG_FROM_SYSTEM           = 0x00000008,
-        FLAG_EDITOR_ACTION         = 0x00000010,
-        FLAG_CANCELED              = 0x00000020,
-        FLAG_VIRTUAL_HARD_KEY      = 0x00000040,
-        FLAG_LONG_PRESS            = 0x00000080,
-        FLAG_CANCELED_LONG_PRESS   = 0x00000100,
-        FLAG_TRACKING              = 0x00000200,
-        FLAG_START_TRACKING        = 0x40000000,
-        dummy_java_enum_list_end
-    };
+    AMETA_ALT_MASK              = AMETA_ALT_LEFT_ON   | AMETA_ALT_RIGHT_ON   | AMETA_ALT_ON,
+    AMETA_CTRL_MASK             = AMETA_CTRL_LEFT_ON  | AMETA_CTRL_RIGHT_ON  | AMETA_CTRL_ON,
+    AMETA_META_MASK             = AMETA_META_LEFT_ON  | AMETA_META_RIGHT_ON  | AMETA_META_ON,
+    AMETA_SHIFT_MASK            = AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_RIGHT_ON | AMETA_SHIFT_ON,
 };
 
 class AndroidMotionEvent
 {
 public:
     enum {
-        ACTION_MASK = 0xff,
         ACTION_DOWN = 0,
         ACTION_UP = 1,
         ACTION_MOVE = 2,
@@ -510,8 +447,9 @@ public:
         ACTION_HOVER_MOVE = 7,
         ACTION_HOVER_ENTER = 9,
         ACTION_HOVER_EXIT = 10,
-        ACTION_POINTER_ID_MASK = 0xff00,
-        ACTION_POINTER_ID_SHIFT = 8,
+        ACTION_MAGNIFY_START = 11,
+        ACTION_MAGNIFY = 12,
+        ACTION_MAGNIFY_END = 13,
         EDGE_TOP = 0x00000001,
         EDGE_BOTTOM = 0x00000002,
         EDGE_LEFT = 0x00000004,
@@ -542,69 +480,119 @@ public:
 
 class AndroidGeckoEvent : public WrappedJavaObject
 {
-public:
-    static void InitGeckoEventClass(JNIEnv *jEnv);
-
-    AndroidGeckoEvent() { }
-    AndroidGeckoEvent(int aType) {
-        Init(aType);
-    }
-    AndroidGeckoEvent(int x1, int y1, int x2, int y2) {
-        Init(x1, y1, x2, y2);
-    }
-    AndroidGeckoEvent(int aType, const nsIntRect &aRect) {
-        Init(aType, aRect);
-    }
-    AndroidGeckoEvent(JNIEnv *jenv, jobject jobj) {
-        Init(jenv, jobj);
-    }
-    AndroidGeckoEvent(AndroidGeckoEvent *aResizeEvent) {
-        Init(aResizeEvent);
+private:
+    AndroidGeckoEvent() {
     }
 
     void Init(JNIEnv *jenv, jobject jobj);
     void Init(int aType);
-    void Init(int x1, int y1, int x2, int y2);
-    void Init(int aType, const nsIntRect &aRect);
     void Init(AndroidGeckoEvent *aResizeEvent);
+
+public:
+    static void InitGeckoEventClass(JNIEnv *jEnv);
+
+    static AndroidGeckoEvent* MakeNativePoke() {
+        AndroidGeckoEvent *event = new AndroidGeckoEvent();
+        event->Init(NATIVE_POKE);
+        return event;
+    }
+
+    static AndroidGeckoEvent* MakeIMEEvent(int aAction) {
+        AndroidGeckoEvent *event = new AndroidGeckoEvent();
+        event->Init(IME_EVENT);
+        event->mAction = aAction;
+        return event;
+    }
+
+    static AndroidGeckoEvent* MakeDrawEvent(const nsIntRect& aRect) {
+        AndroidGeckoEvent *event = new AndroidGeckoEvent();
+        event->Init(DRAW);
+        event->mRect = aRect;
+        return event;
+    }
+
+    static AndroidGeckoEvent* MakeFromJavaObject(JNIEnv *jenv, jobject jobj) {
+        AndroidGeckoEvent *event = new AndroidGeckoEvent();
+        event->Init(jenv, jobj);
+        return event;
+    }
+
+    static AndroidGeckoEvent* CopyResizeEvent(AndroidGeckoEvent *aResizeEvent) {
+        AndroidGeckoEvent *event = new AndroidGeckoEvent();
+        event->Init(aResizeEvent);
+        return event;
+    }
+
+    static AndroidGeckoEvent* MakeBroadcastEvent(const nsCString& topic, const nsCString& data) {
+        AndroidGeckoEvent* event = new AndroidGeckoEvent();
+        event->Init(BROADCAST);
+        CopyUTF8toUTF16(topic, event->mCharacters);
+        CopyUTF8toUTF16(data, event->mCharactersExtra);
+        return event;
+    }
+
+    static AndroidGeckoEvent* MakeAddObserver(const nsAString &key, nsIObserver *observer) {
+        AndroidGeckoEvent *event = new AndroidGeckoEvent();
+        event->Init(ADD_OBSERVER);
+        event->mCharacters.Assign(key);
+        event->mObserver = observer;
+        return event;
+    }
 
     int Action() { return mAction; }
     int Type() { return mType; }
+    bool AckNeeded() { return mAckNeeded; }
     int64_t Time() { return mTime; }
-    nsTArray<nsIntPoint> Points() { return mPoints; }
-    nsTArray<int> PointIndicies() { return mPointIndicies; }
-    nsTArray<float> Pressures() { return mPressures; }
-    nsTArray<float> Orientations() { return mOrientations; }
-    nsTArray<nsIntPoint> PointRadii() { return mPointRadii; }
+    const nsTArray<nsIntPoint>& Points() { return mPoints; }
+    const nsTArray<int>& PointIndicies() { return mPointIndicies; }
+    const nsTArray<float>& Pressures() { return mPressures; }
+    const nsTArray<float>& Orientations() { return mOrientations; }
+    const nsTArray<nsIntPoint>& PointRadii() { return mPointRadii; }
     double X() { return mX; }
     double Y() { return mY; }
     double Z() { return mZ; }
     const nsIntRect& Rect() { return mRect; }
     nsAString& Characters() { return mCharacters; }
     nsAString& CharactersExtra() { return mCharactersExtra; }
+    nsAString& Data() { return mData; }
     int KeyCode() { return mKeyCode; }
     int MetaState() { return mMetaState; }
-    bool IsAltPressed() const { return (mMetaState & AndroidKeyEvent::META_ALT_MASK) != 0; }
-    bool IsShiftPressed() const { return (mMetaState & AndroidKeyEvent::META_SHIFT_MASK) != 0; }
+    uint32_t DomKeyLocation() { return mDomKeyLocation; }
+    bool IsAltPressed() const { return (mMetaState & AMETA_ALT_MASK) != 0; }
+    bool IsShiftPressed() const { return (mMetaState & AMETA_SHIFT_MASK) != 0; }
+    bool IsCtrlPressed() const { return (mMetaState & AMETA_CTRL_MASK) != 0; }
+    bool IsMetaPressed() const { return (mMetaState & AMETA_META_MASK) != 0; }
     int Flags() { return mFlags; }
     int UnicodeChar() { return mUnicodeChar; }
+    int BaseUnicodeChar() { return mBaseUnicodeChar; }
     int RepeatCount() const { return mRepeatCount; }
-    int Offset() { return mOffset; }
     int Count() { return mCount; }
+    int Start() { return mStart; }
+    int End() { return mEnd; }
     int PointerIndex() { return mPointerIndex; }
     int RangeType() { return mRangeType; }
     int RangeStyles() { return mRangeStyles; }
+    int RangeLineStyle() { return mRangeLineStyle; }
+    bool RangeBoldLine() { return mRangeBoldLine; }
     int RangeForeColor() { return mRangeForeColor; }
     int RangeBackColor() { return mRangeBackColor; }
+    int RangeLineColor() { return mRangeLineColor; }
     nsGeoPosition* GeoPosition() { return mGeoPosition; }
     double Bandwidth() { return mBandwidth; }
     bool CanBeMetered() { return mCanBeMetered; }
     short ScreenOrientation() { return mScreenOrientation; }
     RefCountedJavaObject* ByteBuffer() { return mByteBuffer; }
+    int Width() { return mWidth; }
+    int Height() { return mHeight; }
+    nsTouchEvent MakeTouchEvent(nsIWidget* widget);
+    MultiTouchInput MakeMultiTouchInput(nsIWidget* widget);
+    void UnionRect(nsIntRect const& aRect);
+    nsIObserver *Observer() { return mObserver; }
 
 protected:
     int mAction;
     int mType;
+    bool mAckNeeded;
     int64_t mTime;
     nsTArray<nsIntPoint> mPoints;
     nsTArray<nsIntPoint> mPointRadii;
@@ -613,19 +601,24 @@ protected:
     nsTArray<float> mPressures;
     nsIntRect mRect;
     int mFlags, mMetaState;
-    int mKeyCode, mUnicodeChar;
+    uint32_t mDomKeyLocation;
+    int mKeyCode, mUnicodeChar, mBaseUnicodeChar;
     int mRepeatCount;
-    int mOffset, mCount;
-    int mRangeType, mRangeStyles;
-    int mRangeForeColor, mRangeBackColor;
+    int mCount;
+    int mStart, mEnd;
+    int mRangeType, mRangeStyles, mRangeLineStyle;
+    bool mRangeBoldLine;
+    int mRangeForeColor, mRangeBackColor, mRangeLineColor;
     double mX, mY, mZ;
     int mPointerIndex;
-    nsString mCharacters, mCharactersExtra;
+    nsString mCharacters, mCharactersExtra, mData;
     nsRefPtr<nsGeoPosition> mGeoPosition;
     double mBandwidth;
     bool mCanBeMetered;
     short mScreenOrientation;
     nsRefPtr<RefCountedJavaObject> mByteBuffer;
+    int mWidth, mHeight;
+    nsCOMPtr<nsIObserver> mObserver;
 
     void ReadIntArray(nsTArray<int> &aVals,
                       JNIEnv *jenv,
@@ -642,10 +635,14 @@ protected:
     void ReadRectField(JNIEnv *jenv);
     void ReadCharactersField(JNIEnv *jenv);
     void ReadCharactersExtraField(JNIEnv *jenv);
+    void ReadDataField(JNIEnv *jenv);
+
+    uint32_t ReadDomKeyLocation(JNIEnv* jenv, jobject jGeckoEventObj);
 
     static jclass jGeckoEventClass;
     static jfieldID jActionField;
     static jfieldID jTypeField;
+    static jfieldID jAckNeededField;
     static jfieldID jTimeField;
     static jfieldID jPoints;
     static jfieldID jPointIndicies;
@@ -661,18 +658,25 @@ protected:
 
     static jfieldID jCharactersField;
     static jfieldID jCharactersExtraField;
+    static jfieldID jDataField;
     static jfieldID jKeyCodeField;
     static jfieldID jMetaStateField;
+    static jfieldID jDomKeyLocationField;
     static jfieldID jFlagsField;
-    static jfieldID jOffsetField;
     static jfieldID jCountField;
+    static jfieldID jStartField;
+    static jfieldID jEndField;
     static jfieldID jPointerIndexField;
     static jfieldID jUnicodeCharField;
+    static jfieldID jBaseUnicodeCharField;
     static jfieldID jRepeatCountField;
     static jfieldID jRangeTypeField;
     static jfieldID jRangeStylesField;
+    static jfieldID jRangeLineStyleField;
+    static jfieldID jRangeBoldLineField;
     static jfieldID jRangeForeColorField;
     static jfieldID jRangeBackColorField;
+    static jfieldID jRangeLineColorField;
     static jfieldID jLocationField;
 
     static jfieldID jBandwidthField;
@@ -681,50 +685,68 @@ protected:
     static jfieldID jScreenOrientationField;
     static jfieldID jByteBufferField;
 
+    static jfieldID jWidthField;
+    static jfieldID jHeightField;
+
+    static jclass jDomKeyLocationClass;
+    static jfieldID jDomKeyLocationValueField;
+
 public:
     enum {
         NATIVE_POKE = 0,
         KEY_EVENT = 1,
         MOTION_EVENT = 2,
         SENSOR_EVENT = 3,
-        UNUSED1_EVENT = 4,
         LOCATION_EVENT = 5,
         IME_EVENT = 6,
         DRAW = 7,
         SIZE_CHANGED = 8,
-        ACTIVITY_STOPPING = 9,
-        ACTIVITY_PAUSING = 10,
-        ACTIVITY_SHUTDOWN = 11,
+        APP_BACKGROUNDING = 9,
+        APP_FOREGROUNDING = 10,
         LOAD_URI = 12,
-        SURFACE_CREATED = 13,
-        SURFACE_DESTROYED = 14,
-        GECKO_EVENT_SYNC = 15,
-        FORCED_RESIZE = 16,
-        ACTIVITY_START = 17,
+        NOOP = 15,
+        FORCED_RESIZE = 16, // used internally in nsAppShell/nsWindow
         BROADCAST = 19,
         VIEWPORT = 20,
         VISITED = 21,
         NETWORK_CHANGED = 22,
-        UNUSED3_EVENT = 23,
-        ACTIVITY_RESUMING = 24,
-        SCREENSHOT = 25,
-        UNUSED2_EVENT = 26,
+        THUMBNAIL = 25,
         SCREENORIENTATION_CHANGED = 27,
-        COMPOSITOR_PAUSE = 28,
-        COMPOSITOR_RESUME = 29,
-        PAINT_LISTEN_START_EVENT = 30,
+        COMPOSITOR_CREATE = 28,
+        COMPOSITOR_PAUSE = 29,
+        COMPOSITOR_RESUME = 30,
+        NATIVE_GESTURE_EVENT = 31,
+        IME_KEY_EVENT = 32,
+        CALL_OBSERVER = 33,
+        REMOVE_OBSERVER = 34,
+        LOW_MEMORY = 35,
+        NETWORK_LINK_CHANGE = 36,
+        ADD_OBSERVER = 37,
         dummy_java_enum_list_end
     };
 
     enum {
-        IME_COMPOSITION_END = 0,
-        IME_COMPOSITION_BEGIN = 1,
-        IME_SET_TEXT = 2,
-        IME_GET_TEXT = 3,
-        IME_DELETE_TEXT = 4,
-        IME_SET_SELECTION = 5,
-        IME_GET_SELECTION = 6,
-        IME_ADD_RANGE = 7
+        // Memory pressue levels, keep in sync with those in MemoryMonitor.java
+        MEMORY_PRESSURE_NONE = 0,
+        MEMORY_PRESSURE_CLEANUP = 1,
+        MEMORY_PRESSURE_LOW = 2,
+        MEMORY_PRESSURE_MEDIUM = 3,
+        MEMORY_PRESSURE_HIGH = 4
+    };
+
+    enum {
+        // Internal Gecko events
+        IME_FLUSH_CHANGES = -2,
+        IME_UPDATE_CONTEXT = -1,
+        // Events from Java to Gecko
+        IME_SYNCHRONIZE = 0,
+        IME_REPLACE_TEXT = 1,
+        IME_SET_SELECTION = 2,
+        IME_ADD_COMPOSITION_RANGE = 3,
+        IME_UPDATE_COMPOSITION = 4,
+        IME_REMOVE_COMPOSITION = 5,
+        IME_ACKNOWLEDGE_FOCUS = 6,
+        dummy_ime_enum_list_end
     };
 };
 

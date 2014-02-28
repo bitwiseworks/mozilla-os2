@@ -56,11 +56,12 @@ static bool test_basic_array(ElementType *data,
     return false;
   // ensure sort results in ascending order
   ary.Sort();
-  uint32_t j = 0, k;
-  if (ary.GreatestIndexLtEq(extra, k))
+  uint32_t j = 0, k = ary.IndexOfFirstElementGt(extra);
+  if (k != 0 && ary[k-1] == extra)
     return false;
   for (i = 0; i < ary.Length(); ++i) {
-    if (!ary.GreatestIndexLtEq(ary[i], k))
+    k = ary.IndexOfFirstElementGt(ary[i]);
+    if (k == 0 || ary[k-1] != ary[i])
       return false;
     if (k < j)
       return false;
@@ -95,9 +96,9 @@ static bool test_basic_array(ElementType *data,
     return false;
   if (ary[index] != extra)
     return false;
-  if (ary.IndexOf(extra) == PR_UINT32_MAX)
+  if (ary.IndexOf(extra) == UINT32_MAX)
     return false;
-  if (ary.LastIndexOf(extra) == PR_UINT32_MAX)
+  if (ary.LastIndexOf(extra) == UINT32_MAX)
     return false;
   // ensure proper searching
   if (ary.IndexOf(extra) > ary.LastIndexOf(extra))
@@ -118,6 +119,12 @@ static bool test_basic_array(ElementType *data,
   ary.RemoveElementsAt(copy.Length(), copy.Length());
   ary.Compact();
   if (ary.Capacity() == cap)
+    return false;
+
+  ary.Clear();
+  if (ary.IndexOf(extra) != UINT32_MAX)
+    return false;
+  if (ary.LastIndexOf(extra) != UINT32_MAX)
     return false;
 
   ary.Clear();
@@ -321,7 +328,7 @@ typedef nsCOMPtr<nsIFile> FilePointer;
 class nsFileNameComparator {
   public:
     bool Equals(const FilePointer &a, const char *b) const {
-      nsCAutoString name;
+      nsAutoCString name;
       a->GetNativeLeafName(name);
       return name.Equals(b);
     }
@@ -715,11 +722,11 @@ static bool test_swap() {
 
   // Swap two big auto arrays.
   {
-    const int size = 8192;
-    nsAutoTArray<int, size> a;
-    nsAutoTArray<int, size> b;
+    const unsigned size = 8192;
+    nsAutoTArray<unsigned, size> a;
+    nsAutoTArray<unsigned, size> b;
 
-    for (int i = 0; i < size; i++) {
+    for (unsigned i = 0; i < size; i++) {
       a.AppendElement(i);
       b.AppendElement(i + 1);
     }
@@ -735,7 +742,7 @@ static bool test_swap() {
     CHECK_EQ_INT(a.Length(), size);
     CHECK_EQ_INT(b.Length(), size);
 
-    for (int i = 0; i < size; i++) {
+    for (unsigned i = 0; i < size; i++) {
       CHECK_EQ_INT(a[i], i + 1);
       CHECK_EQ_INT(b[i], i);
     }
@@ -865,6 +872,59 @@ static bool test_fallible()
   return false;
 }
 
+static bool test_conversion_operator() {
+  FallibleTArray<int> f;
+  const FallibleTArray<int> fconst;
+  AutoFallibleTArray<int, 8> fauto;
+  const AutoFallibleTArray<int, 8> fautoconst;
+
+  InfallibleTArray<int> i;
+  const InfallibleTArray<int> iconst;
+  AutoInfallibleTArray<int, 8> iauto;
+  const AutoInfallibleTArray<int, 8> iautoconst;
+
+  nsTArray<int> t;
+  const nsTArray<int> tconst;
+  nsAutoTArray<int, 8> tauto;
+  const nsAutoTArray<int, 8> tautoconst;
+
+#define CHECK_ARRAY_CAST(type)                                 \
+  do {                                                         \
+    const type<int>& z1 = f;                                   \
+    if ((void*)&z1 != (void*)&f) return false;                 \
+    const type<int>& z2 = fconst;                              \
+    if ((void*)&z2 != (void*)&fconst) return false;            \
+    const type<int>& z3 = fauto;                               \
+    if ((void*)&z3 != (void*)&fauto) return false;             \
+    const type<int>& z4 = fautoconst;                          \
+    if ((void*)&z4 != (void*)&fautoconst) return false;        \
+    const type<int>& z5 = i;                                   \
+    if ((void*)&z5 != (void*)&i) return false;                 \
+    const type<int>& z6 = iconst;                              \
+    if ((void*)&z6 != (void*)&iconst) return false;            \
+    const type<int>& z7 = iauto;                               \
+    if ((void*)&z7 != (void*)&iauto) return false;             \
+    const type<int>& z8 = iautoconst;                          \
+    if ((void*)&z8 != (void*)&iautoconst) return false;        \
+    const type<int>& z9 = t;                                   \
+    if ((void*)&z9 != (void*)&t) return false;                 \
+    const type<int>& z10 = tconst;                             \
+    if ((void*)&z10 != (void*)&tconst) return false;           \
+    const type<int>& z11 = tauto;                              \
+    if ((void*)&z11 != (void*)&tauto) return false;            \
+    const type<int>& z12 = tautoconst;                         \
+    if ((void*)&z12 != (void*)&tautoconst) return false;       \
+  } while (0)
+
+  CHECK_ARRAY_CAST(FallibleTArray);
+  CHECK_ARRAY_CAST(InfallibleTArray);
+  CHECK_ARRAY_CAST(nsTArray);
+
+#undef CHECK_ARRAY_CAST
+
+  return true;
+}
+
 //----
 
 typedef bool (*TestFunc)();
@@ -890,6 +950,7 @@ static const struct Test {
   DECL_TEST(test_heap),
   DECL_TEST(test_swap),
   DECL_TEST(test_fallible),
+  DECL_TEST(test_conversion_operator),
   { nullptr, nullptr }
 };
 

@@ -26,6 +26,9 @@
 #include "nsDisplayList.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsIReflowCallback.h"
+#include "mozilla/Likely.h"
+#include "nsIScriptError.h"
+#include "nsContentUtils.h"
 
 using namespace mozilla;
 
@@ -36,7 +39,7 @@ using namespace mozilla;
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLContainerFrame)
 
 NS_QUERYFRAME_HEAD(nsMathMLContainerFrame)
-  NS_QUERYFRAME_ENTRY(nsMathMLFrame)
+  NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 // =============================================================================
@@ -413,7 +416,7 @@ nsMathMLContainerFrame::Stretch(nsRenderingContext& aRenderingContext,
           aDesiredStretchSize.width = mBoundingMetrics.width;
           aDesiredStretchSize.mBoundingMetrics.width = mBoundingMetrics.width;
 
-          nscoord dx = (NS_MATHML_IS_RTL(mPresentationData.flags) ?
+          nscoord dx = (StyleVisibility()->mDirection ?
                         coreData.trailingSpace : coreData.leadingSpace);
           if (dx != 0) {
             mBoundingMetrics.leftBearing += dx;
@@ -618,7 +621,7 @@ nsMathMLContainerFrame::PropagatePresentationDataFromChildAt(nsIFrame*       aPa
  */
 
 
-NS_IMETHODIMP
+void
 nsMathMLContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                          const nsRect&           aDirtyRect,
                                          const nsDisplayListSet& aLists)
@@ -626,18 +629,17 @@ nsMathMLContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // report an error if something wrong was found in this frame
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags)) {
     if (!IsVisibleForPainting(aBuilder))
-      return NS_OK;
+      return;
 
-    return aLists.Content()->AppendNewToTop(
-        new (aBuilder) nsDisplayMathMLError(aBuilder, this));
+    aLists.Content()->AppendNewToTop(
+      new (aBuilder) nsDisplayMathMLError(aBuilder, this));
+    return;
   }
 
-  nsresult rv = DisplayBorderBackgroundOutline(aBuilder, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DisplayBorderBackgroundOutline(aBuilder, aLists);
 
-  rv = BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, aLists,
-                                           DISPLAY_CHILD_INLINE);
-  NS_ENSURE_SUCCESS(rv, rv);
+  BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, aLists,
+                                      DISPLAY_CHILD_INLINE);
 
 #if defined(DEBUG) && defined(SHOW_BOUNDING_BOX)
   // for visual debug
@@ -646,9 +648,8 @@ nsMathMLContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // your mBoundingMetrics and mReference point, and set
   // mPresentationData.flags |= NS_MATHML_SHOW_BOUNDING_METRICS
   // in the Init() of your sub-class
-  rv = DisplayBoundingMetrics(aBuilder, this, mReference, mBoundingMetrics, aLists);
+  DisplayBoundingMetrics(aBuilder, this, mReference, mBoundingMetrics, aLists);
 #endif
-  return rv;
 }
 
 // Note that this method re-builds the automatic data in the children -- not
@@ -1172,7 +1173,7 @@ public:
     mX(0),
     mCarrySpace(0),
     mFromFrameType(eMathMLFrameType_UNKNOWN),
-    mRTL(NS_MATHML_IS_RTL(aParentFrame->mPresentationData.flags))
+    mRTL(aParentFrame->StyleVisibility()->mDirection)
   {
     if (!mRTL) {
       mChildFrame = aParentFrame->mFrames.FirstChild();
@@ -1204,7 +1205,7 @@ public:
     InitMetricsForChild();
 
     // add inter frame spacing
-    const nsStyleFont* font = mParentFrame->GetStyleFont();
+    const nsStyleFont* font = mParentFrame->StyleFont();
     nscoord space =
       GetInterFrameSpacing(font->mScriptLevel,
                            prevFrameType, mChildFrameType,
@@ -1285,7 +1286,7 @@ nsMathMLContainerFrame::Place(nsRenderingContext& aRenderingContext,
   // another math frame
   mBoundingMetrics.width = child.X();
 
-  aDesiredSize.width = mBoundingMetrics.width;
+  aDesiredSize.width = std::max(0, mBoundingMetrics.width);
   aDesiredSize.height = ascent + descent;
   aDesiredSize.ascent = ascent;
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
@@ -1373,8 +1374,8 @@ GetInterFrameSpacingFor(int32_t         aScriptLevel,
       prevFrameType, childFrameType, &fromFrameType, &carrySpace);
     if (aChildFrame == childFrame) {
       // get thinspace
-      nsStyleContext* parentContext = aParentFrame->GetStyleContext();
-      nscoord thinSpace = GetThinSpace(parentContext->GetStyleFont());
+      nsStyleContext* parentContext = aParentFrame->StyleContext();
+      nscoord thinSpace = GetThinSpace(parentContext->StyleFont());
       // we are done
       return space * thinSpace;
     }
@@ -1390,13 +1391,13 @@ nsMathMLContainerFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
 {
   nscoord gap = 0;
   nsIContent* parentContent = mParent->GetContent();
-  if (NS_UNLIKELY(!parentContent)) {
+  if (MOZ_UNLIKELY(!parentContent)) {
     return 0;
   }
   nsIAtom *parentTag = parentContent->Tag();
   if (parentContent->GetNameSpaceID() == kNameSpaceID_MathML && 
       (parentTag == nsGkAtoms::math || parentTag == nsGkAtoms::mtd_)) {
-    gap = GetInterFrameSpacingFor(GetStyleFont()->mScriptLevel, mParent, this);
+    gap = GetInterFrameSpacingFor(StyleFont()->mScriptLevel, mParent, this);
     // add our own italic correction
     nscoord leftCorrection = 0, italicCorrection = 0;
     GetItalicCorrection(mBoundingMetrics, leftCorrection, italicCorrection);
@@ -1423,7 +1424,7 @@ nsMathMLContainerFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
 nsMathMLContainerFrame::DidReflowChildren(nsIFrame* aFirst, nsIFrame* aStop)
 
 {
-  if (NS_UNLIKELY(!aFirst))
+  if (MOZ_UNLIKELY(!aFirst))
     return;
 
   for (nsIFrame* frame = aFirst;
@@ -1437,7 +1438,7 @@ nsMathMLContainerFrame::DidReflowChildren(nsIFrame* aFirst, nsIFrame* aStop)
         DidReflowChildren(grandchild, nullptr);
 
       frame->DidReflow(frame->PresContext(), nullptr,
-                       NS_FRAME_REFLOW_FINISHED);
+                       nsDidReflowStatus::FINISHED);
     }
   }
 }
@@ -1514,6 +1515,33 @@ nsMathMLContainerFrame::TransmitAutomaticDataForMrowLikeElement()
   }
 
   return NS_OK;
+}
+
+nsresult
+nsMathMLContainerFrame::ReportErrorToConsole(const char*       errorMsgId,
+                                             const PRUnichar** aParams,
+                                             uint32_t          aParamCount)
+{
+  return nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
+                                         "MathML", mContent->OwnerDoc(),
+                                         nsContentUtils::eMATHML_PROPERTIES,
+                                         errorMsgId, aParams, aParamCount);
+}
+
+nsresult
+nsMathMLContainerFrame::ReportParseError(const PRUnichar* aAttribute,
+                                         const PRUnichar* aValue)
+{
+  const PRUnichar* argv[] = 
+    { aValue, aAttribute, mContent->Tag()->GetUTF16String() };
+  return ReportErrorToConsole("AttributeParsingError", argv, 3);
+}
+
+nsresult
+nsMathMLContainerFrame::ReportChildCountError()
+{
+  const PRUnichar* arg = mContent->Tag()->GetUTF16String();
+  return ReportErrorToConsole("ChildCountIncorrect", &arg, 1);
 }
 
 //==========================

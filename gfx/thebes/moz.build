@@ -1,0 +1,262 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'thebes'
+
+EXPORTS += [
+    'RoundedRect.h',
+    'gfx2DGlue.h',
+    'gfx3DMatrix.h',
+    'gfxASurface.h',
+    'gfxAlphaRecovery.h',
+    'gfxBaseSharedMemorySurface.h',
+    'gfxBlur.h',
+    'gfxCachedTempSurface.h',
+    'gfxColor.h',
+    'gfxContext.h',
+    'gfxDrawable.h',
+    'gfxFailure.h',
+    'gfxFont.h',
+    'gfxFontConstants.h',
+    'gfxFontFeatures.h',
+    'gfxFontTest.h',
+    'gfxFontUtils.h',
+    'gfxImageSurface.h',
+    'gfxLineSegment.h',
+    'gfxMatrix.h',
+    'gfxPath.h',
+    'gfxPattern.h',
+    'gfxPlatform.h',
+    'gfxPoint.h',
+    'gfxPoint3D.h',
+    'gfxPointH3D.h',
+    'gfxQuad.h',
+    'gfxQuaternion.h',
+    'gfxRect.h',
+    'gfxReusableSurfaceWrapper.h',
+    'gfxSVGGlyphs.h',
+    'gfxSharedImageSurface.h',
+    'gfxSharedQuartzSurface.h',
+    'gfxSkipChars.h',
+    'gfxTeeSurface.h',
+    'gfxTypes.h',
+    'gfxUserFontSet.h',
+    'gfxUtils.h',
+    'nsSurfaceTexture.h',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    EXPORTS += [
+        'gfxAndroidPlatform.h',
+        'gfxFT2FontBase.h',
+        'gfxFT2Fonts.h',
+        'gfxPDFSurface.h',
+    ]
+    CPP_SOURCES += [
+        'gfxAndroidPlatform.cpp',
+        'gfxFT2Fonts.cpp',
+        'gfxFT2FontBase.cpp',
+        'gfxFT2Utils.cpp',
+        'gfxFT2FontList.cpp',
+        'gfxPDFSurface.cpp',
+        'nsUnicodeRange.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    EXPORTS += [
+        'gfxAndroidPlatform.h',
+        'gfxFT2FontBase.h',
+        'gfxFT2Fonts.h',
+        'gfxPDFSurface.h',
+    ]
+    CPP_SOURCES += [
+        'gfxAndroidPlatform.cpp',
+        'gfxFT2Fonts.cpp',
+        'gfxFT2FontBase.cpp',
+        'gfxFT2Utils.cpp',
+        'gfxFT2FontList.cpp',
+        'gfxPDFSurface.cpp',
+        'nsUnicodeRange.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    EXPORTS += [
+        'gfxPlatformMac.h',
+        'gfxQuartzImageSurface.h',
+        'gfxQuartzNativeDrawing.h',
+        'gfxQuartzSurface.h',
+    ]
+    CPP_SOURCES += [
+        'gfxQuartzSurface.cpp',
+        'gfxQuartzImageSurface.cpp',
+        'gfxPlatformMac.cpp',
+        'gfxMacFont.cpp',
+        'gfxCoreTextShaper.cpp',
+        'nsUnicodeRange.cpp',
+        'gfxQuartzNativeDrawing.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_GTK']:
+    EXPORTS += [
+        'gfxFT2FontBase.h',
+        'gfxGdkNativeRenderer.h',
+        'gfxPDFSurface.h',
+        'gfxPSSurface.h',
+        'gfxPlatformGtk.h',
+    ]
+
+    CPP_SOURCES += [
+        'gfxPlatformGtk.cpp',
+        'gfxGdkNativeRenderer.cpp',
+        'gfxPDFSurface.cpp',
+        'gfxPSSurface.cpp',
+        'gfxFontconfigUtils.cpp',
+        'gfxFT2FontBase.cpp',
+        'gfxFT2Utils.cpp',
+        'nsUnicodeRange.cpp',
+    ]
+
+    if CONFIG['MOZ_X11']:
+        EXPORTS += [
+            'gfxXlibNativeRenderer.h',
+            'gfxXlibSurface.h',
+        ]
+        CPP_SOURCES += [
+            'gfxXlibSurface.cpp',
+            'gfxXlibNativeRenderer.cpp',
+        ]
+
+    if CONFIG['MOZ_PANGO']:
+        EXPORTS += ['gfxPangoFonts.h']
+        CPP_SOURCES += [
+            'gfxPangoFonts.cpp',
+        ]
+    else:
+        EXPORTS += ['gfxFT2Fonts.h']
+        CPP_SOURCES += [
+            'gfxPangoFonts.cpp',
+        ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    EXPORTS += [
+        'gfxOS2Fonts.h',
+        'gfxOS2Platform.h',
+        'gfxOS2Surface.h',
+        'gfxPDFSurface.h',
+    ]
+    CPP_SOURCES += [
+        'gfxOS2Fonts.cpp',
+        'gfxOS2Platform.cpp',
+        'gfxOS2Surface.cpp',
+        'nsUnicodeRange.cpp',
+        'gfxFontconfigUtils.cpp',
+        'gfxPDFSurface.cpp'
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
+    EXPORTS += [
+        'gfxFT2FontBase.h',
+        'gfxPDFSurface.h',
+        'gfxQPainterSurface.h',
+        'gfxQtNativeRenderer.h',
+        'gfxQtPlatform.h',
+    ]
+    CPP_SOURCES += [
+        'gfxQtPlatform.cpp',
+        'gfxQPainterSurface.cpp',
+        'gfxFT2FontBase.cpp',
+        'gfxFT2Utils.cpp',
+        'gfxFontconfigUtils.cpp',
+        'nsUnicodeRange.cpp',
+        'gfxPDFSurface.cpp',
+    ]
+
+    if CONFIG['MOZ_X11']:
+        EXPORTS += [
+            'gfxXlibSurface.h',
+        ]
+        CPP_SOURCES += [
+            'gfxXlibSurface.cpp',
+            'gfxQtNativeRenderer.cpp',
+        ]
+
+    if CONFIG['MOZ_PANGO']:
+        EXPORTS += ['gfxPangoFonts.h']
+        CPP_SOURCES += [
+            'gfxPangoFonts.cpp',
+        ]
+    else:
+        EXPORTS += ['gfxFT2Fonts.h']
+        CPP_SOURCES += [
+            'gfxFT2Fonts.cpp',
+        ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    EXPORTS += [
+        'gfxD2DSurface.h',
+        'gfxDWriteFonts.h',
+        'gfxGDIFont.h',
+        'gfxGDIFontList.h',
+        'gfxPDFSurface.h',
+        'gfxPlatformFontList.h',
+        'gfxWindowsNativeDrawing.h',
+        'gfxWindowsPlatform.h',
+        'gfxWindowsSurface.h',
+    ]
+    CPP_SOURCES += [
+        'gfxWindowsPlatform.cpp',
+        'gfxWindowsSurface.cpp',
+        'gfxWindowsNativeDrawing.cpp',
+        'nsUnicodeRange.cpp',
+        'gfxGDIFont.cpp',
+        'gfxGDIFontList.cpp',
+        'gfxGDIShaper.cpp',
+        'gfxUniscribeShaper.cpp',
+        'gfxPDFSurface.cpp',
+    ]
+    if CONFIG['MOZ_ENABLE_DWRITE_FONT']:
+        CPP_SOURCES += [
+            'gfxDWriteFonts.cpp',
+            'gfxDWriteShaper.cpp',
+            'gfxDWriteTextAnalysis.cpp',
+            'gfxDWriteCommon.cpp',
+            'gfxD2DSurface.cpp',
+            'gfxDWriteFontList.cpp',
+        ]
+
+# Are we targeting x86 or x64?  If so, build gfxAlphaRecoverySSE2.cpp.
+if CONFIG['INTEL_ARCHITECTURE']:
+    CPP_SOURCES += [
+        'gfxAlphaRecoverySSE2.cpp',
+    ]
+
+CPP_SOURCES += [
+    'gfx3DMatrix.cpp',
+    'gfxASurface.cpp',
+    'gfxAlphaRecovery.cpp',
+    'gfxBaseSharedMemorySurface.cpp',
+    'gfxBlur.cpp',
+    'gfxCachedTempSurface.cpp',
+    'gfxContext.cpp',
+    'gfxDrawable.cpp',
+    'gfxFont.cpp',
+    'gfxFontFeatures.cpp',
+    'gfxFontMissingGlyphs.cpp',
+    'gfxFontTest.cpp',
+    'gfxFontUtils.cpp',
+    'gfxGraphiteShaper.cpp',
+    'gfxHarfBuzzShaper.cpp',
+    'gfxImageSurface.cpp',
+    'gfxMatrix.cpp',
+    'gfxPath.cpp',
+    'gfxPattern.cpp',
+    'gfxPlatform.cpp',
+    'gfxPlatformFontList.cpp',
+    'gfxRect.cpp',
+    'gfxReusableSurfaceWrapper.cpp',
+    'gfxSVGGlyphs.cpp',
+    'gfxScriptItemizer.cpp',
+    'gfxSkipChars.cpp',
+    'gfxTeeSurface.cpp',
+    'gfxUserFontSet.cpp',
+    'gfxUtils.cpp',
+    'nsSurfaceTexture.cpp',
+]
+

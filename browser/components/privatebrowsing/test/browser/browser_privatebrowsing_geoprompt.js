@@ -6,45 +6,64 @@
 // control inside the private browsing mode.
 
 function test() {
-  // initialization
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
-
   const testPageURL = "http://mochi.test:8888/browser/" +
     "browser/components/privatebrowsing/test/browser/browser_privatebrowsing_geoprompt_page.html";
   waitForExplicitFinish();
 
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function () {
-    gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
+    function checkGeolocation(aPrivateMode, aWindow, aCallback) {
+    executeSoon(function() {
+      aWindow.gBrowser.selectedTab = aWindow.gBrowser.addTab();
+      aWindow.gBrowser.selectedBrowser.addEventListener("load", function () {
+        if (aWindow.content.location != testPageURL) {
+          aWindow.content.location = testPageURL;
+          return;
+        }
+        aWindow.gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
 
-    let notification = PopupNotifications.getNotification("geolocation");
-    ok(notification, "Notification should exist");
-    ok(notification.secondaryActions.length > 1, "Secondary actions should exist (always/never remember)");
-    notification.remove();
+        function runTest() {
+          let notification = aWindow.PopupNotifications.getNotification("geolocation");
+          if (!notification) {
+            // Wait until the notification is available
+            executeSoon(runTest);
+            return;
+          }
+          if (aPrivateMode) {
+            // Make sure the notification is correctly displayed without a remember control
+            is(notification.secondaryActions.length, 0, "Secondary actions shouldn't exist (always/never remember)");
+          } else {
+            ok(notification.secondaryActions.length > 1, "Secondary actions should exist (always/never remember)");
+          }
+          notification.remove();
 
-    gBrowser.removeCurrentTab();
+          aWindow.gBrowser.removeCurrentTab();
+          aCallback();
+        }
+        runTest();
+      }, true);
+    });
+  };
 
-    // enter the private browsing mode
-    pb.privateBrowsingEnabled = true;
+  let windowsToClose = [];
+  function testOnWindow(options, callback) {
+    let win = OpenBrowserWindow(options);
+    win.addEventListener("load", function onLoad() {
+      win.removeEventListener("load", onLoad, false);
+      windowsToClose.push(win);
+      callback(win);
+    }, false);
+  };
 
-    gBrowser.selectedTab = gBrowser.addTab();
-    gBrowser.selectedBrowser.addEventListener("load", function () {
-      gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(win) {
+      win.close();
+    });
+  });
 
-      // Make sure the notification is correctly displayed without a remember control
-      let notification = PopupNotifications.getNotification("geolocation");
-      ok(notification, "Notification should exist");
-      is(notification.secondaryActions.length, 0, "Secondary actions shouldn't exist (always/never remember)");
-      notification.remove();
-
-      gBrowser.removeCurrentTab();
-
-      // cleanup
-      pb.privateBrowsingEnabled = false;
-      finish();
-    }, true);
-    content.location = testPageURL;
-  }, true);
-  content.location = testPageURL;
+  testOnWindow({private: false}, function(win) {
+    checkGeolocation(false, win, function() {
+      testOnWindow({private: true}, function(win) {
+        checkGeolocation(true, win, finish);
+      });
+    });
+  });
 }

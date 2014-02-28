@@ -28,9 +28,10 @@ load 349355-1.html
 load 354645-1.xul
 load 360599-1.html
 load 366200-1.xhtml
-load 369216-1.html
 load 371466-1.xhtml
 load 377360-1.xhtml
+load 377960-1.html
+load 377960-2.html
 load 384663-1.html
 load 386000-1.html
 load 386794-1.html
@@ -104,6 +105,7 @@ load 700090-2.html
 load 700512.html
 load xhr_html_nullresponse.html
 load 709384.html
+load 709954.html
 load 713417.html
 load 713417-2.html
 load 715056.html
@@ -113,3 +115,23 @@ load 771639.html
 load 752226-1.html
 load 752226-2.html
 HTTP(..) load xhr_abortinprogress.html
+load 786854.html
+load xhr_empty_datauri.html
+load 815043.html
+load 815276.html
+load 815477.html
+load 815500.html
+load 816253.html
+load 822691.html
+load 822723.html
+load 824719.html
+load 827190.html
+load 828054.html
+load 829428.html
+load 836890.html
+load 841205.html
+load 844404.html
+load 847127.html
+load 849601.html
+load 863950.html
+load 864448.html

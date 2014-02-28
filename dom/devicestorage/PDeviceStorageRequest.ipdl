@@ -27,19 +27,29 @@ struct BlobResponse
 
 struct DeviceStorageFileValue
 {
+  nsString storageName;
   nsString name;
-  nsString fullpath;
 };
 
 struct EnumerationResponse
 {
+  nsString type;
+  nsString rootdir;
   DeviceStorageFileValue[] paths;
 };
 
-struct StatStorageResponse
+struct FreeSpaceStorageResponse
 {
-  int64_t totalBytes;
-  int64_t freeBytes;
+  uint64_t freeBytes;
+};
+
+struct UsedSpaceStorageResponse
+{
+  uint64_t usedBytes;
+};
+
+struct AvailableStorageResponse
+{
   nsString mountState;
 };
 
@@ -49,7 +59,9 @@ union DeviceStorageResponseValue
   SuccessResponse;
   BlobResponse;
   EnumerationResponse;
-  StatStorageResponse;
+  FreeSpaceStorageResponse;
+  UsedSpaceStorageResponse;
+  AvailableStorageResponse;
 };
 
 sync protocol PDeviceStorageRequest {

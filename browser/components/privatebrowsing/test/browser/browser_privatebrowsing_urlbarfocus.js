@@ -2,61 +2,66 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// This test makes sure that the URL bar is focused when entering the private browsing mode.
+// This test makes sure that the URL bar is focused when entering the private window.
 
 function test() {
-  // initialization
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
+  waitForExplicitFinish();
 
   const TEST_URL = "data:text/plain,test";
-  gBrowser.selectedTab = gBrowser.addTab();
-  let browser = gBrowser.selectedBrowser;
-  browser.addEventListener("load", function() {
-    browser.removeEventListener("load", arguments.callee, true);
 
-    // ensure that the URL bar is not focused initially
-    browser.focus();
-    isnot(document.commandDispatcher.focusedElement, gURLBar.inputField,
-      "URL Bar should not be focused before entering the private browsing mode");
-    // ensure that the URL bar is not empty initially
-    isnot(gURLBar.value, "", "URL Bar should no longer be empty after leaving the private browsing mode");
+  function checkUrlbarFocus(aWin, aIsPrivate, aCallback) {
+    let urlbar = aWin.gURLBar;
+    if (aIsPrivate) {
+      is(aWin.document.commandDispatcher.focusedElement, urlbar.inputField,
+         "URL Bar should be focused inside the private window");
+      is(urlbar.value, "",
+         "URL Bar should be empty inside the private window");
+    } else {
+      isnot(aWin.document.commandDispatcher.focusedElement, urlbar.inputField,
+            "URL Bar should not be focused after opening window");
+      isnot(urlbar.value, "",
+            "URL Bar should not be empty after opening window");
+    }
+    aCallback();
+  }
 
-    // enter private browsing mode
-    pb.privateBrowsingEnabled = true;
-    browser = gBrowser.selectedBrowser;
-    browser.addEventListener("load", function() {
-      browser.removeEventListener("load", arguments.callee, true);
+  let windowsToClose = [];
+  function testOnWindow(aPrivate, aCallback) {
+    whenNewWindowLoaded({private: aPrivate}, function(win) {
+      windowsToClose.push(win);
+      executeSoon(function() aCallback(win));
+    });
+  }
 
-      // setTimeout is needed here because the onload handler of about:privatebrowsing sets the focus
-      setTimeout(function() {
-        // ensure that the URL bar is focused inside the private browsing mode
-        is(document.commandDispatcher.focusedElement, gURLBar.inputField,
-          "URL Bar should be focused inside the private browsing mode");
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(win) {
+      win.close();
+    });
+  });
 
-        // ensure that the URL bar is emptied inside the private browsing mode
-        is(gURLBar.value, "", "URL Bar should be empty inside the private browsing mode");
+  function whenLoadTab(aPrivate, aCallback) {
+    testOnWindow(aPrivate, function(win) {
+      let browser = win.gBrowser.selectedBrowser;
+      browser.addEventListener("load", function() {
+        browser.removeEventListener("load", arguments.callee, true);
+        aCallback(win);
+      }, true);
+      if (!aPrivate) {
+        browser.focus();
+        browser.loadURI(TEST_URL);
+      }
+    });
+  }
 
-        // leave private browsing mode
-        pb.privateBrowsingEnabled = false;
-        browser = gBrowser.selectedBrowser;
-        browser.addEventListener("load", function() {
-          browser.removeEventListener("load", arguments.callee, true);
-
-          // ensure that the URL bar is no longer focused after leaving the private browsing mode
-          isnot(document.commandDispatcher.focusedElement, gURLBar.inputField,
-            "URL Bar should no longer be focused after leaving the private browsing mode");
-
-          // ensure that the URL bar is no longer empty after leaving the private browsing mode
-          isnot(gURLBar.value, "", "URL Bar should no longer be empty after leaving the private browsing mode");
-
-          gBrowser.removeCurrentTab();
-          finish();
-        }, true);
-      }, 0);
-    }, true);
-  }, true);
-  content.location = TEST_URL;
-
-  waitForExplicitFinish();
+  whenLoadTab(false, function(win) {
+    checkUrlbarFocus(win, false, function() {
+      whenLoadTab(true, function(win) {
+        checkUrlbarFocus(win, true, function() {
+          whenLoadTab(false, function(win) {
+            checkUrlbarFocus(win, false, finish);
+          });
+        });
+      });
+    });
+  });
 }

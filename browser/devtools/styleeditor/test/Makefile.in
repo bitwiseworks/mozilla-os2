@@ -9,29 +9,37 @@ VPATH		= @srcdir@
 relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
-include $(topsrcdir)/config/rules.mk
 
-_BROWSER_TEST_FILES = \
+MOCHITEST_BROWSER_FILES := \
                  browser_styleeditor_enabled.js \
                  browser_styleeditor_filesave.js \
                  browser_styleeditor_cmd_edit.js \
                  browser_styleeditor_cmd_edit.html \
                  browser_styleeditor_import.js \
+                 browser_styleeditor_import_rule.js \
                  browser_styleeditor_init.js \
                  browser_styleeditor_loading.js \
                  browser_styleeditor_new.js \
-                 browser_styleeditor_passedinsheet.js \
                  browser_styleeditor_pretty.js \
-                 browser_styleeditor_readonly.js \
-                 browser_styleeditor_reopen.js \
+                 browser_styleeditor_private_perwindowpb.js \
                  browser_styleeditor_sv_keynav.js \
                  browser_styleeditor_sv_resize.js \
+                 browser_styleeditor_bug_740541_iframes.js \
+                 browser_styleeditor_bug_851132_middle_click.js \
+                 browser_styleeditor_bug_870339.js \
+                 browser_styleeditor_nostyle.js \
+                 browser_styleeditor_reload.js \
+                 head.js \
                  four.html \
                  head.js \
-                 helpers.js \
+                 import.css \
+                 import.html \
+                 import2.css \
+                 longload.html \
                  media.html \
                  media-small.css \
                  minified.html \
+                 nostyle.html \
                  resources_inpage.jsi \
                  resources_inpage1.css \
                  resources_inpage2.css \
@@ -40,7 +48,8 @@ _BROWSER_TEST_FILES = \
                  simple.css.gz^headers^ \
                  simple.gz.html \
                  simple.html \
+                 test_private.html \
+                 test_private.css \
                  $(NULL)
 
-libs::	$(_BROWSER_TEST_FILES)
-	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)
+include $(topsrcdir)/config/rules.mk

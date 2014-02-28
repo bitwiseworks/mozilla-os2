@@ -38,6 +38,8 @@ MOCHITEST_FILES = \
 		can_play_type_ogg.js \
 		can_play_type_wave.js \
 		can_play_type_webm.js \
+		can_play_type_dash.js \
+		can_play_type_mpeg.js \
 		cancellable_request.sjs \
 		dynamic_redirect.sjs \
 		dynamic_resource.sjs \
@@ -66,12 +68,11 @@ MOCHITEST_FILES = \
 		test_audio1.html \
 		test_audio2.html \
 		test_autoplay.html \
-		test_bug465498.html \
-		test_bug493187.html \
 		test_bug495145.html \
 		test_bug495300.html \
 		test_bug686942.html \
 		test_can_play_type.html \
+		test_can_play_type_mpeg.html \
 		test_closing_connections.html \
 		test_constants.html \
 		test_controls.html \
@@ -81,13 +82,13 @@ MOCHITEST_FILES = \
 		test_delay_load.html \
 		test_error_on_404.html \
 		test_info_leak.html \
+		test_invalid_reject.html \
 		test_load.html \
 		test_load_candidates.html \
 		test_load_same_resource.html \
 		test_load_source.html \
 		test_loop.html \
 		test_metadata.html \
-		test_mozLoadFrom.html \
 		test_no_load_event.html \
 		test_networkState.html \
 		test_new_audio.html \
@@ -95,7 +96,7 @@ MOCHITEST_FILES = \
 		test_paused_after_ended.html \
 		test_play_events.html \
 		test_play_events_2.html \
-		test_played.html \
+		$(filter disabled-temporarily--bug-751539, test_played.html) \
 		test_playback_errors.html \
 		test_seekable1.html \
 		test_preload_actions.html \
@@ -104,49 +105,55 @@ MOCHITEST_FILES = \
 		test_reactivate.html \
 		test_readyState.html \
 		test_replay_metadata.html \
-		test_seek.html \
 		test_seek2.html \
 		test_seek_out_of_range.html \
 		test_source.html \
 		test_source_write.html \
-	        test_source_null.html \
+		test_source_null.html \
 		test_standalone.html \
-		test_timeupdate_small_files.html \
-		test_too_many_elements.html \
 		test_volume.html \
 		test_video_to_canvas.html \
-		use_large_cache.js \
 		test_audiowrite.html \
 		test_mozHasAudio.html \
 		test_source_media.html \
 		test_autoplay_contentEditable.html \
-		test_buffered.html \
-		test_bug448534.html \
 		test_bug463162.xhtml \
 		test_decoder_disable.html \
 		test_media_selection.html \
 		test_playback.html \
 		test_seekLies.html \
+		test_media_sniffer.html \
+		contentType.sjs \
 		test_streams_srcObject.html \
+		test_reset_src.html \
+		test_streams_autoplay.html \
+		test_streams_gc.html \
+		test_streams_tracks.html \
+		$(filter disabled-for-intermittent-failures--bug-608634, test_error_in_video_document.html) \
+		test_texttrack.html \
+		test_timeupdate_small_files.html \
+		test_unseekable.html \
+		test_webvtt_disabled.html \
 		$(NULL)
-
-$(warning test_error_in_video_document.html is disabled for intermittent failures. Bug 608634)
 
 # Disabled on Windows for frequent intermittent failures
 ifneq ($(OS_ARCH), WINNT)
 MOCHITEST_FILES += \
+		test_bug448534.html \
 		test_streams_element_capture.html \
 		test_streams_element_capture_reset.html \
+		test_streams_element_capture_createObjectURL.html \
 		$(NULL)
 else
-$(warning test_streams_element_capture{,_reset}.html is disabled on Windows for timeouts. Bug 752796)
+$(filter disabled-on-windows-for-timeouts--bug-752796, test_streams_element_capture.html)
+$(filter disabled-on-windows-for-timeouts--bug-752796, test_streams_element_capture_reset.html)
 endif
 
 # Don't run in suite
 ifndef MOZ_SUITE
 MOCHITEST_FILES += test_play_twice.html
 else
-$(warning test_play_twice.html is disabled pending investigation. Bug 598252)
+$(filter disabled-pending-investigation--bug-598252, test_play_twice.html)
 endif
 
 # These tests are disabled until we figure out random failures.
@@ -161,13 +168,26 @@ endif
 # Disabled since we don't play Wave files standalone, for now
 #		test_audioDocumentTitle.html
 
+# The below tests are disabled due to frequent timeouts.
+# Bug 832768 and Bug 864682:
+#		test_buffered.html
+#		test_bug465498.html
+# Bug 707777:
+#		test_bug493187.html
+# Bug 832678, bug 795271, and bug 857424
+#		test_seek.html
+# Bug 832768, bug 814533, bug 840742
+#		test_playback_rate.html
+
 # sample files
 MOCHITEST_FILES += \
 		320x240.ogv \
 		448636.ogv \
 		audio-overhang.ogg \
 		audio-gaps.ogg \
+		badtags.ogg \
 		beta-phrasebook.ogg \
+		big-buck-bunny-unseekable.mp4 \
 		bogus.ogv \
 		bug495129.ogv \
 		bug495794.ogg \
@@ -200,19 +220,42 @@ MOCHITEST_FILES += \
 		bug603918.webm \
 		bug604067.webm \
 		chain.ogv \
+		chain.ogg \
+		chain.opus \
+		variable-samplerate.ogg \
+		variable-samplerate.opus \
+		variable-channel.ogg \
+		variable-channel.opus \
+		chained-video.ogv \
+		chained-audio-video.ogg \
+		variable-preskip.opus \
 		dirac.ogg \
 		multiple-bos.ogg \
+		no-cues.webm \
+		owl.mp3 \
 		split.webm \
 		seek.ogv \
 		seek.webm \
 		seek.yuv \
 		short-video.ogv \
 		small-shot.ogg \
+		small-shot.m4a \
+		small-shot.mp3 \
 		sound.ogg \
 		spacestorm-1000Hz-100ms.ogg \
+		test-1-mono.opus \
+		test-2-stereo.opus \
+		test-3-LCR.opus \
+		test-4-quad.opus \
+		test-5-5.0.opus \
+		test-6-5.1.opus \
+		test-7-6.1.opus \
+		test-8-7.1.opus \
 		video-overhang.ogg \
 		file_a4_tone.ogg \
 		detodos.opus \
+		notags.mp3 \
+		id3tags.mp3 \
 		$(NULL)
 
 # Wave sample files
@@ -227,6 +270,12 @@ MOCHITEST_FILES += \
 		r16000_u8_c1_list.wav \
 		wavedata_u8.wav \
 		wavedata_s16.wav \
+		wave_metadata_bad_len.wav \
+		wave_metadata_bad_no_null.wav \
+		wave_metadata_bad_utf8.wav \
+		wave_metadata_unknown_tag.wav \
+		wave_metadata_utf8.wav \
+		wave_metadata.wav \
 		audio.wav \
 		$(NULL)
 
@@ -238,6 +287,16 @@ MOCHITEST_FILES += \
 # Other files
 MOCHITEST_FILES += \
 		bogus.duh \
+		invalid-m0c0.opus \
+		invalid-m0c3.opus \
+		invalid-m1c0.opus \
+		invalid-m1c9.opus \
+		invalid-m2c0.opus \
+		invalid-m2c1.opus \
+		invalid-cmap-short.opus \
+		invalid-cmap-s0c0.opus \
+		invalid-cmap-s0c2.opus \
+		invalid-cmap-s1c2.opus \
 		$(NULL)
 
 # These tests contain backend-specific tests. Try to write backend
@@ -251,11 +310,6 @@ MOCHITEST_FILES += \
 		file_audio_event_adopt_iframe.html \
 		test_audio_event_adopt.html \
 		test_referer.html \
-		test_bug726904.html \
-		$(NULL)
-
-# Bug 759221
-MOCHITEST_FILES += \
 		test_bug686137.html \
 		test_contentDuration1.html \
 		test_contentDuration2.html \
@@ -273,7 +327,10 @@ MOCHITEST_FILES += \
 		contentDuration7.sjs \
 		test_framebuffer.html \
 		test_seekable2.html \
+		test_chaining.html \
 		$(NULL)
+# Temporarily disabled for bug 754860
+#		test_bug726904.html
 else
 MOCHITEST_FILES += \
 		test_can_play_type_no_ogg.html \
@@ -288,6 +345,26 @@ else
 MOCHITEST_FILES += \
 		test_can_play_type_no_webm.html \
 		$(NULL)
+endif
+
+ifdef MOZ_DASH
+MOCHITEST_FILES += \
+    test_can_play_type_dash.html \
+    dash/dash-manifest.mpd \
+    dash/dash-manifest-sjs.mpd \
+    test_dash_detect_stream_switch.html \
+    dash_detect_stream_switch.sjs \
+    dash/dash-webm-video-320x180.webm \
+    dash/dash-webm-video-428x240.webm \
+    dash/dash-webm-audio-128k.webm \
+    dash/dash-manifest-garbled.mpd \
+    dash/dash-manifest-garbled-webm.mpd \
+    dash/garbled.webm \
+    $(NULL)
+else
+MOCHITEST_FILES += \
+    test_can_play_type_no_dash.html \
+    $(NULL)
 endif
 
 ifdef MOZ_WAVE

@@ -15,7 +15,6 @@
 #include "nsComponentManagerUtils.h"
 #include "nsNetUtil.h"
 #include "nsScriptLoader.h"
-#include "nsIJSContextStack.h"
 #include "nsFrameLoader.h"
 #include "xpcpublic.h"
 #include "nsIMozBrowserFrame.h"
@@ -25,24 +24,22 @@
 using mozilla::dom::StructuredCloneData;
 using mozilla::dom::StructuredCloneClosure;
 
-bool SendSyncMessageToParent(void* aCallbackData,
-                             const nsAString& aMessage,
-                             const StructuredCloneData& aData,
-                             InfallibleTArray<nsString>* aJSONRetVal)
+bool
+nsInProcessTabChildGlobal::DoSendSyncMessage(const nsAString& aMessage,
+                                             const StructuredCloneData& aData,
+                                             InfallibleTArray<nsString>* aJSONRetVal)
 {
-  nsInProcessTabChildGlobal* tabChild =
-    static_cast<nsInProcessTabChildGlobal*>(aCallbackData);
-  nsCOMPtr<nsIContent> owner = tabChild->mOwner;
   nsTArray<nsCOMPtr<nsIRunnable> > asyncMessages;
-  asyncMessages.SwapElements(tabChild->mASyncMessages);
+  asyncMessages.SwapElements(mASyncMessages);
   uint32_t len = asyncMessages.Length();
   for (uint32_t i = 0; i < len; ++i) {
     nsCOMPtr<nsIRunnable> async = asyncMessages[i];
     async->Run();
   }
-  if (tabChild->mChromeMessageManager) {
-    nsRefPtr<nsFrameMessageManager> mm = tabChild->mChromeMessageManager;
-    mm->ReceiveMessage(owner, aMessage, true, &aData, nullptr, aJSONRetVal);
+  if (mChromeMessageManager) {
+    nsRefPtr<nsFrameMessageManager> mm = mChromeMessageManager;
+    mm->ReceiveMessage(mOwner, aMessage, true, &aData, JS::NullPtr(),
+                       aJSONRetVal);
   }
   return true;
 }
@@ -53,7 +50,7 @@ public:
   nsAsyncMessageToParent(nsInProcessTabChildGlobal* aTabChild,
                          const nsAString& aMessage,
                          const StructuredCloneData& aData)
-    : mTabChild(aTabChild), mMessage(aMessage)
+    : mTabChild(aTabChild), mMessage(aMessage), mRun(false)
   {
     if (aData.mDataLength && !mData.copy(aData.mData, aData.mDataLength)) {
       NS_RUNTIMEABORT("OOM");
@@ -63,6 +60,11 @@ public:
 
   NS_IMETHOD Run()
   {
+    if (mRun) {
+      return NS_OK;
+    }
+
+    mRun = true;
     mTabChild->mASyncMessages.RemoveElement(this);
     if (mTabChild->mChromeMessageManager) {
       StructuredCloneData data;
@@ -72,7 +74,7 @@ public:
 
       nsRefPtr<nsFrameMessageManager> mm = mTabChild->mChromeMessageManager;
       mm->ReceiveMessage(mTabChild->mOwner, mMessage, false, &data,
-                         nullptr, nullptr, nullptr);
+                         JS::NullPtr(), nullptr);
     }
     return NS_OK;
   }
@@ -80,17 +82,18 @@ public:
   nsString mMessage;
   JSAutoStructuredCloneBuffer mData;
   StructuredCloneClosure mClosure;
+  // True if this runnable has already been called. This can happen if DoSendSyncMessage
+  // is called while waiting for an asynchronous message send.
+  bool mRun;
 };
 
-bool SendAsyncMessageToParent(void* aCallbackData,
-                              const nsAString& aMessage,
-                              const StructuredCloneData& aData)
+bool
+nsInProcessTabChildGlobal::DoSendAsyncMessage(const nsAString& aMessage,
+                                              const StructuredCloneData& aData)
 {
-  nsInProcessTabChildGlobal* tabChild =
-    static_cast<nsInProcessTabChildGlobal*>(aCallbackData);
   nsCOMPtr<nsIRunnable> ev =
-    new nsAsyncMessageToParent(tabChild, aMessage, aData);
-  tabChild->mASyncMessages.AppendElement(ev);
+    new nsAsyncMessageToParent(this, aMessage, aData);
+  mASyncMessages.AppendElement(ev);
   NS_DispatchToCurrentThread(ev);
   return true;
 }
@@ -102,19 +105,28 @@ nsInProcessTabChildGlobal::nsInProcessTabChildGlobal(nsIDocShell* aShell,
   mDelayedDisconnect(false), mOwner(aOwner), mChromeMessageManager(aChrome)
 {
 
-  // If owner corresponds to an <iframe mozbrowser>, we'll have to tweak our
-  // PreHandleEvent implementation.
+  // If owner corresponds to an <iframe mozbrowser> or <iframe mozapp>, we'll
+  // have to tweak our PreHandleEvent implementation.
   nsCOMPtr<nsIMozBrowserFrame> browserFrame = do_QueryInterface(mOwner);
-  bool isBrowser = false;
   if (browserFrame) {
-    browserFrame->GetReallyIsBrowser(&isBrowser);
+    mIsBrowserOrAppFrame = browserFrame->GetReallyIsBrowserOrApp();
   }
-  mIsBrowserFrame = isBrowser;
+  else {
+    mIsBrowserOrAppFrame = false;
+  }
 }
 
 nsInProcessTabChildGlobal::~nsInProcessTabChildGlobal()
 {
-  NS_ASSERTION(!mCx, "Couldn't release JSContext?!?");
+}
+
+/* [notxpcom] boolean markForCC (); */
+// This method isn't automatically forwarded safely because it's notxpcom, so
+// the IDL binding doesn't know what value to return.
+NS_IMETHODIMP_(bool)
+nsInProcessTabChildGlobal::MarkForCC()
+{
+  return mMessageManager ? mMessageManager->MarkForCC() : false;
 }
 
 nsresult
@@ -126,36 +138,22 @@ nsInProcessTabChildGlobal::Init()
   InitTabChildGlobal();
   NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
                    "Couldn't initialize nsInProcessTabChildGlobal");
-  mMessageManager = new nsFrameMessageManager(false, /* aChrome */
-                                              SendSyncMessageToParent,
-                                              SendAsyncMessageToParent,
+  mMessageManager = new nsFrameMessageManager(this,
                                               nullptr,
-                                              this,
-                                              nullptr,
-                                              mCx);
-
-  // Set the location information for the new global, so that tools like
-  // about:memory may use that information.
-  JSObject *global;
-  nsIURI* docURI = mOwner->OwnerDoc()->GetDocumentURI();
-  if (mGlobal && NS_SUCCEEDED(mGlobal->GetJSObject(&global)) && docURI) {
-    xpc::SetLocationForGlobal(global, docURI);
-  }
-
+                                              mozilla::dom::ipc::MM_CHILD);
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsInProcessTabChildGlobal)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsInProcessTabChildGlobal,
                                                 nsDOMEventTargetHelper)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mMessageManager)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mGlobal)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessageManager)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mGlobal)
+  nsFrameScriptExecutor::Unlink(tmp);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsInProcessTabChildGlobal,
                                                   nsDOMEventTargetHelper)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mMessageManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMessageManager)
   nsFrameScriptExecutor::Traverse(tmp, cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -165,8 +163,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsInProcessTabChildGlobal)
   NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)
   NS_INTERFACE_MAP_ENTRY(nsIContentFrameMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIInProcessContentFrameMessageManager)
-  NS_INTERFACE_MAP_ENTRY(nsIScriptContextPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
+  NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
+  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentFrameMessageManager)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
@@ -227,15 +226,7 @@ nsInProcessTabChildGlobal::DelayedDisconnect()
   mOwner = nullptr;
 
   // Fire the "unload" event
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMEvent(getter_AddRefs(event), nullptr, nullptr);
-  if (event) {
-    event->InitEvent(NS_LITERAL_STRING("unload"), false, false);
-    event->SetTrusted(true);
-
-    bool dummy;
-    nsDOMEventTargetHelper::DispatchEvent(event, &dummy);
-  }
+  nsDOMEventTargetHelper::DispatchTrustedEvent(NS_LITERAL_STRING("unload"));
 
   // Continue with the Disconnect cleanup
   nsCOMPtr<nsIDOMWindow> win = do_GetInterface(mDocShell);
@@ -252,13 +243,10 @@ nsInProcessTabChildGlobal::DelayedDisconnect()
   if (mListenerManager) {
     mListenerManager->Disconnect();
   }
-  
+
   if (!mLoadingScript) {
-    nsContentUtils::ReleaseWrapper(static_cast<nsIDOMEventTarget*>(this),
-                                   this);
-    if (mCx) {
-      DestroyCx();
-    }
+    nsContentUtils::ReleaseWrapper(static_cast<EventTarget*>(this), this);
+    mGlobal = nullptr;
   } else {
     mDelayedDisconnect = true;
   }
@@ -275,7 +263,7 @@ nsInProcessTabChildGlobal::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = true;
 
-  if (mIsBrowserFrame &&
+  if (mIsBrowserOrAppFrame &&
       (!mOwner || !nsContentUtils::IsInChromeDocshell(mOwner->OwnerDoc()))) {
     if (mOwner) {
       nsPIDOMWindow* innerWindow = mOwner->OwnerDoc()->GetInnerWindow();
@@ -306,10 +294,17 @@ nsInProcessTabChildGlobal::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 nsresult
 nsInProcessTabChildGlobal::InitTabChildGlobal()
 {
-
-  nsISupports* scopeSupports =
-    NS_ISUPPORTS_CAST(nsIDOMEventTarget*, this);
-  NS_ENSURE_STATE(InitTabChildGlobalInternal(scopeSupports));
+  nsAutoCString id;
+  id.AssignLiteral("inProcessTabChildGlobal");
+  nsIURI* uri = mOwner->OwnerDoc()->GetDocumentURI();
+  if (uri) {
+    nsAutoCString u;
+    uri->GetSpec(u);
+    id.AppendLiteral("?ownedBy=");
+    id.Append(u);
+  }
+  nsISupports* scopeSupports = NS_ISUPPORTS_CAST(EventTarget*, this);
+  NS_ENSURE_STATE(InitTabChildGlobalInternal(scopeSupports, id));
   return NS_OK;
 }
 

@@ -187,11 +187,19 @@ public:
 
   static nsresult NotifyObserver(const char *newpref, void *data);
 
+  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
+
 protected:
   nsPrefBranch()    /* disallow use of this constructer */
     { }
 
   nsresult   GetDefaultFromPropertiesFile(const char *aPrefName, PRUnichar **return_buf);
+  // As SetCharPref, but without any check on the length of |aValue|
+  nsresult   SetCharPrefInternal(const char *aPrefName, const char *aValue);
+  // Reject strings that are more than 1Mb, warn if strings are more than 16kb
+  nsresult   CheckSanityOfStringLength(const char* aPrefName, const nsAString& aValue);
+  nsresult   CheckSanityOfStringLength(const char* aPrefName, const char* aValue);
+  nsresult   CheckSanityOfStringLength(const char* aPrefName, const uint32_t aLength);
   void RemoveExpiredCallback(PrefCallback *aCallback);
   const char *getPrefName(const char *aPrefName);
   void       freeObserverList(void);

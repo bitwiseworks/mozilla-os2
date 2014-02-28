@@ -52,8 +52,8 @@ ReturnKeyRange(JSContext* aCx,
     return false;
   }
 
-  JSObject* result;
-  if (NS_FAILED(holder->GetJSObject(&result))) {
+  JS::Rooted<JSObject*> result(aCx, holder->GetJSObject());
+  if (!result) {
     JS_ReportError(aCx, "Couldn't get JSObject from wrapper.");
     return false;
   }
@@ -113,8 +113,8 @@ MakeOnlyKeyRange(JSContext* aCx,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  jsval val;
-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v", &val)) {
+  JS::Rooted<JS::Value> val(aCx);
+  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v", val.address())) {
     return false;
   }
 
@@ -134,9 +134,10 @@ MakeLowerBoundKeyRange(JSContext* aCx,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  jsval val;
+  JS::Rooted<JS::Value> val(aCx);
   JSBool open = false;
-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v/b", &val, &open)) {
+  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v/b", val.address(),
+                           &open)) {
     return false;
   }
 
@@ -156,9 +157,10 @@ MakeUpperBoundKeyRange(JSContext* aCx,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  jsval val;
+  JS::Rooted<JS::Value> val(aCx);
   JSBool open = false;
-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v/b", &val, &open)) {
+  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "v/b", val.address(),
+                           &open)) {
     return false;
   }
 
@@ -178,10 +180,11 @@ MakeBoundKeyRange(JSContext* aCx,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  jsval lowerVal, upperVal;
+  JS::Rooted<JS::Value> lowerVal(aCx), upperVal(aCx);
   JSBool lowerOpen = false, upperOpen = false;
-  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "vv/bb", &lowerVal,
-                           &upperVal, &lowerOpen, &upperOpen)) {
+  if (!JS_ConvertArguments(aCx, aArgc, JS_ARGV(aCx, aVp), "vv/bb",
+                           lowerVal.address(), upperVal.address(),
+                           &lowerOpen, &upperOpen)) {
     return false;
   }
 
@@ -225,8 +228,7 @@ IDBKeyRange::DefineConstructors(JSContext* aCx,
   NS_ASSERTION(aObject, "Null pointer!");
 
   // Add the constructor methods for key ranges.
-  return JS_DefineFunctions(aCx, aObject,
-                            const_cast<JSFunctionSpec*>(gKeyRangeConstructors));
+  return JS_DefineFunctions(aCx, aObject, gKeyRangeConstructors);
 }
 
 // static
@@ -306,8 +308,6 @@ IDBKeyRange::ToSerializedKeyRange(T& aKeyRange)
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBKeyRange)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBKeyRange)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -318,14 +318,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBKeyRange)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IDBKeyRange)
-  if (tmp->mRooted) {
-    NS_DROP_JS_OBJECTS(tmp, IDBKeyRange);
-    tmp->mCachedLowerVal = JSVAL_VOID;
-    tmp->mCachedUpperVal = JSVAL_VOID;
-    tmp->mHaveCachedLowerVal = false;
-    tmp->mHaveCachedUpperVal = false;
-    tmp->mRooted = false;
-  }
+  tmp->DropJSObjects();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IDBKeyRange)
@@ -339,11 +332,23 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBKeyRange)
 
 DOMCI_DATA(IDBKeyRange, IDBKeyRange)
 
+void
+IDBKeyRange::DropJSObjects()
+{
+  if (!mRooted) {
+    return;
+  }
+  mCachedLowerVal = JSVAL_VOID;
+  mCachedUpperVal = JSVAL_VOID;
+  mHaveCachedLowerVal = false;
+  mHaveCachedUpperVal = false;
+  mRooted = false;
+  NS_DROP_JS_OBJECTS(this, IDBKeyRange);
+}
+
 IDBKeyRange::~IDBKeyRange()
 {
-  if (mRooted) {
-    NS_DROP_JS_OBJECTS(this, IDBKeyRange);
-  }
+  DropJSObjects();
 }
 
 NS_IMETHODIMP
@@ -358,7 +363,7 @@ IDBKeyRange::GetLower(JSContext* aCx,
       mRooted = true;
     }
 
-    nsresult rv = Lower().ToJSVal(aCx, &mCachedLowerVal);
+    nsresult rv = Lower().ToJSVal(aCx, mCachedLowerVal);
     NS_ENSURE_SUCCESS(rv, rv);
 
     mHaveCachedLowerVal = true;
@@ -380,7 +385,7 @@ IDBKeyRange::GetUpper(JSContext* aCx,
       mRooted = true;
     }
 
-    nsresult rv = Upper().ToJSVal(aCx, &mCachedUpperVal);
+    nsresult rv = Upper().ToJSVal(aCx, mCachedUpperVal);
     NS_ENSURE_SUCCESS(rv, rv);
 
     mHaveCachedUpperVal = true;

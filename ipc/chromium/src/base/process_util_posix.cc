@@ -116,6 +116,11 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
 #elif defined(OS_MACOSX)
   static const rlim_t kSystemDefaultMaxFds = 256;
   static const char kFDDir[] = "/dev/fd";
+#elif defined(OS_BSD)
+  // the getrlimit below should never fail, so whatever ..
+  static const rlim_t kSystemDefaultMaxFds = 1024;
+  // at least /dev/fd will exist
+  static const char kFDDir[] = "/dev/fd";
 #endif
 
   // Get the maximum number of FDs possible.
@@ -199,7 +204,7 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
 void SetAllFDsToCloseOnExec() {
 #if defined(OS_LINUX)
   const char fd_dir[] = "/proc/self/fd";
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) || defined(OS_BSD)
   const char fd_dir[] = "/dev/fd";
 #endif
   ScopedDIR dir_closer(opendir(fd_dir));
@@ -328,7 +333,7 @@ int WaitpidWithTimeout(ProcessHandle handle, int wait_milliseconds,
   // the application itself it would probably be best to examine other routes.
   int status = -1;
   pid_t ret_pid = HANDLE_EINTR(waitpid(handle, &status, WNOHANG));
-  static const int64 kQuarterSecondInMicroseconds = kMicrosecondsPerSecond/4;
+  static const int64_t kQuarterSecondInMicroseconds = kMicrosecondsPerSecond/4;
 
   // If the process hasn't exited yet, then sleep and try again.
   Time wakeup_time = Time::Now() + TimeDelta::FromMilliseconds(
@@ -338,7 +343,7 @@ int WaitpidWithTimeout(ProcessHandle handle, int wait_milliseconds,
     if (now > wakeup_time)
       break;
     // Guaranteed to be non-negative!
-    int64 sleep_time_usecs = (wakeup_time - now).InMicroseconds();
+    int64_t sleep_time_usecs = (wakeup_time - now).InMicroseconds();
     // Don't sleep for more than 0.25 secs at a time.
     if (sleep_time_usecs > kQuarterSecondInMicroseconds) {
       sleep_time_usecs = kQuarterSecondInMicroseconds;
@@ -388,7 +393,7 @@ bool CrashAwareSleep(ProcessHandle handle, int wait_milliseconds) {
 
 namespace {
 
-int64 TimeValToMicroseconds(const struct timeval& tv) {
+int64_t TimeValToMicroseconds(const struct timeval& tv) {
   return tv.tv_sec * kMicrosecondsPerSecond + tv.tv_usec;
 }
 
@@ -405,10 +410,10 @@ int ProcessMetrics::GetCPUUsage() {
   if (retval)
     return 0;
 
-  int64 system_time = (TimeValToMicroseconds(usage.ru_stime) +
+  int64_t system_time = (TimeValToMicroseconds(usage.ru_stime) +
                        TimeValToMicroseconds(usage.ru_utime)) /
                         processor_count_;
-  int64 time = TimeValToMicroseconds(now);
+  int64_t time = TimeValToMicroseconds(now);
 
   if ((last_system_time_ == 0) || (last_time_ == 0)) {
     // First call, just set the last values.
@@ -417,8 +422,8 @@ int ProcessMetrics::GetCPUUsage() {
     return 0;
   }
 
-  int64 system_time_delta = system_time - last_system_time_;
-  int64 time_delta = time - last_time_;
+  int64_t system_time_delta = system_time - last_system_time_;
+  int64_t time_delta = time - last_time_;
   DCHECK(time_delta != 0);
   if (time_delta == 0)
     return 0;

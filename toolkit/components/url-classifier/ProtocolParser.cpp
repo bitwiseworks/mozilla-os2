@@ -27,9 +27,9 @@ namespace mozilla {
 namespace safebrowsing {
 
 // Updates will fail if fed chunks larger than this
-const uint32 MAX_CHUNK_SIZE = (1024 * 1024);
+const uint32_t MAX_CHUNK_SIZE = (1024 * 1024);
 
-const uint32 DOMAIN_SIZE = 4;
+const uint32_t DOMAIN_SIZE = 4;
 
 // Parse one stringified range of chunks of the form "n" or "n-m" from a
 // comma-separated list of chunks.  Upon return, 'begin' will point to the
@@ -42,7 +42,7 @@ ParseChunkRange(nsACString::const_iterator& aBegin,
   nsACString::const_iterator iter = aBegin;
   FindCharInReadable(',', iter, aEnd);
 
-  nsCAutoString element(Substring(aBegin, iter));
+  nsAutoCString element(Substring(aBegin, iter));
   aBegin = iter;
   if (aBegin != aEnd)
     aBegin++;
@@ -65,9 +65,8 @@ ParseChunkRange(nsACString::const_iterator& aBegin,
   return false;
 }
 
-ProtocolParser::ProtocolParser(uint32_t aHashKey)
+ProtocolParser::ProtocolParser()
     : mState(PROTOCOL_STATE_CONTROL)
-  , mHashKey(aHashKey)
   , mUpdateStatus(NS_OK)
   , mUpdateWait(0)
   , mResetRequested(false)
@@ -81,10 +80,9 @@ ProtocolParser::~ProtocolParser()
 }
 
 nsresult
-ProtocolParser::Init(nsICryptoHash* aHasher, bool aPerClientRandomize)
+ProtocolParser::Init(nsICryptoHash* aHasher)
 {
   mCryptoHash = aHasher;
-  mPerClientRandomize = aPerClientRandomize;
   return NS_OK;
 }
 
@@ -151,7 +149,7 @@ ProtocolParser::FinishHMAC()
     return NS_OK;
   }
 
-  nsCAutoString clientMAC;
+  nsAutoCString clientMAC;
   mHMAC->Finish(true, clientMAC);
 
   if (clientMAC != mServerMAC) {
@@ -212,7 +210,7 @@ ProtocolParser::ProcessControl(bool* aDone)
 {
   nsresult rv;
 
-  nsCAutoString line;
+  nsAutoCString line;
   *aDone = true;
   while (NextLine(line)) {
     //LOG(("Processing %s\n", line.get()));
@@ -400,7 +398,7 @@ ProtocolParser::ProcessChunk(bool* aDone)
   }
 
   // Pull the chunk out of the pending stream data.
-  nsCAutoString chunk;
+  nsAutoCString chunk;
   chunk.Assign(Substring(mPending, 0, mChunkState.length));
   mPending = Substring(mPending, mChunkState.length);
 
@@ -426,12 +424,11 @@ ProtocolParser::ProcessPlaintextChunk(const nsACString& aChunk)
     return NS_ERROR_FAILURE;
   }
 
-  nsresult rv;
   nsTArray<nsCString> lines;
   ParseString(PromiseFlatCString(aChunk), '\n', lines);
 
   // non-hashed tables need to be hashed
-  for (uint32 i = 0; i < lines.Length(); i++) {
+  for (uint32_t i = 0; i < lines.Length(); i++) {
     nsCString& line = lines[i];
 
     if (mChunkState.type == CHUNK_ADD) {
@@ -441,25 +438,16 @@ ProtocolParser::ProcessPlaintextChunk(const nsACString& aChunk)
         mTableUpdate->NewAddComplete(mChunkState.num, hash);
       } else {
         NS_ASSERTION(mChunkState.hashSize == 4, "Only 32- or 4-byte hashes can be used for add chunks.");
-        Completion hash;
-        Completion domHash;
-        Prefix newHash;
-        rv = LookupCache::GetKey(line, &domHash, mCryptoHash);
-        NS_ENSURE_SUCCESS(rv, rv);
+        Prefix hash;
         hash.FromPlaintext(line, mCryptoHash);
-        uint32_t codedHash;
-        rv = LookupCache::KeyedHash(hash.ToUint32(), domHash.ToUint32(), mHashKey,
-                                    &codedHash, !mPerClientRandomize);
-        NS_ENSURE_SUCCESS(rv, rv);
-        newHash.FromUint32(codedHash);
-        mTableUpdate->NewAddPrefix(mChunkState.num, newHash);
+        mTableUpdate->NewAddPrefix(mChunkState.num, hash);
       }
     } else {
       nsCString::const_iterator begin, iter, end;
       line.BeginReading(begin);
       line.EndReading(end);
       iter = begin;
-      uint32 addChunk;
+      uint32_t addChunk;
       if (!FindCharInReadable(':', iter, end) ||
           PR_sscanf(lines[i].get(), "%d:", &addChunk) != 1) {
         NS_WARNING("Received sub chunk without associated add chunk.");
@@ -474,21 +462,8 @@ ProtocolParser::ProcessPlaintextChunk(const nsACString& aChunk)
       } else {
         NS_ASSERTION(mChunkState.hashSize == 4, "Only 32- or 4-byte hashes can be used for add chunks.");
         Prefix hash;
-        Completion domHash;
-        rv = LookupCache::GetKey(Substring(iter, end), &domHash, mCryptoHash);
-        NS_ENSURE_SUCCESS(rv, rv);
         hash.FromPlaintext(Substring(iter, end), mCryptoHash);
-        uint32_t codedHash;
-        rv = LookupCache::KeyedHash(hash.ToUint32(), domHash.ToUint32(), mHashKey,
-                                    &codedHash, !mPerClientRandomize);
-        NS_ENSURE_SUCCESS(rv, rv);
-        Prefix newHash;
-        newHash.FromUint32(codedHash);
-        mTableUpdate->NewSubPrefix(addChunk, newHash, mChunkState.num);
-        // Needed to knock out completes
-        // Fake chunk nr, will cause it to be removed next update
-        mTableUpdate->NewSubPrefix(addChunk, hash, 0);
-        mTableUpdate->NewSubChunk(0);
+        mTableUpdate->NewSubPrefix(addChunk, hash, mChunkState.num);
       }
     }
   }
@@ -507,7 +482,7 @@ ProtocolParser::ProcessShaChunk(const nsACString& aChunk)
     start += DOMAIN_SIZE;
 
     // Then a count of entries.
-    uint8 numEntries = static_cast<uint8>(aChunk[start]);
+    uint8_t numEntries = static_cast<uint8_t>(aChunk[start]);
     start++;
 
     nsresult rv;
@@ -539,16 +514,8 @@ ProtocolParser::ProcessHostAdd(const Prefix& aDomain, uint8_t aNumEntries,
   NS_ASSERTION(mChunkState.hashSize == PREFIX_SIZE,
                "ProcessHostAdd should only be called for prefix hashes.");
 
-  uint32_t codedHash;
-  uint32_t domHash = aDomain.ToUint32();
-
   if (aNumEntries == 0) {
-    nsresult rv = LookupCache::KeyedHash(domHash, domHash, mHashKey, &codedHash,
-                                         !mPerClientRandomize);
-    NS_ENSURE_SUCCESS(rv, rv);
-    Prefix newHash;
-    newHash.FromUint32(codedHash);
-    mTableUpdate->NewAddPrefix(mChunkState.num, newHash);
+    mTableUpdate->NewAddPrefix(mChunkState.num, aDomain);
     return NS_OK;
   }
 
@@ -557,15 +524,10 @@ ProtocolParser::ProcessHostAdd(const Prefix& aDomain, uint8_t aNumEntries,
     return NS_ERROR_FAILURE;
   }
 
-  for (uint8 i = 0; i < aNumEntries; i++) {
+  for (uint8_t i = 0; i < aNumEntries; i++) {
     Prefix hash;
     hash.Assign(Substring(aChunk, *aStart, PREFIX_SIZE));
-    nsresult rv = LookupCache::KeyedHash(hash.ToUint32(), domHash, mHashKey, &codedHash,
-                                         !mPerClientRandomize);
-    NS_ENSURE_SUCCESS(rv, rv);
-    Prefix newHash;
-    newHash.FromUint32(codedHash);
-    mTableUpdate->NewAddPrefix(mChunkState.num, newHash);
+    mTableUpdate->NewAddPrefix(mChunkState.num, hash);
     *aStart += PREFIX_SIZE;
   }
 
@@ -579,9 +541,6 @@ ProtocolParser::ProcessHostSub(const Prefix& aDomain, uint8_t aNumEntries,
   NS_ASSERTION(mChunkState.hashSize == PREFIX_SIZE,
                "ProcessHostSub should only be called for prefix hashes.");
 
-  uint32_t codedHash;
-  uint32_t domHash = aDomain.ToUint32();
-
   if (aNumEntries == 0) {
     if ((*aStart) + 4 > aChunk.Length()) {
       NS_WARNING("Received a zero-entry sub chunk without an associated add.");
@@ -591,21 +550,11 @@ ProtocolParser::ProcessHostSub(const Prefix& aDomain, uint8_t aNumEntries,
     const nsCSubstring& addChunkStr = Substring(aChunk, *aStart, 4);
     *aStart += 4;
 
-    uint32 addChunk;
+    uint32_t addChunk;
     memcpy(&addChunk, addChunkStr.BeginReading(), 4);
     addChunk = PR_ntohl(addChunk);
 
-    nsresult rv = LookupCache::KeyedHash(domHash, domHash, mHashKey, &codedHash,
-                                         !mPerClientRandomize);
-    NS_ENSURE_SUCCESS(rv, rv);
-    Prefix newHash;
-    newHash.FromUint32(codedHash);
-
-    mTableUpdate->NewSubPrefix(addChunk, newHash, mChunkState.num);
-    // Needed to knock out completes
-    // Fake chunk nr, will cause it to be removed next update
-    mTableUpdate->NewSubPrefix(addChunk, aDomain, 0);
-    mTableUpdate->NewSubChunk(0);
+    mTableUpdate->NewSubPrefix(addChunk, aDomain, mChunkState.num);
     return NS_OK;
   }
 
@@ -614,11 +563,11 @@ ProtocolParser::ProcessHostSub(const Prefix& aDomain, uint8_t aNumEntries,
     return NS_ERROR_FAILURE;
   }
 
-  for (uint8 i = 0; i < aNumEntries; i++) {
+  for (uint8_t i = 0; i < aNumEntries; i++) {
     const nsCSubstring& addChunkStr = Substring(aChunk, *aStart, 4);
     *aStart += 4;
 
-    uint32 addChunk;
+    uint32_t addChunk;
     memcpy(&addChunk, addChunkStr.BeginReading(), 4);
     addChunk = PR_ntohl(addChunk);
 
@@ -626,17 +575,7 @@ ProtocolParser::ProcessHostSub(const Prefix& aDomain, uint8_t aNumEntries,
     prefix.Assign(Substring(aChunk, *aStart, PREFIX_SIZE));
     *aStart += PREFIX_SIZE;
 
-    nsresult rv = LookupCache::KeyedHash(prefix.ToUint32(), domHash, mHashKey,
-                                         &codedHash, !mPerClientRandomize);
-    NS_ENSURE_SUCCESS(rv, rv);
-    Prefix newHash;
-    newHash.FromUint32(codedHash);
-
-    mTableUpdate->NewSubPrefix(addChunk, newHash, mChunkState.num);
-    // Needed to knock out completes
-    // Fake chunk nr, will cause it to be removed next update
-    mTableUpdate->NewSubPrefix(addChunk, prefix, 0);
-    mTableUpdate->NewSubChunk(0);
+    mTableUpdate->NewSubPrefix(addChunk, prefix, mChunkState.num);
   }
 
   return NS_OK;
@@ -660,7 +599,7 @@ ProtocolParser::ProcessHostAddComplete(uint8_t aNumEntries,
     return NS_ERROR_FAILURE;
   }
 
-  for (uint8 i = 0; i < aNumEntries; i++) {
+  for (uint8_t i = 0; i < aNumEntries; i++) {
     Completion hash;
     hash.Assign(Substring(aChunk, *aStart, COMPLETE_SIZE));
     mTableUpdate->NewAddComplete(mChunkState.num, hash);
@@ -696,7 +635,7 @@ ProtocolParser::ProcessHostSubComplete(uint8_t aNumEntries,
     const nsCSubstring& addChunkStr = Substring(aChunk, *aStart, 4);
     *aStart += 4;
 
-    uint32 addChunk;
+    uint32_t addChunk;
     memcpy(&addChunk, addChunkStr.BeginReading(), 4);
     addChunk = PR_ntohl(addChunk);
 
@@ -709,7 +648,7 @@ ProtocolParser::ProcessHostSubComplete(uint8_t aNumEntries,
 bool
 ProtocolParser::NextLine(nsACString& line)
 {
-  int32 newline = mPending.FindChar('\n');
+  int32_t newline = mPending.FindChar('\n');
   if (newline == kNotFound) {
     return false;
   }
@@ -721,7 +660,7 @@ ProtocolParser::NextLine(nsACString& line)
 void
 ProtocolParser::CleanupUpdates()
 {
-  for (uint32 i = 0; i < mTableUpdates.Length(); i++) {
+  for (uint32_t i = 0; i < mTableUpdates.Length(); i++) {
     delete mTableUpdates[i];
   }
   mTableUpdates.Clear();
@@ -730,7 +669,7 @@ ProtocolParser::CleanupUpdates()
 TableUpdate *
 ProtocolParser::GetTableUpdate(const nsACString& aTable)
 {
-  for (uint32 i = 0; i < mTableUpdates.Length(); i++) {
+  for (uint32_t i = 0; i < mTableUpdates.Length(); i++) {
     if (aTable.Equals(mTableUpdates[i]->TableName())) {
       return mTableUpdates[i];
     }

@@ -1,11 +1,7 @@
 /* -*- Mode: Java; c-basic-offset: 4; tab-width: 20; indent-tabs-mode: nil; -*-
- * ***** BEGIN LICENSE BLOCK *****
- *
  * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/.
- *
- * ***** END LICENSE BLOCK ***** */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 package org.mozilla.gecko;
 
@@ -13,13 +9,15 @@ import org.mozilla.gecko.util.INIParser;
 import org.mozilla.gecko.util.INISection;
 
 import android.content.Context;
-import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.charset.Charset;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Hashtable;
@@ -28,14 +26,12 @@ public final class GeckoProfile {
     private static final String LOGTAG = "GeckoProfile";
 
     private static HashMap<String, GeckoProfile> sProfileCache = new HashMap<String, GeckoProfile>();
+    private static String sDefaultProfileName = null;
 
     private final Context mContext;
     private final String mName;
     private File mMozDir;
     private File mDir;
-
-    // this short timeout is a temporary fix until bug 735399 is implemented
-    private static final long SESSION_TIMEOUT = 30 * 1000; // 30 seconds
 
     static private INIParser getProfilesINI(Context context) {
       File filesDir = context.getFilesDir();
@@ -52,6 +48,11 @@ public final class GeckoProfile {
     }
 
     public static GeckoProfile get(Context context, String profileName) {
+        synchronized (sProfileCache) {
+            GeckoProfile profile = sProfileCache.get(profileName);
+            if (profile != null)
+                return profile;
+        }
         return get(context, profileName, null);
     }
 
@@ -63,22 +64,9 @@ public final class GeckoProfile {
         // if no profile was passed in, look for the default profile listed in profiles.ini
         // if that doesn't exist, look for a profile called 'default'
         if (TextUtils.isEmpty(profileName) && TextUtils.isEmpty(profilePath)) {
-            profileName = "default";
-
-            INIParser parser = getProfilesINI(context);
-
-            String profile = "";
-            boolean foundDefault = false;
-            for (Enumeration<INISection> e = parser.getSections().elements(); e.hasMoreElements();) {
-                INISection section = e.nextElement();
-                if (section.getIntProperty("Default") == 1) {
-                    profile = section.getStringProperty("Name");
-                    foundDefault = true;
-                }
-            }
-
-            if (foundDefault)
-                profileName = profile;
+            profileName = GeckoProfile.findDefaultProfile(context);
+            if (profileName == null)
+                profileName = "default";
         }
 
         // actually try to look up the profile
@@ -126,12 +114,9 @@ public final class GeckoProfile {
         if (!TextUtils.isEmpty(profilePath)) {
             File dir = new File(profilePath);
             if (dir.exists() && dir.isDirectory()) {
-                if (mDir != null) {
-                    Log.i(LOGTAG, "profile dir changed from "+mDir+" to "+dir);
-                }
                 mDir = dir;
             } else {
-                Log.w(LOGTAG, "requested profile directory missing: "+profilePath);
+                Log.w(LOGTAG, "requested profile directory missing: " + profilePath);
             }
         }
     }
@@ -181,50 +166,64 @@ public final class GeckoProfile {
         return mContext.getFilesDir();
     }
 
+    /**
+     * Determines whether the tabs from the previous session should be
+     * automatically restored.
+     *
+     * sessionstore.js is moved to sessionstore.bak on a clean quit, so if we
+     * still have sessionstore.js at startup, that means we were killed
+     * uncleanly. This is caused by either 1) a crash, or 2) being killed by
+     * android because of memory constraints. Either way, the existence of this
+     * file indicates that we'll want to restore the previous session.
+     *
+     * @return whether the previous session should be restored
+     */
     public boolean shouldRestoreSession() {
-        Log.w(LOGTAG, "zerdatime " + SystemClock.uptimeMillis() + " - start check sessionstore.js exists");
-        File dir = getDir();
-        if (dir == null)
-            return false;
-
-        File sessionFile = new File(dir, "sessionstore.js");
-        if (!sessionFile.exists())
-            return false;
-
-        boolean shouldRestore = (System.currentTimeMillis() - sessionFile.lastModified() < SESSION_TIMEOUT);
-        Log.w(LOGTAG, "zerdatime " + SystemClock.uptimeMillis() + " - finish check sessionstore.js exists");
-        return shouldRestore;
+        File sessionFile = getFile("sessionstore.js");
+        return sessionFile != null && sessionFile.exists();
     }
 
-    public String readSessionFile(boolean geckoReady) {
-        File dir = getDir();
-        if (dir == null) {
-            return null;
+    /**
+     * Moves the session file to the backup session file.
+     *
+     * sessionstore.js should hold the current session, and sessionstore.bak
+     * should hold the previous session (where it is used to read the "tabs
+     * from last time"). Normally, sessionstore.js is moved to sessionstore.bak
+     * on a clean quit, but this doesn't happen if Fennec crashed. Thus, this
+     * method should be called after a crash so sessionstore.bak correctly
+     * holds the previous session.
+     */
+    public void moveSessionFile() {
+        File sessionFile = getFile("sessionstore.js");
+        if (sessionFile != null && sessionFile.exists()) {
+            File sessionFileBackup = getFile("sessionstore.bak");
+            sessionFile.renameTo(sessionFileBackup);
         }
+    }
 
-        File sessionFile = null;
-        if (! geckoReady) {
-            // we might have crashed, in which case sessionstore.js has tabs from last time
-            sessionFile = new File(dir, "sessionstore.js");
-            if (! sessionFile.exists()) {
-                sessionFile = null;
-            }
-        }
-        if (sessionFile == null) {
-            // either we did not crash, so previous session was moved to sessionstore.bak on quit,
-            // or sessionstore init has occurred, so previous session will always
-            // be in sessionstore.bak
-            sessionFile = new File(dir, "sessionstore.bak");
-            // no need to check if the session file exists here; readFile will throw
-            // an IOException if it does not
-        }
+    /**
+     * Get the string from a session file.
+     *
+     * The session can either be read from sessionstore.js or sessionstore.bak.
+     * In general, sessionstore.js holds the current session, and
+     * sessionstore.bak holds the previous session.
+     *
+     * @param readBackup if true, the session is read from sessionstore.bak;
+     *                   otherwise, the session is read from sessionstore.js
+     *
+     * @return the session string
+     */
+    public String readSessionFile(boolean readBackup) {
+        File sessionFile = getFile(readBackup ? "sessionstore.bak" : "sessionstore.js");
 
         try {
-            return readFile(sessionFile);
+            if (sessionFile != null && sessionFile.exists()) {
+                return readFile(sessionFile);
+            }
         } catch (IOException ioe) {
-            Log.i(LOGTAG, "Unable to read session file " + sessionFile.getAbsolutePath());
-            return null;
+            Log.e(LOGTAG, "Unable to read session file", ioe);
         }
+        return null;
     }
 
     public String readFile(String filename) throws IOException {
@@ -305,6 +304,28 @@ public final class GeckoProfile {
         }
     }
 
+    public static String findDefaultProfile(Context context) {
+        // Have we read the default profile from the INI already?
+        // Changing the default profile requires a restart, so we don't
+        // need to worry about runtime changes.
+        if (sDefaultProfileName != null) {
+            return sDefaultProfileName;
+        }
+
+        // Open profiles.ini to find the correct path
+        INIParser parser = getProfilesINI(context);
+
+        for (Enumeration<INISection> e = parser.getSections().elements(); e.hasMoreElements();) {
+            INISection section = e.nextElement();
+            if (section.getIntProperty("Default") == 1) {
+                sDefaultProfileName = section.getStringProperty("Name");
+                return sDefaultProfileName;
+            }
+        }
+
+        return null;
+    }
+
     private File findProfileDir(File mozillaDir) {
         // Open profiles.ini to find the correct path
         INIParser parser = getProfilesINI(mContext);
@@ -370,12 +391,25 @@ public final class GeckoProfile {
             parser.addSection(generalSection);
 
             // only set as default if this is the first profile we're creating
-            Log.i(LOGTAG, "WESJ - SET DEFAULT");
             profileSection.setProperty("Default", 1);
         }
 
         parser.addSection(profileSection);
         parser.write();
+
+        // Write out profile creation time, mirroring the logic in nsToolkitProfileService.
+        try {
+            FileOutputStream stream = new FileOutputStream(profileDir.getAbsolutePath() + File.separator + "times.json");
+            OutputStreamWriter writer = new OutputStreamWriter(stream, Charset.forName("UTF-8"));
+            try {
+                writer.append("{\"created\": " + System.currentTimeMillis() + "}\n");
+            } finally {
+                writer.close();
+            }
+        } catch (Exception e) {
+            // Best-effort.
+            Log.w(LOGTAG, "Couldn't write times.json.", e);
+        }
 
         return profileDir;
     }

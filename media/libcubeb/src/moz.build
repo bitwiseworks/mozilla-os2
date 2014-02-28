@@ -1,0 +1,48 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'cubeb'
+
+CSRCS += [
+    'cubeb.c',
+]
+
+if CONFIG['MOZ_ALSA']:
+    CSRCS += [
+        'cubeb_alsa.c',
+    ]
+
+if CONFIG['MOZ_PULSEAUDIO']:
+    CSRCS += [
+        'cubeb_pulse.c',
+    ]
+
+if CONFIG['OS_ARCH'] == 'OpenBSD':
+    CSRCS += [
+        'cubeb_sndio.c',
+    ]
+
+if CONFIG['OS_TARGET'] == 'Darwin':
+    CSRCS += [
+        'cubeb_audiounit.c',
+    ]
+
+if CONFIG['OS_TARGET'] == 'WINNT':
+    CSRCS += [
+        'cubeb_winmm.c',
+    ]
+
+if CONFIG['OS_TARGET'] == 'Android':
+    CSRCS += [
+        'cubeb_opensl.c',
+    ]
+    if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
+        CSRCS += [
+            'cubeb_audiotrack.c',
+        ]
+
+LIBRARY_NAME = 'cubeb'
+

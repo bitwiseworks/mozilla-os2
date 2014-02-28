@@ -7,6 +7,7 @@
 #define nsTObserverArray_h___
 
 #include "nsTArray.h"
+#include "nsCycleCollectionNoteChild.h"
 
 /**
  * An array of observers. Like a normal array, but supports iterators that are
@@ -91,7 +92,8 @@ class nsAutoTObserverArray : protected nsTObserverArray_base {
     }
 
     // This method provides direct access to the i'th element of the array.
-    // The given index must be within the array bounds.
+    // The given index must be within the array bounds. If the underlying array
+    // may change during iteration, use an iterator instead of this function.
     // @param i  The index of an element in the array.
     // @return   A reference to the i'th element of the array.
     elem_type& ElementAt(index_type i) {
@@ -116,6 +118,10 @@ class nsAutoTObserverArray : protected nsTObserverArray_base {
     const elem_type& SafeElementAt(index_type i, const elem_type& def) const {
       return mArray.SafeElementAt(i, def);
     }
+
+    // No operator[] is provided because the point of this class is to support
+    // allow modifying the array during iteration, and ElementAt() is not safe
+    // in those conditions.
 
     //
     // Search methods
@@ -364,13 +370,34 @@ class nsTObserverArray : public nsAutoTObserverArray<T, 0> {
     }
 };
 
+template <typename T, uint32_t N>
+inline void
+ImplCycleCollectionUnlink(nsAutoTObserverArray<T, N>& aField)
+{
+  aField.Clear();
+}
+
+template <typename T, uint32_t N>
+inline void
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
+                            nsAutoTObserverArray<T, N>& aField,
+                            const char* aName,
+                            uint32_t aFlags = 0)
+{
+  aFlags |= CycleCollectionEdgeNameArrayFlag;
+  size_t length = aField.Length();
+  for (size_t i = 0; i < length; ++i) {
+    ImplCycleCollectionTraverse(aCallback, aField.ElementAt(i), aName, aFlags);
+  }
+}
+
 // XXXbz I wish I didn't have to pass in the observer type, but I
 // don't see a way to get it out of array_.
 // Note that this macro only works if the array holds pointers to XPCOM objects.
 #define NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(array_, obstype_, func_, params_) \
   PR_BEGIN_MACRO                                                             \
     nsTObserverArray<obstype_ *>::ForwardIterator iter_(array_);             \
-    nsCOMPtr<obstype_> obs_;                                                 \
+    nsRefPtr<obstype_> obs_;                                                 \
     while (iter_.HasMore()) {                                                 \
       obs_ = iter_.GetNext();                                                \
       obs_ -> func_ params_ ;                                                \

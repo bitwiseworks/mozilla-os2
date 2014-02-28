@@ -7,21 +7,23 @@
 #ifndef MOZILLA_DOMSVGTRANSFORMLIST_H__
 #define MOZILLA_DOMSVGTRANSFORMLIST_H__
 
-#include "DOMSVGAnimatedTransformList.h"
+#include "mozilla/dom/SVGAnimatedTransformList.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
-#include "nsIDOMSVGTransformList.h"
 #include "nsTArray.h"
 #include "SVGTransformList.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/ErrorResult.h"
 
-class nsIDOMSVGTransform;
 class nsSVGElement;
 
 namespace mozilla {
 
-class DOMSVGTransform;
+namespace dom {
+class SVGMatrix;
+class SVGTransform;
+}
 
 /**
  * Class DOMSVGTransformList
@@ -29,19 +31,18 @@ class DOMSVGTransform;
  * This class is used to create the DOM tearoff objects that wrap internal
  * SVGTransformList objects.
  *
- * See the architecture comment in DOMSVGAnimatedTransformList.h.
+ * See the architecture comment in SVGAnimatedTransformList.h.
  */
-class DOMSVGTransformList MOZ_FINAL : public nsIDOMSVGTransformList,
+class DOMSVGTransformList MOZ_FINAL : public nsISupports,
                                       public nsWrapperCache
 {
-  friend class DOMSVGTransform;
+  friend class dom::SVGTransform;
 
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGTransformList)
-  NS_DECL_NSIDOMSVGTRANSFORMLIST
 
-  DOMSVGTransformList(DOMSVGAnimatedTransformList *aAList,
+  DOMSVGTransformList(dom::SVGAnimatedTransformList *aAList,
                       const SVGTransformList &aInternalList)
     : mAList(aAList)
   {
@@ -64,8 +65,8 @@ public:
     }
   }
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   nsISupports* GetParentObject()
   {
@@ -76,7 +77,7 @@ public:
    * This will normally be the same as InternalList().Length(), except if we've
    * hit OOM in which case our length will be zero.
    */
-  uint32_t Length() const {
+  uint32_t LengthNoFlush() const {
     NS_ABORT_IF_FALSE(mItems.IsEmpty() ||
       mItems.Length() == InternalList().Length(),
       "DOM wrapper's list length is out of sync");
@@ -85,6 +86,47 @@ public:
 
   /// Called to notify us to synchronize our length and detach excess items.
   void InternalListLengthWillChange(uint32_t aNewLength);
+
+  uint32_t NumberOfItems() const
+  {
+    if (IsAnimValList()) {
+      Element()->FlushAnimations();
+    }
+    return LengthNoFlush();
+  }
+  void Clear(ErrorResult& error);
+  already_AddRefed<dom::SVGTransform> Initialize(dom::SVGTransform& newItem,
+                                                 ErrorResult& error);
+  dom::SVGTransform* GetItem(uint32_t index, ErrorResult& error)
+  {
+    bool found;
+    dom::SVGTransform* item = IndexedGetter(index, found, error);
+    if (!found) {
+      error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    }
+    return item;
+  }
+  dom::SVGTransform* IndexedGetter(uint32_t index, bool& found,
+                                   ErrorResult& error);
+  already_AddRefed<dom::SVGTransform> InsertItemBefore(dom::SVGTransform& newItem,
+                                                       uint32_t index,
+                                                       ErrorResult& error);
+  already_AddRefed<dom::SVGTransform> ReplaceItem(dom::SVGTransform& newItem,
+                                                  uint32_t index,
+                                                  ErrorResult& error);
+  already_AddRefed<dom::SVGTransform> RemoveItem(uint32_t index,
+                                                 ErrorResult& error);
+  already_AddRefed<dom::SVGTransform> AppendItem(dom::SVGTransform& newItem,
+                                                 ErrorResult& error)
+  {
+    return InsertItemBefore(newItem, LengthNoFlush(), error);
+  }
+  already_AddRefed<dom::SVGTransform> CreateSVGTransformFromMatrix(dom::SVGMatrix& matrix);
+  already_AddRefed<dom::SVGTransform> Consolidate(ErrorResult& error);
+  uint32_t Length() const
+  {
+    return NumberOfItems();
+  }
 
 private:
 
@@ -109,17 +151,17 @@ private:
    */
   SVGTransformList& InternalList() const;
 
-  /// Creates a DOMSVGTransform for aIndex, if it doesn't already exist.
+  /// Creates a SVGTransform for aIndex, if it doesn't already exist.
   void EnsureItemAt(uint32_t aIndex);
 
   void MaybeInsertNullInAnimValListAt(uint32_t aIndex);
   void MaybeRemoveItemFromAnimValListAt(uint32_t aIndex);
 
-  // Weak refs to our DOMSVGTransform items. The items are friends and take care
+  // Weak refs to our SVGTransform items. The items are friends and take care
   // of clearing our pointer to them when they die.
-  nsTArray<DOMSVGTransform*> mItems;
+  FallibleTArray<dom::SVGTransform*> mItems;
 
-  nsRefPtr<DOMSVGAnimatedTransformList> mAList;
+  nsRefPtr<dom::SVGAnimatedTransformList> mAList;
 };
 
 } // namespace mozilla

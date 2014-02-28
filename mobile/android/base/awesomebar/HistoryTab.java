@@ -9,6 +9,10 @@ import org.mozilla.gecko.AwesomeBar.ContextMenuSubject;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.BrowserDB.URLColumns;
+import org.mozilla.gecko.gfx.BitmapUtils;
+import org.mozilla.gecko.util.GamepadUtils;
+import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.widget.FaviconView;
 
 import android.app.Activity;
 import android.content.ContentResolver;
@@ -17,14 +21,13 @@ import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.os.AsyncTask;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
 import android.view.ContextMenu;
 import android.view.ContextMenu.ContextMenuInfo;
-import android.view.LayoutInflater;
+import android.view.KeyEvent;
 import android.view.MenuInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -32,7 +35,6 @@ import android.widget.ExpandableListView;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.SimpleExpandableListAdapter;
-import android.widget.TabHost.TabContentFactory;
 import android.widget.TextView;
 
 import java.util.Date;
@@ -55,63 +57,85 @@ public class HistoryTab extends AwesomeBarTab {
         mContentObserver = null;
     }
 
+    @Override
     public int getTitleStringId() {
         return R.string.awesomebar_history_title;
     }
 
+    @Override
     public String getTag() {
         return TAG;
     }
 
-    public TabContentFactory getFactory() {
-        return new TabContentFactory() {
-            public View createTabContent(String tag) {
-                final ExpandableListView list = (ExpandableListView)getListView();
-                list.setOnChildClickListener(new ExpandableListView.OnChildClickListener() {
-                    public boolean onChildClick(ExpandableListView parent, View view,
-                                                 int groupPosition, int childPosition, long id) {
-                        return handleItemClick(groupPosition, childPosition);
-                    }
-                });
-
-                // This is to disallow collapsing the expandable groups in the
-                // history expandable list view to mimic simpler sections. We should
-                // Remove this if we decide to allow expanding/collapsing groups.
-                list.setOnGroupClickListener(new ExpandableListView.OnGroupClickListener() {
-                     public boolean onGroupClick(ExpandableListView parent, View v, int groupPosition, long id) {
-                        return true;
-                    }
-                });
-                return list;
-            }
-       };
-    }
-
-    public ListView getListView() {
+    @Override
+    public ListView getView() {
         if (mView == null) {
-            mView = (ExpandableListView) (LayoutInflater.from(mContext).inflate(R.layout.awesomebar_expandable_list, null));
+            mView = new ExpandableListView(mContext, null);
             ((Activity)mContext).registerForContextMenu(mView);
             mView.setTag(TAG);
+
+            ExpandableListView list = (ExpandableListView)mView;
+            list.setOnChildClickListener(new ExpandableListView.OnChildClickListener() {
+                @Override
+                public boolean onChildClick(ExpandableListView parent, View view,
+                                             int groupPosition, int childPosition, long id) {
+                    return handleItemClick(groupPosition, childPosition);
+                }
+            });
+
+            // This is to disallow collapsing the expandable groups in the
+            // history expandable list view to mimic simpler sections. We should
+            // Remove this if we decide to allow expanding/collapsing groups.
+            list.setOnGroupClickListener(new ExpandableListView.OnGroupClickListener() {
+                @Override
+                public boolean onGroupClick(ExpandableListView parent, View v, int groupPosition, long id) {
+                    return true;
+                }
+            });
+            list.setOnKeyListener(new View.OnKeyListener() {
+                @Override public boolean onKey(View v, int keyCode, KeyEvent event) {
+                    if (GamepadUtils.isActionKeyDown(event)) {
+                        ExpandableListView expando = (ExpandableListView)v;
+                        long selected = expando.getSelectedPosition();
+                        switch (ExpandableListView.getPackedPositionType(selected)) {
+                        case ExpandableListView.PACKED_POSITION_TYPE_CHILD:
+                            return handleItemClick(ExpandableListView.getPackedPositionGroup(selected),
+                                                   ExpandableListView.getPackedPositionChild(selected));
+                        case ExpandableListView.PACKED_POSITION_TYPE_GROUP:
+                            int group = ExpandableListView.getPackedPositionGroup(selected);
+                            return (expando.isGroupExpanded(group)
+                                ? expando.collapseGroup(group)
+                                : expando.expandGroup(group));
+                        }
+                    }
+                    return false;
+                }
+            });
+
             mView.setOnTouchListener(mListListener);
 
             // We need to add the header before we set the adapter, hence make it null
-            ((ExpandableListView)mView).setAdapter(getCursorAdapter());
+            list.setAdapter(getCursorAdapter());
             HistoryQueryTask task = new HistoryQueryTask();
             task.execute();
         }
         return (ListView)mView;
     }
 
+    @Override
     public void destroy() {
+        super.destroy();
+
         if (mContentObserver != null)
             BrowserDB.unregisterContentObserver(getContentResolver(), mContentObserver);
     }
 
+    @Override
     public boolean onBackPressed() {
         // If the soft keyboard is visible in the bookmarks or history tab, the user
         // must have explictly brought it up, so we should try hiding it instead of
         // exiting the activity or going up a bookmarks folder level.
-        ListView view = getListView();
+        View view = getView();
         if (hideSoftInput(view))
             return true;
 
@@ -142,7 +166,7 @@ public class HistoryTab extends AwesomeBarTab {
                 viewHolder = new AwesomeEntryViewHolder();
                 viewHolder.titleView = (TextView) convertView.findViewById(R.id.title);
                 viewHolder.urlView = (TextView) convertView.findViewById(R.id.url);
-                viewHolder.faviconView = (ImageView) convertView.findViewById(R.id.favicon);
+                viewHolder.faviconView = (FaviconView) convertView.findViewById(R.id.favicon);
                 viewHolder.bookmarkIconView = (ImageView) convertView.findViewById(R.id.bookmark_icon);
 
                 convertView.setTag(viewHolder);
@@ -161,20 +185,19 @@ public class HistoryTab extends AwesomeBarTab {
             String title = (String) historyItem.get(URLColumns.TITLE);
             String url = (String) historyItem.get(URLColumns.URL);
 
-            if (TextUtils.isEmpty(title))
-                title = url;
-
-            viewHolder.titleView.setText(title);
-            viewHolder.urlView.setText(url);
+            updateTitle(viewHolder.titleView, title, url);
+            updateUrl(viewHolder, url);
 
             byte[] b = (byte[]) historyItem.get(URLColumns.FAVICON);
+            Bitmap favicon = null;
 
-            if (b == null) {
-                viewHolder.faviconView.setImageDrawable(null);
-            } else {
-                Bitmap bitmap = BitmapFactory.decodeByteArray(b, 0, b.length);
-                viewHolder.faviconView.setImageBitmap(bitmap);
+            if (b != null) {
+                Bitmap bitmap = BitmapUtils.decodeByteArray(b);
+                if (bitmap != null) {
+                    favicon = Favicons.getInstance().scaleImage(bitmap);
+                }
             }
+            updateFavicon(viewHolder.faviconView, favicon, url);
 
             Integer bookmarkId = (Integer) historyItem.get(Combined.BOOKMARK_ID);
             Integer display = (Integer) historyItem.get(Combined.DISPLAY);
@@ -204,6 +227,7 @@ public class HistoryTab extends AwesomeBarTab {
         private static final long MS_PER_DAY = 86400000;
         private static final long MS_PER_WEEK = MS_PER_DAY * 7;
 
+        @Override
         protected Pair<GroupList,List<ChildrenList>> doInBackground(Void... arg0) {
             Cursor cursor = BrowserDB.getRecentHistory(getContentResolver(), MAX_RESULTS);
 
@@ -339,6 +363,7 @@ public class HistoryTab extends AwesomeBarTab {
             return HistorySection.OLDER;
         }
 
+        @Override
         protected void onPostExecute(Pair<GroupList,List<ChildrenList>> result) {
             mCursorAdapter = new HistoryListAdapter(
                 mContext,
@@ -351,7 +376,8 @@ public class HistoryTab extends AwesomeBarTab {
 
             if (mContentObserver == null) {
                 // Register an observer to update the history tab contents if they change.
-                mContentObserver = new ContentObserver(GeckoAppShell.getHandler()) {
+                mContentObserver = new ContentObserver(ThreadUtils.getBackgroundHandler()) {
+                    @Override
                     public void onChange(boolean selfChange) {
                         mQueryTask = new HistoryQueryTask();
                         mQueryTask.execute();
@@ -360,10 +386,11 @@ public class HistoryTab extends AwesomeBarTab {
                 BrowserDB.registerHistoryObserver(getContentResolver(), mContentObserver);
             }
 
-            final ExpandableListView historyList = (ExpandableListView)getListView();
+            final ExpandableListView historyList = (ExpandableListView)getView();
 
             // Hack: force this to the main thread, even though it should already be on it
-            GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
+            ThreadUtils.postToUiThread(new Runnable() {
+                @Override
                 public void run() {
                     historyList.setAdapter(mCursorAdapter);
                     expandAllGroups(historyList);
@@ -383,13 +410,13 @@ public class HistoryTab extends AwesomeBarTab {
         Map<String,Object> historyItem = (Map<String,Object>) adapter.getChild(groupPosition, childPosition);
 
         String url = (String) historyItem.get(URLColumns.URL);
-        AwesomeBarTabs.OnUrlOpenListener listener = getUrlListener();
-        if (!TextUtils.isEmpty(url) && listener != null)
-            listener.onUrlOpen(url);
+        String title = (String) historyItem.get(URLColumns.TITLE);
+        sendToListener(url, title);
 
         return true;
     }
 
+    @Override
     public ContextMenuSubject getSubject(ContextMenu menu, View view, ContextMenuInfo menuInfo) {
         ContextMenuSubject subject = null;
 
@@ -417,17 +444,12 @@ public class HistoryTab extends AwesomeBarTab {
                                                      (String) map.get(URLColumns.TITLE),
                                                      null);
 
-        MenuInflater inflater = new MenuInflater(mContext);
-        inflater.inflate(R.menu.awesomebar_contextmenu, menu);
-        
+        setupMenu(menu, subject);
+
         menu.findItem(R.id.remove_bookmark).setVisible(false);
         menu.findItem(R.id.edit_bookmark).setVisible(false);
+        menu.findItem(R.id.open_in_reader).setVisible(false);
 
-        // Hide "Remove" item if there isn't a valid history ID
-        if (subject.id < 0)
-            menu.findItem(R.id.remove_history).setVisible(false);
-
-        menu.setHeaderTitle(subject.title);
         return subject;
     }
 }

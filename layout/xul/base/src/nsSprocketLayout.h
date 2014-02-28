@@ -6,6 +6,7 @@
 #ifndef nsSprocketLayout_h___
 #define nsSprocketLayout_h___
 
+#include "mozilla/Attributes.h"
 #include "nsBoxLayout.h"
 #include "nsCOMPtr.h"
 #include "nsIFrame.h"
@@ -67,12 +68,12 @@ public:
   friend nsresult NS_NewSprocketLayout(nsIPresShell* aPresShell, nsCOMPtr<nsBoxLayout>& aNewLayout);
   static void Shutdown();
 
-  NS_IMETHOD Layout(nsIFrame* aBox, nsBoxLayoutState& aState);
+  NS_IMETHOD Layout(nsIFrame* aBox, nsBoxLayoutState& aState) MOZ_OVERRIDE;
 
-  virtual nsSize GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState);
-  virtual nsSize GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState);
-  virtual nsSize GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState);
-  virtual nscoord GetAscent(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState);
+  virtual nsSize GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
+  virtual nsSize GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
+  virtual nsSize GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
+  virtual nscoord GetAscent(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
 
   nsSprocketLayout();
 
@@ -109,8 +110,7 @@ protected:
                     bool& aFinished);
 
   void AlignChildren(nsIFrame* aBox,
-                     nsBoxLayoutState& aState,
-                     bool* aNeedsRedraw);
+                     nsBoxLayoutState& aState);
 
   virtual void ComputeChildSizes(nsIFrame* aBox, 
                          nsBoxLayoutState& aState, 

@@ -20,7 +20,6 @@
 #include "mozilla/gfx/QuartzSupport.h"
 #include "base/timer.h"
 
-using namespace mozilla::plugins::PluginUtilsOSX;
 #endif
 
 #include "npfunctions.h"
@@ -35,7 +34,7 @@ using namespace mozilla::plugins::PluginUtilsOSX;
 
 #include <map>
 
-#if defined(MOZ_WIDGET_GTK)
+#if (MOZ_WIDGET_GTK == 2)
 #include "gtk2xtbin.h"
 #endif
 
@@ -125,6 +124,9 @@ protected:
 
     virtual bool
     RecvWindowPosChanged(const NPRemoteEvent& event) MOZ_OVERRIDE;
+
+    virtual bool
+    RecvContentsScaleFactorChanged(const double& aContentsScaleFactor) MOZ_OVERRIDE;
 
     virtual bool
     AnswerNPP_Destroy(NPError* result);
@@ -357,6 +359,9 @@ private:
     const NPPluginFuncs* mPluginIface;
     NPP_t mData;
     NPWindow mWindow;
+#if defined(XP_MACOSX)
+    double mContentsScaleFactor;
+#endif
     int16_t               mDrawingModel;
     NPAsyncSurface* mCurrentAsyncSurface;
     struct AsyncBitmapData {
@@ -378,7 +383,7 @@ private:
 
 #if defined(MOZ_X11) && defined(XP_UNIX) && !defined(XP_MACOSX)
     NPSetWindowCallbackStruct mWsInfo;
-#if defined(MOZ_WIDGET_GTK)
+#if (MOZ_WIDGET_GTK == 2)
     bool mXEmbed;
     XtClient mXtClient;
 #endif
@@ -549,7 +554,7 @@ private:
 #ifdef XP_MACOSX
     // Current IOSurface available for rendering
     // We can't use thebes gfxASurface like other platforms.
-    nsDoubleBufferCARenderer mDoubleBufferCARenderer; 
+    PluginUtilsOSX::nsDoubleBufferCARenderer mDoubleBufferCARenderer; 
 #endif
 
     // (Not to be confused with mBackSurface).  This is a recent copy

@@ -15,8 +15,8 @@
 namespace mozilla {
 namespace layers {
 
-class THEBES_API CanvasLayerD3D10 : public CanvasLayer,
-                                    public LayerD3D10
+class CanvasLayerD3D10 : public CanvasLayer,
+                         public LayerD3D10
 {
 public:
   CanvasLayerD3D10(LayerManagerD3D10 *aManager)
@@ -48,12 +48,12 @@ private:
   mozilla::RefPtr<mozilla::gfx::DrawTarget> mDrawTarget;
   nsRefPtr<GLContext> mGLContext;
   nsRefPtr<ID3D10Texture2D> mTexture;
+  nsRefPtr<ID3D10ShaderResourceView> mUploadSRView;
   nsRefPtr<ID3D10ShaderResourceView> mSRView;
 
   bool mDataIsPremultiplied;
   bool mNeedsYFlip;
   bool mIsD2DTexture;
-  bool mUsingSharedTexture;
   bool mHasAlpha;
   bool mForceReadback;
 
@@ -62,17 +62,17 @@ private:
 
   uint8_t* GetTempBlob(const uint32_t aSize)
   {
-      if (!mCachedTempBlob || aSize != mCachedTempBlob_Size) {
-          mCachedTempBlob = new uint8_t[aSize];
-          mCachedTempBlob_Size = aSize;
-      }
+    if (!mCachedTempBlob || aSize != mCachedTempBlob_Size) {
+      mCachedTempBlob = new uint8_t[aSize];
+      mCachedTempBlob_Size = aSize;
+    }
 
-      return mCachedTempBlob;
+    return mCachedTempBlob;
   }
 
   void DiscardTempBlob()
   {
-      mCachedTempBlob = nullptr;
+    mCachedTempBlob = nullptr;
   }
 };
 

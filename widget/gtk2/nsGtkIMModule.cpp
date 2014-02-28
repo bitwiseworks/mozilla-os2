@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim:expandtab:shiftwidth=4:tabstop=4:
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=4 et sw=4 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,6 +16,7 @@
 #include "nsGtkIMModule.h"
 #include "nsWindow.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Likely.h"
 
 #ifdef MOZ_PLATFORM_MAEMO
 #include "nsServiceManagerUtils.h"
@@ -80,7 +80,7 @@ nsGtkIMModule::nsGtkIMModule(nsWindow* aOwnerWindow) :
     mSimpleContext(nullptr),
 #endif
     mDummyContext(nullptr),
-    mCompositionStart(PR_UINT32_MAX), mProcessingKeyEvent(nullptr),
+    mCompositionStart(UINT32_MAX), mProcessingKeyEvent(nullptr),
     mCompositionState(eCompositionState_NotComposing),
     mIsIMFocused(false), mIgnoreNativeCompositionEvent(false)
 {
@@ -101,7 +101,7 @@ nsGtkIMModule::Init()
 
     MozContainer* container = mOwnerWindow->GetMozContainer();
     NS_PRECONDITION(container, "container is null");
-    GdkWindow* gdkWindow = GTK_WIDGET(container)->window;
+    GdkWindow* gdkWindow = gtk_widget_get_window(GTK_WIDGET(container));
 
     // NOTE: gtk_im_*_new() abort (kill) the whole process when it fails.
     //       So, we don't need to check the result.
@@ -255,7 +255,11 @@ nsGtkIMModule::PrepareToDestroyContext(GtkIMContext *aContext)
     NS_PRECONDITION(container, "The container of the window is null");
 
     GtkIMMulticontext *multicontext = GTK_IM_MULTICONTEXT(aContext);
+#if (MOZ_WIDGET_GTK == 2)
     GtkIMContext *slave = multicontext->slave;
+#else
+    GtkIMContext *slave = NULL; //TODO GTK3
+#endif
     if (!slave) {
         return;
     }
@@ -290,20 +294,20 @@ nsGtkIMModule::PrepareToDestroyContext(GtkIMContext *aContext)
         static gpointer gtk_xim_context_class =
             g_type_class_ref(slaveType);
         // Mute unused variable warning:
-        gtk_xim_context_class = gtk_xim_context_class;
+        (void)gtk_xim_context_class;
     } else if (strcmp(im_type_name, "GtkIMContextIIIM") == 0) {
         // Add a reference to prevent the IIIM module from being unloaded
         static gpointer gtk_iiim_context_class =
             g_type_class_ref(slaveType);
         // Mute unused variable warning:
-        gtk_iiim_context_class = gtk_iiim_context_class;
+        (void)gtk_iiim_context_class;
     }
 }
 
 void
 nsGtkIMModule::OnFocusWindow(nsWindow* aWindow)
 {
-    if (NS_UNLIKELY(IsDestroyed())) {
+    if (MOZ_UNLIKELY(IsDestroyed())) {
         return;
     }
 
@@ -317,7 +321,7 @@ nsGtkIMModule::OnFocusWindow(nsWindow* aWindow)
 void
 nsGtkIMModule::OnBlurWindow(nsWindow* aWindow)
 {
-    if (NS_UNLIKELY(IsDestroyed())) {
+    if (MOZ_UNLIKELY(IsDestroyed())) {
         return;
     }
 
@@ -338,7 +342,7 @@ nsGtkIMModule::OnKeyEvent(nsWindow* aCaller, GdkEventKey* aEvent,
 {
     NS_PRECONDITION(aEvent, "aEvent must be non-null");
 
-    if (!IsEditable() || NS_UNLIKELY(IsDestroyed())) {
+    if (!IsEditable() || MOZ_UNLIKELY(IsDestroyed())) {
         return false;
     }
 
@@ -360,7 +364,7 @@ nsGtkIMModule::OnKeyEvent(nsWindow* aCaller, GdkEventKey* aEvent,
     }
 
     GtkIMContext* im = GetContext();
-    if (NS_UNLIKELY(!im)) {
+    if (MOZ_UNLIKELY(!im)) {
         PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
             ("    FAILED, there are no context"));
         return false;
@@ -440,7 +444,7 @@ nsGtkIMModule::ResetIME()
          this, GetCompositionStateName(), mIsIMFocused ? "YES" : "NO"));
 
     GtkIMContext *im = GetContext();
-    if (NS_UNLIKELY(!im)) {
+    if (MOZ_UNLIKELY(!im)) {
         PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
             ("    FAILED, there are no context"));
         return;
@@ -451,14 +455,15 @@ nsGtkIMModule::ResetIME()
 }
 
 nsresult
-nsGtkIMModule::ResetInputState(nsWindow* aCaller)
+nsGtkIMModule::CommitIMEComposition(nsWindow* aCaller)
 {
-    if (NS_UNLIKELY(IsDestroyed())) {
+    if (MOZ_UNLIKELY(IsDestroyed())) {
         return NS_OK;
     }
 
     PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
-        ("GtkIMModule(%p): ResetInputState, aCaller=%p, mCompositionState=%s",
+        ("GtkIMModule(%p): CommitIMEComposition, aCaller=%p, "
+         "mCompositionState=%s",
          this, aCaller, GetCompositionStateName()));
 
     if (aCaller != mLastFocusedWindow) {
@@ -482,7 +487,7 @@ nsGtkIMModule::ResetInputState(nsWindow* aCaller)
 nsresult
 nsGtkIMModule::CancelIMEComposition(nsWindow* aCaller)
 {
-    if (NS_UNLIKELY(IsDestroyed())) {
+    if (MOZ_UNLIKELY(IsDestroyed())) {
         return NS_OK;
     }
 
@@ -502,7 +507,7 @@ nsGtkIMModule::CancelIMEComposition(nsWindow* aCaller)
     }
 
     GtkIMContext *im = GetContext();
-    if (NS_UNLIKELY(!im)) {
+    if (MOZ_UNLIKELY(!im)) {
         PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
             ("    FAILED, there are no context"));
         return NS_OK;
@@ -519,7 +524,7 @@ nsGtkIMModule::SetInputContext(nsWindow* aCaller,
                                const InputContext* aContext,
                                const InputContextAction* aAction)
 {
-    if (NS_UNLIKELY(IsDestroyed())) {
+    if (MOZ_UNLIKELY(IsDestroyed())) {
         return;
     }
 
@@ -554,7 +559,7 @@ nsGtkIMModule::SetInputContext(nsWindow* aCaller,
 
     // Release current IME focus if IME is enabled.
     if (changingEnabledState && IsEditable()) {
-        ResetInputState(mLastFocusedWindow);
+        CommitIMEComposition(mLastFocusedWindow);
         Blur();
     }
 
@@ -1051,7 +1056,7 @@ nsGtkIMModule::DispatchCompositionStart()
     InitEvent(selection);
     mLastFocusedWindow->DispatchEvent(&selection, status);
 
-    if (!selection.mSucceeded || selection.mReply.mOffset == PR_UINT32_MAX) {
+    if (!selection.mSucceeded || selection.mReply.mOffset == UINT32_MAX) {
         PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
             ("    FAILED, cannot query the selection offset"));
         return false;
@@ -1135,7 +1140,7 @@ nsGtkIMModule::DispatchCompositionEnd()
     nsCOMPtr<nsIWidget> kungFuDeathGrip = mLastFocusedWindow;
     mLastFocusedWindow->DispatchEvent(&compEvent, status);
     mCompositionState = eCompositionState_NotComposing;
-    mCompositionStart = PR_UINT32_MAX;
+    mCompositionStart = UINT32_MAX;
     mDispatchedCompositionString.Truncate();
     if (static_cast<nsWindow*>(kungFuDeathGrip.get())->IsDestroyed() ||
         kungFuDeathGrip != mLastFocusedWindow) {
@@ -1374,7 +1379,7 @@ nsGtkIMModule::SetCursorPosition(uint32_t aTargetOffset)
         ("GtkIMModule(%p): SetCursorPosition, aTargetOffset=%u",
          this, aTargetOffset));
 
-    if (aTargetOffset == PR_UINT32_MAX) {
+    if (aTargetOffset == UINT32_MAX) {
         PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
             ("    FAILED, aTargetOffset is wrong offset"));
         return;
@@ -1463,9 +1468,9 @@ nsGtkIMModule::GetCurrentParagraph(nsAString& aText, uint32_t& aCursorPos)
 
     // XXX nsString::Find and nsString::RFind take int32_t for offset, so,
     //     we cannot support this request when the current offset is larger
-    //     than PR_INT32_MAX.
-    if (selOffset > PR_INT32_MAX || selLength > PR_INT32_MAX ||
-        selOffset + selLength > PR_INT32_MAX) {
+    //     than INT32_MAX.
+    if (selOffset > INT32_MAX || selLength > INT32_MAX ||
+        selOffset + selLength > INT32_MAX) {
         PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
             ("    FAILED, The selection is out of range"));
         return NS_ERROR_FAILURE;
@@ -1475,7 +1480,7 @@ nsGtkIMModule::GetCurrentParagraph(nsAString& aText, uint32_t& aCursorPos)
     nsQueryContentEvent queryTextContentEvent(true,
                                               NS_QUERY_TEXT_CONTENT,
                                               mLastFocusedWindow);
-    queryTextContentEvent.InitForQueryTextContent(0, PR_UINT32_MAX);
+    queryTextContentEvent.InitForQueryTextContent(0, UINT32_MAX);
     mLastFocusedWindow->DispatchEvent(&queryTextContentEvent, status);
     NS_ENSURE_TRUE(queryTextContentEvent.mSucceeded, NS_ERROR_FAILURE);
 
@@ -1570,7 +1575,7 @@ nsGtkIMModule::DeleteText(const int32_t aOffset, const uint32_t aNChars)
     nsQueryContentEvent queryTextContentEvent(true,
                                               NS_QUERY_TEXT_CONTENT,
                                               mLastFocusedWindow);
-    queryTextContentEvent.InitForQueryTextContent(0, PR_UINT32_MAX);
+    queryTextContentEvent.InitForQueryTextContent(0, UINT32_MAX);
     mLastFocusedWindow->DispatchEvent(&queryTextContentEvent, status);
     NS_ENSURE_TRUE(queryTextContentEvent.mSucceeded, NS_ERROR_FAILURE);
     if (queryTextContentEvent.mReply.mString.IsEmpty()) {

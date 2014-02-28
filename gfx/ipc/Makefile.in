@@ -10,31 +10,10 @@ VPATH       = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE             = gfxipc
 LIBRARY_NAME       = gfxipc_s
 FORCE_STATIC_LIB   = 1
 LIBXUL_LIBRARY     = 1
 EXPORT_LIBRARY     = 1
-
-EXPORTS_NAMESPACES = mozilla/gfx
-
-EXPORTS_mozilla/gfx = \
-        SharedDIB.h   \
-        $(NULL)
-
-CPPSRCS = SharedDIB.cpp
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
-EXPORTS_mozilla/gfx += \
-  SharedDIBWin.h \
-  SharedDIBSurface.h \
-  $(NULL)
-
-CPPSRCS += \
-  SharedDIBWin.cpp \
-  SharedDIBSurface.cpp \
-  $(NULL)
-endif
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

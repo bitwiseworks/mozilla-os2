@@ -10,36 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= widget
-LIBRARY_NAME	= wdgtos2
 EXPORT_LIBRARY	= 1
 IS_COMPONENT	= 1
 RESFILE		= widget.res
 MODULE_NAME	= nsWidgetOS2Module
-GRE_MODULE	= 1
 LIBXUL_LIBRARY = 1
 
-
-CPPSRCS		= \
-		nsAppShell.cpp \
-		nsBidiKeyboard.cpp \
-		nsClipboard.cpp \
-		nsFilePicker.cpp \
-		os2FrameWindow.cpp \
-		nsLookAndFeel.cpp \
-		nsOS2Uni.cpp \
-		nsPrintOS2.cpp \
-		nsSound.cpp \
-		nsWidgetFactory.cpp \
-		nsWindow.cpp \
-		nsDragService.cpp \
-		nsScreenOS2.cpp	\
-		nsScreenManagerOS2.cpp \
-		nsDeviceContextSpecOS2.cpp \
-		nsPrintOptionsOS2.cpp \
-		nsRwsService.cpp \
-		nsIdleServiceOS2.cpp \
-		$(NULL)
 
 SHARED_LIBRARY_LIBS = \
 	../xpwidgets/$(LIB_PREFIX)xpwidgets_s.$(LIB_SUFFIX) \
@@ -65,8 +41,11 @@ endif
 libs::	install-readme
 	$(INSTALL) $(srcdir)/MozSounds.cmd $(DIST)/bin/
 
-export::
-	test -d ./res || mkdir ./res
+export-preqs = \
+    $(call mkdir_deps,res) \
+    $(NULL)
+
+export:: $(export-preqs)
 	test -f ./res/aliasb.ptr || cp $(srcdir)/res/*.* ./res
 
 

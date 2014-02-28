@@ -35,8 +35,11 @@
 #include "nsAutoPtr.h"
 #include "nsTreeSanitizer.h"
 #include "nsHtml5Module.h"
+#include "mozilla/dom/DocumentFragment.h"
 
 #define XHTML_DIV_TAG "div xmlns=\"http://www.w3.org/1999/xhtml\""
+
+using namespace mozilla::dom;
 
 NS_IMPL_ISUPPORTS2(nsParserUtils,
                    nsIScriptableUnescapeHTML,
@@ -79,15 +82,16 @@ nsParserUtils::Sanitize(const nsAString& aFromStr,
   nsCOMPtr<nsIPrincipal> principal =
     do_CreateInstance("@mozilla.org/nullprincipal;1");
   nsCOMPtr<nsIDOMDocument> domDocument;
-  nsresult rv = nsContentUtils::CreateDocument(EmptyString(),
-                                               EmptyString(),
-                                               nullptr,
-                                               uri,
-                                               uri,
-                                               principal,
-                                               nullptr,
-                                               DocumentFlavorHTML,
-                                               getter_AddRefs(domDocument));
+  nsresult rv = NS_NewDOMDocument(getter_AddRefs(domDocument),
+                                  EmptyString(),
+                                  EmptyString(),
+                                  nullptr,
+                                  uri,
+                                  uri,
+                                  principal,
+                                  true,
+                                  nullptr,
+                                  DocumentFlavorHTML);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIDocument> document = do_QueryInterface(domDocument);
@@ -161,7 +165,7 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
   // Wrap things in a div or body for parsing, but it won't show up in
   // the fragment.
   nsAutoTArray<nsString, 2> tagStack;
-  nsCAutoString base, spec;
+  nsAutoCString base, spec;
   if (aIsXML) {
     // XHTML
     if (aBaseURI) {
@@ -191,8 +195,7 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
                                           aReturn);
     fragment = do_QueryInterface(*aReturn);
   } else {
-    NS_NewDocumentFragment(aReturn,
-                           document->NodeInfoManager());
+    NS_ADDREF(*aReturn = new DocumentFragment(document->NodeInfoManager()));
     fragment = do_QueryInterface(*aReturn);
     rv = nsContentUtils::ParseFragmentHTML(aFragment,
                                            fragment,

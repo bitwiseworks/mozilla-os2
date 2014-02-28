@@ -65,6 +65,13 @@ MappableFile::finalize()
   fd = -1;
 }
 
+size_t
+MappableFile::GetLength() const
+{
+  struct stat st;
+  return fstat(fd, &st) ? 0 : st.st_size;
+}
+
 Mappable *
 MappableExtractFile::Create(const char *name, Zip *zip, Zip::Stream *stream)
 {
@@ -131,7 +138,7 @@ MappableExtractFile::Create(const char *name, Zip *zip, Zip::Stream *stream)
     }
   } else if (stream->GetType() == Zip::Stream::STORE) {
     SeekableZStream zStream;
-    if (!zStream.Init(stream->GetBuffer())) {
+    if (!zStream.Init(stream->GetBuffer(), stream->GetSize())) {
       log("Couldn't initialize SeekableZStream for %s", name);
       return NULL;
     }
@@ -197,12 +204,13 @@ public:
     /* The Gecko crash reporter is confused by adjacent memory mappings of
      * the same file. On Android, subsequent mappings are growing in memory
      * address, and chances are we're going to map from the same file
-     * descriptor right away. Allocate one page more than requested so that
-     * there is a gap between this mapping and the subsequent one. */
+     * descriptor right away. To avoid problems with the crash reporter,
+     * create an empty anonymous page after the ashmem mapping. To do so,
+     * allocate one page more than requested, then replace the last page with
+     * an anonymous mapping. */
     void *buf = ::mmap(NULL, length + PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (buf != MAP_FAILED) {
-      /* Actually create the gap with anonymous memory */
-      ::mmap(reinterpret_cast<char *>(buf) + ((length + PAGE_SIZE) & PAGE_MASK),
+      ::mmap(reinterpret_cast<char *>(buf) + ((length + PAGE_SIZE - 1) & PAGE_MASK),
              PAGE_SIZE, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
              -1, 0);
       debug("Decompression buffer of size %d in ashmem \"%s\", mapped @%p",
@@ -248,7 +256,7 @@ public:
 #ifdef ANDROID
   ~_MappableBuffer() {
     /* Free the additional page we allocated. See _MappableBuffer::Create */
-    ::munmap(this + ((GetLength() + PAGE_SIZE) & ~(PAGE_SIZE - 1)), PAGE_SIZE);
+    ::munmap(*this + ((GetLength() + PAGE_SIZE - 1) & PAGE_MASK), PAGE_SIZE);
   }
 #endif
 
@@ -333,10 +341,18 @@ MappableDeflate::mmap(const void *addr, size_t length, int prot, int flags, off_
 void
 MappableDeflate::finalize()
 {
+  /* Free zlib internal buffers */
+  inflateEnd(&zStream);
   /* Free decompression buffer */
   buffer = NULL;
   /* Remove reference to Zip archive */
   zip = NULL;
+}
+
+size_t
+MappableDeflate::GetLength() const
+{
+  return buffer->GetLength();
 }
 
 Mappable *
@@ -347,10 +363,14 @@ MappableSeekableZStream::Create(const char *name, Zip *zip,
   mozilla::ScopedDeletePtr<MappableSeekableZStream> mappable;
   mappable = new MappableSeekableZStream(zip);
 
-  if (pthread_mutex_init(&mappable->mutex, NULL))
+  pthread_mutexattr_t recursiveAttr;
+  pthread_mutexattr_init(&recursiveAttr);
+  pthread_mutexattr_settype(&recursiveAttr, PTHREAD_MUTEX_RECURSIVE);
+
+  if (pthread_mutex_init(&mappable->mutex, &recursiveAttr))
     return NULL;
 
-  if (!mappable->zStream.Init(stream->GetBuffer()))
+  if (!mappable->zStream.Init(stream->GetBuffer(), stream->GetSize()))
     return NULL;
 
   mappable->buffer = _MappableBuffer::Create(name,
@@ -443,7 +463,7 @@ MappableSeekableZStream::ensure(const void *addr)
 
   /* Find corresponding chunk */
   off_t mapOffset = map->offsetOf(addrPage);
-  size_t chunk = mapOffset / zStream.GetChunkSize();
+  off_t chunk = mapOffset / zStream.GetChunkSize();
 
   /* In the typical case, we just need to decompress the chunk entirely. But
    * when the current mapping ends in the middle of the chunk, we want to
@@ -454,8 +474,8 @@ MappableSeekableZStream::ensure(const void *addr)
    * going to call mmap (which adds lazyMaps) while this function is
    * called. */
   size_t length = zStream.GetChunkSize(chunk);
-  size_t chunkStart = chunk * zStream.GetChunkSize();
-  size_t chunkEnd = chunkStart + length;
+  off_t chunkStart = chunk * zStream.GetChunkSize();
+  off_t chunkEnd = chunkStart + length;
   std::vector<LazyMap>::iterator it;
   for (it = map; it < lazyMaps.end(); ++it) {
     if (chunkEnd <= it->endOffset())
@@ -467,6 +487,19 @@ MappableSeekableZStream::ensure(const void *addr)
     length = it->endOffset() - chunkStart;
   }
 
+  /* The following lock can be re-acquired by the thread holding it.
+   * If this happens, it means the following code is interrupted somehow by
+   * some signal, and ends up retriggering a chunk decompression for the
+   * same MappableSeekableZStream.
+   * If the chunk to decompress is different the second time, then everything
+   * is safe as the only common data touched below is chunkAvailNum, and it is
+   * atomically updated (leaving out any chance of an interruption while it is
+   * updated affecting the result). If the chunk to decompress is the same, the
+   * worst thing that can happen is chunkAvailNum being incremented one too
+   * many times, which doesn't affect functionality. The chances of it
+   * happening being pretty slim, and the effect being harmless, we can just
+   * ignore the issue. Other than that, we'd just be wasting time decompressing
+   * the same chunk twice. */
   AutoLock lock(&mutex);
 
   /* The very first page is mapped and accessed separately of the rest, and
@@ -510,7 +543,7 @@ MappableSeekableZStream::ensure(const void *addr)
   length = reinterpret_cast<uintptr_t>(end)
            - reinterpret_cast<uintptr_t>(start);
 
-  debug("mprotect @%p, 0x%x, 0x%x", start, length, map->prot);
+  debug("mprotect @%p, 0x%" PRIxSize ", 0x%x", start, length, map->prot);
   if (mprotect(const_cast<void *>(start), length, map->prot) == 0)
     return true;
 
@@ -522,8 +555,8 @@ void
 MappableSeekableZStream::stats(const char *when, const char *name) const
 {
   size_t nEntries = zStream.GetChunksNum();
-  debug("%s: %s; %ld/%ld chunks decompressed",
-        name, when, chunkAvailNum, nEntries);
+  debug("%s: %s; %" PRIdSize "/%" PRIdSize " chunks decompressed",
+        name, when, static_cast<size_t>(chunkAvailNum), nEntries);
 
   size_t len = 64;
   mozilla::ScopedDeleteArray<char> map;
@@ -539,4 +572,10 @@ MappableSeekableZStream::stats(const char *when, const char *name) const
       j = 0;
     }
   }
+}
+
+size_t
+MappableSeekableZStream::GetLength() const
+{
+  return buffer->GetLength();
 }

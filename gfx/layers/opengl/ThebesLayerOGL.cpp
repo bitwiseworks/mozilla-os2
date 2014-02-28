@@ -4,13 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ipc/AutoOpenSurface.h"
-#include "mozilla/layers/PLayers.h"
+#include "mozilla/layers/PLayerTransaction.h"
 #include "TiledLayerBuffer.h"
 
-/* This must occur *after* layers/PLayers.h to avoid typedefs conflicts. */
+/* This must occur *after* layers/PLayerTransaction.h to avoid typedefs conflicts. */
 #include "mozilla/Util.h"
-
-#include "mozilla/layers/ShadowLayers.h"
 
 #include "ThebesLayerBuffer.h"
 #include "ThebesLayerOGL.h"
@@ -98,8 +96,8 @@ public:
 
   bool Initialised() { return mInitialised; }
 
-protected:
   virtual nsIntPoint GetOriginOffset() = 0;
+protected:
 
   GLContext* gl() const { return mOGLLayer->gl(); }
 
@@ -306,7 +304,6 @@ ThebesLayerBufferOGL::RenderTo(const nsIntPoint& aOffset,
   }
 }
 
-
 // This implementation is the fast-path for when our TextureImage is
 // permanently backed with a server-side ASurface.  We can simply
 // reuse the ThebesLayerBuffer logic in its entirety and profit.
@@ -335,15 +332,14 @@ public:
 
   // ThebesLayerBuffer interface
   virtual already_AddRefed<gfxASurface>
-  CreateBuffer(ContentType aType, const nsIntSize& aSize, uint32_t aFlags)
+  CreateBuffer(ContentType aType, const nsIntRect& aRect, uint32_t aFlags, gfxASurface**)
   {
     NS_ASSERTION(gfxASurface::CONTENT_ALPHA != aType,"ThebesBuffer has color");
 
-    mTexImage = CreateClampOrRepeatTextureImage(gl(), aSize, aType, aFlags);
+    mTexImage = CreateClampOrRepeatTextureImage(gl(), aRect.Size(), aType, aFlags);
     return mTexImage ? mTexImage->GetBackingSurface() : nullptr;
   }
 
-protected:
   virtual nsIntPoint GetOriginOffset() {
     return BufferRect().TopLeft() - BufferRotation();
   }
@@ -366,6 +362,10 @@ public:
 
   virtual PaintState BeginPaint(ContentType aContentType,
                                 uint32_t aFlags);
+  virtual nsIntPoint GetOriginOffset() {
+    return mBufferRect.TopLeft() - mBufferRotation;
+  }
+
 
 protected:
   enum XSide {
@@ -375,10 +375,6 @@ protected:
     TOP, BOTTOM
   };
   nsIntRect GetQuadrantRectangle(XSide aXSide, YSide aYSide);
-
-  virtual nsIntPoint GetOriginOffset() {
-    return mBufferRect.TopLeft() - mBufferRotation;
-  }
 
 private:
   nsIntRect mBufferRect;
@@ -587,63 +583,109 @@ BasicBufferOGL::BeginPaint(ContentType aContentType,
       // TEXTURE_2D.  This isn't the case on some older X1600-era Radeons.
       if (mOGLLayer->OGLManager()->FBOTextureTarget() == LOCAL_GL_TEXTURE_2D) {
         nsIntRect overlap;
+
+        // The buffer looks like:
+        //  ______
+        // |1  |2 |  Where the center point is offset by mBufferRotation from the top-left corner.
+        // |___|__|
+        // |3  |4 |
+        // |___|__|
+        //
+        // This is drawn to the screen as:
+        //  ______
+        // |4  |3 |  Where the center point is { width - mBufferRotation.x, height - mBufferRotation.y } from
+        // |___|__|  from the top left corner - rotationPoint.
+        // |2  |1 |
+        // |___|__|
+        //
+
+        // The basic idea below is to take all quadrant rectangles from the src and transform them into rectangles
+        // in the destination. Unfortunately, it seems it is overly complex and could perhaps be simplified.
+
+        nsIntRect srcBufferSpaceBottomRight(mBufferRotation.x, mBufferRotation.y, mBufferRect.width - mBufferRotation.x, mBufferRect.height - mBufferRotation.y);
+        nsIntRect srcBufferSpaceTopRight(mBufferRotation.x, 0, mBufferRect.width - mBufferRotation.x, mBufferRotation.y);
+        nsIntRect srcBufferSpaceTopLeft(0, 0, mBufferRotation.x, mBufferRotation.y);
+        nsIntRect srcBufferSpaceBottomLeft(0, mBufferRotation.y, mBufferRotation.x, mBufferRect.height - mBufferRotation.y);
+
         overlap.IntersectRect(mBufferRect, destBufferRect);
 
         nsIntRect srcRect(overlap), dstRect(overlap);
         srcRect.MoveBy(- mBufferRect.TopLeft() + mBufferRotation);
-        dstRect.MoveBy(- destBufferRect.TopLeft());
         
-        if (mBufferRotation != nsIntPoint(0, 0)) {
-          // If mBuffer is rotated, then BlitTextureImage will only be copying the bottom-right section
-          // of the buffer. We need to invalidate the remaining sections so that they get redrawn too.
-          // Alternatively we could teach BlitTextureImage to rearrange the rotated segments onto
-          // the new buffer.
-          
-          // When the rotated buffer is reorganised, the bottom-right section will be drawn in the top left.
-          // Find the point where this content ends.
-          nsIntPoint rotationPoint(mBufferRect.x + mBufferRect.width - mBufferRotation.x, 
-                                   mBufferRect.y + mBufferRect.height - mBufferRotation.y);
+        nsIntRect srcRectDrawTopRight(srcRect);
+        nsIntRect srcRectDrawTopLeft(srcRect);
+        nsIntRect srcRectDrawBottomLeft(srcRect);
+        // transform into the different quadrants
+        srcRectDrawTopRight  .MoveBy(-nsIntPoint(0, mBufferRect.height));
+        srcRectDrawTopLeft   .MoveBy(-nsIntPoint(mBufferRect.width, mBufferRect.height));
+        srcRectDrawBottomLeft.MoveBy(-nsIntPoint(mBufferRect.width, 0));
 
-          // The buffer looks like:
-          //  ______
-          // |1  |2 |  Where the center point is offset by mBufferRotation from the top-left corner.
-          // |___|__|
-          // |3  |4 |
-          // |___|__|
-          //
-          // This is drawn to the screen as:
-          //  ______
-          // |4  |3 |  Where the center point is { width - mBufferRotation.x, height - mBufferRotation.y } from
-          // |___|__|  from the top left corner - rotationPoint. Since only quadrant 4 will actually be copied, 
-          // |2  |1 |  we need to invalidate the others.
-          // |___|__|
-          //
-          // Quadrants 2 and 1
-          nsIntRect bottom(mBufferRect.x, rotationPoint.y, mBufferRect.width, mBufferRotation.y);
-          // Quadrant 3
-          nsIntRect topright(rotationPoint.x, mBufferRect.y, mBufferRotation.x, rotationPoint.y - mBufferRect.y);
+        // Intersect with the quadrant
+        srcRect               = srcRect              .Intersect(srcBufferSpaceBottomRight);
+        srcRectDrawTopRight   = srcRectDrawTopRight  .Intersect(srcBufferSpaceTopRight);
+        srcRectDrawTopLeft    = srcRectDrawTopLeft   .Intersect(srcBufferSpaceTopLeft);
+        srcRectDrawBottomLeft = srcRectDrawBottomLeft.Intersect(srcBufferSpaceBottomLeft);
 
-          if (!bottom.IsEmpty()) {
-            nsIntRegion temp;
-            temp.And(destBufferRect, bottom);
-            result.mRegionToDraw.Or(result.mRegionToDraw, temp);
-          }
-          if (!topright.IsEmpty()) {
-            nsIntRegion temp;
-            temp.And(destBufferRect, topright);
-            result.mRegionToDraw.Or(result.mRegionToDraw, temp);
-          }
-        }
+        dstRect = srcRect;
+        nsIntRect dstRectDrawTopRight(srcRectDrawTopRight);
+        nsIntRect dstRectDrawTopLeft(srcRectDrawTopLeft);
+        nsIntRect dstRectDrawBottomLeft(srcRectDrawBottomLeft);
+
+        // transform back to src buffer space
+        dstRect              .MoveBy(-mBufferRotation);
+        dstRectDrawTopRight  .MoveBy(-mBufferRotation + nsIntPoint(0, mBufferRect.height));
+        dstRectDrawTopLeft   .MoveBy(-mBufferRotation + nsIntPoint(mBufferRect.width, mBufferRect.height));
+        dstRectDrawBottomLeft.MoveBy(-mBufferRotation + nsIntPoint(mBufferRect.width, 0));
+
+        // transform back to draw coordinates
+        dstRect              .MoveBy(mBufferRect.TopLeft());
+        dstRectDrawTopRight  .MoveBy(mBufferRect.TopLeft());
+        dstRectDrawTopLeft   .MoveBy(mBufferRect.TopLeft());
+        dstRectDrawBottomLeft.MoveBy(mBufferRect.TopLeft());
+
+        // transform to destBuffer space
+        dstRect              .MoveBy(-destBufferRect.TopLeft());
+        dstRectDrawTopRight  .MoveBy(-destBufferRect.TopLeft());
+        dstRectDrawTopLeft   .MoveBy(-destBufferRect.TopLeft());
+        dstRectDrawBottomLeft.MoveBy(-destBufferRect.TopLeft());
 
         destBuffer->Resize(destBufferRect.Size());
 
         gl()->BlitTextureImage(mTexImage, srcRect,
                                destBuffer, dstRect);
+        if (mBufferRotation != nsIntPoint(0, 0)) {
+          // Draw the remaining quadrants. We call BlitTextureImage 3 extra
+          // times instead of doing a single draw call because supporting that
+          // with a tiled source is quite tricky.
+
+          if (!srcRectDrawTopRight.IsEmpty())
+            gl()->BlitTextureImage(mTexImage, srcRectDrawTopRight,
+                                   destBuffer, dstRectDrawTopRight);
+          if (!srcRectDrawTopLeft.IsEmpty())
+            gl()->BlitTextureImage(mTexImage, srcRectDrawTopLeft,
+                                   destBuffer, dstRectDrawTopLeft);
+          if (!srcRectDrawBottomLeft.IsEmpty())
+            gl()->BlitTextureImage(mTexImage, srcRectDrawBottomLeft,
+                                   destBuffer, dstRectDrawBottomLeft);
+        }
         destBuffer->MarkValid();
+
         if (mode == Layer::SURFACE_COMPONENT_ALPHA) {
           destBufferOnWhite->Resize(destBufferRect.Size());
           gl()->BlitTextureImage(mTexImageOnWhite, srcRect,
                                  destBufferOnWhite, dstRect);
+          if (mBufferRotation != nsIntPoint(0, 0)) {
+            // draw the remaining quadrants
+            if (!srcRectDrawTopRight.IsEmpty())
+              gl()->BlitTextureImage(mTexImageOnWhite, srcRectDrawTopRight,
+                                     destBufferOnWhite, dstRectDrawTopRight);
+            if (!srcRectDrawTopLeft.IsEmpty())
+              gl()->BlitTextureImage(mTexImageOnWhite, srcRectDrawTopLeft,
+                                     destBufferOnWhite, dstRectDrawTopLeft);
+            if (!srcRectDrawBottomLeft.IsEmpty())
+              gl()->BlitTextureImage(mTexImageOnWhite, srcRectDrawBottomLeft,
+                                     destBufferOnWhite, dstRectDrawBottomLeft);
+          }
           destBufferOnWhite->MarkValid();
         }
       } else {
@@ -689,25 +731,29 @@ BasicBufferOGL::BeginPaint(ContentType aContentType,
     nsIntRegion drawRegionCopy = result.mRegionToDraw;
     gfxASurface *onBlack = mTexImage->BeginUpdate(drawRegionCopy);
     gfxASurface *onWhite = mTexImageOnWhite->BeginUpdate(result.mRegionToDraw);
-    NS_ASSERTION(result.mRegionToDraw == drawRegionCopy,
-                 "BeginUpdate should always modify the draw region in the same way!");
-    FillSurface(onBlack, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(0.0, 0.0, 0.0, 1.0));
-    FillSurface(onWhite, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(1.0, 1.0, 1.0, 1.0));
-    gfxASurface* surfaces[2] = { onBlack, onWhite };
-    nsRefPtr<gfxTeeSurface> surf = new gfxTeeSurface(surfaces, ArrayLength(surfaces));
+    if (onBlack && onWhite) {
+      NS_ASSERTION(result.mRegionToDraw == drawRegionCopy,
+          "BeginUpdate should always modify the draw region in the same way!");
+      FillSurface(onBlack, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(0.0, 0.0, 0.0, 1.0));
+      FillSurface(onWhite, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(1.0, 1.0, 1.0, 1.0));
+      gfxASurface* surfaces[2] = { onBlack, onWhite };
+      nsRefPtr<gfxTeeSurface> surf = new gfxTeeSurface(surfaces, ArrayLength(surfaces));
 
-    // XXX If the device offset is set on the individual surfaces instead of on
-    // the tee surface, we render in the wrong place. Why?
-    gfxPoint deviceOffset = onBlack->GetDeviceOffset();
-    onBlack->SetDeviceOffset(gfxPoint(0, 0));
-    onWhite->SetDeviceOffset(gfxPoint(0, 0));
-    surf->SetDeviceOffset(deviceOffset);
+      // XXX If the device offset is set on the individual surfaces instead of on
+      // the tee surface, we render in the wrong place. Why?
+      gfxPoint deviceOffset = onBlack->GetDeviceOffset();
+      onBlack->SetDeviceOffset(gfxPoint(0, 0));
+      onWhite->SetDeviceOffset(gfxPoint(0, 0));
+      surf->SetDeviceOffset(deviceOffset);
 
-    // Using this surface as a source will likely go horribly wrong, since
-    // only the onBlack surface will really be used, so alpha information will
-    // be incorrect.
-    surf->SetAllowUseAsSource(false);
-    result.mContext = new gfxContext(surf);
+      // Using this surface as a source will likely go horribly wrong, since
+      // only the onBlack surface will really be used, so alpha information will
+      // be incorrect.
+      surf->SetAllowUseAsSource(false);
+      result.mContext = new gfxContext(surf);
+    } else {
+      result.mContext = nullptr;
+    }
   } else {
     result.mContext = new gfxContext(mTexImage->BeginUpdate(result.mRegionToDraw));
     if (mTexImage->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA) {
@@ -729,7 +775,7 @@ BasicBufferOGL::BeginPaint(ContentType aContentType,
   // If we do partial updates, we have to clip drawing to the regionToDraw.
   // If we don't clip, background images will be fillrect'd to the region correctly,
   // while text or lines will paint outside of the regionToDraw. This becomes apparent
-  // with concave regions. Right now the scrollbars invalidate a narrow strip of the awesomebar
+  // with concave regions. Right now the scrollbars invalidate a narrow strip of the bar
   // although they never cover it. This leads to two draw rects, the narow strip and the actually
   // newly exposed area. It would be wise to fix this glitch in any way to have simpler
   // clip and draw regions.
@@ -738,7 +784,7 @@ BasicBufferOGL::BeginPaint(ContentType aContentType,
   return result;
 }
 
-ThebesLayerOGL::ThebesLayerOGL(LayerManagerOGL *aManager)
+ThebesLayerOGL::ThebesLayerOGL(LayerManagerOGL* aManager)
   : ThebesLayer(aManager, nullptr)
   , LayerOGL(aManager)
   , mBuffer(nullptr)
@@ -789,7 +835,9 @@ ThebesLayerOGL::SetVisibleRegion(const nsIntRegion &aRegion)
 void
 ThebesLayerOGL::InvalidateRegion(const nsIntRegion &aRegion)
 {
-  mValidRegion.Sub(mValidRegion, aRegion);
+  mInvalidRegion.Or(mInvalidRegion, aRegion);
+  mInvalidRegion.SimplifyOutward(10);
+  mValidRegion.Sub(mValidRegion, mInvalidRegion);
 }
 
 void
@@ -810,12 +858,7 @@ ThebesLayerOGL::RenderLayer(int aPreviousFrameBuffer,
 
   uint32_t flags = 0;
 #ifndef MOZ_GFX_OPTIMIZE_MOBILE
-  gfxMatrix transform2d;
-  if (GetEffectiveTransform().Is2D(&transform2d)) {
-    if (transform2d.HasNonIntegerTranslation()) {
-      flags |= ThebesLayerBufferOGL::PAINT_WILL_RESAMPLE;
-    }
-  } else {
+  if (MayResample()) {
     flags |= ThebesLayerBufferOGL::PAINT_WILL_RESAMPLE;
   }
 #endif
@@ -875,261 +918,5 @@ ThebesLayerOGL::CleanupResources()
   mBuffer = nullptr;
 }
 
-class ShadowBufferOGL : public ThebesLayerBufferOGL
-{
-public:
-  ShadowBufferOGL(ShadowThebesLayerOGL* aLayer)
-    : ThebesLayerBufferOGL(aLayer, aLayer)
-  {
-    mInitialised = false;
-  }
-
-  virtual PaintState BeginPaint(ContentType aContentType, uint32_t) {
-    NS_RUNTIMEABORT("can't BeginPaint for a shadow layer");
-    return PaintState();
-  }
-
-  void EnsureTexture(gfxIntSize aSize, ContentType aContentType);
-
-  void DirectUpdate(gfxASurface* aUpdate, nsIntRegion& aRegion);
-
-  void Upload(gfxASurface* aUpdate, const nsIntRegion& aUpdated,
-              const nsIntRect& aRect, const nsIntPoint& aRotation);
-
-  already_AddRefed<TextureImage>
-  Swap(TextureImage* aNewBackBuffer,
-       const nsIntRect& aRect, const nsIntPoint& aRotation,
-       nsIntRect* aPrevRect, nsIntPoint* aPrevRotation);
-
-protected:
-  virtual nsIntPoint GetOriginOffset() {
-    return mBufferRect.TopLeft() - mBufferRotation;
-  }
-
-private:
-  nsIntRect mBufferRect;
-  nsIntPoint mBufferRotation;
-};
-
-void
-ShadowBufferOGL::EnsureTexture(gfxIntSize aSize, ContentType aContentType)
-{
-  if (!mTexImage ||
-      GetSize() != nsIntSize(aSize.width, aSize.height) ||
-      mTexImage->GetContentType() != aContentType) {
-    // XXX we should do something here to decide whether to use REPEAT or not,
-    // but I'm not sure what
-    mTexImage = CreateClampOrRepeatTextureImage(gl(),
-      nsIntSize(aSize.width, aSize.height), aContentType, ALLOW_REPEAT);
-    mInitialised = false;
-  }
-}
-
-void
-ShadowBufferOGL::DirectUpdate(gfxASurface* aUpdate, nsIntRegion& aRegion)
-{
-  EnsureTexture(aUpdate->GetSize(), aUpdate->GetContentType());
-  mInitialised = true;
-  mTexImage->DirectUpdate(aUpdate, aRegion);
-}
-
-void
-ShadowBufferOGL::Upload(gfxASurface* aUpdate, const nsIntRegion& aUpdated,
-                        const nsIntRect& aRect, const nsIntPoint& aRotation)
-{
-  // aUpdated is in screen coordinates. Convert it to buffer coordinates.
-  nsIntRegion destRegion(aUpdated);
-  destRegion.MoveBy(-aRect.TopLeft());
-
-  // Correct for rotation
-  destRegion.MoveBy(aRotation);
-  gfxIntSize size = aUpdate->GetSize();
-  nsIntRect destBounds = destRegion.GetBounds();
-  destRegion.MoveBy((destBounds.x >= size.width) ? -size.width : 0,
-                    (destBounds.y >= size.height) ? -size.height : 0);
-
-  // There's code to make sure that updated regions don't cross rotation
-  // boundaries, so assert here that this is the case
-  NS_ASSERTION(((destBounds.x % size.width) + destBounds.width <= size.width) &&
-               ((destBounds.y % size.height) + destBounds.height <= size.height),
-               "Updated region lies across rotation boundaries!");
-
-  // NB: this gfxContext must not escape EndUpdate() below
-  DirectUpdate(aUpdate, destRegion);
-
-  mBufferRect = aRect;
-  mBufferRotation = aRotation;
-}
-
-already_AddRefed<TextureImage>
-ShadowBufferOGL::Swap(TextureImage* aNewBackBuffer,
-                      const nsIntRect& aRect, const nsIntPoint& aRotation,
-                      nsIntRect* aPrevRect, nsIntPoint* aPrevRotation)
-{
-  nsRefPtr<TextureImage> prevBuffer = mTexImage;
-  *aPrevRect = mBufferRect;
-  *aPrevRotation = mBufferRotation;
-
-  mTexImage = aNewBackBuffer;
-  mBufferRect = aRect;
-  mBufferRotation = aRotation;
-
-  mInitialised = !!mTexImage;
-
-  return prevBuffer.forget();
-}
-
-ShadowThebesLayerOGL::ShadowThebesLayerOGL(LayerManagerOGL *aManager)
-  : ShadowThebesLayer(aManager, nullptr)
-  , LayerOGL(aManager)
-{
-#ifdef FORCE_BASICTILEDTHEBESLAYER
-  NS_ABORT();
-#endif
-  mImplData = static_cast<LayerOGL*>(this);
-}
-
-ShadowThebesLayerOGL::~ShadowThebesLayerOGL()
-{}
-
-void
-ShadowThebesLayerOGL::Swap(const ThebesBuffer& aNewFront,
-                           const nsIntRegion& aUpdatedRegion,
-                           OptionalThebesBuffer* aNewBack,
-                           nsIntRegion* aNewBackValidRegion,
-                           OptionalThebesBuffer* aReadOnlyFront,
-                           nsIntRegion* aFrontUpdatedRegion)
-{
-  if (mDestroyed) {
-    // Don't drop buffers on the floor.
-    *aNewBack = aNewFront;
-    *aNewBackValidRegion = aNewFront.rect();
-    *aReadOnlyFront = null_t();
-    return;
-  }
-
-  if (IsSurfaceDescriptorValid(mBufferDescriptor)) {
-    AutoOpenSurface currentFront(OPEN_READ_ONLY, mBufferDescriptor);
-    AutoOpenSurface newFront(OPEN_READ_ONLY, aNewFront.buffer());
-    if (currentFront.Size() != newFront.Size()) {
-      // The buffer changed size making the current front buffer
-      // obsolete.
-      DestroyFrontBuffer();
-    }
-  }
-
-  if (!mBuffer) {
-    mBuffer = new ShadowBufferOGL(this);
-  }
-  
-  if (nsRefPtr<TextureImage> texImage =
-      ShadowLayerManager::OpenDescriptorForDirectTexturing(
-        gl(), aNewFront.buffer(), WrapMode(gl(), ALLOW_REPEAT))) {
-    // We can directly texture the drawn surface.  Use that as our new
-    // front buffer, and return our previous directly-textured surface
-    // to the renderer.
-    ThebesBuffer newBack;
-    {
-      nsRefPtr<TextureImage> destroy = mBuffer->Swap(
-        texImage, aNewFront.rect(), aNewFront.rotation(),
-        &newBack.rect(), &newBack.rotation());
-    }
-    newBack.buffer() = mBufferDescriptor;
-    mBufferDescriptor = aNewFront.buffer();
-
-    if (IsSurfaceDescriptorValid(newBack.buffer())) {
-      *aNewBack = newBack;
-      // We have to invalidate the pixels painted into the new buffer.
-      // They might overlap with our old pixels.
-      aNewBackValidRegion->Sub(mValidRegionForNextBackBuffer, aUpdatedRegion);
-    } else {
-      *aNewBack = null_t();
-      aNewBackValidRegion->SetEmpty();
-    }
-    *aReadOnlyFront = aNewFront;
-    *aFrontUpdatedRegion = aUpdatedRegion;
-  } else {
-    // We're using resources owned by our texture as the front buffer.
-    // Upload the changed region and then return the surface back to
-    // the renderer.
-    AutoOpenSurface frontSurface(OPEN_READ_ONLY, aNewFront.buffer());
-    mBuffer->Upload(frontSurface.Get(), aUpdatedRegion, aNewFront.rect(), aNewFront.rotation());
-    
-    *aNewBack = aNewFront;
-    *aNewBackValidRegion = mValidRegion;
-    *aReadOnlyFront = null_t();
-    aFrontUpdatedRegion->SetEmpty();
-  }
-
-  // Save the current valid region of our front buffer, because if
-  // we're double buffering, it's going to be the valid region for the
-  // next back buffer sent back to the renderer.
-  //
-  // NB: we rely here on the fact that mValidRegion is initialized to
-  // empty, and that the first time Swap() is called we don't have a
-  // valid front buffer that we're going to return to content.
-  mValidRegionForNextBackBuffer = mValidRegion;
-}
-
-void
-ShadowThebesLayerOGL::DestroyFrontBuffer()
-{
-  mBuffer = nullptr;
-  mValidRegionForNextBackBuffer.SetEmpty();
-  if (IsSurfaceDescriptorValid(mBufferDescriptor)) {
-    mAllocator->DestroySharedSurface(&mBufferDescriptor);
-  }
-}
-
-void
-ShadowThebesLayerOGL::Disconnect()
-{
-  Destroy();
-}
-
-void
-ShadowThebesLayerOGL::Destroy()
-{
-  if (!mDestroyed) {
-    mDestroyed = true;
-    DestroyFrontBuffer();
-  }
-}
-
-Layer*
-ShadowThebesLayerOGL::GetLayer()
-{
-  return this;
-}
-
-bool
-ShadowThebesLayerOGL::IsEmpty()
-{
-  return !mBuffer;
-}
-
-void
-ShadowThebesLayerOGL::RenderLayer(int aPreviousFrameBuffer,
-                                  const nsIntPoint& aOffset)
-{
-  if (!mBuffer || mOGLManager->CompositingDisabled()) {
-    return;
-  }
-  NS_ABORT_IF_FALSE(mBuffer, "should have a buffer here");
-
-  mOGLManager->MakeCurrent();
-
-  gl()->fActiveTexture(LOCAL_GL_TEXTURE0);
-
-  gl()->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, aPreviousFrameBuffer);
-  mBuffer->RenderTo(aOffset, mOGLManager, 0);
-}
-
-void
-ShadowThebesLayerOGL::CleanupResources()
-{
-  DestroyFrontBuffer();
-}
-
-} /* layers */
-} /* mozilla */
+} // layers
+} // mozilla

@@ -116,16 +116,16 @@ public:
     NS_IMETHOD         ConstrainPosition(bool aAllowSlop,
                                          int32_t *aX,
                                          int32_t *aY);
-    NS_IMETHOD         Move(int32_t aX,
-                            int32_t aY);
-    NS_IMETHOD         Resize(int32_t aWidth,
-                              int32_t aHeight,
-                              bool    aRepaint);
-    NS_IMETHOD         Resize(int32_t aX,
-                              int32_t aY,
-                              int32_t aWidth,
-                              int32_t aHeight,
-                              bool     aRepaint);
+    NS_IMETHOD         Move(double aX,
+                            double aY);
+    NS_IMETHOD         Resize(double aWidth,
+                              double aHeight,
+                              bool   aRepaint);
+    NS_IMETHOD         Resize(double aX,
+                              double aY,
+                              double aWidth,
+                              double aHeight,
+                              bool   aRepaint);
     NS_IMETHOD         PlaceBehind(nsTopLevelWidgetZPlacement  aPlacement,
                                    nsIWidget                  *aWidget,
                                    bool                        aActivate);
@@ -153,8 +153,7 @@ public:
     NS_IMETHOD         EnableDragDrop(bool aEnable);
     NS_IMETHOD         CaptureMouse(bool aCapture);
     NS_IMETHOD         CaptureRollupEvents(nsIRollupListener *aListener,
-                                           bool aDoCapture,
-                                           bool aConsumeRollupEvent);
+                                           bool aDoCapture);
 
     NS_IMETHOD         SetWindowClass(const nsAString& xulWinType);
 
@@ -306,6 +305,7 @@ private:
         bool needDispatch;
     } MozCachedMoveEvent;
 
+    bool               CheckForRollup(double aMouseX, double aMouseY, bool aIsWheel);
     void*              SetupPluginPort(void);
     nsresult           SetWindowIconList(const nsTArray<nsCString> &aIconList);
     void               SetDefaultIcon(void);
@@ -316,6 +316,7 @@ private:
                                      nsNativeWidget nativeParent,
                                      nsWidgetInitData* aInitData);
     void               SetSoftwareKeyboardState(bool aOpen, const InputContextAction& aAction);
+    void               ClearCachedResources();
 
     MozQWidget*        mWidget;
 

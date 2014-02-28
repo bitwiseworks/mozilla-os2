@@ -9,6 +9,7 @@
 #include "nsCSSValue.h"
 
 #include "imgIRequest.h"
+#include "nsIDocument.h"
 #include "nsIPrincipal.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
@@ -16,6 +17,7 @@
 #include "CSSCalc.h"
 #include "nsNetUtil.h"
 #include "mozilla/css/ImageLoader.h"
+#include "mozilla/Likely.h"
 
 namespace css = mozilla::css;
 
@@ -40,7 +42,7 @@ nsCSSValue::nsCSSValue(float aValue, nsCSSUnit aUnit)
   NS_ABORT_IF_FALSE(eCSSUnit_Percent <= aUnit, "not a float value");
   if (eCSSUnit_Percent <= aUnit) {
     mValue.mFloat = aValue;
-    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
+    MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
   }
   else {
     mUnit = eCSSUnit_Null;
@@ -54,7 +56,7 @@ nsCSSValue::nsCSSValue(const nsString& aValue, nsCSSUnit aUnit)
   NS_ABORT_IF_FALSE(UnitHasStringValue(), "not a string value");
   if (UnitHasStringValue()) {
     mValue.mString = BufferFromString(aValue).get();
-    if (NS_UNLIKELY(!mValue.mString)) {
+    if (MOZ_UNLIKELY(!mValue.mString)) {
       // XXXbz not much we can do here; just make sure that our promise of a
       // non-null mValue.mString holds for string units.
       mUnit = eCSSUnit_Null;
@@ -103,7 +105,7 @@ nsCSSValue::nsCSSValue(const nsCSSValue& aCopy)
   }
   else if (eCSSUnit_Percent <= mUnit) {
     mValue.mFloat = aCopy.mValue.mFloat;
-    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
+    MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
   }
   else if (UnitHasStringValue()) {
     mValue.mString = aCopy.mValue.mString;
@@ -243,7 +245,7 @@ double nsCSSValue::GetAngleValueInRadians() const
   }
 }
 
-imgIRequest* nsCSSValue::GetImageValue(nsIDocument* aDocument) const
+imgRequestProxy* nsCSSValue::GetImageValue(nsIDocument* aDocument) const
 {
   NS_ABORT_IF_FALSE(mUnit == eCSSUnit_Image, "not an Image value");
   return mValue.mImage->mRequests.GetWeak(aDocument);
@@ -321,7 +323,7 @@ void nsCSSValue::SetPercentValue(float aValue)
   Reset();
   mUnit = eCSSUnit_Percent;
   mValue.mFloat = aValue;
-  MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
+  MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
 }
 
 void nsCSSValue::SetFloatValue(float aValue, nsCSSUnit aUnit)
@@ -331,7 +333,7 @@ void nsCSSValue::SetFloatValue(float aValue, nsCSSUnit aUnit)
   if (eCSSUnit_Number <= aUnit) {
     mUnit = aUnit;
     mValue.mFloat = aValue;
-    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
+    MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
   }
 }
 
@@ -343,7 +345,7 @@ void nsCSSValue::SetStringValue(const nsString& aValue,
   NS_ABORT_IF_FALSE(UnitHasStringValue(), "not a string unit");
   if (UnitHasStringValue()) {
     mValue.mString = BufferFromString(aValue).get();
-    if (NS_UNLIKELY(!mValue.mString)) {
+    if (MOZ_UNLIKELY(!mValue.mString)) {
       // XXXbz not much we can do here; just make sure that our promise of a
       // non-null mValue.mString holds for string units.
       mUnit = eCSSUnit_Null;
@@ -613,8 +615,7 @@ nsCSSValue::EqualsFunction(nsCSSKeyword aFunctionId) const
                     func->Item(0).GetUnit() == eCSSUnit_Enumerated,
                     "illegally structured function value");
 
-  nsCSSKeyword thisFunctionId =
-    static_cast<nsCSSKeyword>(func->Item(0).GetIntValue());
+  nsCSSKeyword thisFunctionId = func->Item(0).GetKeywordValue();
   return thisFunctionId == aFunctionId;
 }
 
@@ -622,10 +623,9 @@ nsCSSValue::EqualsFunction(nsCSSKeyword aFunctionId) const
 already_AddRefed<nsStringBuffer>
 nsCSSValue::BufferFromString(const nsString& aValue)
 {
-  nsStringBuffer* buffer = nsStringBuffer::FromString(aValue);
+  nsRefPtr<nsStringBuffer> buffer = nsStringBuffer::FromString(aValue);
   if (buffer) {
-    buffer->AddRef();
-    return buffer;
+    return buffer.forget();
   }
 
   nsString::size_type length = aValue.Length();
@@ -633,7 +633,7 @@ nsCSSValue::BufferFromString(const nsString& aValue)
   // NOTE: Alloc prouduces a new, already-addref'd (refcnt = 1) buffer.
   // NOTE: String buffer allocation is currently fallible.
   buffer = nsStringBuffer::Alloc((length + 1) * sizeof(PRUnichar));
-  if (NS_UNLIKELY(!buffer)) {
+  if (MOZ_UNLIKELY(!buffer)) {
     NS_RUNTIMEABORT("out of memory");
   }
 
@@ -641,7 +641,7 @@ nsCSSValue::BufferFromString(const nsString& aValue)
   nsCharTraits<PRUnichar>::copy(data, aValue.get(), length);
   // Null-terminate.
   data[length] = 0;
-  return buffer;
+  return buffer.forget();
 }
 
 namespace {
@@ -774,13 +774,38 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
     const nsCSSValue& functionName = array->Item(0);
     if (functionName.GetUnit() == eCSSUnit_Enumerated) {
       // We assume that the first argument is always of nsCSSKeyword type.
-      const nsCSSKeyword functionId =
-        static_cast<nsCSSKeyword>(functionName.GetIntValue());
-      nsStyleUtil::AppendEscapedCSSIdent(
-        NS_ConvertASCIItoUTF16(nsCSSKeywords::GetStringValue(functionId)),
-        aResult);
+      const nsCSSKeyword functionId = functionName.GetKeywordValue();
+      NS_ConvertASCIItoUTF16 ident(nsCSSKeywords::GetStringValue(functionId));
+      // Bug 721136: Normalize the identifier to lowercase, except that things
+      // like scaleX should have the last character capitalized.  This matches
+      // what other browsers do.
+      switch (functionId) {
+        case eCSSKeyword_rotatex:
+        case eCSSKeyword_scalex:
+        case eCSSKeyword_skewx:
+        case eCSSKeyword_translatex:
+          ident.Replace(ident.Length() - 1, 1, PRUnichar('X'));
+          break;
+
+        case eCSSKeyword_rotatey:
+        case eCSSKeyword_scaley:
+        case eCSSKeyword_skewy:
+        case eCSSKeyword_translatey:
+          ident.Replace(ident.Length() - 1, 1, PRUnichar('Y'));
+          break;
+
+        case eCSSKeyword_rotatez:
+        case eCSSKeyword_scalez:
+        case eCSSKeyword_translatez:
+          ident.Replace(ident.Length() - 1, 1, PRUnichar('Z'));
+          break;
+
+        default:
+          break;
+      }
+      nsStyleUtil::AppendEscapedCSSIdent(ident, aResult);
     } else {
-      functionName.AppendToString(aProperty, aResult);
+      MOZ_ASSERT(false, "should no longer have non-enumerated functions");
     }
     aResult.AppendLiteral("(");
 
@@ -805,8 +830,10 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
     aResult.AppendInt(GetIntValue(), 10);
   }
   else if (eCSSUnit_Enumerated == unit) {
-    if (eCSSProperty_text_decoration_line == aProperty) {
-      int32_t intValue = GetIntValue();
+    int32_t intValue = GetIntValue();
+    switch(aProperty) {
+
+    case eCSSProperty_text_decoration_line:
       if (NS_STYLE_TEXT_DECORATION_LINE_NONE == intValue) {
         AppendASCIItoUTF16(nsCSSProps::LookupPropertyValue(aProperty, intValue),
                            aResult);
@@ -820,9 +847,9 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
           NS_STYLE_TEXT_DECORATION_LINE_PREF_ANCHORS,
           aResult);
       }
-    }
-    else if (eCSSProperty_marks == aProperty) {
-      int32_t intValue = GetIntValue();
+      break;
+
+    case eCSSProperty_marks:
       if (intValue == NS_STYLE_PAGE_MARKS_NONE) {
         AppendASCIItoUTF16(nsCSSProps::LookupPropertyValue(aProperty, intValue),
                            aResult);
@@ -832,16 +859,54 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
                                            NS_STYLE_PAGE_MARKS_REGISTER,
                                            aResult);
       }
-    }
-    else {
-      const nsAFlatCString& name = nsCSSProps::LookupPropertyValue(aProperty, GetIntValue());
+      break;
+
+    case eCSSProperty_paint_order:
+      MOZ_STATIC_ASSERT
+        (NS_STYLE_PAINT_ORDER_BITWIDTH * NS_STYLE_PAINT_ORDER_LAST_VALUE <= 8,
+         "SVGStyleStruct::mPaintOrder and the following cast not big enough");
+      nsStyleUtil::AppendPaintOrderValue(static_cast<uint8_t>(GetIntValue()),
+                                         aResult);
+      break;
+
+    case eCSSProperty_font_synthesis:
+      nsStyleUtil::AppendBitmaskCSSValue(aProperty, intValue,
+                                         NS_FONT_SYNTHESIS_WEIGHT,
+                                         NS_FONT_SYNTHESIS_STYLE,
+                                         aResult);
+      break;
+
+    case eCSSProperty_font_variant_east_asian:
+      nsStyleUtil::AppendBitmaskCSSValue(aProperty, intValue,
+                                         NS_FONT_VARIANT_EAST_ASIAN_JIS78,
+                                         NS_FONT_VARIANT_EAST_ASIAN_RUBY,
+                                         aResult);
+      break;
+
+    case eCSSProperty_font_variant_ligatures:
+      nsStyleUtil::AppendBitmaskCSSValue(aProperty, intValue,
+                                         NS_FONT_VARIANT_LIGATURES_COMMON,
+                                         NS_FONT_VARIANT_LIGATURES_NO_CONTEXTUAL,
+                                         aResult);
+      break;
+
+    case eCSSProperty_font_variant_numeric:
+      nsStyleUtil::AppendBitmaskCSSValue(aProperty, intValue,
+                                         NS_FONT_VARIANT_NUMERIC_LINING,
+                                         NS_FONT_VARIANT_NUMERIC_ORDINAL,
+                                         aResult);
+      break;
+
+    default:
+      const nsAFlatCString& name = nsCSSProps::LookupPropertyValue(aProperty, intValue);
       AppendASCIItoUTF16(name, aResult);
+      break;
     }
   }
   else if (eCSSUnit_EnumColor == unit) {
     // we can lookup the property in the ColorTable and then
     // get a string mapping the name
-    nsCAutoString str;
+    nsAutoCString str;
     if (nsCSSProps::GetColorName(GetIntValue(), str)){
       AppendASCIItoUTF16(str, aResult);
     } else {
@@ -1049,7 +1114,27 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
 
     aResult.AppendLiteral(")");
   } else if (eCSSUnit_Pair == unit) {
-    GetPairValue().AppendToString(aProperty, aResult);
+    if (eCSSProperty_font_variant_alternates == aProperty) {
+      int32_t intValue = GetPairValue().mXValue.GetIntValue();
+      nsAutoString out;
+
+      // simple, enumerated values
+      nsStyleUtil::AppendBitmaskCSSValue(aProperty,
+          intValue & NS_FONT_VARIANT_ALTERNATES_ENUMERATED_MASK,
+          NS_FONT_VARIANT_ALTERNATES_HISTORICAL,
+          NS_FONT_VARIANT_ALTERNATES_HISTORICAL,
+          out);
+
+      // functional values
+      const nsCSSValueList *list = GetPairValue().mYValue.GetListValue();
+      nsAutoTArray<gfxAlternateValue,8> altValues;
+
+      nsStyleUtil::ComputeFunctionalAlternates(list, altValues);
+      nsStyleUtil::SerializeFunctionalAlternates(altValues, out);
+      aResult.Append(out);
+    } else {
+      GetPairValue().AppendToString(aProperty, aResult);
+    }
   } else if (eCSSUnit_Triplet == unit) {
     GetTripletValue().AppendToString(aProperty, aResult);
   } else if (eCSSUnit_Rect == unit) {
@@ -1071,7 +1156,7 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
     case eCSSUnit_Null:         break;
     case eCSSUnit_Auto:         aResult.AppendLiteral("auto");     break;
     case eCSSUnit_Inherit:      aResult.AppendLiteral("inherit");  break;
-    case eCSSUnit_Initial:      aResult.AppendLiteral("-moz-initial"); break;
+    case eCSSUnit_Initial:      aResult.AppendLiteral("initial");  break;
     case eCSSUnit_None:         aResult.AppendLiteral("none");     break;
     case eCSSUnit_Normal:       aResult.AppendLiteral("normal");   break;
     case eCSSUnit_System_Font:  aResult.AppendLiteral("-moz-use-system-font"); break;
@@ -1123,6 +1208,11 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
     case eCSSUnit_Centimeter:   aResult.AppendLiteral("cm");   break;
     case eCSSUnit_Point:        aResult.AppendLiteral("pt");   break;
     case eCSSUnit_Pica:         aResult.AppendLiteral("pc");   break;
+
+    case eCSSUnit_ViewportWidth:  aResult.AppendLiteral("vw");   break;
+    case eCSSUnit_ViewportHeight: aResult.AppendLiteral("vh");   break;
+    case eCSSUnit_ViewportMin:    aResult.AppendLiteral("vmin"); break;
+    case eCSSUnit_ViewportMax:    aResult.AppendLiteral("vmax"); break;
 
     case eCSSUnit_EM:           aResult.AppendLiteral("em");   break;
     case eCSSUnit_XHeight:      aResult.AppendLiteral("ex");   break;
@@ -1252,6 +1342,10 @@ nsCSSValue::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
     case eCSSUnit_Percent:
     case eCSSUnit_Number:
     case eCSSUnit_PhysicalMillimeter:
+    case eCSSUnit_ViewportWidth:
+    case eCSSUnit_ViewportHeight:
+    case eCSSUnit_ViewportMin:
+    case eCSSUnit_ViewportMax:
     case eCSSUnit_EM:
     case eCSSUnit_XHeight:
     case eCSSUnit_Char:
@@ -1704,18 +1798,26 @@ css::ImageValue::ImageValue(nsIURI* aURI, nsStringBuffer* aString,
                             nsIDocument* aDocument)
   : URLValue(aURI, aString, aReferrer, aOriginPrincipal)
 {
-  if (aDocument->GetOriginalDocument()) {
-    aDocument = aDocument->GetOriginalDocument();
+  // NB: If aDocument is not the original document, we may not be able to load
+  // images from aDocument.  Instead we do the image load from the original doc
+  // and clone it to aDocument.
+  nsIDocument* loadingDoc = aDocument->GetOriginalDocument();
+  if (!loadingDoc) {
+    loadingDoc = aDocument;
   }
 
   mRequests.Init();
 
-  aDocument->StyleImageLoader()->LoadImage(aURI, aOriginPrincipal, aReferrer,
-                                           this);
+  loadingDoc->StyleImageLoader()->LoadImage(aURI, aOriginPrincipal, aReferrer,
+                                            this);
+
+  if (loadingDoc != aDocument) {
+    aDocument->StyleImageLoader()->MaybeRegisterCSSImage(this);
+  }
 }
 
 static PLDHashOperator
-ClearRequestHashtable(nsISupports* aKey, nsCOMPtr<imgIRequest>& aValue,
+ClearRequestHashtable(nsISupports* aKey, nsRefPtr<imgRequestProxy>& aValue,
                       void* aClosure)
 {
   mozilla::css::ImageValue* image =

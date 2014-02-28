@@ -10,23 +10,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= ucvko
-LIBRARY_NAME	= ucvko_s
 FORCE_STATIC_LIB=1
 LIBXUL_LIBRARY = 1
 
-
-CPPSRCS		= \
-		nsEUCKRToUnicode.cpp \
-		nsUnicodeToEUCKR.cpp \
-		nsISO2022KRToUnicode.cpp \
-		nsCP949ToUnicode.cpp \
-		nsUnicodeToCP949.cpp \
-		nsUnicodeToJohab.cpp \
-		nsJohabToUnicode.cpp \
-		$(NULL)
-
-EXPORTS		= nsUCvKOCID.h
 
 LOCAL_INCLUDES = -I$(srcdir)/../util
 

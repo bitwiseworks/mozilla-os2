@@ -48,7 +48,6 @@ static const char kURINC_BrowserMore2CharsetMenuRoot[] = "NC:BrowserMore2Charset
 static const char kURINC_BrowserMore3CharsetMenuRoot[] = "NC:BrowserMore3CharsetMenuRoot";
 static const char kURINC_BrowserMore4CharsetMenuRoot[] = "NC:BrowserMore4CharsetMenuRoot";
 static const char kURINC_BrowserMore5CharsetMenuRoot[] = "NC:BrowserMore5CharsetMenuRoot";
-static const char kURINC_BrowserUnicodeCharsetMenuRoot[] = "NC:BrowserUnicodeCharsetMenuRoot";
 static const char kURINC_MaileditCharsetMenuRoot[] = "NC:MaileditCharsetMenuRoot";
 static const char kURINC_MailviewCharsetMenuRoot[] = "NC:MailviewCharsetMenuRoot";
 static const char kURINC_ComposerCharsetMenuRoot[] = "NC:ComposerCharsetMenuRoot";
@@ -92,7 +91,7 @@ public:
   nsMenuEntry() { MOZ_COUNT_CTOR(nsMenuEntry); }
   ~nsMenuEntry() { MOZ_COUNT_DTOR(nsMenuEntry); }
 
-  nsCAutoString mCharset;
+  nsAutoCString mCharset;
   nsAutoString      mTitle;
 };
 
@@ -121,7 +120,6 @@ private:
   static nsIRDFResource * kNC_BrowserMore3CharsetMenuRoot;
   static nsIRDFResource * kNC_BrowserMore4CharsetMenuRoot;
   static nsIRDFResource * kNC_BrowserMore5CharsetMenuRoot;
-  static nsIRDFResource * kNC_BrowserUnicodeCharsetMenuRoot;
   static nsIRDFResource * kNC_MaileditCharsetMenuRoot;
   static nsIRDFResource * kNC_MailviewCharsetMenuRoot;
   static nsIRDFResource * kNC_ComposerCharsetMenuRoot;
@@ -330,7 +328,7 @@ nsCharsetMenu::SetArrayFromEnumerator(nsIUTF8StringEnumerator* aEnumerator,
   bool hasMore;
   rv = aEnumerator->HasMore(&hasMore);
   
-  nsCAutoString value;
+  nsAutoCString value;
   while (NS_SUCCEEDED(rv) && hasMore) {
     rv = aEnumerator->GetNext(value);
     if (NS_SUCCEEDED(rv))
@@ -433,7 +431,6 @@ NS_IMETHODIMP nsCharsetMenuObserver::Observe(nsISupports *aSubject, const char *
 //----------------------------------------------------------------------------
 // Class nsCharsetMenu [implementation]
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsCharsetMenu)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(nsCharsetMenu)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsCharsetMenu)
   cb.NoteXPCOMChild(nsCharsetMenu::mInner);
@@ -456,7 +453,6 @@ nsIRDFResource * nsCharsetMenu::kNC_BrowserMore2CharsetMenuRoot = NULL;
 nsIRDFResource * nsCharsetMenu::kNC_BrowserMore3CharsetMenuRoot = NULL;
 nsIRDFResource * nsCharsetMenu::kNC_BrowserMore4CharsetMenuRoot = NULL;
 nsIRDFResource * nsCharsetMenu::kNC_BrowserMore5CharsetMenuRoot = NULL;
-nsIRDFResource * nsCharsetMenu::kNC_BrowserUnicodeCharsetMenuRoot = NULL;
 nsIRDFResource * nsCharsetMenu::kNC_MaileditCharsetMenuRoot = NULL;
 nsIRDFResource * nsCharsetMenu::kNC_MailviewCharsetMenuRoot = NULL;
 nsIRDFResource * nsCharsetMenu::kNC_ComposerCharsetMenuRoot = NULL;
@@ -698,8 +694,6 @@ nsresult nsCharsetMenu::Init()
                              &kNC_BrowserMore4CharsetMenuRoot);
     mRDFService->GetResource(NS_LITERAL_CSTRING(kURINC_BrowserMore5CharsetMenuRoot),
                              &kNC_BrowserMore5CharsetMenuRoot);
-    mRDFService->GetResource(NS_LITERAL_CSTRING(kURINC_BrowserUnicodeCharsetMenuRoot),
-                             &kNC_BrowserUnicodeCharsetMenuRoot);
     mRDFService->GetResource(NS_LITERAL_CSTRING(kURINC_MaileditCharsetMenuRoot),
                              &kNC_MaileditCharsetMenuRoot);
     mRDFService->GetResource(NS_LITERAL_CSTRING(kURINC_MailviewCharsetMenuRoot),
@@ -738,8 +732,6 @@ nsresult nsCharsetMenu::Init()
     if (NS_FAILED(res)) goto done;
     res = rdfUtil->MakeSeq(mInner, kNC_BrowserMore5CharsetMenuRoot, NULL);
     if (NS_FAILED(res)) goto done;
-    res = rdfUtil->MakeSeq(mInner, kNC_BrowserUnicodeCharsetMenuRoot, NULL);
-    if (NS_FAILED(res)) goto done;
     res = rdfUtil->MakeSeq(mInner, kNC_MaileditCharsetMenuRoot, NULL);
     if (NS_FAILED(res)) goto done;
     res = rdfUtil->MakeSeq(mInner, kNC_MailviewCharsetMenuRoot, NULL);
@@ -772,7 +764,6 @@ nsresult nsCharsetMenu::Done()
   NS_IF_RELEASE(kNC_BrowserMore3CharsetMenuRoot);
   NS_IF_RELEASE(kNC_BrowserMore4CharsetMenuRoot);
   NS_IF_RELEASE(kNC_BrowserMore5CharsetMenuRoot);
-  NS_IF_RELEASE(kNC_BrowserUnicodeCharsetMenuRoot);
   NS_IF_RELEASE(kNC_MaileditCharsetMenuRoot);
   NS_IF_RELEASE(kNC_MailviewCharsetMenuRoot);
   NS_IF_RELEASE(kNC_ComposerCharsetMenuRoot);
@@ -816,9 +807,7 @@ nsresult nsCharsetMenu::InitBrowserMenu()
     res = NewRDFContainer(mInner, kNC_BrowserCharsetMenuRoot, getter_AddRefs(container));
     if (NS_FAILED(res)) return res;
 
-
-    // how to clone mDecoderList??
-    nsTArray<nsCString> browserDecoderList = mDecoderList;
+    nsTArray<nsCString> browserDecoderList(mDecoderList);
 
     res = InitStaticMenu(browserDecoderList, kNC_BrowserCharsetMenuRoot, 
                          kBrowserStaticPrefKey, &mBrowserMenu);
@@ -894,7 +883,7 @@ nsresult nsCharsetMenu::InitMailviewMenu()
     res = NewRDFContainer(mInner, kNC_MailviewCharsetMenuRoot, getter_AddRefs(container));
     if (NS_FAILED(res)) return res;
 
-    nsTArray<nsCString> mailviewDecoderList = mDecoderList;
+    nsTArray<nsCString> mailviewDecoderList(mDecoderList);
 
     res = InitStaticMenu(mailviewDecoderList, kNC_MailviewCharsetMenuRoot, 
                          kMailviewStaticPrefKey, &mMailviewMenu);
@@ -930,7 +919,7 @@ nsresult nsCharsetMenu::InitComposerMenu()
     res = NewRDFContainer(mInner, kNC_ComposerCharsetMenuRoot, getter_AddRefs(container));
     if (NS_FAILED(res)) return res;
 
-    nsTArray<nsCString> composerDecoderList = mDecoderList;
+    nsTArray<nsCString> composerDecoderList(mDecoderList);
 
     // even if we fail, the show must go on
     res = InitStaticMenu(composerDecoderList, kNC_ComposerCharsetMenuRoot, 
@@ -963,7 +952,7 @@ nsresult nsCharsetMenu::InitOthers()
   nsresult res = NS_OK;
 
   if (!mOthersInitialized) {
-    nsTArray<nsCString> othersDecoderList = mDecoderList;
+    nsTArray<nsCString> othersDecoderList(mDecoderList);
 
     res = InitMoreMenu(othersDecoderList, kNC_DecodersRoot, ".notForBrowser");                 
     if (NS_FAILED(res))  return res;
@@ -971,7 +960,7 @@ nsresult nsCharsetMenu::InitOthers()
     // Using mDecoderList instead of GetEncoderList(), we can avoid having to
     // tag a whole bunch of 'font encoders' with '.notForOutgoing' in 
     // charsetData.properties file. 
-    nsTArray<nsCString> othersEncoderList = mDecoderList;
+    nsTArray<nsCString> othersEncoderList(mDecoderList);
 
     res = InitMoreMenu(othersEncoderList, kNC_EncodersRoot, ".notForOutgoing");                 
     if (NS_FAILED(res)) return res;
@@ -992,7 +981,7 @@ nsresult nsCharsetMenu::InitSecondaryTiers()
   nsresult res = NS_OK;
 
   if (!mSecondaryTiersInitialized)  {
-    nsTArray<nsCString> secondaryTiersDecoderList = mDecoderList;
+    nsTArray<nsCString> secondaryTiersDecoderList(mDecoderList);
 
     res = InitMoreSubmenus(secondaryTiersDecoderList);
     NS_ASSERTION(NS_SUCCEEDED(res), "err init browser charset more submenus");
@@ -1127,13 +1116,11 @@ nsresult nsCharsetMenu::InitMoreSubmenus(nsTArray<nsCString>& aDecs)
   nsCOMPtr<nsIRDFContainer> container3;
   nsCOMPtr<nsIRDFContainer> container4;
   nsCOMPtr<nsIRDFContainer> container5;
-  nsCOMPtr<nsIRDFContainer> containerU;
   const char key1[] = "intl.charsetmenu.browser.more1";
   const char key2[] = "intl.charsetmenu.browser.more2";
   const char key3[] = "intl.charsetmenu.browser.more3";
   const char key4[] = "intl.charsetmenu.browser.more4";
   const char key5[] = "intl.charsetmenu.browser.more5";
-  const char keyU[] = "intl.charsetmenu.browser.unicode";
 
   res = NewRDFContainer(mInner, kNC_BrowserMore1CharsetMenuRoot, 
     getter_AddRefs(container1));
@@ -1160,11 +1147,6 @@ nsresult nsCharsetMenu::InitMoreSubmenus(nsTArray<nsCString>& aDecs)
   if (NS_FAILED(res)) return res;
   AddFromNolocPrefsToMenu(NULL, container5, key5, aDecs, NULL);
 
-  res = NewRDFContainer(mInner, kNC_BrowserUnicodeCharsetMenuRoot, 
-    getter_AddRefs(containerU));
-  if (NS_FAILED(res)) return res;
-  AddFromNolocPrefsToMenu(NULL, containerU, keyU, aDecs, NULL);
-
   return res;
 }
 
@@ -1186,8 +1168,7 @@ nsresult nsCharsetMenu::AddCharsetToItemArray(nsTArray<nsMenuEntry*> *aArray,
 
   item->mCharset = aCharset;
 
-  res = mCCManager->GetCharsetTitle(aCharset.get(), item->mTitle);
-  if (NS_FAILED(res)) {
+  if (NS_FAILED(mCCManager->GetCharsetTitle(aCharset.get(), item->mTitle))) {
     item->mTitle.AssignWithConversion(aCharset.get());
   }
 
@@ -1240,7 +1221,7 @@ nsresult nsCharsetMenu::AddMenuItemToContainer(
   nsresult res = NS_OK;
   nsCOMPtr<nsIRDFResource> node;
 
-  nsCAutoString id;
+  nsAutoCString id;
   if (aIDPrefix != NULL) id.Assign(aIDPrefix);
   id.Append(aItem->mCharset);
 
@@ -1396,7 +1377,7 @@ nsresult nsCharsetMenu::AddFromStringToMenu(
 
     // if this charset is not on the accepted list of charsets, ignore it
     int32_t index;
-    index = aDecs.IndexOf(nsCAutoString(p), 0, nsIgnoreCaseCStringComparator());
+    index = aDecs.IndexOf(nsAutoCString(p), 0, nsIgnoreCaseCStringComparator());
     if (index >= 0) {
 
       // else, add it to the menu
@@ -1418,7 +1399,7 @@ nsresult nsCharsetMenu::AddFromStringToMenu(
 
 nsresult nsCharsetMenu::AddSeparatorToContainer(nsIRDFContainer * aContainer)
 {
-  nsCAutoString str;
+  nsAutoCString str;
   str.AssignLiteral("----");
 
   // hack to generate unique id's for separators
@@ -1471,8 +1452,8 @@ nsresult nsCharsetMenu::WriteCacheToPrefs(nsTArray<nsMenuEntry*> * aArray,
   nsresult res = NS_OK;
 
   // create together the cache string
-  nsCAutoString cache;
-  nsCAutoString sep(NS_LITERAL_CSTRING(", "));
+  nsAutoCString cache;
+  nsAutoCString sep(NS_LITERAL_CSTRING(", "));
   uint32_t count = aArray->Length();
 
   for (uint32_t i = aCacheStart; i < count; i++) {
@@ -1902,7 +1883,7 @@ NS_IMETHODIMP nsCharsetMenu::GetAllCmds(
                              nsIRDFResource* source,
                              nsISimpleEnumerator/*<nsIRDFResource>*/** commands)
 {
-  NS_NOTYETIMPLEMENTED("write me!");
+  NS_NOTYETIMPLEMENTED("nsCharsetMenu::GetAllCmds");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1912,7 +1893,7 @@ NS_IMETHODIMP nsCharsetMenu::IsCommandEnabled(
                              nsISupportsArray/*<nsIRDFResource>*/* aArguments,
                              bool* aResult)
 {
-  NS_NOTYETIMPLEMENTED("write me!");
+  NS_NOTYETIMPLEMENTED("nsCharsetMenu::IsCommandEnabled");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1920,7 +1901,7 @@ NS_IMETHODIMP nsCharsetMenu::DoCommand(nsISupportsArray* aSources,
                                        nsIRDFResource*   aCommand,
                                        nsISupportsArray* aArguments)
 {
-  NS_NOTYETIMPLEMENTED("write me!");
+  NS_NOTYETIMPLEMENTED("nsCharsetMenu::DoCommand");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

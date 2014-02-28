@@ -9,6 +9,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
+STANDALONE_MAKEFILE := 1
+
 include $(topsrcdir)/config/rules.mk
 
 MOZ_PKG_REMOVALS = $(srcdir)/removed-files.in
@@ -40,8 +42,8 @@ ifdef MOZ_ENABLE_GNOME_COMPONENT
 DEFINES += -DMOZ_ENABLE_GNOME_COMPONENT=1
 endif
 
-ifeq (gtk2, $(MOZ_WIDGET_TOOLKIT))
-DEFINES += -DMOZ_GTK2=1
+ifdef MOZ_WIDGET_GTK
+DEFINES += -DMOZ_GTK=1
 endif
 
 ifdef MOZ_NATIVE_NSPR
@@ -60,28 +62,18 @@ ifdef _MSC_VER
 DEFINES += -D_MSC_VER=$(_MSC_VER)
 endif
 
-ifeq ($(MOZ_CHROME_FILE_FORMAT),jar)
-DEFINES += -DJAREXT=.jar
-else
 DEFINES += -DJAREXT=
-endif
 
 ifdef MOZ_ANGLE_RENDERER
 DEFINES += -DMOZ_ANGLE_RENDERER=$(MOZ_ANGLE_RENDERER)
-DEFINES += -DMOZ_D3DX9_DLL=$(MOZ_D3DX9_DLL)
 DEFINES += -DMOZ_D3DCOMPILER_DLL=$(MOZ_D3DCOMPILER_DLL)
 endif
 
-include $(topsrcdir)/ipc/app/defs.mk
 DEFINES += -DMOZ_CHILD_PROCESS_NAME=$(MOZ_CHILD_PROCESS_NAME)
 
 # Set MSVC dlls version to package, if any.
 ifdef WIN32_REDIST_DIR
 DEFINES += -DMOZ_MSVC_REDIST=$(_MSC_VER)
-endif
-
-ifneq (,$(filter aurora beta,$(MOZ_UPDATE_CHANNEL)))
-DEFINES += -DSHIP_FEEDBACK=1
 endif
 
 ifneq (,$(filter WINNT Darwin Android,$(OS_TARGET)))
@@ -152,7 +144,7 @@ ifdef MOZ_PKG_MANIFEST_P
 	rm -f $(DIST)/pack-list.txt $(DIST)/bin-list.txt
 endif
 
-installer:: removed-files
+installer::
 ifdef INSTALLER_DIR
 	$(MAKE) -C $(INSTALLER_DIR)
 endif

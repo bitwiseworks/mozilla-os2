@@ -9,6 +9,7 @@
 #define nsCSSValue_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/FloatingPoint.h"
 
 #include "nsCOMPtr.h"
 #include "nsCRTGlue.h"
@@ -16,14 +17,13 @@
 #include "nsCSSProperty.h"
 #include "nsColor.h"
 #include "nsCoord.h"
-#include "nsInterfaceHashtable.h"
+#include "nsRefPtrHashtable.h"
 #include "nsString.h"
 #include "nsStringBuffer.h"
 #include "nsTArray.h"
 #include "nsStyleConsts.h"
-#include "mozilla/FloatingPoint.h"
 
-class imgIRequest;
+class imgRequestProxy;
 class nsIDocument;
 class nsIPrincipal;
 class nsPresContext;
@@ -35,12 +35,12 @@ class nsPtrHashKey;
 #define NS_CSS_DELETE_LIST_MEMBER(type_, ptr_, member_)                        \
   {                                                                            \
     type_ *cur = (ptr_)->member_;                                              \
-    (ptr_)->member_ = nullptr;                                                  \
+    (ptr_)->member_ = nullptr;                                                 \
     while (cur) {                                                              \
-      type_ *next = cur->member_;                                              \
-      cur->member_ = nullptr;                                                   \
+      type_ *dlm_next = cur->member_;                                          \
+      cur->member_ = nullptr;                                                  \
       delete cur;                                                              \
-      cur = next;                                                              \
+      cur = dlm_next;                                                          \
     }                                                                          \
   }
 
@@ -50,15 +50,15 @@ class nsPtrHashKey;
 #define NS_CSS_CLONE_LIST_MEMBER(type_, from_, member_, to_, args_)            \
   {                                                                            \
     type_ *dest = (to_);                                                       \
-    (to_)->member_ = nullptr;                                                   \
+    (to_)->member_ = nullptr;                                                  \
     for (const type_ *src = (from_)->member_; src; src = src->member_) {       \
-      type_ *clone = src->Clone args_;                                         \
-      if (!clone) {                                                            \
+      type_ *clm_clone = src->Clone args_;                                     \
+      if (!clm_clone) {                                                        \
         delete (to_);                                                          \
-        return nullptr;                                                         \
+        return nullptr;                                                        \
       }                                                                        \
-      dest->member_ = clone;                                                   \
-      dest = clone;                                                            \
+      dest->member_ = clm_clone;                                               \
+      dest = clm_clone;                                                        \
     }                                                                          \
   }
 
@@ -125,7 +125,7 @@ struct ImageValue : public URLValue {
 
   // Inherit operator== from URLValue
 
-  nsInterfaceHashtable<nsISupportsHashKey, imgIRequest> mRequests; 
+  nsRefPtrHashtable<nsPtrHashKey<nsISupports>, imgRequestProxy> mRequests; 
 
   // Override AddRef and Release to not only log ourselves correctly, but
   // also so that we delete correctly without a virtual destructor
@@ -164,6 +164,7 @@ enum nsCSSUnit {
   eCSSUnit_Steps        = 24,     // (nsCSSValue::Array*) a list of (integer, enumerated)
   eCSSUnit_Function     = 25,     // (nsCSSValue::Array*) a function with
                                   //  parameters.  First elem of array is name,
+                                  //  an nsCSSKeyword as eCSSUnit_Enumerated,
                                   //  the rest of the values are arguments.
 
   // The top level of a calc() expression is eCSSUnit_Calc.  All
@@ -210,6 +211,12 @@ enum nsCSSUnit {
   eCSSUnit_PhysicalMillimeter = 200,   // (float) 1/25.4 inch
 
   // Length units - relative
+  // Viewport relative measure
+  eCSSUnit_ViewportWidth  = 700,    // (float) 1% of the width of the initial containing block
+  eCSSUnit_ViewportHeight = 701,    // (float) 1% of the height of the initial containing block
+  eCSSUnit_ViewportMin    = 702,    // (float) smaller of ViewportWidth and ViewportHeight
+  eCSSUnit_ViewportMax    = 703,    // (float) larger of ViewportWidth and ViewportHeight
+
   // Font relative measure
   eCSSUnit_EM           = 800,    // (float) == current font size
   eCSSUnit_XHeight      = 801,    // (float) distance from top of lower case x to baseline
@@ -340,6 +347,12 @@ public:
     return mValue.mInt;
   }
 
+  nsCSSKeyword GetKeywordValue() const
+  {
+    NS_ABORT_IF_FALSE(mUnit == eCSSUnit_Enumerated, "not a keyword value");
+    return static_cast<nsCSSKeyword>(mValue.mInt);
+  }
+
   float GetPercentValue() const
   {
     NS_ABORT_IF_FALSE(mUnit == eCSSUnit_Percent, "not a percent value");
@@ -349,7 +362,7 @@ public:
   float GetFloatValue() const
   {
     NS_ABORT_IF_FALSE(eCSSUnit_Number <= mUnit, "not a float value");
-    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
+    MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
     return mValue.mFloat;
   }
 
@@ -448,7 +461,7 @@ public:
   // Not making this inline because that would force us to include
   // imgIRequest.h, which leads to REQUIRES hell, since this header is included
   // all over.
-  imgIRequest* GetImageValue(nsIDocument* aDocument) const;
+  imgRequestProxy* GetImageValue(nsIDocument* aDocument) const;
 
   nscoord GetFixedLength(nsPresContext* aPresContext) const;
   nscoord GetPixelLength() const;

@@ -15,7 +15,7 @@ public class Telemetry {
     private static final String LOGTAG = "Telemetry";
 
     // Define new histograms in:
-    // toolkit/components/telemetry/TelemetryHistograms.h
+    // toolkit/components/telemetry/Histograms.json
     public static void HistogramAdd(String name,
                                     int value) {
         try {
@@ -27,8 +27,6 @@ public class Telemetry {
             GeckoEvent event =
                 GeckoEvent.createBroadcastEvent("Telemetry:Add", jsonData.toString());
             GeckoAppShell.sendEventToGecko(event);
-
-            Log.v(LOGTAG, "Sending telemetry: " + jsonData.toString());
         } catch (JSONException e) {
             Log.e(LOGTAG, "JSON exception: ", e);
         }
@@ -37,18 +35,37 @@ public class Telemetry {
     public static class Timer {
         private long mStartTime;
         private String mName;
+        private boolean mHasFinished;
+        private volatile long mElapsed = -1;
 
         public Timer(String name) {
             mName = name;
             mStartTime = SystemClock.uptimeMillis();
+            mHasFinished = false;
+        }
+
+        public void cancel() {
+            mHasFinished = true;
+        }
+
+        public long getElapsed() {
+          return mElapsed;
         }
 
         public void stop() {
-            long elapsed = SystemClock.uptimeMillis() - mStartTime;
+            // Only the first stop counts.
+            if (mHasFinished) {
+                return;
+            } else {
+                mHasFinished = true;
+            }
+
+            final long elapsed = SystemClock.uptimeMillis() - mStartTime;
+            mElapsed = elapsed;
             if (elapsed < Integer.MAX_VALUE) {
                 HistogramAdd(mName, (int)(elapsed));
             } else {
-                Log.e(LOGTAG, "Duration of " + elapsed + " ms is too long.");
+                Log.e(LOGTAG, "Duration of " + elapsed + " ms is too long to add to histogram.");
             }
         }
     }

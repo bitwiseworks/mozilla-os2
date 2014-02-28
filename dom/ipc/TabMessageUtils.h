@@ -6,7 +6,8 @@
 #ifndef TABMESSAGE_UTILS_H
 #define TABMESSAGE_UTILS_H
 
-#include "IPC/IPCMessageUtils.h"
+#include "AudioChannelCommon.h"
+#include "ipc/IPCMessageUtils.h"
 #include "nsIDOMEvent.h"
 #include "nsCOMPtr.h"
 
@@ -18,6 +19,7 @@ namespace mozilla {
 namespace dom {
 struct RemoteDOMEvent
 {
+  // Make sure to set the owner after deserializing.
   nsCOMPtr<nsIDOMEvent> mEvent;
 };
 
@@ -28,7 +30,7 @@ bool ReadRemoteEvent(const IPC::Message* aMsg, void** aIter,
 typedef CrashReporter::ThreadId NativeThreadId;
 #else
 // unused in this case
-typedef int32 NativeThreadId;
+typedef int32_t NativeThreadId;
 #endif
 
 }
@@ -55,6 +57,13 @@ struct ParamTraits<mozilla::dom::RemoteDOMEvent>
   {
   }
 };
+
+template <>
+struct ParamTraits<mozilla::dom::AudioChannelType>
+  : public EnumSerializer<mozilla::dom::AudioChannelType,
+                          mozilla::dom::AUDIO_CHANNEL_NORMAL,
+                          mozilla::dom::AUDIO_CHANNEL_LAST>
+{ };
 
 }
 

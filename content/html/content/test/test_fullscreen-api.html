@@ -31,9 +31,10 @@ SpecialPowers.setBoolPref("full-screen-api.enabled", true);
 SpecialPowers.setBoolPref("full-screen-api.allow-trusted-requests-only", false);
 
 // Run the tests which go full-screen in new windows, as mochitests normally
-// run in an iframe, which by default will not have the mozallowfullscreen
+// run in an iframe, which by default will not have the allowfullscreen
 // attribute set, so full-screen won't work.
 var gTestWindows = [
+  "file_fullscreen-multiple.html",
   "file_fullscreen-rollback.html",
   "file_fullscreen-esc-exit.html",
   "file_fullscreen-denied.html",
@@ -94,14 +95,18 @@ function runNextTest() {
   }
 }
 
-try {
-  window.fullScreen = true;
-} catch (e) {
-}
-is(window.fullScreen, false, "Shouldn't be able to set window fullscreen from content");
+if (isOSXLion || isOSXMtnLion) {
+  todo(false, "Can't reliably run full-screen tests on OS X (bug 900453 comment 18 & bug 802504)");
+} else {
+  try {
+    window.fullScreen = true;
+  } catch (e) {
+  }
+  is(window.fullScreen, false, "Shouldn't be able to set window fullscreen from content");
 
-addLoadEvent(nextTest);
-SimpleTest.waitForExplicitFinish();
+  addLoadEvent(nextTest);
+  SimpleTest.waitForExplicitFinish();
+}
 
 </script>
 </pre>

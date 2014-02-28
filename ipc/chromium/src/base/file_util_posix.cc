@@ -16,6 +16,7 @@
 #include <string.h>
 #include <sys/errno.h>
 #include <sys/mman.h>
+#define _DARWIN_USE_64_BIT_INODE // Use 64-bit inode data structures
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -31,11 +32,6 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/time.h"
-
-// FreeBSD/OpenBSD lacks stat64, but its stat handles files >2GB just fine
-#if defined(OS_FREEBSD) || defined(OS_OPENBSD)
-#define stat64 stat
-#endif
 
 namespace file_util {
 
@@ -78,10 +74,10 @@ int CountFilesCreatedAfter(const FilePath& path,
           (strcmp(ent->d_name, "..") == 0))
         continue;
 
-      struct stat64 st;
-      int test = stat64(path.Append(ent->d_name).value().c_str(), &st);
+      struct stat st;
+      int test = stat(path.Append(ent->d_name).value().c_str(), &st);
       if (test != 0) {
-        LOG(ERROR) << "stat64 failed: " << strerror(errno);
+        LOG(ERROR) << "stat failed: " << strerror(errno);
         continue;
       }
       // Here, we use Time::TimeT(), which discards microseconds. This
@@ -113,8 +109,8 @@ int CountFilesCreatedAfter(const FilePath& path,
 // here.
 bool Delete(const FilePath& path, bool recursive) {
   const char* path_str = path.value().c_str();
-  struct stat64 file_info;
-  int test = stat64(path_str, &file_info);
+  struct stat file_info;
+  int test = stat(path_str, &file_info);
   if (test != 0) {
     // The Windows version defines this condition as success.
     bool ret = (errno == ENOENT || errno == ENOTDIR);
@@ -293,19 +289,19 @@ bool CopyDirectory(const FilePath& from_path,
 }
 
 bool PathExists(const FilePath& path) {
-  struct stat64 file_info;
-  return (stat64(path.value().c_str(), &file_info) == 0);
+  struct stat file_info;
+  return (stat(path.value().c_str(), &file_info) == 0);
 }
 
 bool PathIsWritable(const FilePath& path) {
   FilePath test_path(path);
-  struct stat64 file_info;
-  if (stat64(test_path.value().c_str(), &file_info) != 0) {
+  struct stat file_info;
+  if (stat(test_path.value().c_str(), &file_info) != 0) {
     // If the path doesn't exist, test the parent dir.
     test_path = test_path.DirName();
     // If the parent dir doesn't exist, then return false (the path is not
     // directly writable).
-    if (stat64(test_path.value().c_str(), &file_info) != 0)
+    if (stat(test_path.value().c_str(), &file_info) != 0)
       return false;
   }
   if (S_IWOTH & file_info.st_mode)
@@ -318,8 +314,8 @@ bool PathIsWritable(const FilePath& path) {
 }
 
 bool DirectoryExists(const FilePath& path) {
-  struct stat64 file_info;
-  if (stat64(path.value().c_str(), &file_info) == 0)
+  struct stat file_info;
+  if (stat(path.value().c_str(), &file_info) == 0)
     return S_ISDIR(file_info.st_mode);
   return false;
 }
@@ -392,7 +388,7 @@ bool CreateTemporaryFileName(FilePath* path) {
 FILE* CreateAndOpenTemporaryShmemFile(FilePath* path) {
   FilePath directory;
   if (!GetShmemTempDir(&directory))
-    return false;
+    return NULL;
 
   return CreateAndOpenTemporaryFileInDir(directory, path);
 }
@@ -419,11 +415,11 @@ bool CreateNewTempDirectory(const FilePath::StringType& prefix,
     return false;
   tmpdir = tmpdir.Append(kTempFileName);
   std::string tmpdir_string = tmpdir.value();
-  // this should be OK since mkdtemp just replaces characters in place
-  char* buffer = const_cast<char*>(tmpdir_string.c_str());
 #ifdef ANDROID
   char* dtemp = NULL;
 #else
+  // this should be OK since mkdtemp just replaces characters in place
+  char* buffer = const_cast<char*>(tmpdir_string.c_str());
   char* dtemp = mkdtemp(buffer);
 #endif
   if (!dtemp)
@@ -456,8 +452,8 @@ bool CreateDirectory(const FilePath& full_path) {
 }
 
 bool GetFileInfo(const FilePath& file_path, FileInfo* results) {
-  struct stat64 file_info;
-  if (stat64(file_path.value().c_str(), &file_info) != 0)
+  struct stat file_info;
+  if (stat(file_path.value().c_str(), &file_info) != 0)
     return false;
   results->is_directory = S_ISDIR(file_info.st_mode);
   results->size = file_info.st_size;
@@ -718,7 +714,7 @@ bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
     return false;
   length_ = file_stat.st_size;
 
-  data_ = static_cast<uint8*>(
+  data_ = static_cast<uint8_t*>(
       mmap(NULL, length_, PROT_READ, MAP_SHARED, file_, 0));
   if (data_ == MAP_FAILED)
     data_ = NULL;

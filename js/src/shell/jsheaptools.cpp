@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -301,7 +300,7 @@ HeapReverser::getEdgeDescription()
 {
     if (!debugPrinter && debugPrintIndex == (size_t) -1) {
         const char *arg = static_cast<const char *>(debugPrintArg);
-        char *name = static_cast<char *>(js_malloc(strlen(arg) + 1));
+        char *name = js_pod_malloc<char>(strlen(arg) + 1);
         if (!name)
             return NULL;
         strcpy(name, arg);
@@ -310,7 +309,7 @@ HeapReverser::getEdgeDescription()
 
     /* Lovely; but a fixed size is required by JSTraceNamePrinter. */
     static const int nameSize = 200;
-    char *name = static_cast<char *>(js_malloc(nameSize));
+    char *name = js_pod_malloc<char>(nameSize);
     if (!name)
         return NULL;
     if (debugPrinter)
@@ -384,10 +383,10 @@ class ReferenceFinder {
             JSObject *object = static_cast<JSObject *>(cell);
 
             /* Certain classes of object are for internal use only. */
-            if (object->isBlock() ||
-                object->isCall() ||
-                object->isWith() ||
-                object->isDeclEnv()) {
+            if (object->is<BlockObject>() ||
+                object->is<CallObject>() ||
+                object->is<WithObject>() ||
+                object->is<DeclEnvObject>()) {
                 return JSVAL_VOID;
             }
 
@@ -455,7 +454,7 @@ ReferenceFinder::Path::computeName(JSContext *cx)
         size += strlen(l->edge.name) + (l->next ? 2 : 0);
     size += 1;
 
-    char *path = static_cast<char *>(cx->malloc_(size));
+    char *path = cx->pod_malloc<char>(size);
     if (!path)
         return NULL;
 
@@ -481,20 +480,19 @@ ReferenceFinder::Path::computeName(JSContext *cx)
 }
 
 bool
-ReferenceFinder::addReferrer(jsval referrer_, Path *path)
+ReferenceFinder::addReferrer(jsval referrerArg, Path *path)
 {
-    Rooted<jsval> referrer(context, referrer_);
+    RootedValue referrer(context, referrerArg);
 
-    if (!context->compartment->wrap(context, referrer.address()))
+    if (!context->compartment()->wrap(context, &referrer))
         return false;
 
-    char *pathName = path->computeName(context);
+    ScopedJSFreePtr<char> pathName(path->computeName(context));
     if (!pathName)
         return false;
-    AutoReleasePtr releasePathName(context, pathName);
 
     /* Find the property of the results object named |pathName|. */
-    JS::RootedValue valRoot(context);
+    RootedValue valRoot(context);
     Value &v = valRoot.get();
 
     if (!JS_GetProperty(context, result, pathName, &v))
@@ -540,7 +538,7 @@ FindReferences(JSContext *cx, unsigned argc, jsval *vp)
         return false;
     }
 
-    JS::Value target = JS_ARGV(cx, vp)[0];
+    RootedValue target(cx, JS_ARGV(cx, vp)[0]);
     if (!target.isObject()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_UNEXPECTED_TYPE,
                              "argument", "not an object");

@@ -7,6 +7,11 @@
 
 #include "nsAccUtils.h"
 
+#include "mozilla/StaticPtr.h"
+
+using namespace mozilla;
+using namespace mozilla::a11y;
+
 ////////////////////////////////////////////////////////////////////////////////
 // nsEventShell
 ////////////////////////////////////////////////////////////////////////////////
@@ -18,9 +23,9 @@ nsEventShell::FireEvent(AccEvent* aEvent)
     return;
 
   Accessible* accessible = aEvent->GetAccessible();
-  NS_ENSURE_TRUE(accessible,);
+  NS_ENSURE_TRUE_VOID(accessible);
 
-  nsINode* node = aEvent->GetNode();
+  nsINode* node = accessible->GetNode();
   if (node) {
     sEventTargetNode = node;
     sEventFromUserInput = aEvent->IsFromUserInput();
@@ -35,7 +40,7 @@ void
 nsEventShell::FireEvent(uint32_t aEventType, Accessible* aAccessible,
                         EIsFromUserInput aIsFromUserInput)
 {
-  NS_ENSURE_TRUE(aAccessible,);
+  NS_ENSURE_TRUE_VOID(aAccessible);
 
   nsRefPtr<AccEvent> event = new AccEvent(aEventType, aAccessible,
                                           aIsFromUserInput);
@@ -59,4 +64,4 @@ nsEventShell::GetEventAttributes(nsINode *aNode,
 // nsEventShell: private
 
 bool nsEventShell::sEventFromUserInput = false;
-nsCOMPtr<nsINode> nsEventShell::sEventTargetNode;
+StaticRefPtr<nsINode> nsEventShell::sEventTargetNode;

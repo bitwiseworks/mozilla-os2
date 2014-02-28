@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "WebGLContext.h"
 #include "WebGLTexelConversions.h"
 
 namespace mozilla {
@@ -358,7 +359,7 @@ WebGLContext::ConvertImage(size_t width, size_t height, size_t srcStride, size_t
     ptrdiff_t signedDstStride = dstStride;
     if (mPixelStoreFlipY) {
         dstStart = dst + (height - 1) * dstStride;
-        signedDstStride = -dstStride;
+        signedDstStride = -signedDstStride;
     }
 
     WebGLImageConverter converter(width, height, src, dstStart, srcStride, signedDstStride);

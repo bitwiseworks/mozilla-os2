@@ -10,6 +10,9 @@
 #include "nsAccUtils.h"
 #include "nsCoreUtils.h"
 #include "nsMai.h"
+#include "mozilla/Likely.h"
+
+using namespace mozilla::a11y;
 
 extern "C" {
 
@@ -100,7 +103,7 @@ void
 componentInterfaceInitCB(AtkComponentIface* aIface)
 {
   NS_ASSERTION(aIface, "Invalid Interface");
-  if(NS_UNLIKELY(!aIface))
+  if(MOZ_UNLIKELY(!aIface))
     return;
 
   /*

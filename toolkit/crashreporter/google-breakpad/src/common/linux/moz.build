@@ -1,0 +1,27 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'breakpad_linux_common'
+
+CPP_SOURCES += [
+    'elfutils.cc',
+    'file_id.cc',
+    'guid_creator.cc',
+    'linux_libc_support.cc',
+    'memory_mapped_file.cc',
+    'safe_readlink.cc',
+]
+
+if CONFIG['OS_TARGET'] != 'Android':
+    CPP_SOURCES += [
+        'http_upload.cc',
+    ]
+
+if CONFIG['MOZ_CRASHREPORTER']:
+    HOST_LIBRARY_NAME = 'host_breakpad_linux_common_s'
+
+LIBRARY_NAME = 'breakpad_linux_common_s'
+

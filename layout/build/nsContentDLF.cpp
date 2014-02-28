@@ -23,15 +23,12 @@
 #include "nsNetUtil.h"
 #include "nsCRT.h"
 #include "nsIViewSourceChannel.h"
-#ifdef MOZ_MEDIA
-#include "nsHTMLMediaElement.h"
-#endif
 #include "nsContentUtils.h"
-#include "imgILoader.h"
+#include "imgLoader.h"
 #include "nsCharsetSource.h"
 #include "nsMimeTypes.h"
+#include "DecoderTraits.h"
 
-#include "mozilla/FunctionTimer.h"
 
 // plugins
 #include "nsIPluginHost.h"
@@ -45,9 +42,7 @@ static NS_DEFINE_CID(kPluginDocumentCID, NS_PLUGINDOCUMENT_CID);
 static NS_DEFINE_IID(kHTMLDocumentCID, NS_HTMLDOCUMENT_CID);
 static NS_DEFINE_IID(kXMLDocumentCID, NS_XMLDOCUMENT_CID);
 static NS_DEFINE_IID(kSVGDocumentCID, NS_SVGDOCUMENT_CID);
-#ifdef MOZ_MEDIA
 static NS_DEFINE_IID(kVideoDocumentCID, NS_VIDEODOCUMENT_CID);
-#endif
 static NS_DEFINE_IID(kImageDocumentCID, NS_IMAGEDOCUMENT_CID);
 static NS_DEFINE_IID(kXULDocumentCID, NS_XULDOCUMENT_CID);
 
@@ -145,20 +140,10 @@ nsContentDLF::CreateInstance(const char* aCommand,
                              nsIStreamListener** aDocListener,
                              nsIContentViewer** aDocViewer)
 {
-#ifdef NS_FUNCTION_TIMER
-  nsCAutoString channelURL__("N/A");
-  nsCOMPtr<nsIURI> url__;
-  if (aChannel && NS_SUCCEEDED(aChannel->GetURI(getter_AddRefs(url__)))) {
-    url__->GetSpec(channelURL__);
-  }
-  NS_TIME_FUNCTION_FMT("%s (line %d) (url: %s)", MOZ_FUNCTION_NAME,
-                       __LINE__, channelURL__.get());
-#endif
-
   // Declare "type" here.  This is because although the variable itself only
   // needs limited scope, we need to use the raw string memory -- as returned
   // by "type.get()" farther down in the function.
-  nsCAutoString type;
+  nsAutoCString type;
 
   // Are we viewing source?
   nsCOMPtr<nsIViewSourceChannel> viewSourceChannel = do_QueryInterface(aChannel);
@@ -259,14 +244,12 @@ nsContentDLF::CreateInstance(const char* aCommand,
     }
   }
 
-#ifdef MOZ_MEDIA
-  if (nsHTMLMediaElement::ShouldHandleMediaType(aContentType)) {
+  if (mozilla::DecoderTraits::ShouldHandleMediaType(aContentType)) {
     return CreateDocument(aCommand, 
                           aChannel, aLoadGroup,
                           aContainer, kVideoDocumentCID,
                           aDocListener, aDocViewer);
   }  
-#endif
 
   // Try image types
   if (IsImageContentType(aContentType)) {
@@ -279,7 +262,7 @@ nsContentDLF::CreateInstance(const char* aCommand,
   nsCOMPtr<nsIPluginHost> pluginHostCOM(do_GetService(MOZ_PLUGIN_HOST_CONTRACTID));
   nsPluginHost *pluginHost = static_cast<nsPluginHost*>(pluginHostCOM.get());
   if(pluginHost &&
-     NS_SUCCEEDED(pluginHost->IsPluginEnabledForType(aContentType))) {
+     pluginHost->PluginExistsForType(aContentType)) {
     return CreateDocument(aCommand,
                           aChannel, aLoadGroup,
                           aContainer, kPluginDocumentCID,
@@ -297,8 +280,6 @@ nsContentDLF::CreateInstanceForDocument(nsISupports* aContainer,
                                         const char *aCommand,
                                         nsIContentViewer** aContentViewer)
 {
-  NS_TIME_FUNCTION;
-
   nsCOMPtr<nsIContentViewer> contentViewer;
   nsresult rv = NS_NewContentViewer(getter_AddRefs(contentViewer));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -314,8 +295,6 @@ nsContentDLF::CreateBlankDocument(nsILoadGroup *aLoadGroup,
                                   nsIPrincipal* aPrincipal,
                                   nsIDocument **aDocument)
 {
-  NS_TIME_FUNCTION;
-
   *aDocument = nullptr;
 
   nsresult rv = NS_ERROR_FAILURE;
@@ -396,8 +375,6 @@ nsContentDLF::CreateDocument(const char* aCommand,
                              nsIStreamListener** aDocListener,
                              nsIContentViewer** aContentViewer)
 {
-  NS_TIME_FUNCTION;
-
   nsresult rv = NS_ERROR_FAILURE;
 
   nsCOMPtr<nsIURI> aURL;
@@ -446,8 +423,6 @@ nsContentDLF::CreateXULDocument(const char* aCommand,
                                 nsIStreamListener** aDocListener,
                                 nsIContentViewer** aContentViewer)
 {
-  NS_TIME_FUNCTION;
-
   nsresult rv;
   nsCOMPtr<nsIDocument> doc = do_CreateInstance(kXULDocumentCID, &rv);
   if (NS_FAILED(rv)) return rv;
@@ -481,8 +456,5 @@ nsContentDLF::CreateXULDocument(const char* aCommand,
 }
 
 bool nsContentDLF::IsImageContentType(const char* aContentType) {
-  nsCOMPtr<imgILoader> loader(do_GetService("@mozilla.org/image/loader;1"));
-  bool isDecoderAvailable = false;
-  loader->SupportImageWithMimeType(aContentType, &isDecoderAvailable);
-  return isDecoderAvailable;
+  return imgLoader::SupportImageWithMimeType(aContentType);
 }

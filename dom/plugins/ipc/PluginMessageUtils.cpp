@@ -57,6 +57,9 @@ NPRemoteWindow::NPRemoteWindow() :
 #if defined(XP_WIN)
   ,surfaceHandle(0)
 #endif
+#if defined(XP_MACOSX)
+  ,contentsScaleFactor(1.0)
+#endif
 {
   clipRect.top = 0;
   clipRect.left = 0;
@@ -120,7 +123,14 @@ UnmungePluginDsoPath(const string& munged)
 }
 
 
-PRLogModuleInfo* gPluginLog = PR_NewLogModule("IPCPlugins");
+PRLogModuleInfo*
+GetPluginLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("IPCPlugins");
+  return sLog;
+}
 
 void
 DeferNPObjectLastRelease(const NPNetscapeFuncs* f, NPObject* o)

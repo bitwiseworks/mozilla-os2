@@ -10,6 +10,7 @@
 #include "nsGkAtoms.h"
 #include "nsDisplayList.h"
 #include "nsBoxLayout.h"
+#include <algorithm>
 
 nsListItemFrame::nsListItemFrame(nsIPresShell* aPresShell,
                                  nsStyleContext* aContext,
@@ -31,11 +32,11 @@ nsListItemFrame::GetPrefSize(nsBoxLayoutState& aState)
 
   // guarantee that our preferred height doesn't exceed the standard
   // listbox row height
-  size.height = NS_MAX(mRect.height, size.height);
+  size.height = std::max(mRect.height, size.height);
   return size;
 }
 
-NS_IMETHODIMP
+void
 nsListItemFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
                                              const nsRect&           aDirtyRect,
                                              const nsDisplayListSet& aLists)
@@ -43,10 +44,10 @@ nsListItemFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
   if (aBuilder->IsForEventDelivery()) {
     if (!mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::allowevents,
                                nsGkAtoms::_true, eCaseMatters))
-      return NS_OK;
+      return;
   }
   
-  return nsGridRowLeafFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
+  nsGridRowLeafFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
 }
 
 // Creation Routine ///////////////////////////////////////////////////////////////////////

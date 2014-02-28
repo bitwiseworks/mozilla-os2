@@ -5,41 +5,18 @@
 const TEST_BASE_HTTP = "http://example.com/browser/browser/devtools/commandline/test/";
 const TEST_BASE_HTTPS = "https://example.com/browser/browser/devtools/commandline/test/";
 
-let console = (function() {
-  let tempScope = {};
-  Components.utils.import("resource://gre/modules/devtools/Console.jsm", tempScope);
-  return tempScope.console;
-})();
-
 // Import the GCLI test helper
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 Services.scriptloader.loadSubScript(testDir + "/helpers.js", this);
+Services.scriptloader.loadSubScript(testDir + "/mockCommands.js", this);
 
 /**
- * Open a new tab at a URL and call a callback on load
+ * Force GC on shutdown, because it seems that GCLI can outrun the garbage
+ * collector in some situations, which causes test failures in later tests
+ * Bug 774619 is an example.
  */
-function addTab(aURL, aCallback)
-{
-  waitForExplicitFinish();
-
-  gBrowser.selectedTab = gBrowser.addTab();
-  content.location = aURL;
-
-  let tab = gBrowser.selectedTab;
-  let browser = gBrowser.getBrowserForTab(tab);
-
-  function onTabLoad() {
-    browser.removeEventListener("load", onTabLoad, true);
-    aCallback(browser, tab, browser.contentDocument);
-  }
-
-  browser.addEventListener("load", onTabLoad, true);
-}
-
 registerCleanupFunction(function tearDown() {
-  while (gBrowser.tabs.length > 1) {
-    gBrowser.removeCurrentTab();
-  }
-
-  console = undefined;
+  window.QueryInterface(Ci.nsIInterfaceRequestor)
+      .getInterface(Ci.nsIDOMWindowUtils)
+      .garbageCollect();
 });

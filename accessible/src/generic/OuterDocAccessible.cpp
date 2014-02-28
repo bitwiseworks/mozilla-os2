@@ -5,12 +5,13 @@
 
 #include "OuterDocAccessible.h"
 
+#include "Accessible-inl.h"
 #include "nsAccUtils.h"
-#include "DocAccessible.h"
+#include "DocAccessible-inl.h"
 #include "Role.h"
 #include "States.h"
 
-#ifdef DEBUG
+#ifdef A11Y_LOG
 #include "Logging.h"
 #endif
 
@@ -67,19 +68,6 @@ OuterDocAccessible::ChildAtPoint(int32_t aX, int32_t aY,
   return child;
 }
 
-nsresult
-OuterDocAccessible::GetAttributesInternal(nsIPersistentProperties* aAttributes)
-{
-  nsAutoString tag;
-  aAttributes->GetStringProperty(NS_LITERAL_CSTRING("tag"), tag);
-  if (!tag.IsEmpty()) {
-    // We're overriding the ARIA attributes on an sub document, but we don't want to
-    // override the other attributes
-    return NS_OK;
-  }
-  return Accessible::GetAttributesInternal(aAttributes);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // nsIAccessible
 
@@ -121,22 +109,25 @@ OuterDocAccessible::Shutdown()
 {
   // XXX: sometimes outerdoc accessible is shutdown because of layout style
   // change however the presshell of underlying document isn't destroyed and
-  // the document doesn't get pagehide events. Shutdown underlying document if
-  // any to avoid hanging document accessible.
-#ifdef DEBUG
+  // the document doesn't get pagehide events. Schedule a document rebind
+  // to its parent document. Otherwise a document accessible may be lost if its
+  // outerdoc has being recreated (see bug 862863 for details).
+
+#ifdef A11Y_LOG
   if (logging::IsEnabled(logging::eDocDestroy))
     logging::OuterDocDestroy(this);
 #endif
 
-  Accessible* childAcc = mChildren.SafeElementAt(0, nullptr);
-  if (childAcc) {
-#ifdef DEBUG
+  Accessible* child = mChildren.SafeElementAt(0, nullptr);
+  if (child) {
+#ifdef A11Y_LOG
     if (logging::IsEnabled(logging::eDocDestroy)) {
-      logging::DocDestroy("outerdoc's child document shutdown",
-                          childAcc->GetDocumentNode());
+      logging::DocDestroy("outerdoc's child document rebind is scheduled",
+                          child->AsDoc()->DocumentNode());
     }
 #endif
-    childAcc->Shutdown();
+    RemoveChild(child);
+    mDoc->BindChildDocument(child->AsDoc());
   }
 
   AccessibleWrap::Shutdown();
@@ -148,21 +139,23 @@ OuterDocAccessible::Shutdown()
 void
 OuterDocAccessible::InvalidateChildren()
 {
-  // Do not invalidate children because nsAccDocManager is responsible for
+  // Do not invalidate children because DocManager is responsible for
   // document accessible lifetime when DOM document is created or destroyed. If
   // DOM document isn't destroyed but its presshell is destroyed (for example,
   // when DOM node of outerdoc accessible is hidden), then outerdoc accessible
-  // notifies nsAccDocManager about this. If presshell is created for existing
+  // notifies DocManager about this. If presshell is created for existing
   // DOM document (for example when DOM node of outerdoc accessible is shown)
-  // then allow nsAccDocManager to handle this case since the document
+  // then allow DocManager to handle this case since the document
   // accessible is created and appended as a child when it's requested.
 
   SetChildrenFlag(eChildrenUninitialized);
 }
 
 bool
-OuterDocAccessible::AppendChild(Accessible* aAccessible)
+OuterDocAccessible::InsertChildAt(uint32_t aIdx, Accessible* aAccessible)
 {
+  NS_ASSERTION(aAccessible->IsDoc(),
+               "OuterDocAccessible should only have document child!");
   // We keep showing the old document for a bit after creating the new one,
   // and while building the new DOM and frame tree. That's done on purpose
   // to avoid weird flashes of default background color.
@@ -171,13 +164,13 @@ OuterDocAccessible::AppendChild(Accessible* aAccessible)
   if (mChildren.Length())
     mChildren[0]->Shutdown();
 
-  if (!AccessibleWrap::AppendChild(aAccessible))
+  if (!AccessibleWrap::InsertChildAt(0, aAccessible))
     return false;
 
-#ifdef DEBUG
+#ifdef A11Y_LOG
   if (logging::IsEnabled(logging::eDocCreate)) {
     logging::DocCreate("append document to outerdoc",
-                       aAccessible->GetDocumentNode());
+                       aAccessible->AsDoc()->DocumentNode());
     logging::Address("outerdoc", this);
   }
 #endif
@@ -194,10 +187,10 @@ OuterDocAccessible::RemoveChild(Accessible* aAccessible)
     return false;
   }
 
-#ifdef DEBUG
+#ifdef A11Y_LOG
   if (logging::IsEnabled(logging::eDocDestroy)) {
-    logging::DocDestroy("remove document from outerdoc", child->GetDocumentNode(),
-                        child->AsDoc());
+    logging::DocDestroy("remove document from outerdoc",
+                        child->AsDoc()->DocumentNode(), child->AsDoc());
     logging::Address("outerdoc", this);
   }
 #endif

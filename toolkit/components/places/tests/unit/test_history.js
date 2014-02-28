@@ -7,30 +7,6 @@
 // Get history services
 var histsvc = Cc["@mozilla.org/browser/nav-history-service;1"].
               getService(Ci.nsINavHistoryService);
-var gh = histsvc.QueryInterface(Ci.nsIGlobalHistory2);
-var bh = histsvc.QueryInterface(Ci.nsIBrowserHistory);
-
-/**
- * Adds a test URI visit to the database, and checks for a valid place ID.
- *
- * @param aURI
- *        The URI to add a visit for.
- * @param aReferrer
- *        The referring URI for the given URI.  This can be null.
- * @returns the place id for aURI.
- */
-function add_visit(aURI, aReferrer) {
-  var visitId = histsvc.addVisit(aURI,
-                                 Date.now() * 1000,
-                                 aReferrer,
-                                 histsvc.TRANSITION_TYPED, // user typed in URL bar
-                                 false, // not redirect
-                                 0);
-  dump("### Added visit with id of " + visitId + "\n");
-  do_check_true(gh.isVisited(aURI));
-  do_check_guid_for_uri(aURI);
-  return visitId;
-}
 
 /**
  * Checks to see that a URI is in the database.
@@ -54,13 +30,19 @@ function uri_in_db(aURI) {
 }
 
 // main
-function run_test() {
+function run_test()
+{
+  run_next_test();
+}
+
+add_task(function test_execute()
+{
   // we have a new profile, so we should have imported bookmarks
   do_check_eq(histsvc.databaseStatus, histsvc.DATABASE_STATUS_CREATE);
 
   // add a visit
   var testURI = uri("http://mozilla.com");
-  add_visit(testURI);
+  yield promiseAddVisits(testURI);
 
   // now query for the visit, setting sorting and limit such that
   // we should retrieve only the visit we just added
@@ -79,7 +61,7 @@ function run_test() {
     var node = root.getChild(i);
     // test node properties in RESULTS_AS_VISIT
     do_check_eq(node.uri, testURI.spec);
-    do_check_eq(node.type, options.RESULTS_AS_VISIT);
+    do_check_eq(node.type, Ci.nsINavHistoryResultNode.RESULT_TYPE_URI);
     // TODO: change query type to RESULTS_AS_FULL_VISIT and test this
     //do_check_eq(node.transitionType, histsvc.TRANSITION_TYPED);
   }
@@ -87,8 +69,8 @@ function run_test() {
 
   // add another visit for the same URI, and a third visit for a different URI
   var testURI2 = uri("http://google.com/");
-  add_visit(testURI);
-  add_visit(testURI2);
+  yield promiseAddVisits(testURI);
+  yield promiseAddVisits(testURI2);
 
   options.maxResults = 5;
   options.resultType = options.RESULTS_AS_URI;
@@ -167,8 +149,9 @@ function run_test() {
   do_check_true(!histsvc.historyDisabled);
 
   // test getPageTitle
-  var title = histsvc.getPageTitle(uri("http://mozilla.com"));
-  do_check_eq(title, null);
+  yield promiseAddVisits({ uri: uri("http://example.com"), title: "title" });
+  var title = histsvc.getPageTitle(uri("http://example.com"));
+  do_check_eq(title, "title");
 
   // query for the visit
   do_check_true(uri_in_db(testURI));
@@ -188,7 +171,7 @@ function run_test() {
   }
 
   // bug 394741 - regressed history text searches
-  add_visit(uri("http://mozilla.com"));
+  yield promiseAddVisits(uri("http://mozilla.com"));
   var options = histsvc.getNewQueryOptions();
   //options.resultType = options.RESULTS_AS_VISIT;
   var query = histsvc.getNewQuery();
@@ -198,10 +181,4 @@ function run_test() {
   root.containerOpen = true;
   do_check_true(root.childCount > 0);
   root.containerOpen = false;
-
-  // bug 400544 - testing that a referrer that is not in the DB gets added
-  var referrerURI = uri("http://yahoo.com");
-  do_check_false(uri_in_db(referrerURI));
-  add_visit(uri("http://mozilla.com"), referrerURI);
-  do_check_true(uri_in_db(referrerURI));
-}
+});

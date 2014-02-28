@@ -29,6 +29,12 @@
 
 class nsIDOMWindow;
 
+namespace mozilla {
+namespace dom {
+class EventTarget;
+}
+}
+
 class nsDeviceSensors : public nsIDeviceSensors, public mozilla::hal::ISensorObserver
 {
 public:
@@ -45,25 +51,25 @@ private:
   // sensor -> window listener
   nsTArray<nsTArray<nsIDOMWindow*>* > mWindowListeners;
 
-  void FireDOMLightEvent(nsIDOMEventTarget *target,
+  void FireDOMLightEvent(mozilla::dom::EventTarget* aTarget,
                          double value);
 
-  void FireDOMProximityEvent(nsIDOMEventTarget *aTarget,
+  void FireDOMProximityEvent(mozilla::dom::EventTarget* aTarget,
                              double aValue,
                              double aMin,
                              double aMax);
 
-  void FireDOMUserProximityEvent(nsIDOMEventTarget *aTarget,
+  void FireDOMUserProximityEvent(mozilla::dom::EventTarget* aTarget,
                                  bool aNear);
 
-  void FireDOMOrientationEvent(class nsIDOMDocument *domDoc, 
-                               class nsIDOMEventTarget *target,
+  void FireDOMOrientationEvent(class nsIDOMDocument *domDoc,
+                               mozilla::dom::EventTarget* target,
                                double alpha,
                                double beta,
                                double gamma);
 
-  void FireDOMMotionEvent(class nsIDOMDocument *domDoc, 
-                          class nsIDOMEventTarget *target,
+  void FireDOMMotionEvent(class nsIDOMDocument *domDoc,
+                          mozilla::dom::EventTarget* target,
                           uint32_t type,
                           double x,
                           double y,

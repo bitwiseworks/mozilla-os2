@@ -29,12 +29,12 @@ namespace {
 // protocol 0.  Oops!  We can get away with this until protocol 0
 // starts approaching its 65,536th message.
 enum {
-    CHANNEL_OPENED_MESSAGE_TYPE = kuint16max - 6,
-    SHMEM_DESTROYED_MESSAGE_TYPE = kuint16max - 5,
-    UNBLOCK_CHILD_MESSAGE_TYPE = kuint16max - 4,
-    BLOCK_CHILD_MESSAGE_TYPE   = kuint16max - 3,
-    SHMEM_CREATED_MESSAGE_TYPE = kuint16max - 2,
-    GOODBYE_MESSAGE_TYPE       = kuint16max - 1
+    CHANNEL_OPENED_MESSAGE_TYPE = kuint16max - 5,
+    SHMEM_DESTROYED_MESSAGE_TYPE = kuint16max - 4,
+    SHMEM_CREATED_MESSAGE_TYPE = kuint16max - 3,
+    GOODBYE_MESSAGE_TYPE       = kuint16max - 2
+
+    // kuint16max - 1 is used by ipc_channel.h.
 };
 }
 
@@ -60,13 +60,13 @@ struct Trigger
 {
     enum Action { Send, Recv };
 
-    Trigger(Action action, int32 msg) :
+    Trigger(Action action, int32_t msg) :
         mAction(action),
         mMsg(msg)
     {}
 
     Action mAction;
-    int32 mMsg;
+    int32_t mMsg;
 };
 
 template<class ListenerT>
@@ -83,16 +83,16 @@ public:
 
     typedef base::ProcessHandle ProcessHandle;
 
-    virtual int32 Register(ListenerT*) = 0;
-    virtual int32 RegisterID(ListenerT*, int32) = 0;
-    virtual ListenerT* Lookup(int32) = 0;
-    virtual void Unregister(int32) = 0;
-    virtual void RemoveManagee(int32, ListenerT*) = 0;
+    virtual int32_t Register(ListenerT*) = 0;
+    virtual int32_t RegisterID(ListenerT*, int32_t) = 0;
+    virtual ListenerT* Lookup(int32_t) = 0;
+    virtual void Unregister(int32_t) = 0;
+    virtual void RemoveManagee(int32_t, ListenerT*) = 0;
 
     virtual Shmem::SharedMemory* CreateSharedMemory(
-        size_t, SharedMemory::SharedMemoryType, bool, int32*) = 0;
-    virtual bool AdoptSharedMemory(Shmem::SharedMemory*, int32*) = 0;
-    virtual Shmem::SharedMemory* LookupSharedMemory(int32) = 0;
+        size_t, SharedMemory::SharedMemoryType, bool, int32_t*) = 0;
+    virtual bool AdoptSharedMemory(Shmem::SharedMemory*, int32_t*) = 0;
+    virtual Shmem::SharedMemory* LookupSharedMemory(int32_t) = 0;
     virtual bool IsTrackingSharedMemory(Shmem::SharedMemory*) = 0;
     virtual bool DestroySharedMemory(Shmem&) = 0;
 
@@ -115,9 +115,10 @@ LoggingEnabled()
 inline void
 ProtocolErrorBreakpoint(const char* aMsg)
 {
-#if defined(DEBUG)
-    printf("Protocol error: %s\n", aMsg);
-#endif
+    // Bugs that generate these error messages can be tough to
+    // reproduce.  Log always in the hope that someone finds the error
+    // message.
+    printf_stderr("IPDL protocol error: %s\n", aMsg);
 }
 
 typedef IPCMessageStart ProtocolId;

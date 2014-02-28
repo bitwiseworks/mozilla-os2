@@ -6,6 +6,8 @@
 #include "nsISupportsImpl.h"
 #include "nsTArray.h"
 #include "mozilla/ThreadLocal.h"
+#include "nsPrintfCString.h"
+#include <algorithm>
 
 /*
  * The SENTINEL values below guaranties that a < or >
@@ -19,8 +21,8 @@
 #define NS_COORD_LESS_SENTINEL nscoord_MIN
 #define NS_COORD_GREATER_SENTINEL nscoord_MAX
 #else
-#define NS_COORD_LESS_SENTINEL PR_INT32_MIN
-#define NS_COORD_GREATER_SENTINEL PR_INT32_MAX
+#define NS_COORD_LESS_SENTINEL INT32_MIN
+#define NS_COORD_GREATER_SENTINEL INT32_MAX
 #endif
 
 // Fast inline analogues of nsRect methods for nsRegion::nsRectFast.
@@ -40,13 +42,13 @@ inline bool nsRegion::nsRectFast::Intersects (const nsRect& aRect) const
 
 inline bool nsRegion::nsRectFast::IntersectRect (const nsRect& aRect1, const nsRect& aRect2)
 {
-  const nscoord xmost = NS_MIN (aRect1.XMost (), aRect2.XMost ());
-  x = NS_MAX (aRect1.x, aRect2.x);
+  const nscoord xmost = std::min (aRect1.XMost (), aRect2.XMost ());
+  x = std::max (aRect1.x, aRect2.x);
   width = xmost - x;
   if (width <= 0) return false;
 
-  const nscoord ymost = NS_MIN (aRect1.YMost (), aRect2.YMost ());
-  y = NS_MAX (aRect1.y, aRect2.y);
+  const nscoord ymost = std::min (aRect1.YMost (), aRect2.YMost ());
+  y = std::max (aRect1.y, aRect2.y);
   height = ymost - y;
   if (height <= 0) return false;
 
@@ -55,10 +57,10 @@ inline bool nsRegion::nsRectFast::IntersectRect (const nsRect& aRect1, const nsR
 
 inline void nsRegion::nsRectFast::UnionRect (const nsRect& aRect1, const nsRect& aRect2)
 {
-  const nscoord xmost = NS_MAX (aRect1.XMost (), aRect2.XMost ());
-  const nscoord ymost = NS_MAX (aRect1.YMost (), aRect2.YMost ());
-  x = NS_MIN(aRect1.x, aRect2.x);
-  y = NS_MIN(aRect1.y, aRect2.y);
+  const nscoord xmost = std::max (aRect1.XMost (), aRect2.XMost ());
+  const nscoord ymost = std::max (aRect1.YMost (), aRect2.YMost ());
+  x = std::min(aRect1.x, aRect2.x);
+  y = std::min(aRect1.y, aRect2.y);
   width  = xmost - x;
   height = ymost - y;
 }
@@ -1557,8 +1559,8 @@ namespace {
     // Adds a new partition at the given coordinate to this partitioning. If
     // the coordinate is already present in the partitioning, this does nothing.
     void InsertCoord(nscoord c) {
-      uint32_t i;
-      if (!mStops.GreatestIndexLtEq(c, i)) {
+      uint32_t i = mStops.IndexOfFirstElementGt(c);
+      if (i == 0 || mStops[i-1] != c) {
         mStops.InsertElementAt(i, c);
       }
     }
@@ -1855,6 +1857,25 @@ void nsRegion::SimpleSubtract (const nsRegion& aRegion)
   }
 
   Optimize();
+}
+
+nsCString
+nsRegion::ToString() const
+{
+  nsCString result;
+  result.AppendLiteral("[");
+  const RgnRect* r = mRectListHead.next;
+  while (r != &mRectListHead)
+  {
+    if (r != mRectListHead.next) {
+      result.AppendLiteral("; ");
+    }
+    result.Append(nsPrintfCString("%d,%d,%d,%d", r->x, r->y, r->XMost(), r->YMost()));
+    r = r->next;
+  }
+  result.AppendLiteral("]");
+
+  return result;
 }
 
 nsRegion nsIntRegion::ToAppUnits (nscoord aAppUnitsPerPixel) const

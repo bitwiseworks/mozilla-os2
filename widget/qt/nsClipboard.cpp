@@ -176,16 +176,22 @@ nsClipboard::SetNativeClipboardData( nsITransferable *aTransferable,
                 if (!image)  // Not getting an image for an image mime type!?
                    continue;
 
-                nsRefPtr<gfxImageSurface> imageSurface;
-                image->CopyFrame(imgIContainer::FRAME_CURRENT,
-                                 imgIContainer::FLAG_SYNC_DECODE,
-                                 getter_AddRefs(imageSurface));
+                nsRefPtr<gfxASurface> surface;
+                image->GetFrame(imgIContainer::FRAME_CURRENT,
+                                imgIContainer::FLAG_SYNC_DECODE,
+                                getter_AddRefs(surface));
+                if (!surface)
+                  continue;
 
-                QImage qImage(imageSurface->Data(),
-                              imageSurface->Width(),
-                              imageSurface->Height(),
-                              imageSurface->Stride(),
-                              _gfximage_to_qformat(imageSurface->Format()));
+                nsRefPtr<gfxImageSurface> frame(surface->GetAsReadableARGB32ImageSurface());
+                if (!frame)
+                  continue;
+
+                QImage qImage(frame->Data(),
+                              frame->Width(),
+                              frame->Height(),
+                              frame->Stride(),
+                              _gfximage_to_qformat(frame->Format()));
 
                 // Add image to the mimeData
                 mimeData->setImageData(qImage);
@@ -254,7 +260,7 @@ nsClipboard::GetNativeClipboardData(nsITransferable *aTransferable,
     // Walk through flavors and see which flavor matches the one being pasted
     uint32_t flavorCount;
     flavorList->Count(&flavorCount);
-    nsCAutoString foundFlavor;
+    nsAutoCString foundFlavor;
 
     for (uint32_t i = 0; i < flavorCount; ++i)
     {
@@ -273,7 +279,7 @@ nsClipboard::GetNativeClipboardData(nsITransferable *aTransferable,
             {
                 // Clipboard has text and flavor accepts text, so lets
                 // handle the data as text
-                foundFlavor = nsCAutoString(flavorStr);
+                foundFlavor = nsAutoCString(flavorStr);
 
                 // Get the text data from clipboard
                 QString text = mimeData->text();
@@ -300,7 +306,7 @@ nsClipboard::GetNativeClipboardData(nsITransferable *aTransferable,
             {
                 // Clipboard has text/html and flavor accepts text/html, so lets
                 // handle the data as text/html
-                foundFlavor = nsCAutoString(flavorStr);
+                foundFlavor = nsAutoCString(flavorStr);
 
                 // Get the text data from clipboard
                 QString html = mimeData->html();

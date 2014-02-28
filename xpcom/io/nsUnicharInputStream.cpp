@@ -69,7 +69,7 @@ StringUnicharInputStream::ReadSegments(nsWriteUnicharSegmentFun aWriter,
   uint32_t totalBytesWritten = 0;
 
   nsresult rv;
-  aCount = NS_MIN(mString.Length() - mPos, aCount);
+  aCount = XPCOM_MIN(mString.Length() - mPos, aCount);
   
   nsAString::const_iterator iter;
   mString.BeginReading(iter);
@@ -429,8 +429,6 @@ nsSimpleUnicharStreamFactory::CreateInstanceFromUTF8Stream(nsIInputStream* aStre
 nsSimpleUnicharStreamFactory*
 nsSimpleUnicharStreamFactory::GetInstance()
 {
+  static const nsSimpleUnicharStreamFactory kInstance;
   return const_cast<nsSimpleUnicharStreamFactory*>(&kInstance);
 }
-
-const nsSimpleUnicharStreamFactory
-nsSimpleUnicharStreamFactory::kInstance;

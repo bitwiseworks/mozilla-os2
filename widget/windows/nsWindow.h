@@ -12,11 +12,13 @@
 
 #include "nsAutoPtr.h"
 #include "nsBaseWidget.h"
+#include "nsWindowBase.h"
 #include "nsdefs.h"
 #include "nsIdleService.h"
 #include "nsToolkit.h"
 #include "nsString.h"
 #include "nsTArray.h"
+#include "nsEvent.h"
 #include "gfxWindowsSurface.h"
 #include "nsWindowDbg.h"
 #include "cairo.h"
@@ -33,7 +35,7 @@
 #include "TaskbarWindowPreview.h"
 
 #ifdef ACCESSIBILITY
-#include "OLEACC.H"
+#include "oleacc.h"
 #include "mozilla/a11y/Accessible.h"
 #endif
 
@@ -63,7 +65,7 @@ class ModifierKeyState;
  * Native WIN32 window wrapper.
  */
 
-class nsWindow : public nsBaseWidget
+class nsWindow : public nsWindowBase
 {
   typedef mozilla::TimeStamp TimeStamp;
   typedef mozilla::TimeDuration TimeDuration;
@@ -78,9 +80,11 @@ public:
 
   friend class nsWindowGfx;
 
-  /**
-   * nsIWidget interface
-   */
+  // nsWindowBase
+  virtual void InitEvent(nsGUIEvent& aEvent, nsIntPoint* aPoint = nullptr) MOZ_OVERRIDE;
+  virtual bool DispatchWindowEvent(nsGUIEvent* aEvent) MOZ_OVERRIDE;
+
+  // nsIWidget interface
   NS_IMETHOD              Create(nsIWidget *aParent,
                                  nsNativeWidget aNativeParent,
                                  const nsIntRect &aRect,
@@ -90,13 +94,14 @@ public:
   NS_IMETHOD              SetParent(nsIWidget *aNewParent);
   virtual nsIWidget*      GetParent(void);
   virtual float           GetDPI();
+  virtual double          GetDefaultScaleInternal();
   NS_IMETHOD              Show(bool bState);
   virtual bool            IsVisible() const;
   NS_IMETHOD              ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY);
   virtual void            SetSizeConstraints(const SizeConstraints& aConstraints);
-  NS_IMETHOD              Move(int32_t aX, int32_t aY);
-  NS_IMETHOD              Resize(int32_t aWidth, int32_t aHeight, bool aRepaint);
-  NS_IMETHOD              Resize(int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight, bool aRepaint);
+  NS_IMETHOD              Move(double aX, double aY);
+  NS_IMETHOD              Resize(double aWidth, double aHeight, bool aRepaint);
+  NS_IMETHOD              Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint);
   NS_IMETHOD              BeginResizeDrag(nsGUIEvent* aEvent, int32_t aHorizontal, int32_t aVertical);
   NS_IMETHOD              PlaceBehind(nsTopLevelWidgetZPlacement aPlacement, nsIWidget *aWidget, bool aActivate);
   NS_IMETHOD              SetSizeMode(int32_t aMode);
@@ -128,16 +133,19 @@ public:
   NS_IMETHOD              EnableDragDrop(bool aEnable);
   NS_IMETHOD              CaptureMouse(bool aCapture);
   NS_IMETHOD              CaptureRollupEvents(nsIRollupListener * aListener,
-                                              bool aDoCapture, bool aConsumeRollupEvent);
+                                              bool aDoCapture);
   NS_IMETHOD              GetAttention(int32_t aCycleCount);
   virtual bool            HasPendingInputEvent();
-  virtual LayerManager*   GetLayerManager(PLayersChild* aShadowManager = nullptr,
+  virtual LayerManager*   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                                           LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                           bool* aAllowRetaining = nullptr);
   gfxASurface             *GetThebesSurface();
   NS_IMETHOD              OnDefaultButtonLoaded(const nsIntRect &aButtonRect);
-  NS_IMETHOD              OverrideSystemMouseScrollSpeed(int32_t aOriginalDelta, bool aIsHorizontal, int32_t &aOverriddenDelta);
+  NS_IMETHOD              OverrideSystemMouseScrollSpeed(double aOriginalDeltaX,
+                                                         double aOriginalDeltaY,
+                                                         double& aOverriddenDeltaX,
+                                                         double& aOverriddenDeltaY);
 
   virtual nsresult        SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                                    int32_t aNativeKeyCode,
@@ -158,11 +166,10 @@ public:
                                                            double aDeltaZ,
                                                            uint32_t aModifierFlags,
                                                            uint32_t aAdditionalFlags);
-  NS_IMETHOD              ResetInputState();
+  NS_IMETHOD              NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
   NS_IMETHOD_(void)       SetInputContext(const InputContext& aContext,
                                           const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
-  NS_IMETHOD              CancelIMEComposition();
   NS_IMETHOD              GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState);
   NS_IMETHOD              RegisterTouchWindow();
   NS_IMETHOD              UnregisterTouchWindow();
@@ -171,11 +178,10 @@ public:
   virtual nsTransparencyMode GetTransparencyMode();
   virtual void            UpdateOpaqueRegion(const nsIntRegion& aOpaqueRegion);
 #endif // MOZ_XUL
-#ifdef NS_ENABLE_TSF
-  NS_IMETHOD              OnIMEFocusChange(bool aFocus);
-  NS_IMETHOD              OnIMETextChange(uint32_t aStart, uint32_t aOldEnd, uint32_t aNewEnd);
-  NS_IMETHOD              OnIMESelectionChange(void);
-#endif // NS_ENABLE_TSF
+  NS_IMETHOD              NotifyIMEOfTextChange(uint32_t aStart,
+                                                uint32_t aOldEnd,
+                                                uint32_t aNewEnd) MOZ_OVERRIDE;
+  virtual nsIMEUpdatePreference GetIMEUpdatePreference();
   NS_IMETHOD              GetNonClientMargins(nsIntMargin &margins);
   NS_IMETHOD              SetNonClientMargins(nsIntMargin &margins);
   void                    SetDrawsInTitlebar(bool aState);
@@ -183,19 +189,12 @@ public:
   /**
    * Event helpers
    */
-  void                    InitEvent(nsGUIEvent& event, nsIntPoint* aPoint = nullptr);
   virtual bool            DispatchMouseEvent(uint32_t aEventType, WPARAM wParam,
                                              LPARAM lParam,
                                              bool aIsContextMenuKey = false,
                                              int16_t aButton = nsMouseEvent::eLeftButton,
                                              uint16_t aInputSource = nsIDOMMouseEvent::MOZ_SOURCE_MOUSE);
-  virtual bool            DispatchWindowEvent(nsGUIEvent* event);
   virtual bool            DispatchWindowEvent(nsGUIEvent*event, nsEventStatus &aStatus);
-  void                    InitKeyEvent(nsKeyEvent& aKeyEvent,
-                                       const NativeKey& aNativeKey,
-                                       const mozilla::widget::ModifierKeyState &aModKeyState);
-  virtual bool            DispatchKeyEvent(nsKeyEvent& aKeyEvent,
-                                           const MSG *aMsgSentToPlugin);
   void                    DispatchPendingEvents();
   bool                    DispatchPluginEvent(UINT aMessage,
                                               WPARAM aWParam,
@@ -205,14 +204,13 @@ public:
   void                    SuppressBlurEvents(bool aSuppress); // Called from nsFilePicker
   bool                    BlurEventsSuppressed();
 #ifdef ACCESSIBILITY
-  Accessible* GetRootAccessible();
+  mozilla::a11y::Accessible* GetRootAccessible();
 #endif // ACCESSIBILITY
 
   /**
    * Window utilities
    */
   nsWindow*               GetTopLevelWindow(bool aStopOnDialogOrPopup);
-  HWND                    GetWindowHandle() { return mWnd; }
   WNDPROC                 GetPrevWindowProc() { return mPrevWndProc; }
   WindowHook&             GetWindowHook() { return mWindowHook; }
   nsWindow*               GetParentWindow(bool aIncludeOwner);
@@ -225,11 +223,6 @@ public:
    */
   virtual bool            AutoErase(HDC dc);
   nsIntPoint*             GetLastPoint() { return &mLastPoint; }
-  // needed in nsIMM32Handler.cpp
-  bool                    PluginHasFocus()
-  {
-    return (mInputContext.mIMEState.mEnabled == IMEState::PLUGIN);
-  }
   bool                    IsTopLevelWidget() { return mIsTopWidgetWindow; }
   /**
    * Start allowing Direct3D9 to be used by widgets when GetLayerManager is
@@ -276,9 +269,8 @@ public:
 
   bool                    const DestroyCalled() { return mDestroyCalled; }
 
-  static void             SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray, uint32_t aModifiers);
+  virtual mozilla::layers::LayersBackend GetPreferredCompositorBackend() { return mozilla::layers::LAYERS_D3D11; }
 
-  virtual bool            UseOffMainThreadCompositing();
 protected:
 
   // A magic number to identify the FAKETRACKPOINTSCROLLABLE window created
@@ -327,15 +319,10 @@ protected:
   /**
    * Event processing helpers
    */
-  bool                    DispatchPluginEvent(const MSG &aMsg);
   void                    DispatchFocusToTopLevelWindow(bool aIsActivate);
   bool                    DispatchStandardEvent(uint32_t aMsg);
   bool                    DispatchCommandEvent(uint32_t aEventCommand);
   void                    RelayMouseEvent(UINT aMsg, WPARAM wParam, LPARAM lParam);
-  static void             RemoveNextCharMessage(HWND aWnd);
-  void                    RemoveMessageAndDispatchPluginEvent(UINT aFirstMsg,
-                            UINT aLastMsg,
-                            nsFakeCharMessage* aFakeCharMessage = nullptr);
   virtual bool            ProcessMessage(UINT msg, WPARAM &wParam,
                                          LPARAM &lParam, LRESULT *aRetValue);
   bool                    ProcessMessageForPlugin(const MSG &aMsg,
@@ -351,11 +338,6 @@ protected:
   static bool             ConvertStatus(nsEventStatus aStatus);
   static void             PostSleepWakeNotification(const bool aIsSleepMode);
   int32_t                 ClientMarginHitTestPoint(int32_t mx, int32_t my);
-  static bool             IsRedirectedKeyDownMessage(const MSG &aMsg);
-  static void             ForgetRedirectedKeyDownMessage()
-  {
-    sRedirectedKeyDown.message = WM_NULL;
-  }
 
   /**
    * Event handlers
@@ -363,28 +345,9 @@ protected:
   virtual void            OnDestroy();
   virtual bool            OnMove(int32_t aX, int32_t aY);
   virtual bool            OnResize(nsIntRect &aWindowRect);
-  /**
-   * @param aVirtualKeyCode     If caller knows which key exactly caused the
-   *                            aMsg, set the virtual key code.
-   *                            Otherwise, 0.
-   * @param aScanCode           If aVirutalKeyCode isn't 0, set the scan code.
-   */
-  LRESULT                 OnChar(const MSG &aMsg,
-                                 const NativeKey& aNativeKey,
-                                 const mozilla::widget::ModifierKeyState &aModKeyState,
-                                 bool *aEventDispatched,
-                                 uint32_t aFlags = 0);
-  LRESULT                 OnKeyDown(const MSG &aMsg,
-                                    const mozilla::widget::ModifierKeyState &aModKeyState,
-                                    bool *aEventDispatched,
-                                    nsFakeCharMessage* aFakeCharMessage);
-  LRESULT                 OnKeyUp(const MSG &aMsg,
-                                  const mozilla::widget::ModifierKeyState &aModKeyState,
-                                  bool *aEventDispatched);
   bool                    OnGesture(WPARAM wParam, LPARAM lParam);
   bool                    OnTouch(WPARAM wParam, LPARAM lParam);
   bool                    OnHotKey(WPARAM wParam, LPARAM lParam);
-  BOOL                    OnInputLangChange(HKL aHKL);
   bool                    OnPaint(HDC aDC, uint32_t aNestingLevel);
   void                    OnWindowPosChanged(WINDOWPOS *wp, bool& aResult);
   void                    OnWindowPosChanging(LPWINDOWPOS& info);
@@ -418,7 +381,7 @@ protected:
   static void             ScheduleHookTimer(HWND aWnd, UINT aMsgId);
   static void             RegisterSpecialDropdownHooks();
   static void             UnregisterSpecialDropdownHooks();
-  static BOOL             DealWithPopups(HWND inWnd, UINT inMsg, WPARAM inWParam, LPARAM inLParam, LRESULT* outResult);
+  static bool             DealWithPopups(HWND inWnd, UINT inMsg, WPARAM inWParam, LPARAM inLParam, LRESULT* outResult);
 
   /**
    * Window transparency helpers
@@ -473,7 +436,6 @@ protected:
   uint32_t              mBlurSuppressLevel;
   DWORD_PTR             mOldStyle;
   DWORD_PTR             mOldExStyle;
-  InputContext mInputContext;
   nsNativeDragTarget*   mNativeDragTarget;
   HKL                   mLastKeyboardLayout;
   nsSizeMode            mOldSizeMode;
@@ -531,11 +493,6 @@ protected:
   static HWND           sRollupMsgWnd;
   static UINT           sHookTimerId;
 
-  // Rollup Listener
-  static nsIWidget*     sRollupWidget;
-  static bool           sRollupConsumeEvent;
-  static nsIRollupListener* sRollupListener;
-
   // Mouse Clicks - static variable definitions for figuring
   // out 1 - 3 Clicks.
   static POINT          sLastMousePoint;
@@ -574,46 +531,8 @@ protected:
   //  painting too rapidly in response to frequent input events.
   TimeStamp mLastPaintEndTime;
 
-  // sRedirectedKeyDown is WM_KEYDOWN message or WM_SYSKEYDOWN message which
-  // was reirected to SendInput() API by OnKeyDown().
-  static MSG            sRedirectedKeyDown;
-
   static bool sNeedsToInitMouseWheelSettings;
   static void InitMouseWheelScrollData();
-
-  // If a window receives WM_KEYDOWN message or WM_SYSKEYDOWM message which is
-  // redirected message, OnKeyDowm() prevents to dispatch NS_KEY_DOWN event
-  // because it has been dispatched before the message was redirected.
-  // However, in some cases, ProcessKeyDownMessage() doesn't call OnKeyDown().
-  // Then, ProcessKeyDownMessage() needs to forget the redirected message and
-  // remove WM_CHAR message or WM_SYSCHAR message for the redirected keydown
-  // message.  AutoForgetRedirectedKeyDownMessage struct is a helper struct
-  // for doing that.  This must be created in stack.
-  struct AutoForgetRedirectedKeyDownMessage
-  {
-    AutoForgetRedirectedKeyDownMessage(nsWindow* aWindow, const MSG &aMsg) :
-      mCancel(!nsWindow::IsRedirectedKeyDownMessage(aMsg)),
-      mWindow(aWindow), mMsg(aMsg)
-    {
-    }
-
-    ~AutoForgetRedirectedKeyDownMessage()
-    {
-      if (mCancel) {
-        return;
-      }
-      // Prevent unnecessary keypress event
-      if (!mWindow->mOnDestroyCalled) {
-        nsWindow::RemoveNextCharMessage(mWindow->mWnd);
-      }
-      // Foreget the redirected message
-      nsWindow::ForgetRedirectedKeyDownMessage();
-    }
-
-    bool mCancel;
-    nsRefPtr<nsWindow> mWindow;
-    const MSG &mMsg;
-  };
 };
 
 /**

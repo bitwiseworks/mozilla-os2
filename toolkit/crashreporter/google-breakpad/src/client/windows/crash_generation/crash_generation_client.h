@@ -35,7 +35,7 @@
 #include <string>
 #include <utility>
 #include "client/windows/common/ipc_protocol.h"
-#include "processor/scoped_ptr.h"
+#include "common/scoped_ptr.h"
 
 namespace google_breakpad {
 
@@ -76,6 +76,10 @@ class CrashGenerationClient {
   //
   // Returns true if the registration is successful; false otherwise.
   bool Register();
+
+  // Requests the crash server to upload a previous dump with the
+  // given crash id.
+  bool RequestUpload(DWORD crash_id);
 
   bool RequestDump(EXCEPTION_POINTERS* ex_info,
                    MDRawAssertionInfo* assert_info);

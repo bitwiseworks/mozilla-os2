@@ -1,0 +1,27 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+if CONFIG['MOZ_ZIPWRITER']:
+    DIRS += ['zipwriter']
+
+TEST_TOOL_DIRS += ['test']
+
+XPIDL_SOURCES += [
+    '$(MODULES_LIBJAR_LXPIDLSRCS)',
+]
+
+MODULE = 'jar'
+
+EXPORTS += [
+    'nsJARURI.h',
+    'nsZipArchive.h',
+    'zipstruct.h',
+]
+
+CPP_SOURCES += [
+    '$(MODULES_LIBJAR_LCPPSRCS)',
+]
+

@@ -88,6 +88,8 @@ function testInitializingUntrustedEvent()
     e.initKeyEvent(kTest.type, kTest.bubbles, kTest.cancelable, kTest.view,
                    kTest.ctrlKey, kTest.altKey, kTest.shiftKey, kTest.metaKey,
                    kTest.keyCode, kTest.charCode);
+    is(e.toString(), "[object KeyboardEvent]",
+       description + 'class string should be "KeyboardEvent"');
 
     for (var attr in kTest) {
       if (attr == "createEventArg") {
@@ -119,6 +121,9 @@ function testInitializingUntrustedEvent()
       }
     }
     is(e.isTrusted, false, description + "isTrusted returns wrong value");
+
+    // Currently, there is no way to initialize char and key attribute values.
+    ok(e.key === "", description + "key must return empty string - got " + e.key);
 
     // getModifierState() tests
     is(e.getModifierState("Shift"), kTest.shiftKey,

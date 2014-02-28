@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #ifdef MOZ_WIDGET_ANDROID
 // For ScreenOrientation.h and Hal.h
 #include "base/basictypes.h"
@@ -17,11 +19,12 @@
 #include "nsNPAPIPlugin.h"
 #include "nsNPAPIPluginStreamListener.h"
 #include "nsPluginHost.h"
-#include "nsPluginSafety.h"
 #include "nsPluginLogging.h"
 #include "nsContentUtils.h"
+#include "nsPluginInstanceOwner.h"
 
 #include "nsIDocument.h"
+#include "nsIDocShell.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
 #include "nsDirectoryServiceDefs.h"
@@ -30,9 +33,11 @@
 #include "nsSize.h"
 #include "nsNetCID.h"
 #include "nsIContent.h"
-
-#include "mozilla/Preferences.h"
 #include "nsVersionComparator.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/unused.h"
+
+using namespace mozilla;
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "ANPBase.h"
@@ -46,10 +51,8 @@
 #include "GLContextProvider.h"
 #include "TexturePoolOGL.h"
 
-using namespace mozilla;
 using namespace mozilla::gl;
 
-typedef nsNPAPIPluginInstance::TextureInfo TextureInfo;
 typedef nsNPAPIPluginInstance::VideoInfo VideoInfo;
 
 class PluginEventRunnable : public nsRunnable
@@ -79,7 +82,9 @@ static nsRefPtr<GLContext> sPluginContext = nullptr;
 static bool EnsureGLContext()
 {
   if (!sPluginContext) {
-    sPluginContext = GLContextProvider::CreateOffscreen(gfxIntSize(16, 16));
+    gfxIntSize dummySize(16, 16);
+    sPluginContext = GLContextProvider::CreateOffscreen(dummySize,
+                                                        GLContext::SurfaceCaps::Any());
   }
 
   return sPluginContext != nullptr;
@@ -97,7 +102,7 @@ public:
   {
   }
 
-  TextureInfo Lock()
+  nsNPAPIPluginInstance::TextureInfo Lock()
   {
     if (!EnsureGLContext()) {
       mTextureInfo.mTexture = 0;
@@ -112,7 +117,7 @@ public:
     return mTextureInfo;
   }
 
-  void Release(TextureInfo& aTextureInfo)
+  void Release(nsNPAPIPluginInstance::TextureInfo& aTextureInfo)
   { 
     mTextureInfo = aTextureInfo;
     mLock.Unlock();
@@ -128,7 +133,10 @@ public:
     if (mTextureInfo.mWidth == 0 || mTextureInfo.mHeight == 0)
       return 0;
 
-    SharedTextureHandle handle = sPluginContext->CreateSharedHandle(TextureImage::ThreadShared, (void*)mTextureInfo.mTexture, GLContext::TextureID);
+    SharedTextureHandle handle =
+      sPluginContext->CreateSharedHandle(GLContext::SameProcess,
+                                         (void*)mTextureInfo.mTexture,
+                                         GLContext::TextureID);
 
     // We want forget about this now, so delete the texture. Assigning it to zero
     // ensures that we create a new one in Lock()
@@ -139,15 +147,18 @@ public:
   }
 
 private:
-  TextureInfo mTextureInfo;
+  nsNPAPIPluginInstance::TextureInfo mTextureInfo;
  
   Mutex mLock;
 };
+
+static std::map<NPP, nsNPAPIPluginInstance*> sPluginNPPMap;
 
 #endif
 
 using namespace mozilla;
 using namespace mozilla::plugins::parent;
+using namespace mozilla::layers;
 
 static NS_DEFINE_IID(kIOutputStreamIID, NS_IOUTPUTSTREAM_IID);
 
@@ -172,12 +183,7 @@ nsNPAPIPluginInstance::nsNPAPIPluginInstance()
     mPlugin(nullptr),
     mMIMEType(nullptr),
     mOwner(nullptr),
-    mCurrentPluginEvent(nullptr),
-#if defined(MOZ_X11) || defined(XP_WIN) || defined(XP_MACOSX)
-    mUsePluginLayersPref(true)
-#else
-    mUsePluginLayersPref(false)
-#endif
+    mCurrentPluginEvent(nullptr)
 #ifdef MOZ_WIDGET_ANDROID
   , mOnScreen(true)
 #endif
@@ -186,21 +192,28 @@ nsNPAPIPluginInstance::nsNPAPIPluginInstance()
   mNPP.pdata = NULL;
   mNPP.ndata = this;
 
-  mUsePluginLayersPref =
-    Preferences::GetBool("plugins.use_layers", mUsePluginLayersPref);
-
   PLUGIN_LOG(PLUGIN_LOG_BASIC, ("nsNPAPIPluginInstance ctor: this=%p\n",this));
+
+#ifdef MOZ_WIDGET_ANDROID
+  sPluginNPPMap[&mNPP] = this;
+#endif
 }
 
 nsNPAPIPluginInstance::~nsNPAPIPluginInstance()
 {
   PLUGIN_LOG(PLUGIN_LOG_BASIC, ("nsNPAPIPluginInstance dtor: this=%p\n",this));
 
+#ifdef MOZ_WIDGET_ANDROID
+  sPluginNPPMap.erase(&mNPP);
+#endif
+
   if (mMIMEType) {
     PR_Free((void *)mMIMEType);
     mMIMEType = nullptr;
   }
 }
+
+uint32_t nsNPAPIPluginInstance::gInUnsafePluginCalls = 0;
 
 void
 nsNPAPIPluginInstance::Destroy()
@@ -231,7 +244,7 @@ nsNPAPIPluginInstance::StopTime()
   return mStopTime;
 }
 
-nsresult nsNPAPIPluginInstance::Initialize(nsNPAPIPlugin *aPlugin, nsIPluginInstanceOwner* aOwner, const char* aMIMEType)
+nsresult nsNPAPIPluginInstance::Initialize(nsNPAPIPlugin *aPlugin, nsPluginInstanceOwner* aOwner, const char* aMIMEType)
 {
   PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("nsNPAPIPluginInstance::Initialize this=%p\n",this));
 
@@ -242,7 +255,7 @@ nsresult nsNPAPIPluginInstance::Initialize(nsNPAPIPlugin *aPlugin, nsIPluginInst
   mOwner = aOwner;
 
   if (aMIMEType) {
-    mMIMEType = (char*)PR_Malloc(PL_strlen(aMIMEType) + 1);
+    mMIMEType = (char*)PR_Malloc(strlen(aMIMEType) + 1);
     if (mMIMEType) {
       PL_strcpy(mMIMEType, aMIMEType);
     }
@@ -304,7 +317,8 @@ nsresult nsNPAPIPluginInstance::Stop()
   if (pluginFunctions->destroy) {
     NPSavedData *sdata = 0;
 
-    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->destroy)(&mNPP, &sdata), this);
+    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->destroy)(&mNPP, &sdata), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 
     NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
                    ("NPP Destroy called: this=%p, npp=%p, return=%d\n", this, &mNPP, error));
@@ -330,58 +344,51 @@ nsresult nsNPAPIPluginInstance::Stop()
 already_AddRefed<nsPIDOMWindow>
 nsNPAPIPluginInstance::GetDOMWindow()
 {
-  nsCOMPtr<nsIPluginInstanceOwner> owner;
-  GetOwner(getter_AddRefs(owner));
-  if (!owner)
+  if (!mOwner)
     return nullptr;
 
+  nsRefPtr<nsPluginInstanceOwner> deathGrip(mOwner);
+
   nsCOMPtr<nsIDocument> doc;
-  owner->GetDocument(getter_AddRefs(doc));
+  mOwner->GetDocument(getter_AddRefs(doc));
   if (!doc)
     return nullptr;
 
-  nsPIDOMWindow *window = doc->GetWindow();
-  NS_IF_ADDREF(window);
+  nsRefPtr<nsPIDOMWindow> window = doc->GetWindow();
 
-  return window;
+  return window.forget();
 }
 
 nsresult
 nsNPAPIPluginInstance::GetTagType(nsPluginTagType *result)
 {
-  if (mOwner) {
-    nsCOMPtr<nsIPluginTagInfo> tinfo(do_QueryInterface(mOwner));
-    if (tinfo)
-      return tinfo->GetTagType(result);
+  if (!mOwner) {
+    return NS_ERROR_FAILURE;
   }
 
-  return NS_ERROR_FAILURE;
+  return mOwner->GetTagType(result);
 }
 
 nsresult
 nsNPAPIPluginInstance::GetAttributes(uint16_t& n, const char*const*& names,
                                      const char*const*& values)
 {
-  if (mOwner) {
-    nsCOMPtr<nsIPluginTagInfo> tinfo(do_QueryInterface(mOwner));
-    if (tinfo)
-      return tinfo->GetAttributes(n, names, values);
+  if (!mOwner) {
+    return NS_ERROR_FAILURE;
   }
 
-  return NS_ERROR_FAILURE;
+  return mOwner->GetAttributes(n, names, values);
 }
 
 nsresult
 nsNPAPIPluginInstance::GetParameters(uint16_t& n, const char*const*& names,
                                      const char*const*& values)
 {
-  if (mOwner) {
-    nsCOMPtr<nsIPluginTagInfo> tinfo(do_QueryInterface(mOwner));
-    if (tinfo)
-      return tinfo->GetParameters(n, names, values);
+  if (!mOwner) {
+    return NS_ERROR_FAILURE;
   }
 
-  return NS_ERROR_FAILURE;
+  return mOwner->GetParameters(n, names, values);
 }
 
 nsresult
@@ -525,19 +532,6 @@ nsNPAPIPluginInstance::Start()
   // before returning. If the plugin returns failure, we'll clear it out below.
   mRunning = RUNNING;
 
-#if MOZ_WIDGET_ANDROID
-  // Flash creates some local JNI references during initialization (NPP_New). It does not
-  // remove these references later, so essentially they are leaked. AutoLocalJNIFrame
-  // prevents this by pushing a JNI frame. As a result, all local references created
-  // by Flash are contained in this frame. AutoLocalJNIFrame pops the frame once we
-  // go out of scope and the local references are deleted, preventing the leak.
-  JNIEnv* env = AndroidBridge::GetJNIEnv();
-  if (!env)
-    return NS_ERROR_FAILURE;
-
-  mozilla::AutoLocalJNIFrame frame(env);
-#endif
-
   nsresult newResult = library->NPP_New((char*)mimetype, &mNPP, (uint16_t)mode, count, (char**)names, (char**)values, NULL, &error);
   mInPluginInitCall = oldVal;
 
@@ -587,15 +581,16 @@ nsresult nsNPAPIPluginInstance::SetWindow(NPWindow* window)
 
     NPPAutoPusher nppPusher(&mNPP);
 
-    NPError error;
-    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setwindow)(&mNPP, (NPWindow*)window), this);
+    DebugOnly<NPError> error;
+    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setwindow)(&mNPP, (NPWindow*)window), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 
     mInPluginInitCall = oldVal;
 
     NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
     ("NPP SetWindow called: this=%p, [x=%d,y=%d,w=%d,h=%d], clip[t=%d,b=%d,l=%d,r=%d], return=%d\n",
     this, window->x, window->y, window->width, window->height,
-    window->clipRect.top, window->clipRect.bottom, window->clipRect.left, window->clipRect.right, error));
+    window->clipRect.top, window->clipRect.bottom, window->clipRect.left, window->clipRect.right, (NPError)error));
   }
   return NS_OK;
 }
@@ -656,7 +651,8 @@ nsresult nsNPAPIPluginInstance::Print(NPPrint* platformPrint)
   }
 
   if (pluginFunctions->print)
-      NS_TRY_SAFE_CALL_VOID((*pluginFunctions->print)(&mNPP, thePrint), this);
+      NS_TRY_SAFE_CALL_VOID((*pluginFunctions->print)(&mNPP, thePrint), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 
   NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
   ("NPP PrintProc called: this=%p, pDC=%p, [x=%d,y=%d,w=%d,h=%d], clip[t=%d,b=%d,l=%d,r=%d]\n",
@@ -674,7 +670,8 @@ nsresult nsNPAPIPluginInstance::Print(NPPrint* platformPrint)
   return NS_OK;
 }
 
-nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result)
+nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result,
+                                            NSPluginCallReentry aSafeToReenterGecko)
 {
   if (RUNNING != mRunning)
     return NS_OK;
@@ -694,8 +691,10 @@ nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result)
   if (pluginFunctions->event) {
     mCurrentPluginEvent = event;
 #if defined(XP_WIN) || defined(XP_OS2)
-    NS_TRY_SAFE_CALL_RETURN(tmpResult, (*pluginFunctions->event)(&mNPP, event), this);
+    NS_TRY_SAFE_CALL_RETURN(tmpResult, (*pluginFunctions->event)(&mNPP, event), this,
+                            aSafeToReenterGecko);
 #else
+    MAIN_THREAD_JNI_REF_GUARD;
     tmpResult = (*pluginFunctions->event)(&mNPP, event);
 #endif
     NPP_PLUGIN_LOG(PLUGIN_LOG_NOISY,
@@ -723,7 +722,8 @@ nsresult nsNPAPIPluginInstance::GetValueFromPlugin(NPPVariable variable, void* v
     PluginDestructionGuard guard(this);
 
     NPError pluginError = NPERR_GENERIC_ERROR;
-    NS_TRY_SAFE_CALL_RETURN(pluginError, (*pluginFunctions->getvalue)(&mNPP, variable, value), this);
+    NS_TRY_SAFE_CALL_RETURN(pluginError, (*pluginFunctions->getvalue)(&mNPP, variable, value), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
     NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
     ("NPP GetValue called: this=%p, npp=%p, var=%d, value=%d, return=%d\n", 
     this, &mNPP, variable, value, pluginError));
@@ -803,14 +803,12 @@ void nsNPAPIPluginInstance::RedrawPlugin()
 void nsNPAPIPluginInstance::SetEventModel(NPEventModel aModel)
 {
   // the event model needs to be set for the object frame immediately
-  nsCOMPtr<nsIPluginInstanceOwner> owner;
-  GetOwner(getter_AddRefs(owner));
-  if (!owner) {
+  if (!mOwner) {
     NS_WARNING("Trying to set event model without a plugin instance owner!");
     return;
   }
 
-  owner->SetEventModel(aModel);
+  mOwner->SetEventModel(aModel);
 }
 #endif
 
@@ -960,13 +958,13 @@ GLContext* nsNPAPIPluginInstance::GLContext()
   return sPluginContext;
 }
 
-TextureInfo nsNPAPIPluginInstance::LockContentTexture()
+nsNPAPIPluginInstance::TextureInfo nsNPAPIPluginInstance::LockContentTexture()
 {
   EnsureSharedTexture();
   return mContentTexture->Lock();
 }
 
-void nsNPAPIPluginInstance::ReleaseContentTexture(TextureInfo& aTextureInfo)
+void nsNPAPIPluginInstance::ReleaseContentTexture(nsNPAPIPluginInstance::TextureInfo& aTextureInfo)
 {
   EnsureSharedTexture();
   mContentTexture->Release(aTextureInfo);
@@ -1014,7 +1012,9 @@ SharedTextureHandle nsNPAPIPluginInstance::CreateSharedHandle()
     return mContentTexture->CreateSharedHandle();
   } else if (mContentSurface) {
     EnsureGLContext();
-    return sPluginContext->CreateSharedHandle(TextureImage::ThreadShared, mContentSurface, GLContext::SurfaceTexture);
+    return sPluginContext->CreateSharedHandle(GLContext::SameProcess,
+                                              mContentSurface,
+                                              GLContext::SurfaceTexture);
   } else return 0;
 }
 
@@ -1068,6 +1068,17 @@ void nsNPAPIPluginInstance::SetInverted(bool aInverted)
   mInverted = aInverted;
 }
 
+nsNPAPIPluginInstance* nsNPAPIPluginInstance::GetFromNPP(NPP npp)
+{
+  std::map<NPP, nsNPAPIPluginInstance*>::iterator it;
+
+  it = sPluginNPPMap.find(npp);
+  if (it == sPluginNPPMap.end())
+    return nullptr;
+
+  return it->second;
+}
+
 #endif
 
 nsresult nsNPAPIPluginInstance::GetDrawingModel(int32_t* aModel)
@@ -1091,6 +1102,26 @@ nsresult nsNPAPIPluginInstance::IsRemoteDrawingCoreAnimation(bool* aDrawing)
       return NS_ERROR_FAILURE;
   
   return library->IsRemoteDrawingCoreAnimation(&mNPP, aDrawing);
+#else
+  return NS_ERROR_FAILURE;
+#endif
+}
+
+nsresult nsNPAPIPluginInstance::ContentsScaleFactorChanged(double aContentsScaleFactor)
+{
+#ifdef XP_MACOSX
+  if (!mPlugin)
+      return NS_ERROR_FAILURE;
+
+  PluginLibrary* library = mPlugin->GetLibrary();
+  if (!library)
+      return NS_ERROR_FAILURE;
+
+  // We only need to call this if the plugin is running OOP.
+  if (!library->IsOOP())
+      return NS_OK;
+  
+  return library->ContentsScaleFactorChanged(&mNPP, aContentsScaleFactor);
 #else
   return NS_ERROR_FAILURE;
 #endif
@@ -1139,7 +1170,7 @@ nsNPAPIPluginInstance::IsWindowless(bool* isWindowless)
   return NS_OK;
 }
 
-class NS_STACK_CLASS AutoPluginLibraryCall
+class MOZ_STACK_CLASS AutoPluginLibraryCall
 {
 public:
   AutoPluginLibraryCall(nsNPAPIPluginInstance* aThis)
@@ -1220,13 +1251,8 @@ nsNPAPIPluginInstance::NotifyPainted(void)
 }
 
 nsresult
-nsNPAPIPluginInstance::UseAsyncPainting(bool* aIsAsync)
+nsNPAPIPluginInstance::GetIsOOP(bool* aIsAsync)
 {
-  if (!mUsePluginLayersPref) {
-    *aIsAsync = mUsePluginLayersPref;
-    return NS_OK;
-  }
-
   AutoPluginLibraryCall library(this);
   if (!library)
     return NS_ERROR_FAILURE;
@@ -1380,34 +1406,32 @@ nsNPAPIPluginInstance::PrivateModeStateChanged(bool enabled)
     return NS_ERROR_FAILURE;
 
   PluginDestructionGuard guard(this);
-    
+
   NPError error;
   NPBool value = static_cast<NPBool>(enabled);
-  NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setvalue)(&mNPP, NPNVprivateModeBool, &value), this);
+  NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setvalue)(&mNPP, NPNVprivateModeBool, &value), this,
+                          NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
   return (error == NPERR_NO_ERROR) ? NS_OK : NS_ERROR_FAILURE;
 }
 
-class DelayUnscheduleEvent : public nsRunnable {
-public:
-  nsRefPtr<nsNPAPIPluginInstance> mInstance;
-  uint32_t mTimerID;
-  DelayUnscheduleEvent(nsNPAPIPluginInstance* aInstance, uint32_t aTimerId)
-    : mInstance(aInstance)
-    , mTimerID(aTimerId)
-  {}
-
-  ~DelayUnscheduleEvent() {}
-
-  NS_IMETHOD Run();
-};
-
-NS_IMETHODIMP
-DelayUnscheduleEvent::Run()
+nsresult
+nsNPAPIPluginInstance::IsPrivateBrowsing(bool* aEnabled)
 {
-  mInstance->UnscheduleTimer(mTimerID);
+  if (!mOwner)
+    return NS_ERROR_FAILURE;
+
+  nsCOMPtr<nsIDocument> doc;
+  mOwner->GetDocument(getter_AddRefs(doc));
+  NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+
+  nsCOMPtr<nsPIDOMWindow> domwindow = doc->GetWindow();
+  NS_ENSURE_TRUE(domwindow, NS_ERROR_FAILURE);
+
+  nsCOMPtr<nsIDocShell> docShell = domwindow->GetDocShell();
+  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
+  *aEnabled = (loadContext && loadContext->UsePrivateBrowsing());
   return NS_OK;
 }
-
 
 static void
 PluginTimerCallback(nsITimer *aTimer, void *aClosure)
@@ -1416,6 +1440,9 @@ PluginTimerCallback(nsITimer *aTimer, void *aClosure)
   NPP npp = t->npp;
   uint32_t id = t->id;
 
+  PLUGIN_LOG(PLUGIN_LOG_NOISY, ("nsNPAPIPluginInstance running plugin timer callback this=%p\n", npp->ndata));
+
+  MAIN_THREAD_JNI_REF_GUARD;
   // Some plugins (Flash on Android) calls unscheduletimer
   // from this callback.
   t->inCallback = true;
@@ -1431,8 +1458,8 @@ PluginTimerCallback(nsITimer *aTimer, void *aClosure)
   // use UnscheduleTimer to clean up if this is a one-shot timer
   uint32_t timerType;
   t->timer->GetType(&timerType);
-  if (timerType == nsITimer::TYPE_ONE_SHOT)
-      inst->UnscheduleTimer(id);
+  if (t->needUnschedule || timerType == nsITimer::TYPE_ONE_SHOT)
+    inst->UnscheduleTimer(id);
 }
 
 nsNPAPITimer*
@@ -1457,7 +1484,7 @@ nsNPAPIPluginInstance::ScheduleTimer(uint32_t interval, NPBool repeat, void (*ti
 
   nsNPAPITimer *newTimer = new nsNPAPITimer();
 
-  newTimer->inCallback = false;
+  newTimer->inCallback = newTimer->needUnschedule = false;
   newTimer->npp = &mNPP;
 
   // generate ID that is unique to this instance
@@ -1496,8 +1523,7 @@ nsNPAPIPluginInstance::UnscheduleTimer(uint32_t timerID)
     return;
 
   if (t->inCallback) {
-    nsCOMPtr<nsIRunnable> e = new DelayUnscheduleEvent(this, timerID);
-    NS_DispatchToCurrentThread(e);
+    t->needUnschedule = true;
     return;
   }
 
@@ -1540,11 +1566,7 @@ nsNPAPIPluginInstance::GetDOMElement(nsIDOMElement* *result)
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIPluginTagInfo> tinfo(do_QueryInterface(mOwner));
-  if (tinfo)
-    return tinfo->GetDOMElement(result);
-
-  return NS_ERROR_FAILURE;
+  return mOwner->GetDOMElement(result);
 }
 
 nsresult
@@ -1553,12 +1575,10 @@ nsNPAPIPluginInstance::InvalidateRect(NPRect *invalidRect)
   if (RUNNING != mRunning)
     return NS_OK;
 
-  nsCOMPtr<nsIPluginInstanceOwner> owner;
-  GetOwner(getter_AddRefs(owner));
-  if (!owner)
+  if (!mOwner)
     return NS_ERROR_FAILURE;
 
-  return owner->InvalidateRect(invalidRect);
+  return mOwner->InvalidateRect(invalidRect);
 }
 
 nsresult
@@ -1567,12 +1587,10 @@ nsNPAPIPluginInstance::InvalidateRegion(NPRegion invalidRegion)
   if (RUNNING != mRunning)
     return NS_OK;
 
-  nsCOMPtr<nsIPluginInstanceOwner> owner;
-  GetOwner(getter_AddRefs(owner));
-  if (!owner)
+  if (!mOwner)
     return NS_ERROR_FAILURE;
 
-  return owner->InvalidateRegion(invalidRegion);
+  return mOwner->InvalidateRegion(invalidRegion);
 }
 
 nsresult
@@ -1589,18 +1607,19 @@ nsNPAPIPluginInstance::GetMIMEType(const char* *result)
 nsresult
 nsNPAPIPluginInstance::GetJSContext(JSContext* *outContext)
 {
-  nsCOMPtr<nsIPluginInstanceOwner> owner;
-  GetOwner(getter_AddRefs(owner));
-  if (!owner)
+  if (!mOwner)
     return NS_ERROR_FAILURE;
+
+  nsRefPtr<nsPluginInstanceOwner> deathGrip(mOwner);
 
   *outContext = NULL;
   nsCOMPtr<nsIDocument> document;
 
-  nsresult rv = owner->GetDocument(getter_AddRefs(document));
+  nsresult rv = mOwner->GetDocument(getter_AddRefs(document));
 
   if (NS_SUCCEEDED(rv) && document) {
-    nsIScriptGlobalObject *global = document->GetScriptGlobalObject();
+    nsCOMPtr<nsIScriptGlobalObject> global =
+      do_QueryInterface(document->GetWindow());
 
     if (global) {
       nsIScriptContext *context = global->GetContext();
@@ -1614,20 +1633,16 @@ nsNPAPIPluginInstance::GetJSContext(JSContext* *outContext)
   return rv;
 }
 
-nsresult
-nsNPAPIPluginInstance::GetOwner(nsIPluginInstanceOwner **aOwner)
+nsPluginInstanceOwner*
+nsNPAPIPluginInstance::GetOwner()
 {
-  NS_ENSURE_ARG_POINTER(aOwner);
-  *aOwner = mOwner;
-  NS_IF_ADDREF(mOwner);
-  return (mOwner ? NS_OK : NS_ERROR_FAILURE);
+  return mOwner;
 }
 
-nsresult
-nsNPAPIPluginInstance::SetOwner(nsIPluginInstanceOwner *aOwner)
+void
+nsNPAPIPluginInstance::SetOwner(nsPluginInstanceOwner *aOwner)
 {
   mOwner = aOwner;
-  return NS_OK;
 }
 
 nsresult
@@ -1637,14 +1652,6 @@ nsNPAPIPluginInstance::ShowStatus(const char* message)
     return mOwner->ShowStatus(message);
 
   return NS_ERROR_FAILURE;
-}
-
-nsresult
-nsNPAPIPluginInstance::InvalidateOwner()
-{
-  mOwner = nullptr;
-
-  return NS_OK;
 }
 
 nsresult
@@ -1743,7 +1750,7 @@ GetJavaVersionFromMimetype(nsPluginTag* pluginTag, nsCString& version)
 {
   for (uint32_t i = 0; i < pluginTag->mMimeTypes.Length(); ++i) {
     nsCString type = pluginTag->mMimeTypes[i];
-    nsCAutoString jpi("application/x-java-applet;jpi-version=");
+    nsAutoCString jpi("application/x-java-applet;jpi-version=");
 
     int32_t idx = type.Find(jpi, false, 0, -1);
     if (idx != 0) {
@@ -1779,16 +1786,8 @@ nsNPAPIPluginInstance::CheckJavaC2PJSObjectQuirk(uint16_t paramCount,
     return;
   }
 
-  nsRefPtr<nsPluginHost> pluginHost =
-    already_AddRefed<nsPluginHost>(nsPluginHost::GetInst());
+  nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
   if (!pluginHost) {
-    return;
-  }
-
-  bool isClickToPlay;
-  nsCAutoString mimeType(mMIMEType);
-  rv = pluginHost->IsPluginClickToPlayForType(mimeType, &isClickToPlay);
-  if (NS_FAILED(rv) || !isClickToPlay) {
     return;
   }
 
@@ -1802,10 +1801,10 @@ nsNPAPIPluginInstance::CheckJavaC2PJSObjectQuirk(uint16_t paramCount,
   bool haveCodeParam = false;
   bool isCodeParamEmpty = true;
 
-  for (uint16_t i = 0; i < paramCount; ++i) {
-    if (PL_strcasecmp(paramNames[i], "code") == 0) {
+  for (uint16_t i = paramCount; i > 0; --i) {
+    if (PL_strcasecmp(paramNames[i - 1], "code") == 0) {
       haveCodeParam = true;
-      if (PL_strlen(paramValues[i]) > 0) {
+      if (strlen(paramValues[i - 1]) > 0) {
         isCodeParamEmpty = false;
       }
       break;
@@ -1834,4 +1833,14 @@ nsNPAPIPluginInstance::CheckJavaC2PJSObjectQuirk(uint16_t paramCount,
   }
 
   mHaveJavaC2PJSObjectQuirk = true;
+}
+
+double
+nsNPAPIPluginInstance::GetContentsScaleFactor()
+{
+  double scaleFactor = 1.0;
+  if (mOwner) {
+    mOwner->GetContentsScaleFactor(&scaleFactor);
+  }
+  return scaleFactor;
 }

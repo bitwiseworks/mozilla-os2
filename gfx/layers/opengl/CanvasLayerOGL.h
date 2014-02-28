@@ -6,38 +6,45 @@
 #ifndef GFX_CANVASLAYEROGL_H
 #define GFX_CANVASLAYEROGL_H
 
-
 #include "LayerManagerOGL.h"
 #include "gfxASurface.h"
-#if defined(MOZ_WIDGET_GTK2) && !defined(MOZ_PLATFORM_MAEMO)
+#include "GLDefs.h"
+#include "mozilla/Preferences.h"
+
+#if defined(GL_PROVIDER_GLX)
 #include "GLXLibrary.h"
 #include "mozilla/X11Util.h"
 #endif
 
-#include "mozilla/Preferences.h"
 
 namespace mozilla {
 namespace layers {
 
-class THEBES_API CanvasLayerOGL :
+class CanvasLayerOGL :
   public CanvasLayer,
   public LayerOGL
 {
 public:
   CanvasLayerOGL(LayerManagerOGL *aManager)
-    : CanvasLayer(aManager, NULL),
-      LayerOGL(aManager),
-      mTexture(0),
-      mTextureTarget(LOCAL_GL_TEXTURE_2D),
-      mDelayedUpdates(false)
-#if defined(MOZ_WIDGET_GTK2) && !defined(MOZ_PLATFORM_MAEMO)
-      ,mPixmap(0)
+    : CanvasLayer(aManager, NULL)
+    , LayerOGL(aManager)
+    , mLayerProgram(gl::RGBALayerProgramType)
+    , mTexture(0)
+    , mTextureTarget(LOCAL_GL_TEXTURE_2D)
+    , mDelayedUpdates(false)
+    , mIsGLAlphaPremult(false)
+    , mUploadTexture(0)
+#if defined(GL_PROVIDER_GLX)
+    , mPixmap(0)
 #endif
   { 
-      mImplData = static_cast<LayerOGL*>(this);
-      mForceReadback = Preferences::GetBool("webgl.force-layers-readback", false);
+    mImplData = static_cast<LayerOGL*>(this);
+    mForceReadback = Preferences::GetBool("webgl.force-layers-readback", false);
   }
-  ~CanvasLayerOGL() { Destroy(); }
+
+  ~CanvasLayerOGL() {
+    Destroy();
+  }
 
   // CanvasLayer implementation
   virtual void Initialize(const Data& aData);
@@ -53,7 +60,7 @@ protected:
   void UpdateSurface();
 
   nsRefPtr<gfxASurface> mCanvasSurface;
-  nsRefPtr<GLContext> mCanvasGLContext;
+  nsRefPtr<GLContext> mGLContext;
   gl::ShaderProgramType mLayerProgram;
   RefPtr<gfx::DrawTarget> mDrawTarget;
 
@@ -61,10 +68,11 @@ protected:
   GLenum mTextureTarget;
 
   bool mDelayedUpdates;
-  bool mGLBufferIsPremultiplied;
+  bool mIsGLAlphaPremult;
   bool mNeedsYFlip;
   bool mForceReadback;
-#if defined(MOZ_WIDGET_GTK2) && !defined(MOZ_PLATFORM_MAEMO)
+  GLuint mUploadTexture;
+#if defined(GL_PROVIDER_GLX)
   GLXPixmap mPixmap;
 #endif
 
@@ -88,53 +96,9 @@ protected:
     return mCachedTempSurface;
   }
 
-  void DiscardTempSurface()
-  {
+  void DiscardTempSurface() {
     mCachedTempSurface = nullptr;
   }
-};
-
-// NB: eventually we'll have separate shadow canvas2d and shadow
-// canvas3d layers, but currently they look the same from the
-// perspective of the compositor process
-class ShadowCanvasLayerOGL : public ShadowCanvasLayer,
-                             public LayerOGL
-{
-  typedef gl::TextureImage TextureImage;
-
-public:
-  ShadowCanvasLayerOGL(LayerManagerOGL* aManager);
-  virtual ~ShadowCanvasLayerOGL();
-
-  // CanvasLayer impl
-  virtual void Initialize(const Data& aData);
-  virtual void Init(const CanvasSurface& aNewFront, bool needYFlip);
-
-  // This isn't meaningful for shadow canvas.
-  virtual void Updated(const nsIntRect&) {}
-
-  // ShadowCanvasLayer impl
-  virtual void Swap(const CanvasSurface& aNewFront,
-                    bool needYFlip,
-                    CanvasSurface* aNewBack);
-
-  virtual void DestroyFrontBuffer();
-
-  virtual void Disconnect();
-
-  // LayerOGL impl
-  void Destroy();
-  Layer* GetLayer();
-  virtual void RenderLayer(int aPreviousFrameBuffer,
-                           const nsIntPoint& aOffset);
-  virtual void CleanupResources();
-
-private:
-  nsRefPtr<TextureImage> mTexImage;
-
-  bool mNeedsYFlip;
-  SurfaceDescriptor mFrontBufferDescriptor;
-  GLuint mTexture;
 };
 
 } /* layers */

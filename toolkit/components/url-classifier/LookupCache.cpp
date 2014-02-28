@@ -21,9 +21,9 @@
 // PrefixSet.
 
 // Data format for the ".cache" files:
-//    uint32 magic           Identify the file type
-//    uint32 version         Version identifier for file format
-//    uint32 numCompletions  Amount of completions stored
+//    uint32_t magic           Identify the file type
+//    uint32_t version         Version identifier for file format
+//    uint32_t numCompletions  Amount of completions stored
 //    0...numCompletions     256-bit Completions
 
 // Name of the lookupcomplete cache
@@ -45,20 +45,14 @@ extern PRLogModuleInfo *gUrlClassifierDbServiceLog;
 namespace mozilla {
 namespace safebrowsing {
 
-const uint32 LOOKUPCACHE_MAGIC = 0x1231af3e;
-const uint32 CURRENT_VERSION = 2;
+const uint32_t LOOKUPCACHE_MAGIC = 0x1231af3e;
+const uint32_t CURRENT_VERSION = 2;
 
-LookupCache::LookupCache(const nsACString& aTableName, nsIFile* aStoreDir,
-                         bool aPerClientRandomize)
+LookupCache::LookupCache(const nsACString& aTableName, nsIFile* aStoreDir)
   : mPrimed(false)
-  , mPerClientRandomize(aPerClientRandomize)
   , mTableName(aTableName)
   , mStoreDirectory(aStoreDir)
-  , mTestTable(false)
 {
-  if (mTableName.RFind(NS_LITERAL_CSTRING("-simple")) != kNotFound) {
-    mTestTable = true;
-  }
 }
 
 nsresult
@@ -88,7 +82,7 @@ LookupCache::Open()
 
   nsCOMPtr<nsIInputStream> inputStream;
   rv = NS_NewLocalFileInputStream(getter_AddRefs(inputStream), storeFile,
-                                  PR_RDONLY);
+                                  PR_RDONLY | nsIFile::OS_READAHEAD);
 
   if (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND) {
     Reset();
@@ -162,7 +156,7 @@ LookupCache::Build(AddPrefixArray& aAddPrefixes,
 
   mCompletions.Clear();
   mCompletions.SetCapacity(aAddCompletes.Length());
-  for (uint32 i = 0; i < aAddCompletes.Length(); i++) {
+  for (uint32_t i = 0; i < aAddCompletes.Length(); i++) {
     mCompletions.AppendElement(aAddCompletes[i].CompleteHash());
   }
   aAddCompletes.Clear();
@@ -185,8 +179,8 @@ LookupCache::Dump()
   if (!LOG_ENABLED())
     return;
 
-  for (uint32 i = 0; i < mCompletions.Length(); i++) {
-    nsCAutoString str;
+  for (uint32_t i = 0; i < mCompletions.Length(); i++) {
+    nsAutoCString str;
     mCompletions[i].ToString(str);
     LOG(("Completion: %s", str.get()));
   }
@@ -195,37 +189,26 @@ LookupCache::Dump()
 
 nsresult
 LookupCache::Has(const Completion& aCompletion,
-                 const Completion& aHostkey,
-                 const uint32_t aHashKey,
-                 bool* aHas, bool* aComplete,
-                 Prefix* aOrigPrefix)
+                 bool* aHas, bool* aComplete)
 {
   *aHas = *aComplete = false;
 
   uint32_t prefix = aCompletion.ToUint32();
-  uint32_t hostkey = aHostkey.ToUint32();
-  uint32_t codedkey;
-  nsresult rv = KeyedHash(prefix, hostkey, aHashKey, &codedkey, !mPerClientRandomize);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  Prefix codedPrefix;
-  codedPrefix.FromUint32(codedkey);
-  *aOrigPrefix = codedPrefix;
 
   bool found;
-  rv = mPrefixSet->Contains(codedkey, &found);
+  nsresult rv = mPrefixSet->Contains(prefix, &found);
   NS_ENSURE_SUCCESS(rv, rv);
 
   LOG(("Probe in %s: %X, found %d", mTableName.get(), prefix, found));
 
-  if (found || mTestTable) {
-    *aHas = found;
-    // check completion store
-    if (mCompletions.BinaryIndexOf(aCompletion) != nsTArray<Completion>::NoIndex) {
-      LOG(("Complete in %s", mTableName.get()));
-      *aHas = true;
-      *aComplete = true;
-    }
+  if (found) {
+    *aHas = true;
+  }
+
+  if (mCompletions.BinaryIndexOf(aCompletion) != nsTArray<Completion>::NoIndex) {
+    LOG(("Complete in %s", mTableName.get()));
+    *aComplete = true;
+    *aHas = true;
   }
 
   return NS_OK;
@@ -409,7 +392,7 @@ LookupCache::GetKey(const nsACString& aSpec,
   const nsCSubstring& host = Substring(begin, iter);
 
   if (IsCanonicalizedIP(host)) {
-    nsCAutoString key;
+    nsAutoCString key;
     key.Assign(host);
     key.Append("/");
     return aHash->FromPlaintext(key, aCryptoHash);
@@ -422,7 +405,7 @@ LookupCache::GetKey(const nsACString& aSpec,
     return NS_ERROR_FAILURE;
 
   int32_t last = int32_t(hostComponents.Length()) - 1;
-  nsCAutoString lookupHost;
+  nsAutoCString lookupHost;
 
   if (hostComponents.Length() > 2) {
     lookupHost.Append(hostComponents[last - 2]);
@@ -454,7 +437,7 @@ LookupCache::GetLookupFragments(const nsACString& aSpec,
   }
 
   const nsCSubstring& host = Substring(begin, iter++);
-  nsCAutoString path;
+  nsAutoCString path;
   path.Assign(Substring(iter, end));
 
   /**
@@ -498,7 +481,7 @@ LookupCache::GetLookupFragments(const nsACString& aSpec,
    *    appended that was not present in the original url.
    */
   nsTArray<nsCString> paths;
-  nsCAutoString pathToAdd;
+  nsAutoCString pathToAdd;
 
   path.BeginReading(begin);
   path.EndReading(end);
@@ -598,63 +581,6 @@ LookupCache::GetHostKeys(const nsACString& aSpec,
   return NS_OK;
 }
 
-/* We have both a prefix and a domain. Drop the domain, but
-   hash the domain, the prefix and a random value together,
-   ensuring any collisions happens at a different points for
-   different users.
-*/
-/* static */ nsresult LookupCache::KeyedHash(uint32_t aPref, uint32_t aHostKey,
-                                             uint32_t aUserKey, uint32_t* aOut,
-                                             bool aPassthrough)
-{
-  /* Do not do any processing in passthrough mode. */
-  if (aPassthrough) {
-    *aOut = aPref;
-    return NS_OK;
-  }
-
-  /* This is a reimplementation of MurmurHash3 32-bit
-     based on the public domain C++ sources.
-     http://code.google.com/p/smhasher/source/browse/trunk/MurmurHash3.cpp
-     for nblocks = 2
-  */
-  uint32_t c1 = 0xCC9E2D51;
-  uint32_t c2 = 0x1B873593;
-  uint32_t c3 = 0xE6546B64;
-  uint32_t c4 = 0x85EBCA6B;
-  uint32_t c5 = 0xC2B2AE35;
-  uint32_t h1 = aPref; // seed
-  uint32_t k1;
-  uint32_t karr[2];
-
-  karr[0] = aHostKey;
-  karr[1] = aUserKey;
-
-  for (uint32_t i = 0; i < 2; i++) {
-    k1 = karr[i];
-    k1 *= c1;
-    k1 = (k1 << 15) | (k1 >> (32-15));
-    k1 *= c2;
-
-    h1 ^= k1;
-    h1 = (h1 << 13) | (h1 >> (32-13));
-    h1 *= 5;
-    h1 += c3;
-  }
-
-  h1 ^= 2; // len
-  // fmix
-  h1 ^= h1 >> 16;
-  h1 *= c4;
-  h1 ^= h1 >> 13;
-  h1 *= c5;
-  h1 ^= h1 >> 16;
-
-  *aOut = h1;
-
-  return NS_OK;
-}
-
 bool LookupCache::IsPrimed()
 {
   return mPrimed;
@@ -688,7 +614,7 @@ LookupCache::ConstructPrefixSet(AddPrefixArray& aAddPrefixes)
   nsTArray<uint32_t> array;
   array.SetCapacity(aAddPrefixes.Length());
 
-  for (uint32 i = 0; i < aAddPrefixes.Length(); i++) {
+  for (uint32_t i = 0; i < aAddPrefixes.Length(); i++) {
     array.AppendElement(aAddPrefixes[i].PrefixHash().ToUint32());
   }
   aAddPrefixes.Clear();

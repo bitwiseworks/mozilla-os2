@@ -6,6 +6,7 @@
 #ifndef nsXBLBinding_h_
 #define nsXBLBinding_h_
 
+#include "nsXBLService.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsINodeList.h"
@@ -14,6 +15,7 @@
 #include "nsTArray.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupportsImpl.h"
+#include "jsapi.h"
 
 class nsXBLPrototypeBinding;
 class nsIContent;
@@ -24,7 +26,7 @@ class nsObjectHashtable;
 class nsXBLInsertionPoint;
 typedef nsTArray<nsRefPtr<nsXBLInsertionPoint> > nsInsertionPointList;
 struct JSContext;
-struct JSObject;
+class JSObject;
 
 // *********************************************************************/
 // The XBLBinding class
@@ -58,8 +60,38 @@ public:
   nsIContent* GetBoundElement() { return mBoundElement; }
   void SetBoundElement(nsIContent *aElement);
 
+  void SetJSClass(nsXBLJSClass *aClass) {
+    MOZ_ASSERT(!mJSClass && aClass);
+    mJSClass = aClass;
+  }
+
   bool IsStyleBinding() const { return mIsStyleBinding; }
   void SetIsStyleBinding(bool aIsStyle) { mIsStyleBinding = aIsStyle; }
+
+  /*
+   * Does a lookup for a method or attribute provided by one of the bindings'
+   * prototype implementation. If found, |desc| will be set up appropriately,
+   * and wrapped into cx->compartment.
+   *
+   * May only be called when XBL code is being run in a separate scope, because
+   * otherwise we don't have untainted data with which to do a proper lookup.
+   */
+  bool LookupMember(JSContext* aCx, JS::HandleId aId, JSPropertyDescriptor* aDesc);
+
+  /*
+   * Determines whether the binding has a field with the given name.
+   */
+  bool HasField(nsString& aName);
+
+protected:
+
+  /*
+   * Internal version. Requires that aCx is in appropriate xbl scope.
+   */
+  bool LookupMemberInternal(JSContext* aCx, nsString& aName, JS::HandleId aNameAsId,
+                            JSPropertyDescriptor* aDesc, JS::Handle<JSObject*> aXBLScope);
+
+public:
 
   void MarkForDeath();
   bool MarkedForDeath() const { return mMarkedForDeath; }
@@ -86,7 +118,7 @@ public:
 
   // Resolve all the fields for this binding and all ancestor bindings on the
   // object |obj|.  False return means a JS exception was set.
-  bool ResolveAllFields(JSContext *cx, JSObject *obj) const;
+  bool ResolveAllFields(JSContext *cx, JS::Handle<JSObject*> obj) const;
 
   // Get the list of insertion points for aParent. The nsInsertionPointList
   // is owned by the binding, you should not delete it.
@@ -111,10 +143,12 @@ public:
 
   nsINodeList* GetAnonymousNodes();
 
-  static nsresult DoInitJSClass(JSContext *cx, JSObject *global, JSObject *obj,
+  static nsresult DoInitJSClass(JSContext *cx, JS::Handle<JSObject*> global,
+                                JS::Handle<JSObject*> obj,
                                 const nsAFlatCString& aClassName,
                                 nsXBLPrototypeBinding* aProtoBinding,
-                                JSObject** aClassObject);
+                                JS::MutableHandle<JSObject*> aClassObject,
+                                bool* aNew);
 
   bool AllowScripts();  // XXX make const
 
@@ -126,10 +160,14 @@ protected:
 
   bool mIsStyleBinding;
   bool mMarkedForDeath;
+  bool mUsingXBLScope;
 
   nsXBLPrototypeBinding* mPrototypeBinding; // Weak, but we're holding a ref to the docinfo
   nsCOMPtr<nsIContent> mContent; // Strong. Our anonymous content stays around with us.
   nsRefPtr<nsXBLBinding> mNextBinding; // Strong. The derived binding owns the base class bindings.
+  nsRefPtr<nsXBLJSClass> mJSClass; // Strong. The class object also holds a strong reference,
+                                   // which might be somewhat redundant, but be safe to avoid
+                                   // worrying about edge cases.
   
   nsIContent* mBoundElement; // [WEAK] We have a reference, but we don't own it.
   

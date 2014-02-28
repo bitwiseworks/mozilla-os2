@@ -7,9 +7,9 @@
 #include "CompositorChild.h"
 #include "CompositorParent.h"
 #include "LayerManagerOGL.h"
-#include "mozilla/layers/ShadowLayersChild.h"
+#include "mozilla/layers/LayerTransactionChild.h"
 
-using mozilla::layers::ShadowLayersChild;
+using mozilla::layers::LayerTransactionChild;
 
 namespace mozilla {
 namespace layers {
@@ -30,10 +30,11 @@ CompositorChild::~CompositorChild()
 void
 CompositorChild::Destroy()
 {
+  mLayerManager->Destroy();
   mLayerManager = NULL;
-  while (size_t len = ManagedPLayersChild().Length()) {
-    ShadowLayersChild* layers =
-      static_cast<ShadowLayersChild*>(ManagedPLayersChild()[len - 1]);
+  while (size_t len = ManagedPLayerTransactionChild().Length()) {
+    LayerTransactionChild* layers =
+      static_cast<LayerTransactionChild*>(ManagedPLayerTransactionChild()[len - 1]);
     layers->Destroy();
   }
   SendStop();
@@ -69,17 +70,16 @@ CompositorChild::Get()
   return sCompositor;
 }
 
-PLayersChild*
-CompositorChild::AllocPLayers(const LayersBackend& aBackendHint,
-                              const uint64_t& aId,
-                              LayersBackend* aBackend,
-                              int* aMaxTextureSize)
+PLayerTransactionChild*
+CompositorChild::AllocPLayerTransaction(const LayersBackend& aBackendHint,
+                                        const uint64_t& aId,
+                                        TextureFactoryIdentifier*)
 {
-  return new ShadowLayersChild();
+  return new LayerTransactionChild();
 }
 
 bool
-CompositorChild::DeallocPLayers(PLayersChild* actor)
+CompositorChild::DeallocPLayerTransaction(PLayerTransactionChild* actor)
 {
   delete actor;
   return true;
@@ -89,6 +89,11 @@ void
 CompositorChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   MOZ_ASSERT(sCompositor == this);
+
+  if (aWhy == AbnormalShutdown) {
+    NS_RUNTIMEABORT("ActorDestroy by IPC channel failure at CompositorChild");
+  }
+
   sCompositor = NULL;
   // We don't want to release the ref to sCompositor here, during
   // cleanup, because that will cause it to be deleted while it's

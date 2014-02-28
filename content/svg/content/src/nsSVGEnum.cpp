@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsError.h"
+#include "nsSVGAttrTearoffTable.h"
 #include "nsSVGEnum.h"
 #include "nsIAtom.h"
 #include "nsSVGElement.h"
@@ -24,6 +25,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSVGEnum::DOMAnimatedEnum)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAnimatedEnumeration)
 NS_INTERFACE_MAP_END
+
+static nsSVGAttrTearoffTable<nsSVGEnum, nsSVGEnum::DOMAnimatedEnum>
+  sSVGAnimatedEnumTearoffTable;
 
 nsSVGEnumMapping *
 nsSVGEnum::GetMapping(nsSVGElement *aSVGElement)
@@ -53,7 +57,7 @@ nsSVGEnum::SetBaseValueAtom(const nsIAtom* aValue, nsSVGElement *aSVGElement)
           aSVGElement->AnimationNeedsResample();
         }
         // We don't need to call DidChange* here - we're only called by
-        // nsSVGElement::ParseAttribute under nsGenericElement::SetAttr,
+        // nsSVGElement::ParseAttribute under Element::SetAttr,
         // which takes care of notifying.
       }
       return NS_OK;
@@ -122,12 +126,26 @@ nsresult
 nsSVGEnum::ToDOMAnimatedEnum(nsIDOMSVGAnimatedEnumeration **aResult,
                              nsSVGElement *aSVGElement)
 {
-  *aResult = new DOMAnimatedEnum(this, aSVGElement);
-  if (!*aResult)
-    return NS_ERROR_OUT_OF_MEMORY;
-
-  NS_ADDREF(*aResult);
+  *aResult = ToDOMAnimatedEnum(aSVGElement).get();
   return NS_OK;
+}
+
+already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+nsSVGEnum::ToDOMAnimatedEnum(nsSVGElement* aSVGElement)
+{
+  nsRefPtr<DOMAnimatedEnum> domAnimatedEnum =
+    sSVGAnimatedEnumTearoffTable.GetTearoff(this);
+  if (!domAnimatedEnum) {
+    domAnimatedEnum = new DOMAnimatedEnum(this, aSVGElement);
+    sSVGAnimatedEnumTearoffTable.AddTearoff(this, domAnimatedEnum);
+  }
+
+  return domAnimatedEnum.forget();
+}
+
+nsSVGEnum::DOMAnimatedEnum::~DOMAnimatedEnum()
+{
+  sSVGAnimatedEnumTearoffTable.RemoveTearoff(mVal);
 }
 
 nsISMILAttr*
@@ -138,7 +156,7 @@ nsSVGEnum::ToSMILAttr(nsSVGElement *aSVGElement)
 
 nsresult
 nsSVGEnum::SMILEnum::ValueFromString(const nsAString& aStr,
-                                     const nsISMILAnimationElement* /*aSrcElement*/,
+                                     const dom::SVGAnimationElement* /*aSrcElement*/,
                                      nsSMILValue& aValue,
                                      bool& aPreventCachingOfSandwich) const
 {
@@ -148,7 +166,7 @@ nsSVGEnum::SMILEnum::ValueFromString(const nsAString& aStr,
 
     while (mapping && mapping->mKey) {
       if (valAtom == *(mapping->mKey)) {
-        nsSMILValue val(&SMILEnumType::sSingleton);
+        nsSMILValue val(SMILEnumType::Singleton());
         val.mU.mUint = mapping->mVal;
         aValue = val;
         aPreventCachingOfSandwich = false;
@@ -166,7 +184,7 @@ nsSVGEnum::SMILEnum::ValueFromString(const nsAString& aStr,
 nsSMILValue
 nsSVGEnum::SMILEnum::GetBaseValue() const
 {
-  nsSMILValue val(&SMILEnumType::sSingleton);
+  nsSMILValue val(SMILEnumType::Singleton());
   val.mU.mUint = mVal->mBaseVal;
   return val;
 }
@@ -184,9 +202,9 @@ nsSVGEnum::SMILEnum::ClearAnimValue()
 nsresult
 nsSVGEnum::SMILEnum::SetAnimValue(const nsSMILValue& aValue)
 {
-  NS_ASSERTION(aValue.mType == &SMILEnumType::sSingleton,
+  NS_ASSERTION(aValue.mType == SMILEnumType::Singleton(),
                "Unexpected type to assign animated value");
-  if (aValue.mType == &SMILEnumType::sSingleton) {
+  if (aValue.mType == SMILEnumType::Singleton()) {
     NS_ABORT_IF_FALSE(aValue.mU.mUint <= USHRT_MAX,
                       "Very large enumerated value - too big for uint16_t");
     mVal->SetAnimValue(uint16_t(aValue.mU.mUint), mSVGElement);

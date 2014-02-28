@@ -7,10 +7,11 @@
 #include "nsDOMTextEvent.h"
 #include "nsPrivateTextRange.h"
 
-nsDOMTextEvent::nsDOMTextEvent(nsPresContext* aPresContext,
+nsDOMTextEvent::nsDOMTextEvent(mozilla::dom::EventTarget* aOwner,
+                               nsPresContext* aPresContext,
                                nsTextEvent* aEvent)
-  : nsDOMUIEvent(aPresContext, aEvent ? aEvent :
-                 new nsTextEvent(false, 0, nullptr))
+  : nsDOMUIEvent(aOwner, aPresContext,
+                 aEvent ? aEvent : new nsTextEvent(false, 0, nullptr))
 {
   NS_ASSERTION(mEvent->eventStructType == NS_TEXT_EVENT, "event type mismatch");
 
@@ -65,21 +66,16 @@ NS_METHOD_(already_AddRefed<nsIPrivateTextRangeList>) nsDOMTextEvent::GetInputRa
 {
   if (mEvent->message == NS_TEXT_TEXT) {
     nsRefPtr<nsPrivateTextRangeList> textRange = mTextRange;
-    nsPrivateTextRangeList *textRangePtr = nullptr;
-    textRange.swap(textRangePtr);
-    return textRangePtr;
+    return textRange.forget();
   }
   return nullptr;
 }
 
 nsresult NS_NewDOMTextEvent(nsIDOMEvent** aInstancePtrResult,
+                            mozilla::dom::EventTarget* aOwner,
                             nsPresContext* aPresContext,
                             nsTextEvent *aEvent)
 {
-  nsDOMTextEvent* it = new nsDOMTextEvent(aPresContext, aEvent);
-  if (nullptr == it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
+  nsDOMTextEvent* it = new nsDOMTextEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

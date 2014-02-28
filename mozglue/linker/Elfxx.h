@@ -27,7 +27,6 @@
 #ifndef ELF_ST_BIND
 #define ELF_ST_BIND ELF64_ST_BIND
 #endif
-#define PRIxAddr "lx"
 #else
 #define Elf_(type) Elf32_ ## type
 #define ELFCLASS ELFCLASS32
@@ -36,7 +35,6 @@
 #ifndef ELF_ST_BIND
 #define ELF_ST_BIND ELF32_ST_BIND
 #endif
-#define PRIxAddr "x"
 #endif
 
 #ifndef __BYTE_ORDER
@@ -150,6 +148,9 @@
 #endif
 #ifndef DT_VERNEEDNUM
 #define DT_VERNEEDNUM 0x6fffffff
+#endif
+#ifndef DT_FLAGS_1
+#define DT_FLAGS_1 0x6ffffffb
 #endif
 #ifndef DT_FLAGS
 #define DT_FLAGS 30

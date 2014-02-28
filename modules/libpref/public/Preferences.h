@@ -25,7 +25,7 @@ class nsAdoptingString;
 class nsAdoptingCString;
 
 #ifndef have_PrefChangedFunc_typedef
-typedef int (*PR_CALLBACK PrefChangedFunc)(const char *, void *);
+typedef int (*PrefChangedFunc)(const char *, void *);
 #define have_PrefChangedFunc_typedef
 #endif
 
@@ -123,6 +123,13 @@ public:
     return result;
   }
 
+  static float GetFloat(const char* aPref, float aDefault = 0)
+  {
+    float result = aDefault;
+    GetFloat(aPref, &result);
+    return result;
+  }
+
   /**
    * Gets char type pref value directly.  If failed, the get() of result
    * returns NULL.  Even if succeeded but the result was empty string, the
@@ -150,7 +157,8 @@ public:
   static nsAdoptingString GetLocalizedString(const char* aPref);
 
   /**
-   * Gets int or bool type pref value with raw return value of nsIPrefBranch.
+   * Gets int, float, or bool type pref value with raw return value of
+   * nsIPrefBranch.
    *
    * @param aPref       A pref name.
    * @param aResult     Must not be NULL.  The value is never modified when
@@ -158,6 +166,7 @@ public:
    */
   static nsresult GetBool(const char* aPref, bool* aResult);
   static nsresult GetInt(const char* aPref, int32_t* aResult);
+  static nsresult GetFloat(const char* aPref, float* aResult);
   static nsresult GetUint(const char* aPref, uint32_t* aResult)
   {
     int32_t result;
@@ -219,7 +228,7 @@ public:
    * Adds/Removes the observer for the root pref branch.
    * The observer is referenced strongly if AddStrongObserver is used.  On the
    * other hand, it is referenced weakly, if AddWeakObserver is used.
-   * See nsIPrefBran2.idl for the detail.
+   * See nsIPrefBranch.idl for details.
    */
   static nsresult AddStrongObserver(nsIObserver* aObserver, const char* aPref);
   static nsresult AddWeakObserver(nsIObserver* aObserver, const char* aPref);
@@ -245,6 +254,11 @@ public:
   static nsresult UnregisterCallback(PrefChangedFunc aCallback,
                                      const char* aPref,
                                      void* aClosure = nullptr);
+  // Like RegisterCallback, but also calls the callback immediately for
+  // initialization.
+  static nsresult RegisterCallbackAndCall(PrefChangedFunc aCallback,
+                                          const char* aPref,
+                                          void* aClosure = nullptr);
 
   /**
    * Adds the aVariable to cache table.  aVariable must be a pointer for a
@@ -261,6 +275,9 @@ public:
   static nsresult AddUintVarCache(uint32_t* aVariable,
                                   const char* aPref,
                                   uint32_t aDefault = 0);
+  static nsresult AddFloatVarCache(float* aVariable,
+                                   const char* aPref,
+                                   float aDefault = 0.0f);
 
   /**
    * Gets the default bool, int or uint value of the pref.
@@ -330,6 +347,9 @@ public:
   static void GetPreferences(InfallibleTArray<PrefSetting>* aPrefs);
   static void GetPreference(PrefSetting* aPref);
   static void SetPreference(const PrefSetting& aPref);
+
+  static int64_t GetPreferencesMemoryUsed();
+  static nsresult SetFloat(const char* aPref, float aValue);
 
 protected:
   nsresult NotifyServiceObservers(const char *aSubject);

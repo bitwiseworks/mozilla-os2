@@ -57,8 +57,8 @@ Source;  Usage and purpose;  License
   by @ signs.
   MPL
 
-* writeMakefile.py
-  Helper functions to write out Makefiles.
+* writeBuildFiles.py
+  Helper functions to write out automatically generated build files.
   MPL
 
 * Makefile.in
@@ -100,5 +100,7 @@ Importing a new test suite
 ==========================
 
 Create a data file in the format documented above, and run the
-importTestsuite.py script, passing the data file as its argument.  Add any
-necessary files in failures/.
+importTestsuite.py script, passing the data file as its argument.
+This will create a foo.mk file; include this file in dom/imptests/Makefile.in.
+
+Add any necessary files in failures/.

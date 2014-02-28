@@ -7,9 +7,14 @@ let Cc = Components.classes;
 let Ci = Components.interfaces;
 let Cu = Components.utils;
 
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this,
+  "LoginManagerContent", "resource://gre/modules/LoginManagerContent.jsm");
+
 // Bug 671101 - directly using webNavigation in this context
 // causes docshells to leak
-__defineGetter__("webNavigation", function () {
+this.__defineGetter__("webNavigation", function () {
   return docShell.QueryInterface(Ci.nsIWebNavigation);
 });
 
@@ -27,4 +32,14 @@ addMessageListener("Browser:HideSessionRestoreButton", function (message) {
       (container = doc.getElementById("sessionRestoreContainer"))){
     container.hidden = true;
   }
+});
+
+addEventListener("DOMContentLoaded", function(event) {
+  LoginManagerContent.onContentLoaded(event);
+});
+addEventListener("DOMAutoComplete", function(event) {
+  LoginManagerContent.onUsernameInput(event);
+});
+addEventListener("blur", function(event) {
+  LoginManagerContent.onUsernameInput(event);
 });

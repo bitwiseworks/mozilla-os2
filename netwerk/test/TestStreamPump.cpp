@@ -23,6 +23,7 @@
 #include "nsAutoLock.h"
 #include "prlog.h"
 #include "prprf.h"
+#include <algorithm>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -54,15 +55,15 @@ public:
 
     NS_IMETHOD OnDataAvailable(nsIRequest *req, nsISupports *ctx,
                                nsIInputStream *stream,
-                               uint32_t offset, uint32_t count)
+                               uint64_t offset, uint32_t count)
     {
-        LOG(("MyListener::OnDataAvailable [offset=%u count=%u]\n", offset, count));
+        LOG(("MyListener::OnDataAvailable [offset=%llu count=%u]\n", offset, count));
 
         char buf[500];
         nsresult rv;
 
         while (count) {
-            uint32_t n, amt = NS_MIN<uint32_t>(count, sizeof(buf));
+            uint32_t n, amt = std::min<uint32_t>(count, sizeof(buf));
 
             rv = stream->Read(buf, amt, &n);
             if (NS_FAILED(rv)) {

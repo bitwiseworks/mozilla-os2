@@ -7,14 +7,18 @@
 #ifndef mozilla_dom_indexeddb_idbdatabase_h__
 #define mozilla_dom_indexeddb_idbdatabase_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
 #include "nsIDocument.h"
 #include "nsIFileStorage.h"
 #include "nsIIDBDatabase.h"
+#include "nsIOfflineStorage.h"
+
 #include "nsDOMEventTargetHelper.h"
-#include "mozilla/dom/indexedDB/IDBWrapperCache.h"
+
 #include "mozilla/dom/indexedDB/FileManager.h"
+#include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 
 class nsIScriptContext;
 class nsPIDOMWindow;
@@ -22,6 +26,9 @@ class nsPIDOMWindow;
 namespace mozilla {
 namespace dom {
 class ContentParent;
+namespace quota {
+class Client;
+}
 }
 }
 
@@ -29,6 +36,7 @@ BEGIN_INDEXEDDB_NAMESPACE
 
 class AsyncConnectionHelper;
 struct DatabaseInfo;
+class IDBFactory;
 class IDBIndex;
 class IDBObjectStore;
 class IDBTransaction;
@@ -39,7 +47,7 @@ struct ObjectStoreInfoGuts;
 
 class IDBDatabase : public IDBWrapperCache,
                     public nsIIDBDatabase,
-                    public nsIFileStorage
+                    public nsIOfflineStorage
 {
   friend class AsyncConnectionHelper;
   friend class IndexedDatabaseManager;
@@ -49,35 +57,42 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIIDBDATABASE
   NS_DECL_NSIFILESTORAGE
+  NS_DECL_NSIOFFLINESTORAGE_NOCLOSE
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 
   static already_AddRefed<IDBDatabase>
   Create(IDBWrapperCache* aOwnerCache,
+         IDBFactory* aFactory,
          already_AddRefed<DatabaseInfo> aDatabaseInfo,
          const nsACString& aASCIIOrigin,
          FileManager* aFileManager,
          mozilla::dom::ContentParent* aContentParent);
 
-  // nsIDOMEventTarget
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor);
+  static IDBDatabase*
+  FromStorage(nsIOfflineStorage* aStorage);
 
-  nsIAtom* Id() const
+  static IDBDatabase*
+  FromStorage(nsIFileStorage* aStorage)
   {
-    return mDatabaseId;
+    nsCOMPtr<nsIOfflineStorage> storage = do_QueryInterface(aStorage);
+    return storage ? FromStorage(storage) : nullptr;
   }
+
+  // nsIDOMEventTarget
+  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   DatabaseInfo* Info() const
   {
     return mDatabaseInfo;
   }
 
-  const nsString& Name()
+  const nsString& Name() const
   {
     return mName;
   }
 
-  const nsString& FilePath()
+  const nsString& FilePath() const
   {
     return mFilePath;
   }
@@ -88,26 +103,13 @@ public:
       return nullptr;
     }
 
-    nsCOMPtr<nsIDocument> doc =
-      do_QueryInterface(GetOwner()->GetExtantDocument());
+    nsCOMPtr<nsIDocument> doc = GetOwner()->GetExtantDoc();
     return doc.forget();
   }
 
-  nsCString& Origin()
-  {
-    return mASCIIOrigin;
-  }
-
-  void Invalidate();
-
-  // Whether or not the database has been invalidated. If it has then no further
-  // transactions for this database will be allowed to run.
-  bool IsInvalidated();
+  void DisconnectFromActorParent();
 
   void CloseInternal(bool aIsDead);
-
-  // Whether or not the database has had Close called on it.
-  bool IsClosed();
 
   void EnterSetVersionTransaction();
   void ExitSetVersionTransaction();
@@ -142,6 +144,12 @@ public:
     return mActorChild;
   }
 
+  IndexedDBDatabaseParent*
+  GetActorParent() const
+  {
+    return mActorParent;
+  }
+
   mozilla::dom::ContentParent*
   GetContentParent() const
   {
@@ -159,7 +167,13 @@ private:
 
   void OnUnlink();
 
+  // The factory must be kept alive when IndexedDB is used in multiple
+  // processes. If it dies then the entire actor tree will be destroyed with it
+  // and the world will explode.
+  nsRefPtr<IDBFactory> mFactory;
+
   nsRefPtr<DatabaseInfo> mDatabaseInfo;
+
   // Set to a copy of the existing DatabaseInfo when starting a versionchange
   // transaction.
   nsRefPtr<DatabaseInfo> mPreviousDatabaseInfo;
@@ -170,17 +184,14 @@ private:
 
   nsRefPtr<FileManager> mFileManager;
 
-  // Only touched on the main thread.
-  NS_DECL_EVENT_HANDLER(abort)
-  NS_DECL_EVENT_HANDLER(error)
-  NS_DECL_EVENT_HANDLER(versionchange)
-
   IndexedDBDatabaseChild* mActorChild;
   IndexedDBDatabaseParent* mActorParent;
 
   mozilla::dom::ContentParent* mContentParent;
 
-  int32_t mInvalidated;
+  nsRefPtr<mozilla::dom::quota::Client> mQuotaClient;
+
+  bool mInvalidated;
   bool mRegistered;
   bool mClosed;
   bool mRunningVersionChange;

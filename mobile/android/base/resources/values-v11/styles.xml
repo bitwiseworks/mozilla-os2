@@ -3,12 +3,41 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
-<resources>
+<resources xmlns:android="http://schemas.android.com/apk/res/android">
     
     <!--
         Only overriden styles for Honeycomb/Ice cream sandwich are specified here.
         Please refer to values/styles.xml for default styles.
     -->
+
+    <!--
+        Base application styles. This could be overridden in other res/values-XXX/themes.xml.
+    -->
+    <style name="Widget.BaseButton" parent="android:style/Widget.Holo.Light.Button"/>
+
+    <style name="Widget.BaseDropDownItem" parent="android:style/Widget.Holo.Light.DropDownItem"/>
+
+    <style name="Widget.BaseEditText" parent="android:style/Widget.Holo.Light.EditText"/>
+
+    <style name="Widget.BaseListView" parent="android:style/Widget.Holo.ListView"/>
+
+    <style name="Widget.BaseTextView" parent="android:style/Widget.Holo.Light.TextView"/>
+
+
+    <!--
+        Application styles. All customizations that are not specific
+        to a particular API level can go here.
+    -->
+    <style name="Widget.ListItem">
+        <item name="android:textColor">@color/select_item_multichoice</item>
+        <item name="android:minHeight">?android:attr/listPreferredItemHeight</item>
+        <item name="android:textAppearance">?android:attr/textAppearanceLarge</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingLeft">12dip</item>
+        <item name="android:paddingRight">7dip</item>
+        <item name="android:checkMark">?android:attr/listChoiceIndicatorMultiple</item>
+        <item name="android:ellipsize">marquee</item>
+    </style>
 
     <!-- AwesomeBar -->
     <style name="AwesomeBar">
@@ -16,28 +45,9 @@
         <item name="android:layout_height">@dimen/browser_toolbar_height</item>
         <item name="android:orientation">horizontal</item>
     </style>
-
-    <!-- Lists in AwesomeBar -->
-    <style name="AwesomeBarList" parent="android:style/Widget.Holo.ListView">
-        <item name="android:layout_width">fill_parent</item>
-        <item name="android:layout_height">fill_parent</item>
-        <item name="android:layout_weight">1</item>
-        <item name="android:background">#EEF1F5</item>
-        <item name="android:divider">#D1D5DA</item>
-        <item name="android:dividerHeight">1dp</item>
-        <item name="android:cacheColorHint">#EEF1F5</item>
-        <item name="android:listSelector">@drawable/action_bar_button</item>
-    </style>
  
     <!-- ActionBar -->
     <style name="ActionBar" parent="android:style/Widget.Holo.ActionBar" />
-
-    <!-- AwesomeBar ActionBar -->
-    <style name="ActionBar.AwesomeBar">
-         <item name="android:displayOptions">showCustom</item>
-         <item name="android:customNavigationLayout">@layout/awesomebar_actionbar</item>
-         <item name="android:visibility">gone</item>
-    </style>
  
     <!-- GeckoPreferences ActionBar -->
     <style name="ActionBar.GeckoPreferences">
@@ -47,6 +57,26 @@
     <!-- TabsTray ActionBar -->
     <style name="ActionBar.TabsTray">
          <item name="android:visibility">gone</item>
+    </style>
+
+    <!-- DropDown List View -->
+    <style name="DropDownListView" parent="@android:style/Widget.Holo.ListView.DropDown">
+         <item name="android:listSelector">@drawable/action_bar_button</item>
+         <item name="android:divider">#FFD1D5DA</item>
+         <item name="android:dividerHeight">1dp</item>
+    </style>
+
+    <!-- Spinner DropDown Item -->
+    <style name="Widget.DropDownItem.Spinner" parent="@android:style/Widget.Holo.Light.DropDownItem.Spinner">
+         <item name="android:textColor">#FF000000</item>
+    </style>
+
+    <style name="Widget.Spinner" parent="android:style/Widget.Holo.Light.Spinner">
+        <item name="android:minWidth">@dimen/doorhanger_input_width</item>
+    </style>
+
+    <style name="Widget.TextView.SpinnerItem" parent="android:style/Widget.Holo.Light.TextView.SpinnerItem">
+        <item name="android:textColor">#FF000000</item>
     </style>
 
 </resources>

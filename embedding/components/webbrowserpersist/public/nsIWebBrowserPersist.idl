@@ -12,11 +12,12 @@ interface nsIDOMDocument;
 interface nsIWebProgressListener;
 interface nsIFile;
 interface nsIChannel;
+interface nsILoadContext;
 
 /**
  * Interface for persisting DOM documents and URIs to local or remote storage.
  */
-[scriptable, uuid(dd4e0a6a-210f-419a-ad85-40e8543b9465)]
+[scriptable, uuid(35c1f231-582b-4315-a26c-a1227e3539b4)]
 interface nsIWebBrowserPersist : nsICancelable
 {
   /** No special persistence behaviour. */
@@ -94,9 +95,8 @@ interface nsIWebBrowserPersist : nsICancelable
    * Value indicating the success or failure of the persist
    * operation.
    *
-   * @return NS_OK Operation was successful or is still ongoing.
-   * @return NS_BINDING_ABORTED Operation cancelled.
-   * @return NS_ERROR_FAILURE Non-specific failure.
+   * @throws NS_BINDING_ABORTED Operation cancelled.
+   * @throws NS_ERROR_FAILURE Non-specific failure.
    */
   readonly attribute nsresult result;
 
@@ -130,17 +130,33 @@ interface nsIWebBrowserPersist : nsICancelable
    * @param aFile      Target file. This may be a nsIFile object or an
    *                   nsIURI object with a file scheme or a scheme that
    *                   supports uploading (e.g. ftp).
+   * @param aPrivacyContext A context from which the privacy status of this
+   *                   save operation can be determined. Must only be null
+   *                   in situations in which no such context is available
+   *                   (eg. the operation has no logical association with any
+   *                   window or document)
    *
    * @see nsIFile
    * @see nsIURI
    * @see nsIInputStream
    *
-   * @return NS_OK Operation has been started.
-   * @return NS_ERROR_INVALID_ARG One or more arguments was invalid.
+   * @throws NS_ERROR_INVALID_ARG One or more arguments was invalid.
    */
   void saveURI(in nsIURI aURI, in nsISupports aCacheKey,
       in nsIURI aReferrer, in nsIInputStream aPostData,
-      in string aExtraHeaders, in nsISupports aFile);
+      in string aExtraHeaders, in nsISupports aFile,
+      in nsILoadContext aPrivacyContext);
+
+  /**
+   * @param aIsPrivate Treat the save operation as private (ie. with
+   *                   regards to networking operations and persistence
+   *                   of intermediate data, etc.)
+   * @see saveURI for all other parameter descriptions
+   */
+  void savePrivacyAwareURI(in nsIURI aURI, in nsISupports aCacheKey,
+      in nsIURI aReferrer, in nsIInputStream aPostData,
+      in string aExtraHeaders, in nsISupports aFile,
+      in boolean aIsPrivate);
 
   /**
    * Save a channel to a file. It must not be opened yet.
@@ -245,8 +261,7 @@ interface nsIWebBrowserPersist : nsICancelable
    * @see nsIFile
    * @see nsIURI
    *
-   * @return NS_OK Operation has been started.
-   * @return NS_ERROR_INVALID_ARG One or more arguments was invalid.
+   * @throws NS_ERROR_INVALID_ARG One or more arguments was invalid.
    */
   void saveDocument(in nsIDOMDocument aDocument,
      in nsISupports aFile, in nsISupports aDataPath,

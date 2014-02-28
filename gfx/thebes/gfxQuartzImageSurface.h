@@ -9,7 +9,7 @@
 #include "gfxASurface.h"
 #include "gfxImageSurface.h"
 
-class THEBES_API gfxQuartzImageSurface : public gfxASurface {
+class gfxQuartzImageSurface : public gfxASurface {
 public:
     gfxQuartzImageSurface(gfxImageSurface *imageSurface);
     gfxQuartzImageSurface(cairo_surface_t *csurf);
@@ -18,6 +18,13 @@ public:
 
     already_AddRefed<gfxImageSurface> GetAsImageSurface();
     virtual int32_t KnownMemoryUsed();
+    virtual const gfxIntSize GetSize() const { return gfxIntSize(mSize.width, mSize.height); }
+
+protected:
+    gfxIntSize mSize;
+
+private:
+    gfxIntSize ComputeSize();
 };
 
 #endif /* GFX_QUARTZIMAGESURFACE_H */

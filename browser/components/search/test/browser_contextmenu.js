@@ -16,11 +16,10 @@ function test() {
       case "engine-added":
         var engine = ss.getEngineByName(ENGINE_NAME);
         ok(engine, "Engine was added.");
-        //XXX Bug 493051
-        //ss.currentEngine = engine;
+        ss.currentEngine = engine;
         break;
       case "engine-current":
-        ok(ss.currentEngine.name == ENGINE_NAME, "currentEngine set");
+        is(ss.currentEngine.name, ENGINE_NAME, "currentEngine set");
         startTest();
         break;
       case "engine-removed":
@@ -40,58 +39,61 @@ function test() {
     ok(contextMenu, "Got context menu XUL");
 
     doOnloadOnce(testContextMenu);
-    var tab = gBrowser.addTab("data:text/plain,test%20search");
-    gBrowser.selectedTab = tab;
+    let tab = gBrowser.selectedTab = gBrowser.addTab("data:text/plain;charset=utf8,test%20search");
+    registerCleanupFunction(function () {
+      gBrowser.removeTab(tab);
+    });
   }
 
   function testContextMenu() {
-    function rightClickOnDocument(){
+    function rightClickOnDocument() {
+      info("rightClickOnDocument: " + content.window.location);
+      waitForBrowserContextMenu(checkContextMenu);
       var clickTarget = content.document.body;
       var eventDetails = { type: "contextmenu", button: 2 };
       EventUtils.synthesizeMouseAtCenter(clickTarget, eventDetails, content);
-      SimpleTest.executeSoon(checkContextMenu);
     }
 
     // check the search menu item and then perform a search
     function checkContextMenu() {
+      info("checkContextMenu");
       var searchItem = contextMenu.getElementsByAttribute("id", "context-searchselect")[0];
       ok(searchItem, "Got search context menu item");
       is(searchItem.label, 'Search ' + ENGINE_NAME + ' for "test search"', "Check context menu label");
       is(searchItem.disabled, false, "Check that search context menu item is enabled");
+      doOnloadOnce(checkSearchURL);
       searchItem.click();
+      contextMenu.hidePopup();
     }
 
-    function checkSearchURL(event){
+    function checkSearchURL(event) {
       is(event.originalTarget.URL,
          "http://mochi.test:8888/browser/browser/components/search/test/?test=test+search&ie=utf-8&client=app&channel=contextsearch",
          "Checking context menu search URL");
-      finalize();
+      // Remove the tab opened by the search
+      gBrowser.removeCurrentTab();
+      ss.removeEngine(ss.currentEngine);
     }
 
-    doOnloadOnce(checkSearchURL);
+    var selectionListener = {
+      notifySelectionChanged: function(doc, sel, reason) {
+        if (reason != Ci.nsISelectionListener.SELECTALL_REASON || sel.toString() != "test search")
+          return;
+        info("notifySelectionChanged: Text selected");
+        content.window.getSelection().QueryInterface(Ci.nsISelectionPrivate).
+                                      removeSelectionListener(selectionListener);
+        SimpleTest.executeSoon(rightClickOnDocument);
+      }
+    };
 
-    // select the text on the page
-    var selectAllItem = contextMenu.getElementsByAttribute("id", "context-selectall")[0];
-    ok(selectAllItem, "Got select all context menu item");
-    selectAllItem.click();
-
-    // wait for the selection to take effect
-    SimpleTest.executeSoon(rightClickOnDocument);
-  }
-
-  function finalize() {
-    while (gBrowser.tabs.length != 1) {
-      gBrowser.removeTab(gBrowser.tabs[0]);
-    }
-    content.location.href = "about:blank";
-    var engine = ss.getEngineByName(ENGINE_NAME);
-    ss.removeEngine(engine);
-  }
-
-  function doOnloadOnce(callback) {
-    gBrowser.addEventListener("DOMContentLoaded", function handleLoad(event) {
-      gBrowser.removeEventListener("DOMContentLoaded", handleLoad, true);
-      callback(event);
-    }, true);
+    // Delay the select all to avoid intermittent selection failures.
+    setTimeout(function delaySelectAll() {
+      info("delaySelectAll: " + content.window.location.toString());
+      // add a listener to know when the selection takes effect
+      content.window.getSelection().QueryInterface(Ci.nsISelectionPrivate).
+                                    addSelectionListener(selectionListener);
+      // select the text on the page
+      goDoCommand('cmd_selectAll');
+    }, 500);
   }
 }

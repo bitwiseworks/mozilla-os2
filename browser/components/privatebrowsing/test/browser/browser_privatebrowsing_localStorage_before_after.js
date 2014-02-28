@@ -11,31 +11,56 @@
 //   existing.
 
 function test() {
-  let prefix = 'http://mochi.test:8888/browser/browser/components/privatebrowsing/test/browser/';
+  // initialization
   waitForExplicitFinish();
-  
-  // We wait for a GC to ensure that all previous PB docshells in this test suite are destroyed
-  // so that the PB localStorage instance is clean.
-  Components.utils.schedulePreciseGC(function() {
-    let tab = gBrowser.selectedTab = gBrowser.addTab();
-    let browser = gBrowser.selectedBrowser;
-    browser.docShell.QueryInterface(Ci.nsILoadContext).usePrivateBrowsing = true;
-    browser.addEventListener('load', function() {
-      browser.removeEventListener('load', arguments.callee, true);
-      is(browser.contentWindow.document.title, '1', "localStorage should contain 1 item");
-      browser.docShell.QueryInterface(Ci.nsILoadContext).usePrivateBrowsing = false;
+  let windowsToClose = [];
+  let testURI = "about:blank";
+  let prefix = 'http://mochi.test:8888/browser/browser/components/privatebrowsing/test/browser/';
 
-      gBrowser.selectedTab = gBrowser.addTab();
-      let browser2 = gBrowser.selectedBrowser;
-      gBrowser.removeTab(tab);
-      browser2.addEventListener('load', function() {
-        browser2.removeEventListener('load', arguments.callee, true);
-        is(browser2.contentWindow.document.title, 'null|0', 'localStorage should contain 0 items');
-        gBrowser.removeCurrentTab();
-        finish();
-      }, true);
-      browser2.loadURI(prefix + 'browser_privatebrowsing_localStorage_before_after_page2.html');
+  function doTest(aIsPrivateMode, aWindow, aCallback) {
+    aWindow.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+      aWindow.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+
+      if (aIsPrivateMode) {
+        // do something when aIsPrivateMode is true
+        is(aWindow.gBrowser.contentWindow.document.title, '1', "localStorage should contain 1 item");
+      } else {
+        // do something when aIsPrivateMode is false
+        is(aWindow.gBrowser.contentWindow.document.title, 'null|0', 'localStorage should contain 0 items');
+      }
+
+      aCallback();
     }, true);
-    browser.loadURI(prefix + 'browser_privatebrowsing_localStorage_before_after_page.html');
+
+    aWindow.gBrowser.selectedBrowser.loadURI(testURI);
+  }
+
+  function testOnWindow(aOptions, aCallback) {
+    whenNewWindowLoaded(aOptions, function(aWin) {
+      windowsToClose.push(aWin);
+      // execute should only be called when need, like when you are opening
+      // web pages on the test. If calling executeSoon() is not necesary, then
+      // call whenNewWindowLoaded() instead of testOnWindow() on your test.
+      executeSoon(function() aCallback(aWin));
+    });
+  };
+
+   // this function is called after calling finish() on the test.
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(aWin) {
+      aWin.close();
+    });
+  });
+
+  // test first when on private mode
+  testOnWindow({private: true}, function(aWin) {
+    testURI = prefix + 'browser_privatebrowsing_localStorage_before_after_page.html';
+    doTest(true, aWin, function() {
+      // then test when not on private mode
+      testOnWindow({}, function(aWin) {
+        testURI = prefix + 'browser_privatebrowsing_localStorage_before_after_page2.html';
+        doTest(false, aWin, finish);
+      });
+    });
   });
 }

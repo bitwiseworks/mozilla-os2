@@ -7,12 +7,14 @@
 #ifndef VideoUtils_h
 #define VideoUtils_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/CheckedInt.h"
 
 #include "nsRect.h"
 #include "nsIThreadManager.h"
 #include "nsThreadUtils.h"
+#include "prtime.h"
 
 using mozilla::CheckedInt64;
 using mozilla::CheckedUint64;
@@ -35,7 +37,7 @@ namespace mozilla {
  *
  * MUCH PREFERRED to bare calls to ReentrantMonitor.Exit and Enter.
  */ 
-class NS_STACK_CLASS ReentrantMonitorAutoExit
+class MOZ_STACK_CLASS ReentrantMonitorAutoExit
 {
 public:
     /**
@@ -70,13 +72,52 @@ private:
     ReentrantMonitor* mReentrantMonitor;
 };
 
+/**
+ * ReentrantMonitorConditionallyEnter
+ *
+ * Enters the supplied monitor only if the conditional value |aEnter| is true.
+ * E.g. Used to allow unmonitored read access on the decode thread,
+ * and monitored access on all other threads.
+ */
+class MOZ_STACK_CLASS ReentrantMonitorConditionallyEnter
+{
+public:
+  ReentrantMonitorConditionallyEnter(bool aEnter,
+                                     ReentrantMonitor &aReentrantMonitor) :
+    mReentrantMonitor(nullptr)
+  {
+    MOZ_COUNT_CTOR(ReentrantMonitorConditionallyEnter);
+    if (aEnter) {
+      mReentrantMonitor = &aReentrantMonitor;
+      NS_ASSERTION(mReentrantMonitor, "null monitor");
+      mReentrantMonitor->Enter();
+    }
+  }
+  ~ReentrantMonitorConditionallyEnter(void)
+  {
+    if (mReentrantMonitor) {
+      mReentrantMonitor->Exit();
+    }
+    MOZ_COUNT_DTOR(ReentrantMonitorConditionallyEnter);
+  }
+private:
+  // Restrict to constructor and destructor defined above.
+  ReentrantMonitorConditionallyEnter();
+  ReentrantMonitorConditionallyEnter(const ReentrantMonitorConditionallyEnter&);
+  ReentrantMonitorConditionallyEnter& operator =(const ReentrantMonitorConditionallyEnter&);
+  static void* operator new(size_t) CPP_THROW_NEW;
+  static void operator delete(void*);
+
+  ReentrantMonitor* mReentrantMonitor;
+};
+
 // Shuts down a thread asynchronously.
 class ShutdownThreadEvent : public nsRunnable 
 {
 public:
   ShutdownThreadEvent(nsIThread* aThread) : mThread(aThread) {}
   ~ShutdownThreadEvent() {}
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() MOZ_OVERRIDE {
     mThread->Shutdown();
     mThread = nullptr;
     return NS_OK;
@@ -85,7 +126,24 @@ private:
   nsCOMPtr<nsIThread> mThread;
 };
 
+class MediaResource;
 } // namespace mozilla
+
+namespace mozilla {
+namespace dom {
+class TimeRanges;
+}
+}
+
+// Estimates the buffered ranges of a MediaResource using a simple
+// (byteOffset/length)*duration method. Probably inaccurate, but won't
+// do file I/O, and can be used when we don't have detailed knowledge
+// of the byte->time mapping of a resource. aDurationUsecs is the duration
+// of the media in microseconds. Estimated buffered ranges are stored in
+// aOutBuffered. Ranges are 0-normalized, i.e. in the range of (0,duration].
+void GetEstimatedBufferedTimeRanges(mozilla::MediaResource* aStream,
+                                    int64_t aDurationUsecs,
+                                    mozilla::dom::TimeRanges* aOutBuffered);
 
 // Converts from number of audio frames (aFrames) to microseconds, given
 // the specified audio rate (aRate). Stores result in aOutUsecs. Returns true
@@ -105,6 +163,9 @@ static const int64_t USECS_PER_S = 1000000;
 // Number of microseconds per millisecond.
 static const int64_t USECS_PER_MS = 1000;
 
+// Converts seconds to milliseconds.
+#define MS_TO_SECONDS(s) ((double)(s) / (PR_MSEC_PER_SEC))
+
 // The maximum height and width of the video. Used for
 // sanitizing the memory allocation of the RGB buffer.
 // The maximum resolution we anticipate encountering in the
@@ -113,7 +174,7 @@ static const int32_t MAX_VIDEO_WIDTH = 4000;
 static const int32_t MAX_VIDEO_HEIGHT = 3000;
 
 // Scales the display rect aDisplay by aspect ratio aAspectRatio.
-// Note that aDisplay must be validated by nsVideoInfo::ValidateVideoRegion()
+// Note that aDisplay must be validated by VideoInfo::ValidateVideoRegion()
 // before being used!
 void ScaleDisplayByAspectRatio(nsIntSize& aDisplay, float aAspectRatio);
 

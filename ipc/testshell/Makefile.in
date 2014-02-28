@@ -7,39 +7,20 @@ topsrcdir = @top_srcdir@
 srcdir = @srcdir@
 VPATH = @srcdir@
 relativesrcdir = @relativesrcdir@
+FAIL_ON_WARNINGS = 1
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = ipcshell
 LIBRARY_NAME = ipcshell_s
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
-
-EXPORTS_NAMESPACES = mozilla/ipc
-
-EXPORTS_mozilla/ipc = \
-  TestShellChild.h \
-  TestShellParent.h \
-  XPCShellEnvironment.h \
-  $(NULL)
-
-CPPSRCS += \
-  TestShellChild.cpp \
-  TestShellParent.cpp \
-  XPCShellEnvironment.cpp \
-  $(NULL)
 
 # For xpcshell error messages and nsDependentJSString
 LOCAL_INCLUDES += \
   -I$(topsrcdir)/js/xpconnect/shell \
   -I$(topsrcdir)/dom/base \
   $(NULL)
-
-# FIXME/bug 575918: out-of-process xpcshell is broken on OS X
-ifneq ($(OS_ARCH),Darwin)
-XPCSHELL_TESTS = tests
-endif
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

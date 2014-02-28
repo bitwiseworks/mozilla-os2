@@ -10,8 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = mozglue
-LIBRARY_NAME = mozglue
 DIST_INSTALL = 1
 
 # Build mozglue as a shared lib on Windows, OSX and Android.
@@ -23,12 +21,11 @@ FORCE_STATIC_LIB = 1
 endif
 
 # Keep jemalloc separated when mozglue is statically linked
-ifeq (1_1,$(MOZ_MEMORY)_$(FORCE_SHARED_LIB))
+ifeq (1_1,$(MOZ_MEMORY)_$(or $(MOZ_NATIVE_JEMALLOC),$(FORCE_SHARED_LIB)))
 SHARED_LIBRARY_LIBS = $(call EXPAND_LIBNAME_PATH,memory,$(DEPTH)/memory/build)
 else
 # Temporary, until bug 662814 lands
 VISIBILITY_FLAGS =
-CPPSRCS = dummy.cpp
 
 ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
 SDK_LIBRARY = $(IMPORT_LIBRARY)
@@ -48,7 +45,7 @@ ifeq (WINNT,$(OS_TARGET))
 DEFFILE = mozglue.def
 
 mozglue.def: mozglue.def.in
-	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(ACDEFINES) $< > $@
+	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(if $(MOZ_REPLACE_MALLOC),-DMOZ_REPLACE_MALLOC) $(ACDEFINES) $< > $@
 
 GARBAGE += mozglue.def
 
@@ -60,10 +57,33 @@ endif
 EXTRA_DSO_LDOPTS += $(MOZ_ZLIB_LIBS)
 endif
 
+ifeq (Darwin_1,$(OS_TARGET)_$(MOZ_REPLACE_MALLOC))
+EXTRA_DSO_LDOPTS += \
+  -Wl,-U,_replace_init \
+  -Wl,-U,_replace_malloc \
+  -Wl,-U,_replace_posix_memalign \
+  -Wl,-U,_replace_aligned_alloc \
+  -Wl,-U,_replace_calloc \
+  -Wl,-U,_replace_realloc \
+  -Wl,-U,_replace_free \
+  -Wl,-U,_replace_memalign \
+  -Wl,-U,_replace_valloc \
+  -Wl,-U,_replace_malloc_usable_size \
+  -Wl,-U,_replace_malloc_good_size \
+  -Wl,-U,_replace_jemalloc_stats \
+  -Wl,-U,_replace_jemalloc_purge_freed_pages \
+  -Wl,-U,_replace_jemalloc_free_dirty_pages \
+  $(NULL)
+
+ifneq ($(MOZ_REPLACE_MALLOC_LINKAGE),compiler support)
+EXTRA_DSO_LDOPTS += -flat_namespace
+endif
+ifeq ($(MOZ_REPLACE_MALLOC_LINKAGE),dummy library)
+EXTRA_DSO_LDOPTS += -Wl,-weak_library,$(DEPTH)/memory/replace/dummy/$(DLL_PREFIX)replace_malloc$(DLL_SUFFIX)
+endif
+endif
+
 ifeq (Android,$(OS_TARGET))
-# To properly wrap jemalloc's pthread_atfork call.
-EXTRA_DSO_LDOPTS += -Wl,--wrap=pthread_atfork
-CPPSRCS += BionicGlue.cpp
 SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,android,$(DEPTH)/other-licenses/android)
 endif
 
@@ -71,6 +91,12 @@ ifeq (android, $(MOZ_WIDGET_TOOLKIT))
 # Add Android specific code
 EXTRA_DSO_LDOPTS += $(MOZ_ZLIB_LIBS)
 SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,android,../android)
+# To properly wrap jemalloc's pthread_atfork call.
+EXTRA_DSO_LDOPTS += -Wl,--wrap=pthread_atfork
+endif
+
+ifeq (gonk, $(MOZ_WIDGET_TOOLKIT))
+CSRCS += cpuacct.c
 endif
 
 ifdef MOZ_LINKER
@@ -86,7 +112,7 @@ endif
 SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,mfbt,$(DEPTH)/mfbt)
 
 ifeq (Android, $(OS_TARGET))
-WRAP_LDFLAGS =
+WRAP_LDFLAGS := $(filter -Wl%,$(WRAP_LDFLAGS))
 endif
 
 include $(topsrcdir)/config/rules.mk

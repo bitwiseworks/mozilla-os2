@@ -5,16 +5,17 @@
 #ifndef nsTreeSanitizer_h_
 #define nsTreeSanitizer_h_
 
-#include "nsIContent.h"
 #include "mozilla/css/StyleRule.h"
 #include "nsIPrincipal.h"
 #include "mozilla/dom/Element.h"
+
+class nsIContent;
 
 /**
  * See the documentation of nsIParserUtils::sanitize for documentation
  * about the default behavior and the configuration options of this sanitizer.
  */
-class NS_STACK_CLASS nsTreeSanitizer {
+class MOZ_STACK_CLASS nsTreeSanitizer {
 
   public:
 

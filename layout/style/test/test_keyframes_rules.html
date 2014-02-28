@@ -59,13 +59,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=577974
 var sheet = document.getElementById("style").sheet;
 
 var bounce = sheet.cssRules[0];
-is(bounce.type, CSSRule.MOZ_KEYFRAMES_RULE, "bounce.type");
+is(bounce.type, CSSRule.KEYFRAMES_RULE, "bounce.type");
 is(bounce.type, 7, "bounce.type");
 is(bounce.name, "bounce", "bounce.name");
 bounce.name = "bouncier";
 is(bounce.name, "bouncier", "setting bounce.name");
 
-is(bounce.cssRules[0].type, CSSRule.MOZ_KEYFRAME_RULE, "keyframe rule type");
+is(bounce.cssRules[0].type, CSSRule.KEYFRAME_RULE, "keyframe rule type");
 is(bounce.cssRules[0].type, 8, "keyframe rule type");
 is(bounce.cssRules[0].keyText, "0%", "keyframe rule keyText");
 is(bounce.cssRules[1].keyText, "25%", "keyframe rule keyText");
@@ -119,14 +119,14 @@ bounce.deleteRule("75%  ,85%");
 is(bounce.cssRules.length, 3, "deleteRule should match keys in order, parsed");
 bounce.deleteRule("0%");
 is(bounce.cssRules.length, 2, "deleteRule should match keys in order, parsed");
-bounce.insertRule("from { color: blue }");
-is(bounce.cssRules.length, 3, "insertRule should append");
-is(bounce.cssRules[2].keyText, "0%", "insertRule should append");
-bounce.insertRule("from { color: blue }");
-is(bounce.cssRules.length, 4, "insertRule should append");
-is(bounce.cssRules[3].keyText, "0%", "insertRule should append");
-bounce.insertRule("from { color: blue } to { color: green }");
-is(bounce.cssRules.length, 4, "insertRule should ignore garbage at end");
+bounce.appendRule("from { color: blue }");
+is(bounce.cssRules.length, 3, "appendRule should append");
+is(bounce.cssRules[2].keyText, "0%", "appendRule should append");
+bounce.appendRule("from { color: blue }");
+is(bounce.cssRules.length, 4, "appendRule should append");
+is(bounce.cssRules[3].keyText, "0%", "appendRule should append");
+bounce.appendRule("from { color: blue } to { color: green }");
+is(bounce.cssRules.length, 4, "appendRule should ignore garbage at end");
 
 </script>
 </pre>

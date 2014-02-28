@@ -16,13 +16,9 @@
 #include "nsStringGlue.h"
 
 struct JSContext;
-struct JSObject;
+class JSObject;
 
 namespace mozilla {
-
-namespace jsipc {
-class PContextWrapperParent;
-}
 
 namespace ipc {
 
@@ -39,11 +35,6 @@ public:
 
   bool
   CommandDone(TestShellCommandParent* aActor, const nsString& aResponse);
-
-  PContextWrapperParent* AllocPContextWrapper();
-  bool DeallocPContextWrapper(PContextWrapperParent* actor);
-
-  JSBool GetGlobalJSObject(JSContext* cx, JSObject** globalp);
 };
 
 
@@ -53,7 +44,7 @@ public:
   TestShellCommandParent() : mCx(NULL) { }
 
   JSBool SetCallback(JSContext* aCx,
-                     jsval aCallback);
+                     JS::Value aCallback);
 
   JSBool RunCallback(const nsString& aResponse);
 

@@ -21,6 +21,12 @@
 
   <script type="application/javascript">
   <![CDATA[
+    if (navigator.platform.startsWith("Mac")) {
+      SimpleTest.expectAssertions(0, 1);
+    } else {
+      SimpleTest.expectAssertions(1);
+    }
+
     function doTest()
     {
       var actionsArray = [
@@ -42,12 +48,12 @@
         {
           ID: "menuitem",
           actionName: "click",
-          events: ALL_EVENTS
+          events: XUL_EVENTS
         },
         {
           ID: "button",
           actionName: "press",
-          events: ALL_EVENTS
+          events: XUL_EVENTS
         },
         {
           ID: "buttonmenu",

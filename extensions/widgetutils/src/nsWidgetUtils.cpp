@@ -27,16 +27,15 @@
 #include "nsWeakReference.h"
 #include "nsIWebBrowser.h"
 #include "nsIObserverService.h"
-#include "nsIDOMEventTarget.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMCompositionListener.h"
 #include "nsIDOMTextListener.h"
 #include "nsIDOMMouseEvent.h"
 #include "nsIDOMWheelEvent.h"
-#include "nsIView.h"
+#include "nsView.h"
 #include "nsGUIEvent.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIContentPolicy.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIContent.h"
@@ -77,7 +76,7 @@ public:
 private:
   nsresult Init(void);
   void RemoveWindowListeners(nsIDOMWindow *aDOMWin);
-  void GetChromeEventHandler(nsIDOMWindow *aDOMWin, nsIDOMEventTarget **aChromeTarget);
+  EventTarget* GetChromeEventHandler(nsIDOMWindow *aDOMWin);
   void AttachWindowListeners(nsIDOMWindow *aDOMWin);
   bool IsXULNode(nsIDOMNode *aNode, uint32_t *aType = 0);
   nsresult GetDOMWindowByNode(nsIDOMNode *aNode, nsIDOMWindow * *aDOMWindow);
@@ -89,7 +88,7 @@ private:
   static void StopPanningCallback(nsITimer *timer, void *closure);
 
   nsCOMPtr<nsIWidget> mWidget;
-  nsCOMPtr<nsIViewManager> mViewManager;
+  nsRefPtr<nsViewManager> mViewManager;
   nsCOMPtr<nsITimer> mTimer;
 };
 
@@ -128,10 +127,10 @@ nsWidgetUtils::UpdateFromEvent(nsIDOMEvent *aDOMEvent)
   nsCOMPtr<nsIDOMNode> mOrigNode;
 
   uint32_t type = 0;
+  nsDOMEvent* event = aDOMEvent->InternalDOMEvent();
   bool isXul = false;
   {
-    nsCOMPtr<nsIDOMEventTarget> eventOrigTarget;
-    aDOMEvent->GetOriginalTarget(getter_AddRefs(eventOrigTarget));
+    nsCOMPtr<EventTarget> eventOrigTarget = event->GetOriginalTarget();
     if (eventOrigTarget)
       mOrigNode = do_QueryInterface(eventOrigTarget);
     isXul = IsXULNode(mOrigNode, &type);
@@ -140,8 +139,7 @@ nsWidgetUtils::UpdateFromEvent(nsIDOMEvent *aDOMEvent)
   if (isXul)
     return NS_ERROR_FAILURE;
 
-  nsCOMPtr<nsIDOMEventTarget> eventTarget;
-  aDOMEvent->GetTarget(getter_AddRefs(eventTarget));
+  nsCOMPtr<EventTarget> eventTarget = event->GetTarget();
   if (eventTarget)
     mNode = do_QueryInterface(eventTarget);
 
@@ -230,7 +228,7 @@ nsWidgetUtils::MouseMove(nsIDOMEvent* aDOMEvent)
   if(g_lastX == MIN_INT || g_lastY == MIN_INT)
     return NS_OK;
 
-  nsIView* aView = mViewManager->GetRootView();
+  nsView* aView = mViewManager->GetRootView();
   if (!aView)
     if (NS_FAILED(UpdateFromEvent(aDOMEvent)))
       return NS_OK;
@@ -277,9 +275,9 @@ nsWidgetUtils::ShouldLoad(uint32_t          aContentType,
     if (!aContentLocation)
         return NS_OK;
 
-    nsCAutoString scheme;
+    nsAutoCString scheme;
     rv = aContentLocation->GetScheme(scheme);
-    nsCAutoString lscheme;
+    nsAutoCString lscheme;
     ToLowerCase(scheme, lscheme);
     if (!lscheme.EqualsLiteral("ftp") &&
         !lscheme.EqualsLiteral("http") &&
@@ -364,25 +362,18 @@ nsWidgetUtils::GetDOMWindowByNode(nsIDOMNode* aNode, nsIDOMWindow** aDOMWindow)
   return rv;
 }
 
-void
-nsWidgetUtils::GetChromeEventHandler(nsIDOMWindow *aDOMWin,
-                                     nsIDOMEventTarget **aChromeTarget)
+EventTarget*
+nsWidgetUtils::GetChromeEventHandler(nsIDOMWindow* aDOMWin)
 {
-    nsCOMPtr<nsPIDOMWindow> privateDOMWindow(do_QueryInterface(aDOMWin));
-    nsIDOMEventTarget* chromeEventHandler = nullptr;
-    if (privateDOMWindow) {
-        chromeEventHandler = privateDOMWindow->GetChromeEventHandler();
-    }
-
-    NS_IF_ADDREF(*aChromeTarget = chromeEventHandler);
+  nsCOMPtr<nsPIDOMWindow> privateDOMWindow = do_QueryInterface(aDOMWin);
+  return privateDOMWindow ? privateDOMWindow->GetChromeEventHandler() : nullptr;
 }
 
 void
 nsWidgetUtils::RemoveWindowListeners(nsIDOMWindow *aDOMWin)
 {
     nsresult rv;
-    nsCOMPtr<nsIDOMEventTarget> chromeEventHandler;
-    GetChromeEventHandler(aDOMWin, getter_AddRefs(chromeEventHandler));
+    EventTarget* chromeEventHandler = GetChromeEventHandler(aDOMWin);
     if (!chromeEventHandler) {
         return;
     }
@@ -402,8 +393,7 @@ void
 nsWidgetUtils::AttachWindowListeners(nsIDOMWindow *aDOMWin)
 {
     nsresult rv;
-    nsCOMPtr<nsIDOMEventTarget> chromeEventHandler;
-    GetChromeEventHandler(aDOMWin, getter_AddRefs(chromeEventHandler));
+    EventHandler* chromeEventHandler = GetChromeEventHandler(aDOMWin);
     if (!chromeEventHandler) {
         return;
     }

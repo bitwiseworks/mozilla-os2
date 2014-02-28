@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = ["SignInToWebsiteUX"];
+this.EXPORTED_SYMBOLS = ["SignInToWebsiteUX"];
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -23,20 +23,32 @@ function log(...aMessageArgs) {
   Logger.log.apply(Logger, ["SignInToWebsiteUX"].concat(aMessageArgs));
 }
 
-let SignInToWebsiteUX = {
+this.SignInToWebsiteUX = {
 
   init: function SignInToWebsiteUX_init() {
+
+    /*
+     * bug 793906 - temporarily disabling desktop UI so we can
+     * focus on b2g without worrying about desktop as well
+     *
     Services.obs.addObserver(this, "identity-request", false);
     Services.obs.addObserver(this, "identity-auth", false);
     Services.obs.addObserver(this, "identity-auth-complete", false);
     Services.obs.addObserver(this, "identity-login-state-changed", false);
+     */
   },
 
   uninit: function SignInToWebsiteUX_uninit() {
+    /*
+     * As above:
+     * bug 793906 - temporarily disabling desktop UI so we can
+     * focus on b2g without worrying about desktop as well
+     *
     Services.obs.removeObserver(this, "identity-request");
     Services.obs.removeObserver(this, "identity-auth");
     Services.obs.removeObserver(this, "identity-auth-complete");
     Services.obs.removeObserver(this, "identity-login-state-changed");
+     */
   },
 
   observe: function SignInToWebsiteUX_observe(aSubject, aTopic, aData) {
@@ -124,16 +136,7 @@ let SignInToWebsiteUX = {
    * Return the chrome window and <browser> for the given outer window ID.
    */
   _getUIForWindowID: function(aWindowID) {
-    let someWindow = Services.wm.getMostRecentWindow("navigator:browser");
-    if (!someWindow) {
-      Logger.reportError("SignInToWebsiteUX", "no window");
-      return [null, null];
-    }
-
-    let windowUtils = someWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindowUtils);
-    let content = windowUtils.getOuterWindowWithId(aWindowID);
-
+    let content = Services.wm.getOuterWindowWithId(aWindowID);
     if (content) {
       let browser = content.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIWebNavigation)
@@ -141,8 +144,8 @@ let SignInToWebsiteUX = {
       let chromeWin = browser.ownerDocument.defaultView;
       return [chromeWin, browser];
     }
-    Logger.reportError("SignInToWebsiteUX", "no content");
 
+    Logger.reportError("SignInToWebsiteUX", "no content");
     return [null, null];
   },
 

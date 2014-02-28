@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "IPC/IPCMessageUtils.h"
+#include "ipc/IPCMessageUtils.h"
 
 #if defined(XP_UNIX) || defined(XP_BEOS)
 #include <unistd.h>
@@ -51,7 +51,9 @@ nsFileStreamBase::~nsFileStreamBase()
     Close();
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsFileStreamBase, nsISeekableStream)
+NS_IMPL_THREADSAFE_ISUPPORTS2(nsFileStreamBase,
+                              nsISeekableStream,
+                              nsIFileMetadata)
 
 NS_IMETHODIMP
 nsFileStreamBase::Seek(int32_t whence, int64_t offset)
@@ -120,6 +122,52 @@ nsFileStreamBase::SetEOF()
 #else
     // XXX not implemented
 #endif
+
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFileStreamBase::GetSize(int64_t* _retval)
+{
+    nsresult rv = DoPendingOpen();
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (!mFD) {
+        return NS_BASE_STREAM_CLOSED;
+    }
+
+    PRFileInfo64 info;
+    if (PR_GetOpenFileInfo64(mFD, &info) == PR_FAILURE) {
+        return NS_BASE_STREAM_OSERROR;
+    }
+
+    *_retval = int64_t(info.size);
+
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFileStreamBase::GetLastModified(int64_t* _retval)
+{
+    nsresult rv = DoPendingOpen();
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (!mFD) {
+        return NS_BASE_STREAM_CLOSED;
+    }
+
+    PRFileInfo64 info;
+    if (PR_GetOpenFileInfo64(mFD, &info) == PR_FAILURE) {
+        return NS_BASE_STREAM_OSERROR;
+    }
+
+    int64_t modTime = int64_t(info.modifyTime);
+    if (modTime == 0) {
+        *_retval = 0;
+    }
+    else {
+        *_retval = modTime / int64_t(PR_USEC_PER_MSEC);
+    }
 
     return NS_OK;
 }
@@ -409,8 +457,16 @@ nsFileInputStream::Init(nsIFile* aFile, int32_t aIOFlags, int32_t aPerm,
 NS_IMETHODIMP
 nsFileInputStream::Close()
 {
+    // Get the cache position at the time the file was close. This allows
+    // NS_SEEK_CUR on a closed file that has been opened with
+    // REOPEN_ON_REWIND.
+    if (mBehaviorFlags & REOPEN_ON_REWIND) {
+        // Get actual position. Not one modified by subclasses
+        nsFileStreamBase::Tell(&mCachedPosition);
+    }
+
     // null out mLineBuffer in case Close() is called again after failing
-    PR_FREEIF(mLineBuffer);
+    mLineBuffer = nullptr;
     nsresult rv = nsFileStreamBase::Close();
     if (NS_FAILED(rv)) return rv;
     if (mFile && (mBehaviorFlags & DELETE_ON_CLOSE)) {
@@ -445,10 +501,9 @@ nsFileInputStream::ReadLine(nsACString& aLine, bool* aResult)
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (!mLineBuffer) {
-        nsresult rv = NS_InitLineBuffer(&mLineBuffer);
-        if (NS_FAILED(rv)) return rv;
+      mLineBuffer = new nsLineBuffer<char>;
     }
-    return NS_ReadLine(this, mLineBuffer, aLine, aResult);
+    return NS_ReadLine(this, mLineBuffer.get(), aLine, aResult);
 }
 
 NS_IMETHODIMP
@@ -457,12 +512,18 @@ nsFileInputStream::Seek(int32_t aWhence, int64_t aOffset)
     nsresult rv = DoPendingOpen();
     NS_ENSURE_SUCCESS(rv, rv);
 
-    PR_FREEIF(mLineBuffer); // this invalidates the line buffer
+    mLineBuffer = nullptr;
     if (!mFD) {
         if (mBehaviorFlags & REOPEN_ON_REWIND) {
-            nsresult rv = Reopen();
-            if (NS_FAILED(rv)) {
-                return rv;
+            rv = Open(mFile, mIOFlags, mPerm);
+            NS_ENSURE_SUCCESS(rv, rv);
+
+            // If the file was closed, and we do a relative seek, use the
+            // position we cached when we closed the file to seek to the right
+            // location.
+            if (aWhence == NS_SEEK_CUR) {
+                aWhence = NS_SEEK_SET;
+                aOffset += mCachedPosition;
             }
         } else {
             return NS_BASE_STREAM_CLOSED;
@@ -470,6 +531,18 @@ nsFileInputStream::Seek(int32_t aWhence, int64_t aOffset)
     }
 
     return nsFileStreamBase::Seek(aWhence, aOffset);
+}
+
+NS_IMETHODIMP
+nsFileInputStream::Tell(int64_t *aResult)
+{
+    return nsFileStreamBase::Tell(aResult);
+}
+
+NS_IMETHODIMP
+nsFileInputStream::Available(uint64_t *aResult)
+{
+    return nsFileStreamBase::Available(aResult);
 }
 
 void
@@ -600,7 +673,7 @@ nsPartialFileInputStream::Init(nsIFile* aFile, uint64_t aStart,
 NS_IMETHODIMP
 nsPartialFileInputStream::Tell(int64_t *aResult)
 {
-    int64_t tell;
+    int64_t tell = 0;
     nsresult rv = nsFileInputStream::Tell(&tell);
     if (NS_SUCCEEDED(rv)) {
         *aResult = tell - mStart;
@@ -611,7 +684,7 @@ nsPartialFileInputStream::Tell(int64_t *aResult)
 NS_IMETHODIMP
 nsPartialFileInputStream::Available(uint64_t* aResult)
 {
-    uint64_t available;
+    uint64_t available = 0;
     nsresult rv = nsFileInputStream::Available(&available);
     if (NS_SUCCEEDED(rv)) {
         *aResult = TruncateSize(available);
@@ -909,13 +982,12 @@ nsSafeFileOutputStream::Write(const char *buf, uint32_t count, uint32_t *result)
 ////////////////////////////////////////////////////////////////////////////////
 // nsFileStream
 
-NS_IMPL_ISUPPORTS_INHERITED4(nsFileStream, 
+NS_IMPL_ISUPPORTS_INHERITED3(nsFileStream,
                              nsFileStreamBase,
                              nsIInputStream,
                              nsIOutputStream,
-                             nsIFileStream,
-                             nsIFileMetadata)
- 
+                             nsIFileStream)
+
 NS_IMETHODIMP
 nsFileStream::Init(nsIFile* file, int32_t ioFlags, int32_t perm,
                    int32_t behaviorFlags)
@@ -932,52 +1004,6 @@ nsFileStream::Init(nsIFile* file, int32_t ioFlags, int32_t perm,
 
     return MaybeOpen(file, ioFlags, perm,
                      mBehaviorFlags & nsIFileStream::DEFER_OPEN);
-}
-
-NS_IMETHODIMP
-nsFileStream::GetSize(int64_t* _retval)
-{
-    nsresult rv = DoPendingOpen();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!mFD) {
-        return NS_BASE_STREAM_CLOSED;
-    }
-
-    PRFileInfo64 info;
-    if (PR_GetOpenFileInfo64(mFD, &info) == PR_FAILURE) {
-        return NS_BASE_STREAM_OSERROR;
-    }
-
-    *_retval = int64_t(info.size);
-
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsFileStream::GetLastModified(int64_t* _retval)
-{
-    nsresult rv = DoPendingOpen();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!mFD) {
-        return NS_BASE_STREAM_CLOSED;
-    }
-
-    PRFileInfo64 info;
-    if (PR_GetOpenFileInfo64(mFD, &info) == PR_FAILURE) {
-        return NS_BASE_STREAM_OSERROR;
-    }
-
-    int64_t modTime = int64_t(info.modifyTime);
-    if (modTime == 0) {
-        *_retval = 0;
-    }
-    else {
-        *_retval = modTime / int64_t(PR_USEC_PER_MSEC);
-    }
-
-    return NS_OK;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 
 #include "gfxASurface.h"
-#include "mozilla/layers/PLayers.h"
+#include "mozilla/layers/PLayerTransaction.h"
 #include "ShadowLayers.h"
 
 namespace mozilla {
@@ -23,7 +23,7 @@ namespace layers {
  * ahsolutely necessary.  And after being forced to open, it remembers
  * the mapping so it doesn't need to be redone.
  */
-class NS_STACK_CLASS AutoOpenSurface
+class MOZ_STACK_CLASS AutoOpenSurface
 {
 public:
   typedef gfxASurface::gfxContentType gfxContentType;

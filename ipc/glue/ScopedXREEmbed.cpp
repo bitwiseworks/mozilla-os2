@@ -29,6 +29,19 @@ ScopedXREEmbed::~ScopedXREEmbed()
 }
 
 void
+ScopedXREEmbed::SetAppDir(const nsACString& aPath)
+{
+  bool flag;
+  nsresult rv =
+    XRE_GetFileFromPath(aPath.BeginReading(), getter_AddRefs(mAppDir));
+  if (NS_FAILED(rv) ||
+      NS_FAILED(mAppDir->Exists(&flag)) || !flag) {
+    NS_WARNING("Invalid application directory passed to content process.");
+    mAppDir = nullptr;
+  }
+}
+
+void
 ScopedXREEmbed::Start()
 {
   std::string path;
@@ -51,7 +64,7 @@ ScopedXREEmbed::Start()
     return;
 
   localFile = do_QueryInterface(parent);
-  NS_ENSURE_TRUE(localFile,);
+  NS_ENSURE_TRUE_VOID(localFile);
 
 #ifdef OS_MACOSX
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
@@ -62,25 +75,28 @@ ScopedXREEmbed::Start()
       return;
 
     localFile = do_QueryInterface(parent);
-    NS_ENSURE_TRUE(localFile,);
+    NS_ENSURE_TRUE_VOID(localFile);
 
     rv = localFile->GetParent(getter_AddRefs(parent));
     if (NS_FAILED(rv))
       return;
 
     localFile = do_QueryInterface(parent);
-    NS_ENSURE_TRUE(localFile,);
+    NS_ENSURE_TRUE_VOID(localFile);
 
     rv = localFile->GetParent(getter_AddRefs(parent));
     if (NS_FAILED(rv))
       return;
 
     localFile = do_QueryInterface(parent);
-    NS_ENSURE_TRUE(localFile,);
+    NS_ENSURE_TRUE_VOID(localFile);
   }
 #endif
 
-  rv = XRE_InitEmbedding2(localFile, localFile, nullptr);
+  if (mAppDir)
+    rv = XRE_InitEmbedding2(localFile, mAppDir, nullptr);
+  else
+    rv = XRE_InitEmbedding2(localFile, localFile, nullptr);
   if (NS_FAILED(rv))
     return;
 

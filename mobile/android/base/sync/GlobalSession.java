@@ -19,12 +19,13 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.json.simple.parser.ParseException;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.crypto.CryptoException;
 import org.mozilla.gecko.sync.crypto.KeyBundle;
 import org.mozilla.gecko.sync.delegates.ClientsDataDelegate;
 import org.mozilla.gecko.sync.delegates.FreshStartDelegate;
 import org.mozilla.gecko.sync.delegates.GlobalSessionCallback;
-import org.mozilla.gecko.sync.delegates.InfoCollectionsDelegate;
+import org.mozilla.gecko.sync.delegates.JSONRecordFetchDelegate;
 import org.mozilla.gecko.sync.delegates.KeyUploadDelegate;
 import org.mozilla.gecko.sync.delegates.MetaGlobalDelegate;
 import org.mozilla.gecko.sync.delegates.WipeServerDelegate;
@@ -74,10 +75,11 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
 
   /**
    * Map from engine name to new settings for an updated meta/global record.
+   * Engines to remove will have <code>null</code> EngineSettings.
    */
   public final Map<String, EngineSettings> enginesToUpdate = new HashMap<String, EngineSettings>();
 
-  /*
+   /*
    * Key accessors.
    */
   public KeyBundle keyBundleForCollection(String collection) throws NoCollectionKeysSetException {
@@ -162,10 +164,8 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
 
     registerCommands();
     prepareStages();
-    Collection<String> knownStageNames = new HashSet<String>();
-    for (Stage stage : Stage.getNamedStages()) {
-      knownStageNames.add(stage.getRepositoryName());
-    }
+
+    Collection<String> knownStageNames = SyncConfiguration.validEngineNames();
     config.stagesToSync = Utils.getStagesToSyncFromBundle(knownStageNames, extras);
 
     // TODO: data-driven plan for the sync, referring to prepareStages.
@@ -222,21 +222,21 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
   protected void prepareStages() {
     HashMap<Stage, GlobalSyncStage> stages = new HashMap<Stage, GlobalSyncStage>();
 
-    stages.put(Stage.checkPreconditions,      new CheckPreconditionsStage(this));
-    stages.put(Stage.ensureClusterURL,        new EnsureClusterURLStage(this));
-    stages.put(Stage.fetchInfoCollections,    new FetchInfoCollectionsStage(this));
-    stages.put(Stage.fetchMetaGlobal,         new FetchMetaGlobalStage(this));
-    stages.put(Stage.ensureKeysStage,         new EnsureCrypto5KeysStage(this));
-    stages.put(Stage.syncClientsEngine,       new SyncClientsEngineStage(this));
+    stages.put(Stage.checkPreconditions,      new CheckPreconditionsStage());
+    stages.put(Stage.ensureClusterURL,        new EnsureClusterURLStage());
+    stages.put(Stage.fetchInfoCollections,    new FetchInfoCollectionsStage());
+    stages.put(Stage.fetchMetaGlobal,         new FetchMetaGlobalStage());
+    stages.put(Stage.ensureKeysStage,         new EnsureCrypto5KeysStage());
+    stages.put(Stage.syncClientsEngine,       new SyncClientsEngineStage());
 
-    stages.put(Stage.syncTabs,                new FennecTabsServerSyncStage(this));
-    stages.put(Stage.syncPasswords,           new PasswordsServerSyncStage(this));
-    stages.put(Stage.syncBookmarks,           new AndroidBrowserBookmarksServerSyncStage(this));
-    stages.put(Stage.syncHistory,             new AndroidBrowserHistoryServerSyncStage(this));
-    stages.put(Stage.syncFormHistory,         new FormHistoryServerSyncStage(this));
+    stages.put(Stage.syncTabs,                new FennecTabsServerSyncStage());
+    stages.put(Stage.syncPasswords,           new PasswordsServerSyncStage());
+    stages.put(Stage.syncBookmarks,           new AndroidBrowserBookmarksServerSyncStage());
+    stages.put(Stage.syncHistory,             new AndroidBrowserHistoryServerSyncStage());
+    stages.put(Stage.syncFormHistory,         new FormHistoryServerSyncStage());
 
-    stages.put(Stage.uploadMetaGlobal,        new UploadMetaGlobalStage(this));
-    stages.put(Stage.completed,               new CompletedStage(this));
+    stages.put(Stage.uploadMetaGlobal,        new UploadMetaGlobalStage());
+    stages.put(Stage.completed,               new CompletedStage());
 
     this.stages = Collections.unmodifiableMap(stages);
   }
@@ -314,7 +314,7 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
     this.currentState = next;
     Logger.info(LOG_TAG, "Running next stage " + next + " (" + nextStage + ")...");
     try {
-      nextStage.execute();
+      nextStage.execute(this);
     } catch (Exception ex) {
       Logger.warn(LOG_TAG, "Caught exception " + ex + " running stage " + next);
       this.abort(ex, "Uncaught exception in stage.");
@@ -388,8 +388,19 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
    * @param engineName engine to update.
    * @param engineSettings new syncID and version.
    */
-  public void updateMetaGlobalWith(String engineName, EngineSettings engineSettings) {
+  public void recordForMetaGlobalUpdate(String engineName, EngineSettings engineSettings) {
     enginesToUpdate.put(engineName, engineSettings);
+  }
+
+  /**
+   * Record that an updated meta/global record should be uploaded without the
+   * given engine name.
+   *
+   * @param engineName
+   *          engine to remove.
+   */
+  public void removeEngineFromMetaGlobal(String engineName) {
+    enginesToUpdate.put(engineName, null);
   }
 
   public boolean hasUpdatedMetaGlobal() {
@@ -399,8 +410,8 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
     }
 
     if (Logger.shouldLogVerbose(LOG_TAG)) {
-      Logger.trace(LOG_TAG, "Uploading updated meta/global record since there are engines requesting upload: " +
-          Utils.toCommaSeparatedString(enginesToUpdate.keySet()));
+      Logger.trace(LOG_TAG, "Uploading updated meta/global record since there are engine changes to meta/global.");
+      Logger.trace(LOG_TAG, "Engines requesting update [" + Utils.toCommaSeparatedString(enginesToUpdate.keySet()) + "]");
     }
 
     return true;
@@ -409,8 +420,13 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
   public void updateMetaGlobalInPlace() {
     ExtendedJSONObject engines = config.metaGlobal.getEngines();
     for (Entry<String, EngineSettings> pair : enginesToUpdate.entrySet()) {
-      engines.put(pair.getKey(), pair.getValue().toJSONObject());
+      if (pair.getValue() == null) {
+        engines.remove(pair.getKey());
+      } else {
+        engines.put(pair.getKey(), pair.getValue().toJSONObject());
+      }
     }
+
     enginesToUpdate.clear();
   }
 
@@ -432,6 +448,11 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
           @Override
           public void handleSuccess(MetaGlobal global, SyncStorageResponse response) {
             Logger.info(LOG_TAG, "Successfully uploaded updated meta/global record.");
+            // Engine changes are stored as diffs, so update enabled engines in config to match uploaded meta/global.
+            config.enabledEngineNames = config.metaGlobal.getEnabledEngineNames();
+            // Clear userSelectedEngines because they are updated in config and meta/global.
+            config.userSelectedEngines = null;
+
             synchronized (monitor) {
               monitor.notify();
             }
@@ -547,11 +568,9 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
     }
   }
 
-  public void fetchInfoCollections(InfoCollectionsDelegate callback) throws URISyntaxException {
-    if (this.config.infoCollections == null) {
-      this.config.infoCollections = new InfoCollections(config.infoURL(), credentials());
-    }
-    this.config.infoCollections.fetch(callback);
+  public void fetchInfoCollections(JSONRecordFetchDelegate callback) throws URISyntaxException {
+    final JSONRecordFetcher fetcher = new JSONRecordFetcher(config.infoCollectionsURL(), credentials());
+    fetcher.fetch(callback);
   }
 
   /**
@@ -660,6 +679,12 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
       resetAllStages();
       config.purgeCryptoKeys();
       config.syncID = remoteSyncID;
+    }
+    // Compare lastModified timestamps for remote/local engine selection times.
+    Logger.debug(LOG_TAG, "Comparing local engine selection timestamp [" + config.userSelectedEnginesTimestamp + "] to server meta/global timestamp [" + config.persistedMetaGlobal().lastModified() + "].");
+    if (config.userSelectedEnginesTimestamp < config.persistedMetaGlobal().lastModified()) {
+      // Remote has later meta/global timestamp. Don't upload engine changes.
+      config.userSelectedEngines = null;
     }
     // Persist enabled engine names.
     config.enabledEngineNames = global.getEnabledEngineNames();
@@ -877,11 +902,11 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
     this.wipeStagesByEnum(Stage.getNamedStages());
   }
 
-  public static void wipeStages(Collection<GlobalSyncStage> stages) {
+  public void wipeStages(Collection<GlobalSyncStage> stages) {
     for (GlobalSyncStage stage : stages) {
       try {
         Logger.info(LOG_TAG, "Wiping " + stage);
-        stage.wipeLocal();
+        stage.wipeLocal(this);
       } catch (Exception e) {
         Logger.error(LOG_TAG, "Ignoring wipe failure for stage " + stage, e);
       }
@@ -889,11 +914,11 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
   }
 
   public void wipeStagesByEnum(Collection<Stage> stages) {
-    GlobalSession.wipeStages(this.getSyncStagesByEnum(stages));
+    wipeStages(this.getSyncStagesByEnum(stages));
   }
 
   public void wipeStagesByName(Collection<String> names) {
-    GlobalSession.wipeStages(this.getSyncStagesByName(names));
+    wipeStages(this.getSyncStagesByName(names));
   }
 
   public void resetAllStages() {
@@ -902,11 +927,11 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
     this.resetStagesByEnum(Stage.getNamedStages());
   }
 
-  public static void resetStages(Collection<GlobalSyncStage> stages) {
+  public void resetStages(Collection<GlobalSyncStage> stages) {
     for (GlobalSyncStage stage : stages) {
       try {
         Logger.info(LOG_TAG, "Resetting " + stage);
-        stage.resetLocal();
+        stage.resetLocal(this);
       } catch (Exception e) {
         Logger.error(LOG_TAG, "Ignoring reset failure for stage " + stage, e);
       }
@@ -914,20 +939,11 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
   }
 
   public void resetStagesByEnum(Collection<Stage> stages) {
-    GlobalSession.resetStages(this.getSyncStagesByEnum(stages));
+    resetStages(this.getSyncStagesByEnum(stages));
   }
 
   public void resetStagesByName(Collection<String> names) {
-    Collection<GlobalSyncStage> stages = new ArrayList<GlobalSyncStage>();
-    for (String name : names) {
-      try {
-        GlobalSyncStage stage = this.getSyncStageByName(name);
-        stages.add(stage);
-      } catch (NoSuchStageException e) {
-        Logger.warn(LOG_TAG, "Cannot reset stage " + name + ": no such stage.");
-      }
-    }
-    GlobalSession.resetStages(stages);
+    resetStages(this.getSyncStagesByName(names));
   }
 
   /**
@@ -945,11 +961,8 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
     if (config.enabledEngineNames != null) {
       return config.enabledEngineNames;
     }
-    Set<String> engineNames = new HashSet<String>();
-    for (Stage stage : Stage.getNamedStages()) {
-      engineNames.add(stage.getRepositoryName());
-    }
-    return engineNames;
+
+    return SyncConfiguration.validEngineNames();
   }
 
   /**
@@ -957,6 +970,7 @@ public class GlobalSession implements CredentialsSource, PrefsSource, HttpRespon
    * @return crypto/keys collection.
    * @throws CryptoException
    */
+  @SuppressWarnings("static-method")
   public CollectionKeys generateNewCryptoKeys() throws CryptoException {
     return CollectionKeys.generateCollectionKeys();
   }

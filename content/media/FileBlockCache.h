@@ -7,10 +7,11 @@
 #ifndef FILE_BLOCK_CACHE_H_
 #define FILE_BLOCK_CACHE_H_
 
+#include "mozilla/Attributes.h"
 #include "mozilla/Monitor.h"
 #include "prio.h"
 #include "nsTArray.h"
-#include "nsMediaCache.h"
+#include "MediaCache.h"
 #include "nsDeque.h"
 
 namespace mozilla {
@@ -48,7 +49,7 @@ namespace mozilla {
 class FileBlockCache : public nsRunnable {
 public:
   enum {
-    BLOCK_SIZE = nsMediaCacheStream::BLOCK_SIZE
+    BLOCK_SIZE = MediaCacheStream::BLOCK_SIZE
   };
 
   FileBlockCache();
@@ -65,7 +66,7 @@ public:
   nsresult WriteBlock(uint32_t aBlockIndex, const uint8_t* aData);
 
   // Performs block writes and block moves on its own thread.
-  NS_IMETHOD Run();
+  NS_IMETHOD Run() MOZ_OVERRIDE;
 
   // Synchronously reads data from file. May read from file or memory
   // depending on whether written blocks have been flushed to file yet.
@@ -147,17 +148,21 @@ public:
   };
 
 private:
+  int64_t BlockIndexToOffset(int32_t aBlockIndex) {
+    return static_cast<int64_t>(aBlockIndex) * BLOCK_SIZE;
+  }
+
   // Monitor which controls access to mFD and mFDCurrentPos. Don't hold
   // mDataMonitor while holding mFileMonitor! mFileMonitor must be owned
   // while accessing any of the following data fields or methods.
-  mozilla::Monitor mFileMonitor;
+  Monitor mFileMonitor;
   // Moves a block already committed to file.
   nsresult MoveBlockInFile(int32_t aSourceBlockIndex,
                            int32_t aDestBlockIndex);
   // Seeks file pointer.
   nsresult Seek(int64_t aOffset);
   // Reads data from file offset.
-  nsresult ReadFromFile(int32_t aOffset,
+  nsresult ReadFromFile(int64_t aOffset,
                         uint8_t* aDest,
                         int32_t aBytesToRead,
                         int32_t& aBytesRead);
@@ -172,7 +177,7 @@ private:
   // and mFDCurrentPos. Don't hold mDataMonitor while holding mFileMonitor!
   // mDataMonitor must be owned while accessing any of the following data
   // fields or methods.
-  mozilla::Monitor mDataMonitor;
+  Monitor mDataMonitor;
   // Ensures we either are running the event to preform IO, or an event
   // has been dispatched to preform the IO.
   // mDataMonitor must be owned while calling this.

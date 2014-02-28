@@ -27,6 +27,12 @@ void main(void) {                           \n\
 ";
 
 static const char kTexBlit_FragShaderSource[] = "\
+#ifdef GL_FRAGMENT_PRECISION_HIGH                   \n\
+    precision highp float;                          \n\
+#else                                               \n\
+    precision mediump float;                        \n\
+#endif                                              \n\
+                                                    \n\
 uniform sampler2D uTexUnit;                         \n\
                                                     \n\
 varying vec2 vTexCoord;                             \n\
@@ -220,16 +226,42 @@ GLContext::BlitFramebufferToFramebuffer(GLuint srcFB, GLuint destFB,
     MOZ_ASSERT(IsExtensionSupported(EXT_framebuffer_blit) ||
                IsExtensionSupported(ANGLE_framebuffer_blit));
 
-    ScopedFramebufferBinding boundFB(this);
+    ScopedBindFramebuffer boundFB(this);
     ScopedGLState scissor(this, LOCAL_GL_SCISSOR_TEST, false);
 
-    BindUserReadFBO(srcFB);
-    BindUserDrawFBO(destFB);
+    BindReadFB(srcFB);
+    BindDrawFB(destFB);
 
     fBlitFramebuffer(0, 0,  srcSize.width,  srcSize.height,
                      0, 0, destSize.width, destSize.height,
                      LOCAL_GL_COLOR_BUFFER_BIT,
                      LOCAL_GL_NEAREST);
+}
+
+void
+GLContext::BlitFramebufferToFramebuffer(GLuint srcFB, GLuint destFB,
+                                        const gfxIntSize& srcSize,
+                                        const gfxIntSize& destSize,
+                                        const GLFormats& srcFormats)
+{
+    MOZ_ASSERT(!srcFB || fIsFramebuffer(srcFB));
+    MOZ_ASSERT(!destFB || fIsFramebuffer(destFB));
+
+    if (IsExtensionSupported(EXT_framebuffer_blit) ||
+        IsExtensionSupported(ANGLE_framebuffer_blit))
+    {
+        BlitFramebufferToFramebuffer(srcFB, destFB,
+                                     srcSize, destSize);
+        return;
+    }
+
+    GLuint tex = CreateTextureForOffscreen(srcFormats, srcSize);
+    MOZ_ASSERT(tex);
+
+    BlitFramebufferToTexture(srcFB, tex, srcSize, srcSize);
+    BlitTextureToFramebuffer(tex, destFB, srcSize, destSize);
+
+    fDeleteTextures(1, &tex);
 }
 
 void
@@ -243,7 +275,7 @@ GLContext::BlitTextureToFramebuffer(GLuint srcTex, GLuint destFB,
     if (IsExtensionSupported(EXT_framebuffer_blit) ||
         IsExtensionSupported(ANGLE_framebuffer_blit))
     {
-        ScopedFramebufferTexture srcWrapper(this, srcTex);
+        ScopedFramebufferForTexture srcWrapper(this, srcTex);
         MOZ_ASSERT(srcWrapper.IsComplete());
 
         BlitFramebufferToFramebuffer(srcWrapper.FB(), destFB,
@@ -252,7 +284,7 @@ GLContext::BlitTextureToFramebuffer(GLuint srcTex, GLuint destFB,
     }
 
 
-    ScopedFramebufferBinding boundFB(this, destFB);
+    ScopedBindFramebuffer boundFB(this, destFB);
 
     GLuint boundTexUnit = 0;
     GetUIntegerv(LOCAL_GL_ACTIVE_TEXTURE, &boundTexUnit);
@@ -370,27 +402,21 @@ GLContext::BlitFramebufferToTexture(GLuint srcFB, GLuint destTex,
     if (IsExtensionSupported(EXT_framebuffer_blit) ||
         IsExtensionSupported(ANGLE_framebuffer_blit))
     {
-        ScopedFramebufferTexture destWrapper(this, destTex);
-        MOZ_ASSERT(destWrapper.IsComplete());
+        ScopedFramebufferForTexture destWrapper(this, destTex);
 
         BlitFramebufferToFramebuffer(srcFB, destWrapper.FB(),
                                      srcSize, destSize);
         return;
     }
 
-    GLuint boundTex = 0;
-    GetUIntegerv(LOCAL_GL_TEXTURE_BINDING_2D, &boundTex);
-    fBindTexture(LOCAL_GL_TEXTURE_2D, destTex);
-
-    ScopedFramebufferBinding boundFB(this, srcFB);
+    ScopedBindTexture autoTex(this, destTex);
+    ScopedBindFramebuffer boundFB(this, srcFB);
     ScopedGLState scissor(this, LOCAL_GL_SCISSOR_TEST, false);
 
     fCopyTexSubImage2D(LOCAL_GL_TEXTURE_2D, 0,
                        0, 0,
                        0, 0,
                        srcSize.width, srcSize.height);
-
-    fBindTexture(LOCAL_GL_TEXTURE_2D, boundTex);
 }
 
 void
@@ -403,8 +429,7 @@ GLContext::BlitTextureToTexture(GLuint srcTex, GLuint destTex,
 
     if (mTexBlit_UseDrawNotCopy) {
         // Draw is texture->framebuffer
-        ScopedFramebufferTexture destWrapper(this, destTex);
-        MOZ_ASSERT(destWrapper.IsComplete());
+        ScopedFramebufferForTexture destWrapper(this, destTex);
 
         BlitTextureToFramebuffer(srcTex, destWrapper.FB(),
                                  srcSize, destSize);
@@ -412,11 +437,67 @@ GLContext::BlitTextureToTexture(GLuint srcTex, GLuint destTex,
     }
 
     // Generally, just use the CopyTexSubImage path
-    ScopedFramebufferTexture srcWrapper(this, srcTex);
-    MOZ_ASSERT(srcWrapper.IsComplete());
+    ScopedFramebufferForTexture srcWrapper(this, srcTex);
 
     BlitFramebufferToTexture(srcWrapper.FB(), destTex,
                              srcSize, destSize);
+}
+
+uint32_t GetBitsPerTexel(GLenum format, GLenum type)
+{
+    // If there is no defined format or type, we're not taking up any memory
+    if (!format || !type) {
+        return 0;
+    }
+
+    if (format == LOCAL_GL_DEPTH_COMPONENT) {
+        if (type == LOCAL_GL_UNSIGNED_SHORT)
+            return 2;
+        else if (type == LOCAL_GL_UNSIGNED_INT)
+            return 4;
+    } else if (format == LOCAL_GL_DEPTH_STENCIL) {
+        if (type == LOCAL_GL_UNSIGNED_INT_24_8_EXT)
+            return 4;
+    }
+
+    if (type == LOCAL_GL_UNSIGNED_BYTE || type == LOCAL_GL_FLOAT) {
+        int multiplier = type == LOCAL_GL_FLOAT ? 32 : 8;
+        switch (format) {
+            case LOCAL_GL_ALPHA:
+            case LOCAL_GL_LUMINANCE:
+                return 1 * multiplier;
+            case LOCAL_GL_LUMINANCE_ALPHA:
+                return 2 * multiplier;
+            case LOCAL_GL_RGB:
+                return 3 * multiplier;
+            case LOCAL_GL_RGBA:
+                return 4 * multiplier;
+            case LOCAL_GL_COMPRESSED_RGB_PVRTC_2BPPV1:
+            case LOCAL_GL_COMPRESSED_RGBA_PVRTC_2BPPV1:
+                return 2;
+            case LOCAL_GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+            case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+            case LOCAL_GL_ATC_RGB:
+            case LOCAL_GL_COMPRESSED_RGB_PVRTC_4BPPV1:
+            case LOCAL_GL_COMPRESSED_RGBA_PVRTC_4BPPV1:
+                return 4;
+            case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+            case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+            case LOCAL_GL_ATC_RGBA_EXPLICIT_ALPHA:
+            case LOCAL_GL_ATC_RGBA_INTERPOLATED_ALPHA:
+                return 8;
+            default:
+                break;
+        }
+    } else if (type == LOCAL_GL_UNSIGNED_SHORT_4_4_4_4 ||
+               type == LOCAL_GL_UNSIGNED_SHORT_5_5_5_1 ||
+               type == LOCAL_GL_UNSIGNED_SHORT_5_6_5)
+    {
+        return 16;
+    }
+
+    MOZ_ASSERT(false);
+    return 0;
 }
 
 

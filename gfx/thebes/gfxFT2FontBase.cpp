@@ -6,6 +6,7 @@
 #include "gfxFT2FontBase.h"
 #include "gfxFT2Utils.h"
 #include "harfbuzz/hb.h"
+#include "mozilla/Likely.h"
 
 using namespace mozilla::gfx;
 
@@ -110,7 +111,7 @@ gfxFT2FontBase::GetMetrics()
     if (mHasMetrics)
         return mMetrics;
 
-    if (NS_UNLIKELY(GetStyle()->size <= 0.0)) {
+    if (MOZ_UNLIKELY(GetStyle()->size <= 0.0)) {
         new(&mMetrics) gfxFont::Metrics(); // zero initialize
         mSpaceGlyph = 0;
     } else {
@@ -143,22 +144,6 @@ gfxFT2FontBase::GetSpaceGlyph()
                  "forgot to short-circuit a text run with zero-sized font?");
     GetMetrics();
     return mSpaceGlyph;
-}
-
-hb_blob_t *
-gfxFT2FontBase::GetFontTable(uint32_t aTag)
-{
-    hb_blob_t *blob;
-    if (mFontEntry->GetExistingFontTable(aTag, &blob))
-        return blob;
-
-    FallibleTArray<uint8_t> buffer;
-    bool haveTable = gfxFT2LockedFace(this).GetFontTable(aTag, buffer);
-
-    // Cache even when there is no table to save having to open the FT_Face
-    // again.
-    return mFontEntry->ShareFontTableAndGetBlob(aTag,
-                                                haveTable ? &buffer : nullptr);
 }
 
 uint32_t

@@ -5,6 +5,8 @@
 
 #include "nsDOMBlobBuilder.h"
 #include "jsfriendapi.h"
+#include "mozilla/dom/BlobBinding.h"
+#include "mozilla/dom/FileBinding.h"
 #include "nsAutoPtr.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIMultiplexInputStream.h"
@@ -12,10 +14,11 @@
 #include "nsTArray.h"
 #include "nsJSUtils.h"
 #include "nsContentUtils.h"
-#include "DictionaryHelpers.h"
 #include "nsIScriptError.h"
+#include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 NS_IMPL_ISUPPORTS_INHERITED1(nsDOMMultipartFile, nsDOMFile,
                              nsIJSNativeInitializer)
@@ -92,7 +95,7 @@ nsDOMMultipartFile::CreateSlice(uint64_t aStart, uint64_t aLength,
     NS_ENSURE_SUCCESS(rv, nullptr);
 
     if (skipStart < l) {
-      uint64_t upperBound = NS_MIN<uint64_t>(l - skipStart, length);
+      uint64_t upperBound = std::min<uint64_t>(l - skipStart, length);
 
       nsCOMPtr<nsIDOMBlob> firstBlob;
       rv = blob->Slice(skipStart, skipStart + upperBound,
@@ -131,7 +134,7 @@ nsDOMMultipartFile::CreateSlice(uint64_t aStart, uint64_t aLength,
     } else {
       blobs.AppendElement(blob);
     }
-    length -= NS_MIN<uint64_t>(l, length);
+    length -= std::min<uint64_t>(l, length);
   }
 
   // we can create our blob now
@@ -167,28 +170,36 @@ NS_IMETHODIMP
 nsDOMMultipartFile::Initialize(nsISupports* aOwner,
                                JSContext* aCx,
                                JSObject* aObj,
-                               uint32_t aArgc,
-                               jsval* aArgv)
+                               const JS::CallArgs& aArgs)
 {
-  return InitInternal(aCx, aArgc, aArgv, GetXPConnectNative);
+  if (!mIsFile) {
+    return InitBlob(aCx, aArgs.length(), aArgs.array(), GetXPConnectNative);
+  }
+  return InitFile(aCx, aArgs.length(), aArgs.array());
 }
 
 nsresult
-nsDOMMultipartFile::InitInternal(JSContext* aCx,
-                                 uint32_t aArgc,
-                                 jsval* aArgv,
-                                 UnwrapFuncPtr aUnwrapFunc)
+nsDOMMultipartFile::InitBlob(JSContext* aCx,
+                             uint32_t aArgc,
+                             JS::Value* aArgv,
+                             UnwrapFuncPtr aUnwrapFunc)
 {
   bool nativeEOL = false;
   if (aArgc > 1) {
-    mozilla::dom::BlobPropertyBag d;
-    nsresult rv = d.Init(aCx, &aArgv[1]);
-    NS_ENSURE_SUCCESS(rv, rv);
-    mContentType = d.type;
-    if (d.endings.EqualsLiteral("native")) {
-      nativeEOL = true;
-    } else if (!d.endings.EqualsLiteral("transparent")) {
-      return NS_ERROR_TYPE_ERR;
+    if (NS_IsMainThread()) {
+      BlobPropertyBag d;
+      if (!d.Init(aCx, JS::Handle<JS::Value>::fromMarkedLocation(&aArgv[1]))) {
+        return NS_ERROR_TYPE_ERR;
+      }
+      mContentType = d.mType;
+      nativeEOL = d.mEndings == EndingTypes::Native;
+    } else {
+      BlobPropertyBagWorkers d;
+      if (!d.Init(aCx, JS::Handle<JS::Value>::fromMarkedLocation(&aArgv[1]))) {
+        return NS_ERROR_TYPE_ERR;
+      }
+      mContentType = d.mType;
+      nativeEOL = d.mEndings == EndingTypes::Native;
     }
   }
 
@@ -197,23 +208,23 @@ nsDOMMultipartFile::InitInternal(JSContext* aCx,
       return NS_ERROR_TYPE_ERR; // We're not interested
     }
 
-    JSObject& obj = aArgv[0].toObject();
-    if (!JS_IsArrayObject(aCx, &obj)) {
+    JS::Rooted<JSObject*> obj(aCx, &aArgv[0].toObject());
+    if (!JS_IsArrayObject(aCx, obj)) {
       return NS_ERROR_TYPE_ERR; // We're not interested
     }
 
     BlobSet blobSet;
 
     uint32_t length;
-    JS_ALWAYS_TRUE(JS_GetArrayLength(aCx, &obj, &length));
+    JS_ALWAYS_TRUE(JS_GetArrayLength(aCx, obj, &length));
     for (uint32_t i = 0; i < length; ++i) {
-      jsval element;
-      if (!JS_GetElement(aCx, &obj, i, &element))
+      JS::Rooted<JS::Value> element(aCx);
+      if (!JS_GetElement(aCx, obj, i, element.address()))
         return NS_ERROR_TYPE_ERR;
 
       if (element.isObject()) {
-        JSObject& obj = element.toObject();
-        nsCOMPtr<nsIDOMBlob> blob = aUnwrapFunc(aCx, &obj);
+        JS::Rooted<JSObject*> obj(aCx, &element.toObject());
+        nsCOMPtr<nsIDOMBlob> blob = aUnwrapFunc(aCx, obj);
         if (blob) {
           // Flatten so that multipart blobs will never nest
           nsDOMFileBase* file = static_cast<nsDOMFileBase*>(
@@ -227,13 +238,13 @@ nsDOMMultipartFile::InitInternal(JSContext* aCx,
           }
           continue;
         }
-        if (JS_IsArrayBufferViewObject(&obj, aCx)) {
-          blobSet.AppendVoidPtr(JS_GetArrayBufferViewData(&obj, aCx),
-                                JS_GetArrayBufferViewByteLength(&obj, aCx));
+        if (JS_IsArrayBufferViewObject(obj)) {
+          blobSet.AppendVoidPtr(JS_GetArrayBufferViewData(obj),
+                                JS_GetArrayBufferViewByteLength(obj));
           continue;
         }
-        if (JS_IsArrayBufferObject(&obj, aCx)) {
-          blobSet.AppendArrayBuffer(&obj, aCx);
+        if (JS_IsArrayBufferObject(obj)) {
+          blobSet.AppendArrayBuffer(obj);
           continue;
         }
         // neither Blob nor ArrayBuffer(View)
@@ -249,6 +260,99 @@ nsDOMMultipartFile::InitInternal(JSContext* aCx,
 
     mBlobs = blobSet.GetBlobs();
   }
+
+  return NS_OK;
+}
+
+nsresult
+nsDOMMultipartFile::InitFile(JSContext* aCx,
+                             uint32_t aArgc,
+                             JS::Value* aArgv)
+{
+  nsresult rv;
+
+  NS_ASSERTION(!mImmutable, "Something went wrong ...");
+  NS_ENSURE_TRUE(!mImmutable, NS_ERROR_UNEXPECTED);
+
+  if (!nsContentUtils::IsCallerChrome()) {
+    return NS_ERROR_DOM_SECURITY_ERR; // Real short trip
+  }
+
+  NS_ENSURE_TRUE(aArgc > 0, NS_ERROR_UNEXPECTED);
+
+  if (aArgc > 1) {
+    FilePropertyBag d;
+    if (!d.Init(aCx, JS::Handle<JS::Value>::fromMarkedLocation(&aArgv[1]))) {
+      return NS_ERROR_TYPE_ERR;
+    }
+    mName = d.mName;
+    mContentType = d.mType;
+  }
+
+
+  // We expect to get a path to represent as a File object or
+  // Blob object, an nsIFile, or an nsIDOMFile.
+  nsCOMPtr<nsIFile> file;
+  nsCOMPtr<nsIDOMBlob> blob;
+  if (!aArgv[0].isString()) {
+    // Lets see if it's an nsIFile
+    if (!aArgv[0].isObject()) {
+      return NS_ERROR_UNEXPECTED; // We're not interested
+    }
+
+    JSObject* obj = &aArgv[0].toObject();
+
+    nsISupports* supports =
+      nsContentUtils::XPConnect()->GetNativeOfWrapper(aCx, obj);
+    if (!supports) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    blob = do_QueryInterface(supports);
+    file = do_QueryInterface(supports);
+    if (!blob && !file) {
+      return NS_ERROR_UNEXPECTED;
+    }
+  } else {
+    // It's a string
+    JSString* str = JS_ValueToString(aCx, aArgv[0]);
+    NS_ENSURE_TRUE(str, NS_ERROR_XPC_BAD_CONVERT_JS);
+
+    nsDependentJSString xpcomStr;
+    if (!xpcomStr.init(aCx, str)) {
+      return NS_ERROR_XPC_BAD_CONVERT_JS;
+    }
+
+    rv = NS_NewLocalFile(xpcomStr, false, getter_AddRefs(file));
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  if (file) {
+    bool exists;
+    rv = file->Exists(&exists);
+    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_TRUE(exists, NS_ERROR_FILE_NOT_FOUND);
+
+    bool isDir;
+    rv = file->IsDirectory(&isDir);
+    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_FALSE(isDir, NS_ERROR_FILE_IS_DIRECTORY);
+
+    if (mName.IsEmpty()) {
+      file->GetLeafName(mName);
+    }
+
+    blob = new nsDOMFileFile(file);
+  }
+
+  // XXXkhuey this is terrible
+  if (mContentType.IsEmpty()) {
+    blob->GetType(mContentType);
+  }
+
+  BlobSet blobSet;
+  blobSet.AppendBlob(blob);
+  mBlobs = blobSet.GetBlobs();
 
   return NS_OK;
 }
@@ -312,147 +416,8 @@ BlobSet::AppendBlobs(const nsTArray<nsCOMPtr<nsIDOMBlob> >& aBlob)
 }
 
 nsresult
-BlobSet::AppendArrayBuffer(JSObject* aBuffer, JSContext *aCx)
+BlobSet::AppendArrayBuffer(JSObject* aBuffer)
 {
-  return AppendVoidPtr(JS_GetArrayBufferData(aBuffer, aCx),
-                       JS_GetArrayBufferByteLength(aBuffer, aCx));
-}
-
-DOMCI_DATA(MozBlobBuilder, nsDOMBlobBuilder)
-
-NS_IMPL_ADDREF(nsDOMBlobBuilder)
-NS_IMPL_RELEASE(nsDOMBlobBuilder)
-NS_INTERFACE_MAP_BEGIN(nsDOMBlobBuilder)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMMozBlobBuilder)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMMozBlobBuilder)
-  NS_INTERFACE_MAP_ENTRY(nsIJSNativeInitializer)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozBlobBuilder)
-NS_INTERFACE_MAP_END
-
-/* nsIDOMBlob getBlob ([optional] in DOMString contentType); */
-NS_IMETHODIMP
-nsDOMBlobBuilder::GetBlob(const nsAString& aContentType,
-                          nsIDOMBlob** aBlob)
-{
-  return GetBlobInternal(aContentType, true, aBlob);
-}
-
-nsresult
-nsDOMBlobBuilder::GetBlobInternal(const nsAString& aContentType,
-                                  bool aClearBuffer,
-                                  nsIDOMBlob** aBlob)
-{
-  NS_ENSURE_ARG(aBlob);
-
-  nsTArray<nsCOMPtr<nsIDOMBlob> >& blobs = mBlobSet.GetBlobs();
-
-  nsCOMPtr<nsIDOMBlob> blob = new nsDOMMultipartFile(blobs,
-                                                     aContentType);
-  blob.forget(aBlob);
-
-  // NB: This is a willful violation of the spec.  The spec says that
-  // the existing contents of the BlobBuilder should be included
-  // in the next blob produced.  This seems silly and has been raised
-  // on the WHATWG listserv.
-  if (aClearBuffer) {
-    blobs.Clear();
-  }
-
-  return NS_OK;
-}
-
-/* nsIDOMBlob getFile (in DOMString name, [optional] in DOMString contentType); */
-NS_IMETHODIMP
-nsDOMBlobBuilder::GetFile(const nsAString& aName,
-                          const nsAString& aContentType,
-                          nsIDOMFile** aFile)
-{
-  NS_ENSURE_ARG(aFile);
-
-  nsTArray<nsCOMPtr<nsIDOMBlob> >& blobs = mBlobSet.GetBlobs();
-
-  nsCOMPtr<nsIDOMFile> file = new nsDOMMultipartFile(blobs,
-                                                     aName,
-                                                     aContentType);
-  file.forget(aFile);
-
-  // NB: This is a willful violation of the spec.  The spec says that
-  // the existing contents of the BlobBuilder should be included
-  // in the next blob produced.  This seems silly and has been raised
-  // on the WHATWG listserv.
-  blobs.Clear();
-
-  return NS_OK;
-}
-
-/* [implicit_jscontext] void append (in jsval data,
-                                     [optional] in DOMString endings); */
-NS_IMETHODIMP
-nsDOMBlobBuilder::Append(const JS::Value& aData,
-                         const nsAString& aEndings, JSContext* aCx)
-{
-  // We need to figure out what our jsval is
-
-  // Just return for null
-  if (aData.isNull())
-    return NS_OK;
-
-  // Is it an object?
-  if (aData.isObject()) {
-    JSObject* obj = &aData.toObject();
-
-    // Is it a Blob?
-    nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(
-      nsContentUtils::XPConnect()->
-        GetNativeOfWrapper(aCx, obj));
-    if (blob) {
-      // Flatten so that multipart blobs will never nest
-      nsDOMFileBase* file = static_cast<nsDOMFileBase*>(
-          static_cast<nsIDOMBlob*>(blob));
-      const nsTArray<nsCOMPtr<nsIDOMBlob> >* subBlobs = file->GetSubBlobs();
-      if (subBlobs) {
-        return mBlobSet.AppendBlobs(*subBlobs);
-      } else {
-        return mBlobSet.AppendBlob(blob);
-      }
-    }
-
-    // Is it an array buffer?
-    if (JS_IsArrayBufferObject(obj, aCx)) {
-      return mBlobSet.AppendArrayBuffer(obj, aCx);
-    }
-  }
-
-  // If it's not a Blob or an ArrayBuffer, coerce it to a string
-  JSString* str = JS_ValueToString(aCx, aData);
-  NS_ENSURE_TRUE(str, NS_ERROR_FAILURE);
-
-  return mBlobSet.AppendString(str, aEndings.EqualsLiteral("native"), aCx);
-}
-
-nsresult NS_NewBlobBuilder(nsISupports* *aSupports)
-{
-  nsDOMBlobBuilder* builder = new nsDOMBlobBuilder();
-  return CallQueryInterface(builder, aSupports);
-}
-
-NS_IMETHODIMP
-nsDOMBlobBuilder::Initialize(nsISupports* aOwner,
-                             JSContext* aCx,
-                             JSObject* aObj,
-                             uint32_t aArgc,
-                             jsval* aArgv)
-{
-  nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aOwner));
-  if (!window) {
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDocument> doc(do_QueryInterface(window->GetExtantDocument()));
-  if (!doc) {
-    return NS_OK;
-  }
-
-  doc->WarnOnceAbout(nsIDocument::eMozBlobBuilder);
-  return NS_OK;
+  return AppendVoidPtr(JS_GetArrayBufferData(aBuffer),
+                       JS_GetArrayBufferByteLength(aBuffer));
 }

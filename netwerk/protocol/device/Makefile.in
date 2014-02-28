@@ -10,34 +10,9 @@ FAIL_ON_WARNINGS = 1
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = deviceprotocol
 LIBRARY_NAME = nkdevice_s
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
-
-CPPSRCS = \
-  nsDeviceChannel.cpp \
-  nsDeviceProtocolHandler.cpp \
-  $(NULL)
-
-ifeq (android,$(MOZ_WIDGET_TOOLKIT))
-CPPSRCS += AndroidCaptureProvider.cpp \
-           CameraStreamImpl.cpp \
-           $(NULL)
-
-EXPORTS_NAMESPACES = mozilla/net
-
-EXPORTS_mozilla/net += \
-  CameraStreamImpl.h  \
-  $(NULL)
-
-endif
-
-ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
-CPPSRCS += GonkCaptureProvider.cpp \
-           nsB2GProtocolHandler.cpp \
-           $(NULL)
-endif
 
 LOCAL_INCLUDES = -I$(srcdir)/../../base/src/ \
                  $(NULL)

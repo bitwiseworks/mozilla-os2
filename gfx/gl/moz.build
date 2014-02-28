@@ -1,0 +1,108 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'gl'
+
+# NOTE: Please keep gl_provider in sync with Makefile.in until all variables
+# are moved over.
+gl_provider = 'Null'
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    gl_provider = 'WGL'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    gl_provider = 'CGL'
+elif CONFIG['MOZ_WIDGET_GTK']:
+    if CONFIG['fdef MOZ_PLATFORM_MAEMO']:
+        gl_provider = 'EGL'
+    else:
+        if CONFIG['MOZ_EGL_XRENDER_COMPOSITE']:
+            gl_provider = 'EGL'
+        else:
+            gl_provider = 'GLX'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
+    if CONFIG['fdef MOZ_PLATFORM_MAEMO']:
+        gl_provider = 'EGL'
+    else:
+        gl_provider = 'GLX'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    gl_provider = 'EGL'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    gl_provider = 'EGL'
+
+if CONFIG['MOZ_GL_PROVIDER']:
+    gl_provider = CONFIG['MOZ_GL_PROVIDER']
+
+EXPORTS += [
+    'ForceDiscreteGPUHelperCGL.h',
+    'GLContext.h',
+    'GLContextProvider.h',
+    'GLContextProviderImpl.h',
+    'GLContextSymbols.h',
+    'GLContextTypes.h',
+    'GLDefs.h',
+    'GLLibraryEGL.h',
+    'GLLibraryLoader.h',
+    'GLScreenBuffer.h',
+    'GLTextureImage.h',
+    'SharedSurface.h',
+    'SharedSurfaceEGL.h',
+    'SharedSurfaceGL.h',
+    'SurfaceFactory.h',
+    'SurfaceStream.h',
+    'SurfaceTypes.h',
+]
+
+if CONFIG['MOZ_X11']:
+    EXPORTS += ['GLXLibrary.h']
+
+# Win32 is a special snowflake, for ANGLE
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    EXPORTS += [
+        'SharedSurfaceANGLE.h',
+        'WGLLibrary.h',
+    ]
+    CPP_SOURCES += [
+        'GLContextProviderEGL.cpp',
+        'GLLibraryEGL.cpp',
+        'SharedSurfaceANGLE.cpp',
+    ]
+if CONFIG['MOZ_ENABLE_SKIA_GPU']:
+    EXPORTS += ['GLContextSkia.h']
+    CPP_SOURCES += [
+        'GLContextSkia.cpp',
+    ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    CPP_SOURCES += ['SharedSurfaceGralloc.cpp']
+    EXPORTS += ['SharedSurfaceGralloc.h']
+
+if gl_provider == 'CGL':
+    # TODO: CMMSRCS
+    pass
+else:
+    CPP_SOURCES += [
+        'GLContextProvider%s.cpp' % gl_provider,
+    ]
+
+if gl_provider == 'EGL':
+    CPP_SOURCES += [
+        'GLLibraryEGL.cpp',
+    ]
+
+CPP_SOURCES += [
+    'GLContext.cpp',
+    'GLContextTypes.cpp',
+    'GLContextUtils.cpp',
+    'GLLibraryLoader.cpp',
+    'GLScreenBuffer.cpp',
+    'GLTextureImage.cpp',
+    'SharedSurface.cpp',
+    'SharedSurfaceEGL.cpp',
+    'SharedSurfaceGL.cpp',
+    'SurfaceFactory.cpp',
+    'SurfaceStream.cpp',
+]
+

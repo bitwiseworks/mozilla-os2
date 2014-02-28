@@ -23,7 +23,7 @@ interface nsIObserver;
  * @see nsIPrefService
  */
 
-[scriptable, uuid(7df46a54-d8b0-448e-903c-4341a1b2499c)]
+[scriptable, uuid(55d25e49-793f-4727-a69f-de8b15f4b985)]
 interface nsIPrefBranch : nsISupports
 {
 
@@ -70,12 +70,24 @@ interface nsIPrefBranch : nsISupports
    * @param aPrefName The boolean preference to set the state of.
    * @param aValue    The boolean value to set the preference to.
    *
-   * @return NS_OK The value was successfully set.
-   * @return Other The value was not set or is the wrong type.
+   * @throws Error if setting failed or the value is the wrong type.
    *
    * @see getBoolPref
    */
   void setBoolPref(in string aPrefName, in boolean aValue);
+
+  /**
+   * Called to get the state of an individual floating-point preference.
+   * "Floating point" preferences are really string preferences that
+   * are converted to floating point numbers.
+   *
+   * @param aPrefName The floating point preference to get the state of.
+   *
+   * @return float  The value of the requested floating point preference.
+   *
+   * @see setCharPref
+   */
+  float getFloatPref(in string aPrefName);
 
   /**
    * Called to get the state of an individual string preference.
@@ -94,8 +106,7 @@ interface nsIPrefBranch : nsISupports
    * @param aPrefName The string preference to set.
    * @param aValue    The string value to set the preference to.
    *
-   * @return NS_OK The value was successfully set.
-   * @return Other The value was not set or is the wrong type.
+   * @throws Error if setting failed or the value is the wrong type.
    *
    * @see getCharPref
    */
@@ -118,8 +129,7 @@ interface nsIPrefBranch : nsISupports
    * @param aPrefName The integer preference to set the value of.
    * @param aValue    The integer value to set the preference to.
    *
-   * @return NS_OK The value was successfully set.
-   * @return Other The value was not set or is the wrong type.
+   * @throws Error if setting failed or the value is the wrong type.
    *
    * @see getIntPref
    */
@@ -139,8 +149,7 @@ interface nsIPrefBranch : nsISupports
    * @param aValue    The XPCOM object into which to the complex preference 
    *                  value should be retrieved.
    *
-   * @return NS_OK The value was successfully retrieved.
-   * @return Other The value does not exist or is the wrong type.
+   * @throws Error The value does not exist or is the wrong type.
    *
    * @see setComplexValue
    */
@@ -161,8 +170,7 @@ interface nsIPrefBranch : nsISupports
    * @param aValue    The XPCOM object from which to set the complex preference 
    *                  value.
    *
-   * @return NS_OK The value was successfully set.
-   * @return Other The value was not set or is the wrong type.
+   * @throws Error if setting failed or the value is the wrong type.
    *
    * @see getComplexValue
    */
@@ -177,8 +185,6 @@ interface nsIPrefBranch : nsISupports
    *
    * @note
    * This method does nothing if this object is a default branch.
-   *
-   * @return NS_OK The user preference was successfully cleared.
    */
   void clearUserPref(in string aPrefName);
 
@@ -193,8 +199,7 @@ interface nsIPrefBranch : nsISupports
    * This method can be called on either a default or user branch but, in
    * effect, always operates on the default branch.
    *
-   * @return NS_OK The preference was successfully locked.
-   * @return Other The preference does not exist or an error occurred.
+   * @throws Error The preference does not exist or an error occurred.
    *
    * @see unlockPref
    */
@@ -251,8 +256,7 @@ interface nsIPrefBranch : nsISupports
    * This method can be called on either a default or user branch but, in
    * effect, always operates on the default branch.
    *
-   * @return NS_OK The preference was successfully unlocked.
-   * @return Other The preference does not exist or an error occurred.
+   * @throws Error The preference does not exist or an error occurred.
    *
    * @see lockPref
    */
@@ -270,8 +274,7 @@ interface nsIPrefBranch : nsISupports
    * This method can be called on either a default or user branch but, in
    * effect, always operates on both.
    *
-   * @return NS_OK The preference(s) were successfully removed.
-   * @return Other The preference(s) do not exist or an error occurred.
+   * @throws Error The preference(s) do not exist or an error occurred.
    */
   void deleteBranch(in string aStartingAt);
 
@@ -289,8 +292,7 @@ interface nsIPrefBranch : nsISupports
    * This method can be called on either a default or user branch but, in
    * effect, always operates on both.
    *
-   * @return NS_OK The preference list was successfully retrieved.
-   * @return Other The preference(s) do not exist or an error occurred.
+   * @throws Error The preference(s) do not exist or an error occurred.
    */
   void getChildList(in string aStartingAt,
                     [optional] out unsigned long aCount,
@@ -308,8 +310,7 @@ interface nsIPrefBranch : nsISupports
    * This method can be called on either a default or user branch but, in
    * effect, always operates on the user branch.
    *
-   * @return NS_OK The preference(s) were successfully reset.
-   * @return Other The preference(s) do not exist or an error occurred.
+   * @throws Error The preference(s) do not exist or an error occurred.
    */
   void resetBranch(in string aStartingAt);
 
@@ -397,7 +398,6 @@ interface nsIPrefBranch : nsISupports
 %{C++
 
 #define NS_PREFBRANCH_CONTRACTID "@mozilla.org/preferencesbranch;1"
-#define NS_PREFBRANCH_CLASSNAME "Preferences Branch"
 /**
  * Notification sent when a preference changes.
  */

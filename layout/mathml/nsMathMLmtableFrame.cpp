@@ -9,6 +9,7 @@
 #include "nsPresContext.h"
 #include "nsStyleContext.h"
 #include "nsStyleConsts.h"
+#include "nsTableRowFrame.h"
 #include "nsINameSpaceManager.h"
 #include "nsRenderingContext.h"
 
@@ -20,6 +21,7 @@
 #include "celldata.h"
 
 #include "nsMathMLmtableFrame.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -140,9 +142,9 @@ IsTable(uint8_t aDisplay)
 }
 
 #define DEBUG_VERIFY_THAT_FRAME_IS(_frame, _expected) \
-  NS_ASSERTION(NS_STYLE_DISPLAY_##_expected == _frame->GetStyleDisplay()->mDisplay, "internal error");
+  NS_ASSERTION(NS_STYLE_DISPLAY_##_expected == _frame->StyleDisplay()->mDisplay, "internal error");
 #define DEBUG_VERIFY_THAT_FRAME_IS_TABLE(_frame) \
-  NS_ASSERTION(IsTable(_frame->GetStyleDisplay()->mDisplay), "internal error");
+  NS_ASSERTION(IsTable(_frame->StyleDisplay()->mDisplay), "internal error");
 #else
 #define DEBUG_VERIFY_THAT_FRAME_IS(_frame, _expected)
 #define DEBUG_VERIFY_THAT_FRAME_IS_TABLE(_frame)
@@ -502,7 +504,7 @@ nsMathMLmtableOuterFrame::AttributeChanged(int32_t  aNameSpaceID,
   // Explicitly request a re-resolve and reflow in our subtree to pick up any changes
   presContext->PresShell()->FrameConstructor()->
     PostRestyleEvent(mContent->AsElement(), eRestyle_Subtree,
-                     nsChangeHint_ReflowFrame);
+                     nsChangeHint_AllReflowHints);
 
   return NS_OK;
 }
@@ -511,8 +513,7 @@ nsIFrame*
 nsMathMLmtableOuterFrame::GetRowFrameAt(nsPresContext* aPresContext,
                                         int32_t         aRowIndex)
 {
-  int32_t rowCount, colCount;
-  GetTableSize(rowCount, colCount);
+  int32_t rowCount = GetRowCount();
 
   // Negative indices mean to find upwards from the end.
   if (aRowIndex < 0) {
@@ -684,7 +685,7 @@ nsMathMLmtableFrame::RestyleTable()
   // Explicitly request a re-resolve and reflow in our subtree to pick up any changes
   PresContext()->PresShell()->FrameConstructor()->
     PostRestyleEvent(mContent->AsElement(), eRestyle_Subtree,
-                     nsChangeHint_ReflowFrame);
+                     nsChangeHint_AllReflowHints);
 }
 
 // --------
@@ -745,7 +746,7 @@ nsMathMLmtrFrame::AttributeChanged(int32_t  aNameSpaceID,
   // Explicitly request a re-resolve and reflow in our subtree to pick up any changes
   presContext->PresShell()->FrameConstructor()->
     PostRestyleEvent(mContent->AsElement(), eRestyle_Subtree,
-                     nsChangeHint_ReflowFrame);
+                     nsChangeHint_AllReflowHints);
 
   return NS_OK;
 }
@@ -771,7 +772,7 @@ nsMathMLmtdFrame::GetRowSpan()
   int32_t rowspan = 1;
 
   // Don't look at the content's rowspan if we're not an mtd or a pseudo cell.
-  if ((mContent->Tag() == nsGkAtoms::mtd_) && !GetStyleContext()->GetPseudo()) {
+  if ((mContent->Tag() == nsGkAtoms::mtd_) && !StyleContext()->GetPseudo()) {
     nsAutoString value;
     mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::rowspan, value);
     if (!value.IsEmpty()) {
@@ -779,7 +780,7 @@ nsMathMLmtdFrame::GetRowSpan()
       rowspan = value.ToInteger(&error);
       if (NS_FAILED(error) || rowspan < 0)
         rowspan = 1;
-      rowspan = NS_MIN(rowspan, MAX_ROWSPAN);
+      rowspan = std::min(rowspan, MAX_ROWSPAN);
     }
   }
   return rowspan;
@@ -791,7 +792,7 @@ nsMathMLmtdFrame::GetColSpan()
   int32_t colspan = 1;
 
   // Don't look at the content's colspan if we're not an mtd or a pseudo cell.
-  if ((mContent->Tag() == nsGkAtoms::mtd_) && !GetStyleContext()->GetPseudo()) {
+  if ((mContent->Tag() == nsGkAtoms::mtd_) && !StyleContext()->GetPseudo()) {
     nsAutoString value;
     mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::columnspan_, value);
     if (!value.IsEmpty()) {

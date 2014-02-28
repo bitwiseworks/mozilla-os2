@@ -579,7 +579,6 @@ nsPlacesExpiration.prototype = {
 
   onVisit: function() {},
   onTitleChanged: function() {},
-  onBeforeDeleteURI: function() {},
   onDeleteURI: function() {},
   onPageChanged: function() {},
   onDeleteVisits: function() {},
@@ -619,7 +618,7 @@ nsPlacesExpiration.prototype = {
       return;
 
     let row;
-    while (row = aResultSet.getNextRow()) {
+    while ((row = aResultSet.getNextRow())) {
       if (!("_expectedResultsCount" in this))
         this._expectedResultsCount = row.getResultByName("expected_results");
       if (this._expectedResultsCount > 0)
@@ -631,7 +630,7 @@ nsPlacesExpiration.prototype = {
       let wholeEntry = row.getResultByName("whole_entry");
       // Dispatch expiration notifications to history.
       this._hsn.notifyOnPageExpired(uri, visitDate, wholeEntry, guid,
-                                    Ci.nsINavHistoryObserver.REASON_EXPIRED);
+                                    Ci.nsINavHistoryObserver.REASON_EXPIRED, 0);
     }
   },
 
@@ -994,4 +993,4 @@ nsPlacesExpiration.prototype = {
 //// Module Registration
 
 let components = [nsPlacesExpiration];
-var NSGetFactory = XPCOMUtils.generateNSGetFactory(components);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

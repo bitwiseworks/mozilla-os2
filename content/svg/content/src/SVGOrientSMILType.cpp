@@ -5,10 +5,9 @@
 
 #include "SVGOrientSMILType.h"
 #include "nsSMILValue.h"
-#include "nsSVGViewBox.h"
 #include "nsSVGAngle.h"
-#include "nsIDOMSVGMarkerElement.h"
 #include "nsDebug.h"
+#include "mozilla/dom/SVGMarkerElement.h"
 #include <math.h>
 
 namespace mozilla {
@@ -21,8 +20,8 @@ SVGOrientSMILType::Init(nsSMILValue& aValue) const
   NS_ABORT_IF_FALSE(aValue.IsNull(), "Unexpected value type");
 
   aValue.mU.mOrient.mAngle = 0.0f;
-  aValue.mU.mOrient.mUnit = nsIDOMSVGAngle::SVG_ANGLETYPE_UNSPECIFIED;
-  aValue.mU.mOrient.mOrientType = nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE;
+  aValue.mU.mOrient.mUnit = SVG_ANGLETYPE_UNSPECIFIED;
+  aValue.mU.mOrient.mOrientType = dom::SVG_MARKER_ORIENT_ANGLE;
   aValue.mType = this;
 }
 
@@ -31,7 +30,7 @@ SVGOrientSMILType::Destroy(nsSMILValue& aValue) const
 {
   NS_PRECONDITION(aValue.mType == this, "Unexpected SMIL value.");
   aValue.mU.mPtr = nullptr;
-  aValue.mType = &nsSMILNullType::sSingleton;
+  aValue.mType = nsSMILNullType::Singleton();
 }
 
 nsresult
@@ -67,8 +66,8 @@ SVGOrientSMILType::Add(nsSMILValue& aDest, const nsSMILValue& aValueToAdd,
                   "Trying to add invalid types");
   NS_PRECONDITION(aValueToAdd.mType == this, "Unexpected source type");
 
-  if (aDest.mU.mOrient.mOrientType != nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE ||
-      aValueToAdd.mU.mOrient.mOrientType != nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE) {
+  if (aDest.mU.mOrient.mOrientType != dom::SVG_MARKER_ORIENT_ANGLE ||
+      aValueToAdd.mU.mOrient.mOrientType != dom::SVG_MARKER_ORIENT_ANGLE) {
     // TODO: it would be nice to be able to add to auto angles
     return NS_ERROR_FAILURE;
   }
@@ -98,8 +97,8 @@ SVGOrientSMILType::ComputeDistance(const nsSMILValue& aFrom,
   NS_PRECONDITION(aFrom.mType == aTo.mType,"Trying to compare different types");
   NS_PRECONDITION(aFrom.mType == this, "Unexpected source type");
 
-  if (aFrom.mU.mOrient.mOrientType != nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE ||
-      aTo.mU.mOrient.mOrientType != nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE) {
+  if (aFrom.mU.mOrient.mOrientType != dom::SVG_MARKER_ORIENT_ANGLE ||
+      aTo.mU.mOrient.mOrientType != dom::SVG_MARKER_ORIENT_ANGLE) {
     // TODO: it would be nice to be able to compute distance with auto angles
     return NS_ERROR_FAILURE;
   }
@@ -127,8 +126,8 @@ SVGOrientSMILType::Interpolate(const nsSMILValue& aStartVal,
                   "Unexpected types for interpolation.");
   NS_PRECONDITION(aResult.mType   == this, "Unexpected result type.");
 
-  if (aStartVal.mU.mOrient.mOrientType != nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE ||
-      aEndVal.mU.mOrient.mOrientType != nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE) {
+  if (aStartVal.mU.mOrient.mOrientType != dom::SVG_MARKER_ORIENT_ANGLE ||
+      aEndVal.mU.mOrient.mOrientType != dom::SVG_MARKER_ORIENT_ANGLE) {
     // TODO: it would be nice to be able to handle auto angles too.
     return NS_ERROR_FAILURE;
   }

@@ -3,7 +3,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-llvm_revision = "161022"
+llvm_revision = "170890"
 moz_version = "moz0"
 
 ##############################################
@@ -14,6 +14,9 @@ import shutil
 import tarfile
 import subprocess
 import platform
+import sys
+import json
+import collections
 
 def check_run(args):
     r = subprocess.call(args)
@@ -30,12 +33,13 @@ def patch(patch, plevel, srcdir):
     check_run(['patch', '-d', srcdir, '-p%s' % plevel, '-i', patch, '--fuzz=0',
                '-s'])
 
-def build_package(package_source_dir, package_build_dir, configure_args):
+def build_package(package_source_dir, package_build_dir, configure_args,
+                  make_args):
     if not os.path.exists(package_build_dir):
         os.mkdir(package_build_dir)
     run_in(package_build_dir,
            ["%s/configure" % package_source_dir] + configure_args)
-    run_in(package_build_dir, ["make", "-j8"])
+    run_in(package_build_dir, ["make", "-j8"] + make_args)
     run_in(package_build_dir, ["make", "install"])
 
 def with_env(env, f):
@@ -70,6 +74,22 @@ def build_one_stage(env, stage_dir, is_stage_one):
         build_one_stage_aux(stage_dir, is_stage_one)
     with_env(env, f)
 
+def build_tooltool_manifest():
+    basedir = os.path.split(os.path.realpath(sys.argv[0]))[0]
+    tooltool = basedir + '/tooltool.py'
+    setup = basedir + '/setup.sh'
+    manifest = 'clang.manifest'
+    check_run(['python', tooltool, '-m', manifest, 'add',
+               setup, 'clang.tar.bz2'])
+    data = json.load(file(manifest), object_pairs_hook=collections.OrderedDict)
+    data = [{'clang_version' : 'r%s' % llvm_revision }] + data
+    out = file(manifest,'w')
+    json.dump(data, out, indent=0)
+    out.write('\n')
+
+    assert data[2]['filename'] == 'clang.tar.bz2'
+    os.rename('clang.tar.bz2', data[2]['digest'])
+
 isDarwin = platform.system() == "Darwin"
 
 def build_one_stage_aux(stage_dir, is_stage_one):
@@ -78,32 +98,38 @@ def build_one_stage_aux(stage_dir, is_stage_one):
     build_dir = stage_dir + "/build"
     inst_dir = stage_dir + "/clang"
 
+    targets = ["x86", "x86_64"]
+    # The Darwin equivalents of binutils appear to have intermittent problems
+    # with objects in compiler-rt that are compiled for arm.  Since the arm
+    # support is only necessary for iOS (which we don't support), only enable
+    # arm support on Linux.
+    if not isDarwin:
+        targets.append("arm")
+
     configure_opts = ["--enable-optimized",
+                      "--enable-targets=" + ",".join(targets),
                       "--disable-assertions",
                       "--prefix=%s" % inst_dir,
-                      "--with-gcc-toolchain=/tools/gcc-4.5-0moz3"]
-    if is_stage_one and not isDarwin:
-        configure_opts.append("--with-optimize-option=-O0")
-
-    build_package(llvm_source_dir, build_dir, configure_opts)
+                      "--with-gcc-toolchain=/tools/gcc-4.7.3-0moz1"]
+    build_package(llvm_source_dir, build_dir, configure_opts,
+                  [])
 
 if isDarwin:
     os.environ['MACOSX_DEPLOYMENT_TARGET'] = '10.7'
 
 if not os.path.exists(source_dir):
     os.makedirs(source_dir)
-    svn_co("http://llvm.org/svn/llvm-project/llvm/trunk",
+    svn_co("http://llvm.org/svn/llvm-project/llvm/branches/release_32",
            llvm_source_dir, llvm_revision)
-    svn_co("http://llvm.org/svn/llvm-project/cfe/trunk",
+    svn_co("http://llvm.org/svn/llvm-project/cfe/branches/release_32",
            clang_source_dir, llvm_revision)
-    svn_co("http://llvm.org/svn/llvm-project/compiler-rt/trunk",
+    svn_co("http://llvm.org/svn/llvm-project/compiler-rt/branches/release_32",
            compiler_rt_source_dir, llvm_revision)
     os.symlink("../../clang", llvm_source_dir + "/tools/clang")
     os.symlink("../../compiler-rt", llvm_source_dir + "/projects/compiler-rt")
+    patch("llvm-debug-frame.patch", 1, llvm_source_dir)
     if not isDarwin:
-        patch("old-ld-hack.patch", 1, llvm_source_dir)
-        patch("compiler-rt-gnu89-inline.patch", 0, compiler_rt_source_dir)
-        patch("no-sse-on-linux.patch", 1, clang_source_dir)
+        patch("no-sse-on-linux.patch", 0, clang_source_dir)
 
 if os.path.exists(build_dir):
     shutil.rmtree(build_dir)
@@ -120,15 +146,12 @@ if isDarwin:
 else:
     extra_cflags = "-static-libgcc"
     extra_cxxflags = "-static-libgcc -static-libstdc++"
-    cc = "/tools/gcc-4.5-0moz3/bin/gcc %s" % extra_cflags
-    cxx = "/tools/gcc-4.5-0moz3/bin/g++ %s" % extra_cxxflags
+    cc = "/usr/bin/gcc"
+    cxx = "/usr/bin/g++"
 
 build_one_stage({"CC"  : cc,
                  "CXX" : cxx },
                 stage1_dir, True)
-
-if not isDarwin:
-    extra_cflags += " -fgnu89-inline"
 
 stage2_dir = build_dir + '/stage2'
 build_one_stage({"CC"  : stage1_inst_dir + "/bin/clang %s" % extra_cflags,
@@ -136,3 +159,4 @@ build_one_stage({"CC"  : stage1_inst_dir + "/bin/clang %s" % extra_cflags,
                 stage2_dir, False)
 
 build_tar_package("tar", "clang.tar.bz2", stage2_dir, "clang")
+build_tooltool_manifest()

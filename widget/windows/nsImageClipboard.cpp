@@ -113,13 +113,17 @@ nsImageToClipboard::CalcSpanLength(uint32_t aWidth, uint32_t aBitCount)
 nsresult
 nsImageToClipboard::CreateFromImage ( imgIContainer* inImage, HANDLE* outBitmap )
 {
+    nsresult rv;
     *outBitmap = nullptr;
 
-    nsRefPtr<gfxImageSurface> frame;
-    nsresult rv = inImage->CopyFrame(imgIContainer::FRAME_CURRENT,
-                                     imgIContainer::FLAG_SYNC_DECODE,
-                                     getter_AddRefs(frame));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsRefPtr<gfxASurface> surface;
+    inImage->GetFrame(imgIContainer::FRAME_CURRENT,
+                      imgIContainer::FLAG_SYNC_DECODE,
+                      getter_AddRefs(surface));
+    NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
+
+    nsRefPtr<gfxImageSurface> frame(surface->GetAsReadableARGB32ImageSurface());
+    NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
 
     nsCOMPtr<imgIEncoder> encoder = do_CreateInstance("@mozilla.org/image/encoder;2?type=image/bmp", &rv);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -127,9 +131,9 @@ nsImageToClipboard::CreateFromImage ( imgIContainer* inImage, HANDLE* outBitmap 
     uint32_t format;
     nsAutoString options;
     if (mWantDIBV5) {
-      options.AppendASCII("version=5;bpp=");
+      options.AppendLiteral("version=5;bpp=");
     } else {
-      options.AppendASCII("version=3;bpp=");
+      options.AppendLiteral("version=3;bpp=");
     }
     switch (frame->Format()) {
     case gfxASurface::ImageFormatARGB32:
@@ -207,7 +211,7 @@ nsImageFromClipboard ::GetEncodedImageStream (unsigned char * aClipboardData, co
     rv = ConvertColorBitMap((unsigned char *) (pGlobal + header->bmiHeader.biSize), header, rgbData);
     // if that succeeded, encode the bitmap as aMIMEFormat data. Don't return early or we risk leaking rgbData
     if (NS_SUCCEEDED(rv)) {
-      nsCAutoString encoderCID(NS_LITERAL_CSTRING("@mozilla.org/image/encoder;2?type="));
+      nsAutoCString encoderCID(NS_LITERAL_CSTRING("@mozilla.org/image/encoder;2?type="));
 
       // Map image/jpg to image/jpeg (which is how the encoder is registered).
       if (strcmp(aMIMEFormat, kJPGImageMime) == 0)

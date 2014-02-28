@@ -10,61 +10,11 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= widget
 LIBRARY_NAME	= widget_qt
 EXPORT_LIBRARY = 1
 IS_COMPONENT    = 1
 MODULE_NAME	= nsWidgetQtModule
-GRE_MODULE	= 1
 LIBXUL_LIBRARY	= 1
-
-
-MOCSRCS = \
-		moc_moziqwidget.cpp \
-		moc_mozqwidget.cpp \
-		moc_nsAppShell.cpp \
-		$(NULL)
-
-ifdef MOZ_ENABLE_CONTENTMANAGER
-MOCSRCS += moc_nsMFilePicker.cpp \
-		$(NULL)
-CPPSRCS	+= nsMFilePicker.cpp \
-		$(NULL)
-endif
-
-CPPSRCS	+= \
-		$(MOCSRCS) \
-		nsAppShell.cpp \
-		nsWidgetFactory.cpp \
-		nsWindow.cpp \
-		nsLookAndFeel.cpp \
-		nsScreenQt.cpp \
-		nsScreenManagerQt.cpp \
-		nsQtKeyUtils.cpp \
-		nsClipboard.cpp \
-		nsBidiKeyboard.cpp \
-		nsIdleServiceQt.cpp \
-		nsDragService.cpp \
-		nsNativeThemeQt.cpp \
-		mozqwidget.cpp \
-		mozSwipeGesture.cpp \
-		nsSound.cpp \
-		nsFilePicker.cpp \
-		nsPrintOptionsQt.cpp \
-		nsPrintSettingsQt.cpp \
-		nsPrintDialogQt.cpp \
-		nsDeviceContextSpecQt.cpp \
-		mozqglwidgetwrapper.cpp \
-		$(NULL)
-
-EXPORTS		= \
-		nsQtKeyUtils.h \
-		$(NULL)
-
-ifdef MOZ_ENABLE_QTMOBILITY
-MOCSRCS += moc_mozqorientationsensorfilter.cpp
-CPPSRCS += mozqorientationsensorfilter.cpp
-endif
 
 SHARED_LIBRARY_LIBS = ../xpwidgets/libxpwidgets_s.a
 
@@ -72,8 +22,6 @@ SHARED_LIBRARY_LIBS = ../xpwidgets/libxpwidgets_s.a
 ifneq (qt,$(MOZ_WIDGET_TOOLKIT))
 INACTIVE_COMPONENT = 1
 endif
-
-DIRS += faststartupqt
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
@@ -102,6 +50,7 @@ endif
 endif
 
 LOCAL_INCLUDES	+= \
+		   -I$(topsrcdir)/widget/shared \
 		   -I$(topsrcdir)/widget/xpwidgets \
 		   -I$(topsrcdir)/widget/qt/faststartupqt \
 		   -I$(srcdir) \

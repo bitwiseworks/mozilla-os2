@@ -38,10 +38,6 @@ body {
   -moz-box-pack: end;
 }
 
-#header:focus {
-  outline: none;
-}
-
 #main {
   margin: 0 10px 10px 10px;
   -moz-box-sizing: border-box;
@@ -50,6 +46,16 @@ body {
   border-width: 1px;
   font: 10px/12px monospace;
 }
+
+@media (min-width: 320px) {
+  body {
+    position: absolute;
+    width: 320px;
+    left: -160px;
+    margin-left: 50%;
+  }
+}
+
 
 #margins {
   padding: 28px;

@@ -39,7 +39,7 @@ nsTitleBarFrame::nsTitleBarFrame(nsIPresShell* aPresShell, nsStyleContext* aCont
   UpdateMouseThrough();
 }
 
-NS_IMETHODIMP
+void
 nsTitleBarFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
                                              const nsRect&           aDirtyRect,
                                              const nsDisplayListSet& aLists)
@@ -48,9 +48,9 @@ nsTitleBarFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
   if (aBuilder->IsForEventDelivery()) {
     if (!mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::allowevents,
                                nsGkAtoms::_true, eCaseMatters))
-      return NS_OK;
+      return;
   }
-  return nsBoxFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
+  nsBoxFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
 }
 
 NS_IMETHODIMP
@@ -172,6 +172,5 @@ nsTitleBarFrame::MouseClicked(nsPresContext* aPresContext, nsGUIEvent* aEvent)
 {
   // Execute the oncommand event handler.
   nsContentUtils::DispatchXULCommand(mContent,
-                                     aEvent ?
-                                       NS_IS_TRUSTED_EVENT(aEvent) : false);
+                                     aEvent && aEvent->mFlags.mIsTrusted);
 }

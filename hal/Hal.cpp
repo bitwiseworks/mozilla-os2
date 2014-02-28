@@ -11,7 +11,9 @@
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/Observer.h"
+#include "nsIDocument.h"
 #include "nsIDOMDocument.h"
+#include "nsPIDOMWindow.h"
 #include "nsIDOMWindow.h"
 #include "mozilla/Services.h"
 #include "nsIWebNavigation.h"
@@ -21,6 +23,8 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "WindowIdentifier.h"
 #include "mozilla/dom/ScreenOrientation.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -28,19 +32,25 @@
 #endif
 
 using namespace mozilla::services;
+using namespace mozilla::dom;
 
 #define PROXY_IF_SANDBOXED(_call)                 \
   do {                                            \
     if (InSandbox()) {                            \
-      hal_sandbox::_call;                         \
+      if (!hal_sandbox::HalChildDestroyed()) {    \
+        hal_sandbox::_call;                       \
+      }                                           \
     } else {                                      \
       hal_impl::_call;                            \
     }                                             \
   } while (0)
 
-#define RETURN_PROXY_IF_SANDBOXED(_call)          \
+#define RETURN_PROXY_IF_SANDBOXED(_call, defValue)\
   do {                                            \
     if (InSandbox()) {                            \
+      if (hal_sandbox::HalChildDestroyed()) {     \
+        return defValue;                          \
+      }                                           \
       return hal_sandbox::_call;                  \
     } else {                                      \
       return hal_impl::_call;                     \
@@ -50,7 +60,15 @@ using namespace mozilla::services;
 namespace mozilla {
 namespace hal {
 
-PRLogModuleInfo *sHalLog = PR_LOG_DEFINE("hal");
+PRLogModuleInfo *
+GetHalLog()
+{
+  static PRLogModuleInfo *sHalLog;
+  if (!sHalLog) {
+    sHalLog = PR_NewLogModule("hal");
+  }
+  return sHalLog;
+}
 
 namespace {
 
@@ -66,18 +84,22 @@ InSandbox()
   return GeckoProcessType_Content == XRE_GetProcessType();
 }
 
-bool
-WindowIsActive(nsIDOMWindow *window)
+void
+AssertMainProcess()
 {
+  MOZ_ASSERT(GeckoProcessType_Default == XRE_GetProcessType());
+}
+
+bool
+WindowIsActive(nsIDOMWindow* aWindow)
+{
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aWindow);
   NS_ENSURE_TRUE(window, false);
 
-  nsCOMPtr<nsIDOMDocument> doc;
-  window->GetDocument(getter_AddRefs(doc));
-  NS_ENSURE_TRUE(doc, false);
+  nsIDocument* document = window->GetDoc();
+  NS_ENSURE_TRUE(document, false);
 
-  bool hidden = true;
-  doc->GetMozHidden(&hidden);
-  return !hidden;
+  return !document->Hidden();
 }
 
 StaticAutoPtr<WindowIdentifier::IDArrayType> gLastIDToVibrate;
@@ -112,20 +134,17 @@ Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier &id)
     return;
   }
 
-  if (InSandbox()) {
-    hal_sandbox::Vibrate(pattern, id);
-  }
-  else {
-    if (!gLastIDToVibrate)
+  if (!InSandbox()) {
+    if (!gLastIDToVibrate) {
       InitLastIDToVibrate();
+    }
     *gLastIDToVibrate = id.AsArray();
-
-    HAL_LOG(("Vibrate: Forwarding to hal_impl."));
-
-    // hal_impl doesn't need |id|. Send it an empty id, which will
-    // assert if it's used.
-    hal_impl::Vibrate(pattern, WindowIdentifier());
   }
+
+  // Don't forward our ID if we are not in the sandbox, because hal_impl 
+  // doesn't need it, and we don't want it to be tempted to read it.  The
+  // empty identifier will assert if it's used.
+  PROXY_IF_SANDBOXED(Vibrate(pattern, InSandbox() ? id : WindowIdentifier()));
 }
 
 void
@@ -156,15 +175,11 @@ CancelVibrate(const WindowIdentifier &id)
   // to start a vibration, and only accepts cancellation requests from
   // the same window.  All other cancellation requests are ignored.
 
-  if (InSandbox()) {
-    hal_sandbox::CancelVibrate(id);
-  }
-  else if (gLastIDToVibrate && *gLastIDToVibrate == id.AsArray()) {
-    // Don't forward our ID to hal_impl. It doesn't need it, and we
-    // don't want it to be tempted to read it.  The empty identifier
-    // will assert if it's used.
-    HAL_LOG(("CancelVibrate: Forwarding to hal_impl."));
-    hal_impl::CancelVibrate(WindowIdentifier());
+  if (InSandbox() || (gLastIDToVibrate && *gLastIDToVibrate == id.AsArray())) {
+    // Don't forward our ID if we are not in the sandbox, because hal_impl 
+    // doesn't need it, and we don't want it to be tempted to read it.  The
+    // empty identifier will assert if it's used.
+    PROXY_IF_SANDBOXED(CancelVibrate(InSandbox() ? id : WindowIdentifier()));
   }
 }
 
@@ -185,22 +200,11 @@ public:
   }
 
   void RemoveObserver(Observer<InfoType>* aObserver) {
-    // If mObservers is null, that means there are no observers.
-    // In addition, if RemoveObserver() returns false, that means we didn't
-    // find the observer.
-    // In both cases, that is a logical error we want to make sure the developer
-    // notices.
-
-    MOZ_ASSERT(mObservers);
-
-#ifndef DEBUG
-    if (!mObservers) {
+    bool removed = mObservers && mObservers->RemoveObserver(aObserver);
+    if (!removed) {
+      NS_WARNING("RemoveObserver() called for unregistered observer");
       return;
     }
-#endif
-
-    DebugOnly<bool> removed = mObservers->RemoveObserver(aObserver);
-    MOZ_ASSERT(removed);
 
     if (mObservers->Length() == 0) {
       DisableNotifications();
@@ -208,7 +212,7 @@ public:
       OnNotificationsDisabled();
 
       delete mObservers;
-      mObservers = 0;
+      mObservers = nullptr;
     }
   }
 
@@ -368,7 +372,7 @@ NotifyBatteryChange(const BatteryInformation& aInfo)
 bool GetScreenEnabled()
 {
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(GetScreenEnabled());
+  RETURN_PROXY_IF_SANDBOXED(GetScreenEnabled(), false);
 }
 
 void SetScreenEnabled(bool enabled)
@@ -384,7 +388,7 @@ bool GetCpuSleepAllowed()
   // what the battery API does. But since this is only used by
   // privileged interface, the synchronous getter is OK here.
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(GetCpuSleepAllowed());
+  RETURN_PROXY_IF_SANDBOXED(GetCpuSleepAllowed(), true);
 }
 
 void SetCpuSleepAllowed(bool allowed)
@@ -396,7 +400,7 @@ void SetCpuSleepAllowed(bool allowed)
 double GetScreenBrightness()
 {
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(GetScreenBrightness());
+  RETURN_PROXY_IF_SANDBOXED(GetScreenBrightness(), 0);
 }
 
 void SetScreenBrightness(double brightness)
@@ -405,21 +409,88 @@ void SetScreenBrightness(double brightness)
   PROXY_IF_SANDBOXED(SetScreenBrightness(clamped(brightness, 0.0, 1.0)));
 }
 
-bool SetLight(LightType light, const hal::LightConfiguration& aConfig)
+bool SetLight(LightType light, const LightConfiguration& aConfig)
 {
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(SetLight(light, aConfig));
+  RETURN_PROXY_IF_SANDBOXED(SetLight(light, aConfig), false);
 }
 
-bool GetLight(LightType light, hal::LightConfiguration* aConfig)
+bool GetLight(LightType light, LightConfiguration* aConfig)
 {
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(GetLight(light, aConfig));
+  RETURN_PROXY_IF_SANDBOXED(GetLight(light, aConfig), false);
 }
 
+class SystemClockChangeObserversManager : public ObserversManager<int64_t>
+{
+protected:
+  void EnableNotifications() {
+    PROXY_IF_SANDBOXED(EnableSystemClockChangeNotifications());
+  }
+
+  void DisableNotifications() {
+    PROXY_IF_SANDBOXED(DisableSystemClockChangeNotifications());
+  }
+};
+
+static SystemClockChangeObserversManager sSystemClockChangeObservers;
+
+void
+RegisterSystemClockChangeObserver(SystemClockChangeObserver* aObserver)
+{
+  AssertMainThread();
+  sSystemClockChangeObservers.AddObserver(aObserver);
+}
+
+void
+UnregisterSystemClockChangeObserver(SystemClockChangeObserver* aObserver)
+{
+  AssertMainThread();
+  sSystemClockChangeObservers.RemoveObserver(aObserver);
+}
+
+void
+NotifySystemClockChange(const int64_t& aClockDeltaMS)
+{
+  sSystemClockChangeObservers.BroadcastInformation(aClockDeltaMS);
+}
+
+class SystemTimezoneChangeObserversManager : public ObserversManager<SystemTimezoneChangeInformation>
+{
+protected:
+  void EnableNotifications() {
+    PROXY_IF_SANDBOXED(EnableSystemTimezoneChangeNotifications());
+  }
+
+  void DisableNotifications() {
+    PROXY_IF_SANDBOXED(DisableSystemTimezoneChangeNotifications());
+  }
+};
+
+static SystemTimezoneChangeObserversManager sSystemTimezoneChangeObservers;
+
+void
+RegisterSystemTimezoneChangeObserver(SystemTimezoneChangeObserver* aObserver)
+{
+  AssertMainThread();
+  sSystemTimezoneChangeObservers.AddObserver(aObserver);
+}
+
+void
+UnregisterSystemTimezoneChangeObserver(SystemTimezoneChangeObserver* aObserver)
+{
+  AssertMainThread();
+  sSystemTimezoneChangeObservers.RemoveObserver(aObserver);
+}
+
+void
+NotifySystemTimezoneChange(const SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo)
+{
+  sSystemTimezoneChangeObservers.BroadcastInformation(aSystemTimezoneChangeInfo);
+}
 
 void 
-AdjustSystemClock(int32_t aDeltaMilliseconds)
+AdjustSystemClock(int64_t aDeltaMilliseconds)
 {
   AssertMainThread();
   PROXY_IF_SANDBOXED(AdjustSystemClock(aDeltaMilliseconds));
@@ -430,6 +501,13 @@ SetTimezone(const nsCString& aTimezoneSpec)
 {
   AssertMainThread();
   PROXY_IF_SANDBOXED(SetTimezone(aTimezoneSpec));
+}
+
+nsCString
+GetTimezone()
+{
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetTimezone(), nsCString(""));
 }
 
 void
@@ -445,14 +523,15 @@ DisableSensorNotifications(SensorType aSensor) {
 }
 
 typedef mozilla::ObserverList<SensorData> SensorObserverList;
-static SensorObserverList* gSensorObservers = NULL;
+static SensorObserverList* gSensorObservers = nullptr;
 
 static SensorObserverList &
 GetSensorObservers(SensorType sensor_type) {
   MOZ_ASSERT(sensor_type < NUM_SENSOR_TYPE);
   
-  if(gSensorObservers == NULL)
+  if(!gSensorObservers) {
     gSensorObservers = new SensorObserverList[NUM_SENSOR_TYPE];
+  }
   return gSensorObservers[sensor_type];
 }
 
@@ -470,12 +549,14 @@ RegisterSensorObserver(SensorType aSensor, ISensorObserver *aObserver) {
 
 void
 UnregisterSensorObserver(SensorType aSensor, ISensorObserver *aObserver) {
-  SensorObserverList &observers = GetSensorObservers(aSensor);
-
   AssertMainThread();
-  
-  observers.RemoveObserver(aObserver);
-  if (observers.Length() > 0) {
+
+  if (!gSensorObservers) {
+    return;
+  }
+
+  SensorObserverList &observers = GetSensorObservers(aSensor);
+  if (!observers.RemoveObserver(aObserver) || observers.Length() > 0) {
     return;
   }
   DisableSensorNotifications(aSensor);
@@ -529,14 +610,33 @@ NotifyNetworkChange(const NetworkInformation& aInfo)
 
 void Reboot()
 {
+  AssertMainProcess();
   AssertMainThread();
   PROXY_IF_SANDBOXED(Reboot());
 }
 
 void PowerOff()
 {
+  AssertMainProcess();
   AssertMainThread();
   PROXY_IF_SANDBOXED(PowerOff());
+}
+
+void StartForceQuitWatchdog(ShutdownMode aMode, int32_t aTimeoutSecs)
+{
+  AssertMainProcess();
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(StartForceQuitWatchdog(aMode, aTimeoutSecs));
+}
+
+void StartMonitoringGamepadStatus()
+{
+  PROXY_IF_SANDBOXED(StartMonitoringGamepadStatus());
+}
+
+void StopMonitoringGamepadStatus()
+{
+  PROXY_IF_SANDBOXED(StopMonitoringGamepadStatus());
 }
 
 void
@@ -554,16 +654,24 @@ UnregisterWakeLockObserver(WakeLockObserver* aObserver)
 }
 
 void
-ModifyWakeLock(const nsAString &aTopic,
-               hal::WakeLockControl aLockAdjust,
-               hal::WakeLockControl aHiddenAdjust)
+ModifyWakeLock(const nsAString& aTopic,
+               WakeLockControl aLockAdjust,
+               WakeLockControl aHiddenAdjust,
+               uint64_t aProcessID /* = CONTENT_PROCESS_ID_UNKNOWN */)
 {
   AssertMainThread();
-  PROXY_IF_SANDBOXED(ModifyWakeLock(aTopic, aLockAdjust, aHiddenAdjust));
+
+  if (aProcessID == CONTENT_PROCESS_ID_UNKNOWN) {
+    aProcessID = InSandbox() ? ContentChild::GetSingleton()->GetID() :
+                               CONTENT_PROCESS_ID_MAIN;
+  }
+
+  PROXY_IF_SANDBOXED(ModifyWakeLock(aTopic, aLockAdjust,
+                                    aHiddenAdjust, aProcessID));
 }
 
 void
-GetWakeLockInfo(const nsAString &aTopic, WakeLockInformation *aWakeLockInfo)
+GetWakeLockInfo(const nsAString& aTopic, WakeLockInformation* aWakeLockInfo)
 {
   AssertMainThread();
   PROXY_IF_SANDBOXED(GetWakeLockInfo(aTopic, aWakeLockInfo));
@@ -608,7 +716,7 @@ bool
 LockScreenOrientation(const dom::ScreenOrientation& aOrientation)
 {
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(LockScreenOrientation(aOrientation));
+  RETURN_PROXY_IF_SANDBOXED(LockScreenOrientation(aOrientation), false);
 }
 
 void
@@ -619,21 +727,21 @@ UnlockScreenOrientation()
 }
 
 void
-EnableSwitchNotifications(hal::SwitchDevice aDevice) {
+EnableSwitchNotifications(SwitchDevice aDevice) {
   AssertMainThread();
   PROXY_IF_SANDBOXED(EnableSwitchNotifications(aDevice));
 }
 
 void
-DisableSwitchNotifications(hal::SwitchDevice aDevice) {
+DisableSwitchNotifications(SwitchDevice aDevice) {
   AssertMainThread();
   PROXY_IF_SANDBOXED(DisableSwitchNotifications(aDevice));
 }
 
-hal::SwitchState GetCurrentSwitchState(hal::SwitchDevice aDevice)
+SwitchState GetCurrentSwitchState(SwitchDevice aDevice)
 {
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(GetCurrentSwitchState(aDevice));
+  RETURN_PROXY_IF_SANDBOXED(GetCurrentSwitchState(aDevice), SWITCH_STATE_UNKNOWN);
 }
 
 typedef mozilla::ObserverList<SwitchEvent> SwitchObserverList;
@@ -641,7 +749,7 @@ typedef mozilla::ObserverList<SwitchEvent> SwitchObserverList;
 static SwitchObserverList *sSwitchObserverLists = NULL;
 
 static SwitchObserverList&
-GetSwitchObserverList(hal::SwitchDevice aDevice) {
+GetSwitchObserverList(SwitchDevice aDevice) {
   MOZ_ASSERT(0 <= aDevice && aDevice < NUM_SWITCH_DEVICE); 
   if (sSwitchObserverLists == NULL) {
     sSwitchObserverLists = new SwitchObserverList[NUM_SWITCH_DEVICE];
@@ -662,7 +770,7 @@ ReleaseObserversIfNeeded() {
 }
 
 void
-RegisterSwitchObserver(hal::SwitchDevice aDevice, hal::SwitchObserver *aObserver)
+RegisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver)
 {
   AssertMainThread();
   SwitchObserverList& observer = GetSwitchObserverList(aDevice);
@@ -673,19 +781,25 @@ RegisterSwitchObserver(hal::SwitchDevice aDevice, hal::SwitchObserver *aObserver
 }
 
 void
-UnregisterSwitchObserver(hal::SwitchDevice aDevice, hal::SwitchObserver *aObserver)
+UnregisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver)
 {
   AssertMainThread();
-  SwitchObserverList& observer = GetSwitchObserverList(aDevice);
-  observer.RemoveObserver(aObserver);
-  if (observer.Length() == 0) {
-    DisableSwitchNotifications(aDevice);
-    ReleaseObserversIfNeeded();
+
+  if (!sSwitchObserverLists) {
+    return;
   }
+
+  SwitchObserverList& observer = GetSwitchObserverList(aDevice);
+  if (!observer.RemoveObserver(aObserver) || observer.Length() > 0) {
+    return;
+  }
+
+  DisableSwitchNotifications(aDevice);
+  ReleaseObserversIfNeeded();
 }
 
 void
-NotifySwitchChange(const hal::SwitchEvent& aEvent)
+NotifySwitchChange(const SwitchEvent& aEvent)
 {
   // When callback this notification, main thread may call unregister function
   // first. We should check if this pointer is valid.
@@ -705,14 +819,14 @@ RegisterTheOneAlarmObserver(AlarmObserver* aObserver)
   MOZ_ASSERT(!sAlarmObserver);
 
   sAlarmObserver = aObserver;
-  RETURN_PROXY_IF_SANDBOXED(EnableAlarm());
+  RETURN_PROXY_IF_SANDBOXED(EnableAlarm(), false);
 }
 
 void
 UnregisterTheOneAlarmObserver()
 {
   if (sAlarmObserver) {
-    sAlarmObserver = NULL;
+    sAlarmObserver = nullptr;
     PROXY_IF_SANDBOXED(DisableAlarm());
   }
 }
@@ -730,18 +844,336 @@ SetAlarm(int32_t aSeconds, int32_t aNanoseconds)
 {
   // It's pointless to program an alarm nothing is going to observe ...
   MOZ_ASSERT(sAlarmObserver);
-  RETURN_PROXY_IF_SANDBOXED(SetAlarm(aSeconds, aNanoseconds));
+  RETURN_PROXY_IF_SANDBOXED(SetAlarm(aSeconds, aNanoseconds), false);
 }
 
 void
-SetProcessPriority(int aPid, ProcessPriority aPriority)
+SetProcessPriority(int aPid,
+                   ProcessPriority aPriority,
+                   ProcessCPUPriority aCPUPriority)
 {
-  if (InSandbox()) {
-    hal_sandbox::SetProcessPriority(aPid, aPriority);
+  // n.b. The sandboxed implementation crashes; SetProcessPriority works only
+  // from the main process.
+  PROXY_IF_SANDBOXED(SetProcessPriority(aPid, aPriority, aCPUPriority));
+}
+
+// From HalTypes.h.
+const char*
+ProcessPriorityToString(ProcessPriority aPriority)
+{
+  switch (aPriority) {
+  case PROCESS_PRIORITY_MASTER:
+    return "MASTER";
+  case PROCESS_PRIORITY_FOREGROUND_HIGH:
+    return "FOREGROUND_HIGH";
+  case PROCESS_PRIORITY_FOREGROUND:
+    return "FOREGROUND";
+  case PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE:
+    return "BACKGROUND_PERCEIVABLE";
+  case PROCESS_PRIORITY_BACKGROUND_HOMESCREEN:
+    return "BACKGROUND_HOMESCREEN";
+  case PROCESS_PRIORITY_BACKGROUND:
+    return "BACKGROUND";
+  case PROCESS_PRIORITY_UNKNOWN:
+    return "UNKNOWN";
+  default:
+    MOZ_ASSERT(false);
+    return "???";
   }
-  else {
-    hal_impl::SetProcessPriority(aPid, aPriority);
+}
+
+// From HalTypes.h.
+const char*
+ProcessPriorityToString(ProcessPriority aPriority,
+                        ProcessCPUPriority aCPUPriority)
+{
+  // Sorry this is ugly.  At least it's all in one place.
+  //
+  // We intentionally fall through if aCPUPriority is invalid; we won't hit any
+  // of the if statements further down, so it's OK.
+
+  switch (aPriority) {
+  case PROCESS_PRIORITY_MASTER:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "MASTER:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "MASTER:CPU_LOW";
+    }
+  case PROCESS_PRIORITY_FOREGROUND_HIGH:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "FOREGROUND_HIGH:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "FOREGROUND_HIGH:CPU_LOW";
+    }
+  case PROCESS_PRIORITY_FOREGROUND:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "FOREGROUND:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "FOREGROUND:CPU_LOW";
+    }
+  case PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "BACKGROUND_PERCEIVABLE:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "BACKGROUND_PERCEIVABLE:CPU_LOW";
+    }
+  case PROCESS_PRIORITY_BACKGROUND_HOMESCREEN:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "BACKGROUND_HOMESCREEN:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "BACKGROUND_HOMESCREEN:CPU_LOW";
+    }
+  case PROCESS_PRIORITY_BACKGROUND:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "BACKGROUND:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "BACKGROUND:CPU_LOW";
+    }
+  case PROCESS_PRIORITY_UNKNOWN:
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_NORMAL) {
+      return "UNKNOWN:CPU_NORMAL";
+    }
+    if (aCPUPriority == PROCESS_CPU_PRIORITY_LOW) {
+      return "UNKNOWN:CPU_LOW";
+    }
+  default:
+    // Fall through.  (|default| is here to silence warnings.)
+    break;
   }
+
+  MOZ_ASSERT(false);
+  return "???";
+}
+
+static StaticAutoPtr<ObserverList<FMRadioOperationInformation> > sFMRadioObservers;
+
+static void
+InitializeFMRadioObserver()
+{
+  if (!sFMRadioObservers) {
+    sFMRadioObservers = new ObserverList<FMRadioOperationInformation>;
+    ClearOnShutdown(&sFMRadioObservers);
+  }
+}
+
+void
+RegisterFMRadioObserver(FMRadioObserver* aFMRadioObserver) {
+  AssertMainThread();
+  InitializeFMRadioObserver();
+  sFMRadioObservers->AddObserver(aFMRadioObserver);
+}
+
+void
+UnregisterFMRadioObserver(FMRadioObserver* aFMRadioObserver) {
+  AssertMainThread();
+  InitializeFMRadioObserver();
+  sFMRadioObservers->RemoveObserver(aFMRadioObserver);
+}
+
+void
+NotifyFMRadioStatus(const FMRadioOperationInformation& aFMRadioState) {
+  InitializeFMRadioObserver();
+  sFMRadioObservers->Broadcast(aFMRadioState);
+}
+
+void
+EnableFMRadio(const FMRadioSettings& aInfo) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(EnableFMRadio(aInfo));
+}
+
+void
+DisableFMRadio() {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(DisableFMRadio());
+}
+
+void
+FMRadioSeek(const FMRadioSeekDirection& aDirection) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(FMRadioSeek(aDirection));
+}
+
+void
+GetFMRadioSettings(FMRadioSettings* aInfo) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(GetFMRadioSettings(aInfo));
+}
+
+void
+SetFMRadioFrequency(const uint32_t aFrequency) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(SetFMRadioFrequency(aFrequency));
+}
+
+uint32_t
+GetFMRadioFrequency() {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetFMRadioFrequency(), 0);
+}
+
+bool
+IsFMRadioOn() {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(IsFMRadioOn(), false);
+}
+
+uint32_t
+GetFMRadioSignalStrength() {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetFMRadioSignalStrength(), 0);
+}
+
+void
+CancelFMRadioSeek() {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(CancelFMRadioSeek());
+}
+
+FMRadioSettings
+GetFMBandSettings(FMRadioCountry aCountry) {
+  FMRadioSettings settings;
+
+  switch (aCountry) {
+    case FM_RADIO_COUNTRY_US:
+    case FM_RADIO_COUNTRY_EU:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 87800;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_JP_STANDARD:
+      settings.upperLimit() = 76000;
+      settings.lowerLimit() = 90000;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_CY:
+    case FM_RADIO_COUNTRY_DE:
+    case FM_RADIO_COUNTRY_DK:
+    case FM_RADIO_COUNTRY_ES:
+    case FM_RADIO_COUNTRY_FI:
+    case FM_RADIO_COUNTRY_FR:
+    case FM_RADIO_COUNTRY_HU:
+    case FM_RADIO_COUNTRY_IR:
+    case FM_RADIO_COUNTRY_IT:
+    case FM_RADIO_COUNTRY_KW:
+    case FM_RADIO_COUNTRY_LT:
+    case FM_RADIO_COUNTRY_ML:
+    case FM_RADIO_COUNTRY_NO:
+    case FM_RADIO_COUNTRY_OM:
+    case FM_RADIO_COUNTRY_PG:
+    case FM_RADIO_COUNTRY_NL:
+    case FM_RADIO_COUNTRY_CZ:
+    case FM_RADIO_COUNTRY_UK:
+    case FM_RADIO_COUNTRY_RW:
+    case FM_RADIO_COUNTRY_SN:
+    case FM_RADIO_COUNTRY_SI:
+    case FM_RADIO_COUNTRY_ZA:
+    case FM_RADIO_COUNTRY_SE:
+    case FM_RADIO_COUNTRY_CH:
+    case FM_RADIO_COUNTRY_TW:
+    case FM_RADIO_COUNTRY_UA:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 87500;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_VA:
+    case FM_RADIO_COUNTRY_MA:
+    case FM_RADIO_COUNTRY_TR:
+      settings.upperLimit() = 10800;
+      settings.lowerLimit() = 87500;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_AU:
+    case FM_RADIO_COUNTRY_BD:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 87500;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_AW:
+    case FM_RADIO_COUNTRY_BS:
+    case FM_RADIO_COUNTRY_CO:
+    case FM_RADIO_COUNTRY_KR:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_EC:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 0;
+      break;
+    case FM_RADIO_COUNTRY_GM:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 0;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_QA:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_SG:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_IN:
+      settings.upperLimit() = 100000;
+      settings.lowerLimit() = 108000;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_NZ:
+      settings.upperLimit() = 100000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 50;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_USER_DEFINED:
+      break;
+    default:
+      MOZ_ASSERT(0);
+      break;
+    };
+    return settings;
+}
+
+void FactoryReset()
+{
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(FactoryReset());
+}
+
+void
+StartDiskSpaceWatcher()
+{
+  AssertMainProcess();
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(StartDiskSpaceWatcher());
+}
+
+void
+StopDiskSpaceWatcher()
+{
+  AssertMainProcess();
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(StopDiskSpaceWatcher());
 }
 
 } // namespace hal

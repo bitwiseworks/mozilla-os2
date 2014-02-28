@@ -12,8 +12,7 @@
 #include "nsIIOService.h"
 #include "nsIObserver.h"
 
-#include "nsStubImageDecoderObserver.h"
-#include "imgIDecoderObserver.h"
+#include "imgINotificationObserver.h"
 
 #include "nsDisplayList.h"
 #include "imgIContainer.h"
@@ -31,6 +30,7 @@ class nsPresContext;
 class nsImageFrame;
 class nsTransform2D;
 class nsImageLoadingContent;
+class imgRequestProxy;
 
 namespace mozilla {
 namespace layers {
@@ -40,23 +40,14 @@ namespace layers {
 }
 }
 
-class nsImageListener : public nsStubImageDecoderObserver
+class nsImageListener : public imgINotificationObserver
 {
 public:
   nsImageListener(nsImageFrame *aFrame);
   virtual ~nsImageListener();
 
   NS_DECL_ISUPPORTS
-  // imgIDecoderObserver (override nsStubImageDecoderObserver)
-  NS_IMETHOD OnStartContainer(imgIRequest *aRequest, imgIContainer *aImage);
-  NS_IMETHOD OnDataAvailable(imgIRequest *aRequest, bool aCurrentFrame,
-                             const nsIntRect *aRect);
-  NS_IMETHOD OnStopDecode(imgIRequest *aRequest, nsresult status,
-                          const PRUnichar *statusArg);
-  // imgIContainerObserver (override nsStubImageDecoderObserver)
-  NS_IMETHOD FrameChanged(imgIRequest *aRequest,
-                          imgIContainer *aContainer,
-                          const nsIntRect *dirtyRect);
+  NS_DECL_IMGINOTIFICATIONOBSERVER
 
   void SetFrame(nsImageFrame *frame) { mFrame = frame; }
 
@@ -83,12 +74,12 @@ public:
   NS_DECL_QUERYFRAME
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot);
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext);
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext);
   virtual IntrinsicSize GetIntrinsicSize();
@@ -110,7 +101,7 @@ public:
                               int32_t aModType);
 
 #ifdef ACCESSIBILITY
-  virtual already_AddRefed<Accessible> CreateAccessible();
+  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
   virtual nsIAtom* GetType() const;
@@ -122,10 +113,10 @@ public:
 
 #ifdef DEBUG
   NS_IMETHOD GetFrameName(nsAString& aResult) const;
-  NS_IMETHOD List(FILE* out, int32_t aIndent) const;
+  void List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
 #endif
 
-  virtual int GetSkipSides() const;
+  virtual int GetSkipSides() const MOZ_OVERRIDE;
 
   nsresult GetIntrinsicImageSize(nsSize& aSize);
 
@@ -136,6 +127,8 @@ public:
     }
     NS_IF_RELEASE(sIOService);
   }
+
+  nsresult Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData);
 
   /**
    * Function to test whether aContent, which has aStyleContext as its style,
@@ -221,14 +214,11 @@ protected:
   friend class nsImageListener;
   friend class nsImageLoadingContent;
   nsresult OnStartContainer(imgIRequest *aRequest, imgIContainer *aImage);
-  nsresult OnDataAvailable(imgIRequest *aRequest, bool aCurrentFrame,
-                           const nsIntRect *rect);
-  nsresult OnStopDecode(imgIRequest *aRequest,
-                        nsresult aStatus,
-                        const PRUnichar *aStatusArg);
+  nsresult OnDataAvailable(imgIRequest *aRequest, const nsIntRect *rect);
+  nsresult OnStopRequest(imgIRequest *aRequest,
+                         nsresult aStatus);
   nsresult FrameChanged(imgIRequest *aRequest,
-                        imgIContainer *aContainer,
-                        const nsIntRect *aDirtyRect);
+                        imgIContainer *aContainer);
   /**
    * Notification that aRequest will now be the current request.
    */
@@ -288,13 +278,14 @@ private:
 
   nsImageMap*         mImageMap;
 
-  nsCOMPtr<imgIDecoderObserver> mListener;
+  nsCOMPtr<imgINotificationObserver> mListener;
 
   nsSize mComputedSize;
   nsIFrame::IntrinsicSize mIntrinsicSize;
   nsSize mIntrinsicRatio;
 
   bool mDisplayingIcon;
+  bool mFirstFrameComplete;
 
   static nsIIOService* sIOService;
   
@@ -308,10 +299,10 @@ private:
   // loading / broken images
   nsresult LoadIcons(nsPresContext *aPresContext);
   nsresult LoadIcon(const nsAString& aSpec, nsPresContext *aPresContext,
-                    imgIRequest **aRequest);
+                    imgRequestProxy **aRequest);
 
   class IconLoad MOZ_FINAL : public nsIObserver,
-                             public imgIDecoderObserver {
+                             public imgINotificationObserver {
     // private class that wraps the data and logic needed for
     // broken image and loading image icons
   public:
@@ -321,8 +312,7 @@ private:
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSIOBSERVER
-    NS_DECL_IMGICONTAINEROBSERVER
-    NS_DECL_IMGIDECODEROBSERVER
+    NS_DECL_IMGINOTIFICATIONOBSERVER
 
     void AddIconObserver(nsImageFrame *frame) {
         NS_ABORT_IF_FALSE(!mIconObservers.Contains(frame),
@@ -344,8 +334,8 @@ private:
 
 
   public:
-    nsCOMPtr<imgIRequest> mLoadingImage;
-    nsCOMPtr<imgIRequest> mBrokenImage;
+    nsRefPtr<imgRequestProxy> mLoadingImage;
+    nsRefPtr<imgRequestProxy> mBrokenImage;
     bool             mPrefForceInlineAltText;
     bool             mPrefShowPlaceholders;
   };
@@ -362,44 +352,48 @@ public:
  * image itself, and hence receive events just as if the image itself
  * received events.
  */
-class nsDisplayImage : public nsDisplayItem {
+class nsDisplayImage : public nsDisplayImageContainer {
 public:
-  typedef mozilla::layers::ImageContainer ImageContainer;
-  typedef mozilla::layers::ImageLayer ImageLayer;
   typedef mozilla::layers::LayerManager LayerManager;
 
   nsDisplayImage(nsDisplayListBuilder* aBuilder, nsImageFrame* aFrame,
                  imgIContainer* aImage)
-    : nsDisplayItem(aBuilder, aFrame), mImage(aImage) {
+    : nsDisplayImageContainer(aBuilder, aFrame), mImage(aImage) {
     MOZ_COUNT_CTOR(nsDisplayImage);
   }
   virtual ~nsDisplayImage() {
     MOZ_COUNT_DTOR(nsDisplayImage);
   }
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx);
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
 
   /**
    * Returns an ImageContainer for this image if the image type
    * supports it (TYPE_RASTER only).
    */
-  already_AddRefed<ImageContainer> GetContainer();
+  virtual already_AddRefed<ImageContainer> GetContainer(LayerManager* aManager,
+                                                        nsDisplayListBuilder* aBuilder) MOZ_OVERRIDE;
 
   gfxRect GetDestRect();
 
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
-                                   const ContainerParameters& aParameters);
+                                   const ContainerParameters& aParameters) MOZ_OVERRIDE;
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE
+  {
+    *aSnap = true;
+    return nsRect(ToReferenceFrame(), Frame()->GetSize());
+  }
 
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
-                                             const ContainerParameters& aContainerParameters);
+                                             const ContainerParameters& aContainerParameters) MOZ_OVERRIDE;
 
   /**
    * Configure an ImageLayer for this display item.
    * Set the required filter and scaling transform.
    */
-  void ConfigureLayer(ImageLayer* aLayer);
+  virtual void ConfigureLayer(ImageLayer* aLayer, const nsIntPoint& aOffset) MOZ_OVERRIDE;
 
   NS_DISPLAY_DECL_NAME("Image", TYPE_IMAGE)
 private:

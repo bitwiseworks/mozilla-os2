@@ -15,6 +15,7 @@ load 311457-1.html
 load 321056-1.xhtml
 load 326834-1.html
 load 322786-1.xul
+load 325377.xul
 load 326879-1.xul
 load 327776-1.xul
 load 328135-1.xul
@@ -25,13 +26,16 @@ load 336962-1.xul
 load 344228-1.xul
 load 346083-1.xul
 load 346281-1.xul
+load 350460.xul
 load 360642-1.xul
+load 365151.xul
 load 366112-1.xul
 load 369942-1.xhtml
 load 374102-1.xul
 load 376137-1.html
 load 376137-2.html
 load 377592-1.svg
+load 381862.html
 load 382746-1.xul
 load 382899-1.xul
 load 383236-1.xul
@@ -43,8 +47,10 @@ load 387033-1.xhtml
 load 387080-1.xul
 load 391974-1.html
 load 394120-1.xhtml
+load 397293.xhtml
 load 397304-1.html
 load 398326-1.xhtml
+load 399013.xul
 load 400779-1.xhtml
 load 402912-1.xhtml
 load 408904-1.xul
@@ -57,12 +63,16 @@ load 432058-1.xul
 load 432068-1.xul
 load 432068-2.xul
 load 433296-1.xul
+load 433429.xul
 load 434458-1.xul
+load 452185.html
 load 460900-1.xul
 load 464149-1.xul
 asserts-if(winWidget,1) load 464407-1.xhtml # Bug 450974
+load 467080.xul
 load 467481-1.xul
 load 470063-1.html
+load 470272.html
 load 472189.xul
 load 475133.html
 load 488210-1.xhtml

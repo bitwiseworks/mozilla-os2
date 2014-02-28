@@ -10,19 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= embedcomponents
-LIBRARY_NAME	= printingui_s
 EXPORT_LIBRARY	= ..
 LIBXUL_LIBRARY	= 1
 
 
 
 CMMSRCS = nsPrintingPromptServiceX.mm
-
-CPPSRCS		= \
-      nsPrintProgressParams.cpp \
-      nsPrintProgress.cpp \
-      $(NULL)
 
 LOCAL_INCLUDES	= \
 		$(NULL)

@@ -1,0 +1,164 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+DEPTH = @DEPTH@
+topsrcdir = @top_srcdir@
+srcdir = @srcdir@
+VPATH = @srcdir@
+
+include $(DEPTH)/config/autoconf.mk
+
+LIBS = \
+  $(XPCOM_LIBS) \
+  $(NSPR_LIBS) \
+  $(NSS_LIBS) \
+  $(REALTIME_LIBS) \
+  $(DEPTH)/xpcom/glue/$(LIB_PREFIX)xpcomglue_s.$(LIB_SUFFIX) \
+  $(DEPTH)/media/mtransport/standalone/$(LIB_PREFIX)mtransport_s.$(LIB_SUFFIX) \
+  $(DEPTH)/media/webrtc/signalingtest/signaling_ecc/$(LIB_PREFIX)ecc.$(LIB_SUFFIX) \
+  $(DEPTH)/media/webrtc/signalingtest/signaling_sipcc/$(LIB_PREFIX)sipcc.$(LIB_SUFFIX) \
+  $(DEPTH)/layout/media/$(LIB_PREFIX)gkmedias.$(LIB_SUFFIX) \
+  $(DEPTH)/media/webrtc/trunk/testing/gtest_gtest/$(LIB_PREFIX)gtest.$(LIB_SUFFIX) \
+  $(DEPTH)/netwerk/srtp/src/$(LIB_PREFIX)nksrtp_s.$(LIB_SUFFIX) \
+  $(NULL)
+
+ifdef MOZ_CUBEB
+ifdef MOZ_ALSA
+LIBS += \
+  $(MOZ_ALSA_LIBS) \
+  $(NULL)
+endif
+ifdef MOZ_PULSEAUDIO
+LIBS += \
+  $(MOZ_PULSEAUDIO_LIBS) \
+  $(NULL)
+endif
+endif
+
+ifeq ($(OS_TARGET),Android)
+LIBS += \
+  $(STLPORT_LDFLAGS) \
+  $(STLPORT_LIBS) \
+  $(NULL)
+CPPFLAGS += \
+  $(STLPORT_CPPFLAGS) \
+  $(NULL)
+DEFINES += \
+  -DGTEST_USE_OWN_TR1_TUPLE=1 \
+   $(NULL)
+endif
+
+ifdef MOZ_NATIVE_JPEG
+LIBS += \
+  $(MOZ_JPEG_LIBS) \
+  $(NULL)
+endif
+
+ifdef MOZ_NATIVE_LIBVPX
+LIBS += \
+  $(MOZ_LIBVPX_LIBS) \
+  $(NULL)
+endif
+
+ifndef MOZ_TREE_PIXMAN
+LIBS += \
+  $(MOZ_PIXMAN_LIBS) \
+  $(NULL)
+endif
+
+ifeq (gtk2,$(MOZ_WIDGET_TOOLKIT))
+LIBS += \
+  $(XLIBS) \
+  $(MOZ_GTK2_LIBS) \
+  -lgthread-2.0 \
+  $(NULL)
+endif
+
+ifeq (qt,$(MOZ_WIDGET_TOOLKIT))
+LIBS += \
+  $(XLIBS) \
+  $(TK_LIBS) \
+  $(MOZ_PANGO_LIBS) \
+  $(NULL)
+endif
+
+ifeq ($(OS_TARGET),Linux)
+LIBS += \
+  $(MOZ_CAIRO_OSLIBS) \
+  $(NULL)
+endif
+
+ifeq ($(OS_TARGET),Darwin)
+LIBS += \
+  -framework AudioToolbox \
+  -framework AudioUnit \
+  -framework Carbon \
+  -framework CoreAudio \
+  -framework OpenGL \
+  -framework QTKit \
+  -framework QuartzCore \
+  -framework Security \
+  -framework SystemConfiguration \
+  -framework IOKit \
+  -F/System/Library/PrivateFrameworks -framework CoreUI \
+  $(TK_LIBS) \
+  $(NULL)
+endif
+
+ifeq ($(OS_TARGET),WINNT)
+LIBS += \
+  $(DEPTH)/staticlib/components/$(LIB_PREFIX)windowsproxy.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+
+DEFINES += \
+  -DUSE_FAKE_MEDIA_STREAMS \
+  $(NULL)
+
+ifeq ($(OS_TARGET),Darwin)
+DEFINES += \
+  -DGTEST_USE_OWN_TR1_TUPLE=1 \
+  $(NULL)
+endif
+
+LOCAL_INCLUDES += \
+ -I. \
+ -I$(topsrcdir)/media/webrtc/trunk/testing/gtest/include \
+ -I$(topsrcdir)/ipc/chromium/src \
+ -I$(topsrcdir)/media/mtransport \
+ -I$(topsrcdir)/media/mtransport/test \
+ -I$(topsrcdir)/media/webrtc/signaling/include \
+ -I$(topsrcdir)/media/webrtc/signaling/src/sipcc/core/sdp \
+ -I$(topsrcdir)/media/webrtc/signaling/src/sipcc/cpr/include \
+ -I$(topsrcdir)/media/webrtc/signaling/src/sipcc/core/includes \
+ -I$(topsrcdir)/media/webrtc/signaling/src/common/browser_logging \
+ -I$(topsrcdir)/media/webrtc/signaling/src/media \
+ -I$(topsrcdir)/media/webrtc/signaling/src/media-conduit \
+ -I$(topsrcdir)/media/webrtc/signaling/src/mediapipeline \
+ -I$(topsrcdir)/media/webrtc/signaling/src/sipcc/include \
+ -I$(topsrcdir)/media/webrtc/signaling/src/peerconnection \
+ -I$(topsrcdir)/media/webrtc/signaling/media-conduit\
+ -I$(topsrcdir)/media/webrtc/trunk/third_party/libjingle/source/ \
+ -I$(topsrcdir)/xpcom/base/ \
+ $(NULL)
+
+ifneq ($(OS_TARGET),WINNT)
+ifneq (gonk,$(MOZ_WIDGET_TOOLKIT))
+ifdef JS_SHARED_LIBRARY
+LIBS += $(MOZ_ZLIB_LIBS)
+endif
+
+CPP_UNIT_TESTS = \
+  sdp_unittests.cpp \
+  signaling_unittests.cpp \
+  mediapipeline_unittest.cpp \
+  mediaconduit_unittests.cpp \
+  $(NULL)
+endif
+endif
+
+include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/media/webrtc/webrtc-config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+include $(topsrcdir)/config/rules.mk

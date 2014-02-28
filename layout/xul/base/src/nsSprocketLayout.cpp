@@ -19,6 +19,8 @@
 #include "nsContainerFrame.h"
 #include "nsBoxFrame.h"
 #include "StackArena.h"
+#include "mozilla/Likely.h"
+#include <algorithm>
 
 nsBoxLayout* nsSprocketLayout::gInstance = nullptr;
 
@@ -66,7 +68,7 @@ nsSprocketLayout::GetFrameState(nsIFrame* aBox, nsFrameState& aState)
 static uint8_t
 GetFrameDirection(nsIFrame* aBox)
 {
-   return aBox->GetStyleVisibility()->mDirection;
+   return aBox->StyleVisibility()->mDirection;
 }
 
 static void
@@ -251,7 +253,6 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
   }
 
   // With the sizes computed, now it's time to lay out our children.
-  bool needsRedraw = false;
   bool finished;
   nscoord passes = 0;
 
@@ -328,8 +329,8 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
            prefSize = nsBox::BoundsCheck(minSize, prefSize, maxSize);
        
            AddMargin(child, prefSize);
-           width = NS_MIN(prefSize.width, originalClientRect.width);
-           height = NS_MIN(prefSize.height, originalClientRect.height);
+           width = std::min(prefSize.width, originalClientRect.width);
+           height = std::min(prefSize.height, originalClientRect.height);
         }
       }
 
@@ -472,14 +473,7 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
            
         // set it again
         child->SetBounds(aState, childRect);
-
-        // Since the child changed size, we know a redraw is probably going to be required.
-        needsRedraw = true;
       }
-
-      // if something moved then we might need to redraw
-      if (oldRect.x != childRect.x || oldRect.y != childRect.y)
-          needsRedraw = true;
 
       // If we already determined that layout was required or if our size has changed, then
       // we make sure to call layout on the child, since its children may need to be shifted
@@ -632,13 +626,9 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
 
   // Perform out-of-axis alignment for non-stretch alignments
   if (!(frameState & NS_STATE_AUTO_STRETCH)) {
-    AlignChildren(aBox, aState, &needsRedraw);
+    AlignChildren(aBox, aState);
   }
-
-  // Now do our redraw.
-  if (needsRedraw)
-    aBox->Redraw(aState);
-
+  
   // That's it!  If you made it this far without having a nervous breakdown, 
   // congratulations!  Go get yourself a beer.
   return NS_OK;
@@ -849,11 +839,11 @@ nsSprocketLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, nsB
   if (childCount > 0) {
     nscoord maxAllowedFlex = nscoord_MAX / childCount;
   
-    if (NS_UNLIKELY(maxFlex > maxAllowedFlex)) {
+    if (MOZ_UNLIKELY(maxFlex > maxAllowedFlex)) {
       // clamp all the flexes
       currentBox = aBoxSizes;
       while (currentBox) {
-        currentBox->flex = NS_MIN(currentBox->flex, maxAllowedFlex);
+        currentBox->flex = std::min(currentBox->flex, maxAllowedFlex);
         currentBox = currentBox->next;      
       }
     }
@@ -866,7 +856,7 @@ nsSprocketLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, nsB
 
   // we specified all our children are equal size;
   if (frameState & NS_STATE_EQUAL_SIZE) {
-    smallestMaxWidth = NS_MAX(smallestMaxWidth, biggestMinWidth);
+    smallestMaxWidth = std::max(smallestMaxWidth, biggestMinWidth);
     biggestPrefWidth = nsBox::BoundsCheck(biggestMinWidth, biggestPrefWidth, smallestMaxWidth);
 
     currentBox = aBoxSizes;
@@ -919,8 +909,7 @@ nsSprocketLayout::ComputeChildsNextPosition(nsIFrame* aBox,
 
 void
 nsSprocketLayout::AlignChildren(nsIFrame* aBox,
-                                nsBoxLayoutState& aState,
-                                bool* aNeedsRedraw)
+                                nsBoxLayoutState& aState)
 {
   nsFrameState frameState = 0;
   GetFrameState(aBox, frameState);
@@ -976,8 +965,8 @@ nsSprocketLayout::AlignChildren(nsIFrame* aBox,
           // Alignments don't force the box to grow (only sizes do),
           // so keep the children within the box.
           y = maxAscent - child->GetBoxAscent(aState);
-          y = NS_MAX(startAlign, y);
-          y = NS_MIN(y, endAlign);
+          y = std::max(startAlign, y);
+          y = std::min(y, endAlign);
           break;
       }
 
@@ -1005,7 +994,6 @@ nsSprocketLayout::AlignChildren(nsIFrame* aBox,
     }
 
     if (childRect.TopLeft() != child->GetPosition()) {
-      *aNeedsRedraw = true;
       child->SetBounds(aState, childRect);
     }
 

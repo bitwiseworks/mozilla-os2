@@ -24,7 +24,7 @@ fi
 
 # "parse" the makefile fragments to get the list of source files
 # requires GNU sed extensions
-SRC_FILES=$(sed -e ':a;N;$!ba;s/\\\n//g;s/[A-Z_]* = //g' \
+SRC_FILES=$(sed -e ':a;N;$!ba;s/#[^\n]*\(\n\)/\1/g;s/\\\n//g;s/[A-Z_]* = //g' \
              $(for file in ${MK_FILES}; do echo "$1/${file}"; done))
 
 # pre-release versions of the code don't list opus_custom.h
@@ -63,4 +63,6 @@ sed -e "s/^The git tag\/revision used was .*/The git tag\/revision used was ${ve
     mv ${TARGET}/README_MOZILLA+ ${TARGET}/README_MOZILLA
 
 # apply outstanding local patches
-patch -p3 < ./bug776661.patch
+patch -p3 < bug776661.patch
+patch -p1 < padding.patch
+patch -p3 < mingw.patch

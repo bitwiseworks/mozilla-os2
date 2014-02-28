@@ -1,9 +1,9 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+Cu.import("resource://services-common/log4moz.js");
 Cu.import("resource://services-common/observers.js");
 Cu.import("resource://services-sync/identity.js");
-Cu.import("resource://services-common/log4moz.js");
 Cu.import("resource://services-sync/resource.js");
 Cu.import("resource://services-sync/util.js");
 
@@ -110,21 +110,21 @@ function server_backoff(metadata, response) {
   let body = "Hey, back off!";
   response.setHeader("X-Weave-Backoff", '600', false);
   response.setStatusLine(metadata.httpVersion, 200, "OK");
-  response.bodyOutputStream.write(body, body.length);  
+  response.bodyOutputStream.write(body, body.length);
 }
 
 function server_quota_notice(request, response) {
   let body = "You're approaching quota.";
   response.setHeader("X-Weave-Quota-Remaining", '1048576', false);
   response.setStatusLine(request.httpVersion, 200, "OK");
-  response.bodyOutputStream.write(body, body.length);  
+  response.bodyOutputStream.write(body, body.length);
 }
 
 function server_quota_error(request, response) {
   let body = "14";
   response.setHeader("X-Weave-Quota-Remaining", '-1024', false);
   response.setStatusLine(request.httpVersion, 400, "OK");
-  response.bodyOutputStream.write(body, body.length);  
+  response.bodyOutputStream.write(body, body.length);
 }
 
 function server_headers(metadata, response) {
@@ -172,7 +172,7 @@ add_test(function test_proxy_auth_redirect() {
     "/open": server_open,
     "/pac2": server_pac
   });
-    
+
   PACSystemSettings.PACURI = "http://localhost:8080/pac2";
   installFakePAC();
   let res = new AsyncResource("http://localhost:8080/open");
@@ -321,7 +321,8 @@ add_test(function test_get_protected_fail() {
 
 add_test(function test_get_protected_success() {
   _("GET a password protected resource");
-  let auth = Identity.getBasicResourceAuthenticator("guest", "guest");
+  let identity = new IdentityManager();
+  let auth = identity.getBasicResourceAuthenticator("guest", "guest");
   let res3 = new AsyncResource("http://localhost:8080/protected");
   res3.authenticator = auth;
   do_check_eq(res3.authenticator, auth);
@@ -666,7 +667,7 @@ add_test(function test_js_exception_handling() {
     do_check_eq(warnings.pop(),
                 "Got exception calling onProgress handler during fetch of " +
                 "http://localhost:8080/json");
-      
+
     run_next_test();
   });
 });
@@ -698,6 +699,27 @@ add_test(function test_uri_construction() {
   do_check_eq(uri1.query, uri2.query);
 
   run_next_test();
+});
+
+add_test(function test_not_sending_cookie() {
+  function handler(metadata, response) {
+    let body = "COOKIE!";
+    response.setStatusLine(metadata.httpVersion, 200, "OK");
+    response.bodyOutputStream.write(body, body.length);
+    do_check_false(metadata.hasHeader("Cookie"));
+  }
+  let cookieSer = Cc["@mozilla.org/cookieService;1"]
+                    .getService(Ci.nsICookieService);
+  let uri = CommonUtils.makeURI("http://localhost:8080");
+  cookieSer.setCookieString(uri, null, "test=test; path=/;", null);
+
+  let res = new AsyncResource("http://localhost:8080/test");
+  res.get(function (error) {
+    do_check_null(error);
+    do_check_true(this.response.success);
+    do_check_eq("COOKIE!", this.response.body);
+    server.stop(run_next_test);
+  });
 });
 
 /**

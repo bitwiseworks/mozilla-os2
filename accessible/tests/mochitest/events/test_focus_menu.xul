@@ -21,8 +21,7 @@
           src="../events.js" />
 
   <script type="application/javascript">
-    //gA11yEventDumpID = "eventdump"; // debug stuff
-    gA11yEventDumpToConsole = true; // debug stuff
+    //gA11yEventDumpToConsole = true; // debug stuff
 
     var gQueue = null;
     function doTests()
@@ -58,7 +57,7 @@
       //                              [ new focusChecker("vehicle"),
       //                                new focusChecker("cycle")]));
       gQueue.push(new synthClick("vehicle", new focusChecker("vehicle")));
-      gQueue.push(new synthMouseMove("cycle", new focusChecker("cycle")));
+      gQueue.push(new synthDownKey("cycle", new focusChecker("cycle")));
 
       // open submenu
       gQueue.push(new synthRightKey("cycle", new focusChecker("tricycle")));
@@ -70,6 +69,9 @@
 
       // click menuitem to close menu, focus gets back to document
       gQueue.push(new synthClick("tricycle", new focusChecker(document)));
+
+      //enableLogging("focus,DOMEvents,tree"); // logging for bug708927
+      //gQueue.onFinish = function() { disableLogging(); }
 
       gQueue.invoke(); // Will call SimpleTest.finish();
     }

@@ -11,17 +11,16 @@
 #include "nsCOMPtr.h"
 #include "nsSVGAttrTearoffTable.h"
 #include "nsContentUtils.h"
-#include "dombindings.h"
+#include "mozilla/dom/SVGPointListBinding.h"
+#include <algorithm>
 
 // See the comment in this file's header.
 
 // local helper functions
 namespace {
 
-using mozilla::DOMSVGPoint;
-
 void
-UpdateListIndicesFromIndex(nsTArray<DOMSVGPoint*>& aItemsArray,
+UpdateListIndicesFromIndex(FallibleTArray<mozilla::nsISVGPoint*>& aItemsArray,
                            uint32_t aStartingIndex)
 {
   uint32_t length = aItemsArray.Length();
@@ -37,17 +36,22 @@ UpdateListIndicesFromIndex(nsTArray<DOMSVGPoint*>& aItemsArray,
 
 namespace mozilla {
 
-static nsSVGAttrTearoffTable<void, DOMSVGPointList>
-  sSVGPointListTearoffTable;
+  static inline
+nsSVGAttrTearoffTable<void, DOMSVGPointList>&
+SVGPointListTearoffTable()
+{
+  static nsSVGAttrTearoffTable<void, DOMSVGPointList>
+    sSVGPointListTearoffTable;
+  return sSVGPointListTearoffTable;
+}
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGPointList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGPointList)
   // No unlinking of mElement, we'd need to null out the value pointer (the
   // object it points to is held by the element) and null-check it everywhere.
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGPointList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mElement, nsIContent)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGPointList)
@@ -57,15 +61,9 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGPointList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGPointList)
 
-} // namespace mozilla
-DOMCI_DATA(SVGPointList, mozilla::DOMSVGPointList)
-namespace mozilla {
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGPointList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGPointList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGPointList)
 NS_INTERFACE_MAP_END
 
 
@@ -75,10 +73,10 @@ DOMSVGPointList::GetDOMWrapper(void *aList,
                                bool aIsAnimValList)
 {
   nsRefPtr<DOMSVGPointList> wrapper =
-    sSVGPointListTearoffTable.GetTearoff(aList);
+    SVGPointListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
     wrapper = new DOMSVGPointList(aElement, aIsAnimValList);
-    sSVGPointListTearoffTable.AddTearoff(aList, wrapper);
+    SVGPointListTearoffTable().AddTearoff(aList, wrapper);
   }
   return wrapper.forget();
 }
@@ -86,7 +84,7 @@ DOMSVGPointList::GetDOMWrapper(void *aList,
 /* static */ DOMSVGPointList*
 DOMSVGPointList::GetDOMWrapperIfExists(void *aList)
 {
-  return sSVGPointListTearoffTable.GetTearoff(aList);
+  return SVGPointListTearoffTable().GetTearoff(aList);
 }
 
 DOMSVGPointList::~DOMSVGPointList()
@@ -96,27 +94,13 @@ DOMSVGPointList::~DOMSVGPointList()
   void *key = mIsAnimValList ?
     InternalAList().GetAnimValKey() :
     InternalAList().GetBaseValKey();
-  sSVGPointListTearoffTable.RemoveTearoff(key);
+  SVGPointListTearoffTable().RemoveTearoff(key);
 }
 
 JSObject*
-DOMSVGPointList::WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap)
+DOMSVGPointList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-  return mozilla::dom::oldproxybindings::SVGPointList::create(cx, scope, this,
-                                                     triedToWrap);
-}
-
-nsIDOMSVGPoint*
-DOMSVGPointList::GetItemAt(uint32_t aIndex)
-{
-  if (IsAnimValList()) {
-    Element()->FlushAnimations();
-  }
-  if (aIndex < Length()) {
-    EnsureItemAt(aIndex);
-    return mItems[aIndex];
-  }
-  return nullptr;
+  return mozilla::dom::SVGPointListBinding::Wrap(cx, scope, this);
 }
 
 void
@@ -129,10 +113,10 @@ DOMSVGPointList::InternalListWillChangeTo(const SVGPointList& aNewValue)
   uint32_t oldLength = mItems.Length();
 
   uint32_t newLength = aNewValue.Length();
-  if (newLength > DOMSVGPoint::MaxListIndex()) {
+  if (newLength > nsISVGPoint::MaxListIndex()) {
     // It's safe to get out of sync with our internal list as long as we have
     // FEWER items than it does.
-    newLength = DOMSVGPoint::MaxListIndex();
+    newLength = nsISVGPoint::MaxListIndex();
   }
 
   nsRefPtr<DOMSVGPointList> kungFuDeathGrip;
@@ -185,24 +169,15 @@ DOMSVGPointList::InternalAList() const
 // ----------------------------------------------------------------------------
 // nsIDOMSVGPointList implementation:
 
-NS_IMETHODIMP
-DOMSVGPointList::GetNumberOfItems(uint32_t *aNumberOfItems)
+void
+DOMSVGPointList::Clear(ErrorResult& aError)
 {
   if (IsAnimValList()) {
-    Element()->FlushAnimations();
-  }
-  *aNumberOfItems = Length();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DOMSVGPointList::Clear()
-{
-  if (IsAnimValList()) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    aError.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return;
   }
 
-  if (Length() > 0) {
+  if (LengthNoFlush() > 0) {
     nsAttrValue emptyOrOldValue = Element()->WillChangePointList();
     // DOM list items that are to be removed must be removed before we change
     // the internal list, otherwise they wouldn't be able to copy their
@@ -225,16 +200,14 @@ DOMSVGPointList::Clear()
       Element()->AnimationNeedsResample();
     }
   }
-  return NS_OK;
 }
 
-NS_IMETHODIMP
-DOMSVGPointList::Initialize(nsIDOMSVGPoint *aNewItem,
-                            nsIDOMSVGPoint **_retval)
+already_AddRefed<nsISVGPoint>
+DOMSVGPointList::Initialize(nsISVGPoint& aNewItem, ErrorResult& aError)
 {
-  *_retval = nullptr;
   if (IsAnimValList()) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    aError.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return nullptr;
   }
 
   // If aNewItem is already in a list we should insert a clone of aNewItem,
@@ -245,49 +218,48 @@ DOMSVGPointList::Initialize(nsIDOMSVGPoint *aNewItem,
   // clone of aNewItem, it would actually insert aNewItem. To prevent that
   // from happening we have to do the clone here, if necessary.
 
-  nsCOMPtr<DOMSVGPoint> domItem = do_QueryInterface(aNewItem);
-  if (!domItem) {
-    return NS_ERROR_DOM_SVG_WRONG_TYPE_ERR;
-  }
+  nsCOMPtr<nsISVGPoint> domItem = &aNewItem;
   if (domItem->HasOwner() || domItem->IsReadonly()) {
-    aNewItem = domItem->Clone();
+    domItem = domItem->Clone(); // must do this before changing anything!
   }
 
-  Clear();
-  return InsertItemBefore(aNewItem, 0, _retval);
+  ErrorResult rv;
+  Clear(rv);
+  MOZ_ASSERT(!rv.Failed());
+  return InsertItemBefore(*domItem, 0, aError);
 }
 
-NS_IMETHODIMP
-DOMSVGPointList::GetItem(uint32_t aIndex,
-                         nsIDOMSVGPoint **_retval)
+nsISVGPoint*
+DOMSVGPointList::IndexedGetter(uint32_t aIndex, bool& aFound,
+                               ErrorResult& aError)
 {
-  *_retval = GetItemAt(aIndex);
-  if (!*_retval) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
-  }
-  NS_ADDREF(*_retval);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DOMSVGPointList::InsertItemBefore(nsIDOMSVGPoint *aNewItem,
-                                  uint32_t aIndex,
-                                  nsIDOMSVGPoint **_retval)
-{
-  *_retval = nullptr;
   if (IsAnimValList()) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    Element()->FlushAnimations();
+  }
+  aFound = aIndex < LengthNoFlush();
+  if (aFound) {
+    EnsureItemAt(aIndex);
+    return mItems[aIndex];
+  }
+  return nullptr;
+}
+
+already_AddRefed<nsISVGPoint>
+DOMSVGPointList::InsertItemBefore(nsISVGPoint& aNewItem, uint32_t aIndex,
+                                  ErrorResult& aError)
+{
+  if (IsAnimValList()) {
+    aError.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return nullptr;
   }
 
-  aIndex = NS_MIN(aIndex, Length());
-  if (aIndex >= DOMSVGPoint::MaxListIndex()) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+  aIndex = std::min(aIndex, LengthNoFlush());
+  if (aIndex >= nsISVGPoint::MaxListIndex()) {
+    aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
   }
 
-  nsCOMPtr<DOMSVGPoint> domItem = do_QueryInterface(aNewItem);
-  if (!domItem) {
-    return NS_ERROR_DOM_SVG_WRONG_TYPE_ERR;
-  }
+  nsCOMPtr<nsISVGPoint> domItem = &aNewItem;
   if (domItem->HasOwner() || domItem->IsReadonly()) {
     domItem = domItem->Clone(); // must do this before changing anything!
   }
@@ -295,7 +267,8 @@ DOMSVGPointList::InsertItemBefore(nsIDOMSVGPoint *aNewItem,
   // Ensure we have enough memory so we can avoid complex error handling below:
   if (!mItems.SetCapacity(mItems.Length() + 1) ||
       !InternalList().SetCapacity(InternalList().Length() + 1)) {
-    return NS_ERROR_OUT_OF_MEMORY;
+    aError.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return nullptr;
   }
 
   nsAttrValue emptyOrOldValue = Element()->WillChangePointList();
@@ -303,7 +276,7 @@ DOMSVGPointList::InsertItemBefore(nsIDOMSVGPoint *aNewItem,
   MaybeInsertNullInAnimValListAt(aIndex);
 
   InternalList().InsertItem(aIndex, domItem->ToSVGPoint());
-  mItems.InsertElementAt(aIndex, domItem.get());
+  mItems.InsertElementAt(aIndex, domItem);
 
   // This MUST come after the insertion into InternalList(), or else under the
   // insertion into InternalList() the values read from domItem would be bad
@@ -316,27 +289,24 @@ DOMSVGPointList::InsertItemBefore(nsIDOMSVGPoint *aNewItem,
   if (AttrIsAnimating()) {
     Element()->AnimationNeedsResample();
   }
-  domItem.forget(_retval);
-  return NS_OK;
+  return domItem.forget();
 }
 
-NS_IMETHODIMP
-DOMSVGPointList::ReplaceItem(nsIDOMSVGPoint *aNewItem,
-                             uint32_t aIndex,
-                             nsIDOMSVGPoint **_retval)
+already_AddRefed<nsISVGPoint>
+DOMSVGPointList::ReplaceItem(nsISVGPoint& aNewItem, uint32_t aIndex,
+                             ErrorResult& aError)
 {
-  *_retval = nullptr;
   if (IsAnimValList()) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    aError.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return nullptr;
   }
 
-  nsCOMPtr<DOMSVGPoint> domItem = do_QueryInterface(aNewItem);
-  if (!domItem) {
-    return NS_ERROR_DOM_SVG_WRONG_TYPE_ERR;
+  if (aIndex >= LengthNoFlush()) {
+    aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
   }
-  if (aIndex >= Length()) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
-  }
+
+  nsCOMPtr<nsISVGPoint> domItem = &aNewItem;
   if (domItem->HasOwner() || domItem->IsReadonly()) {
     domItem = domItem->Clone(); // must do this before changing anything!
   }
@@ -359,21 +329,20 @@ DOMSVGPointList::ReplaceItem(nsIDOMSVGPoint *aNewItem,
   if (AttrIsAnimating()) {
     Element()->AnimationNeedsResample();
   }
-  NS_ADDREF(*_retval = domItem.get());
-  return NS_OK;
+  return domItem.forget();
 }
 
-NS_IMETHODIMP
-DOMSVGPointList::RemoveItem(uint32_t aIndex,
-                            nsIDOMSVGPoint **_retval)
+already_AddRefed<nsISVGPoint>
+DOMSVGPointList::RemoveItem(uint32_t aIndex, ErrorResult& aError)
 {
-  *_retval = nullptr;
   if (IsAnimValList()) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    aError.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return nullptr;
   }
 
-  if (aIndex >= Length()) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+  if (aIndex >= LengthNoFlush()) {
+    aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return nullptr;
   }
 
   nsAttrValue emptyOrOldValue = Element()->WillChangePointList();
@@ -388,7 +357,7 @@ DOMSVGPointList::RemoveItem(uint32_t aIndex,
   // Notify the DOM item of removal *before* modifying the lists so that the
   // DOM item can copy its *old* value:
   mItems[aIndex]->RemovingFromList();
-  NS_ADDREF(*_retval = mItems[aIndex]);
+  nsCOMPtr<nsISVGPoint> result = mItems[aIndex];
 
   InternalList().RemoveItem(aIndex);
   mItems.RemoveElementAt(aIndex);
@@ -399,20 +368,7 @@ DOMSVGPointList::RemoveItem(uint32_t aIndex,
   if (AttrIsAnimating()) {
     Element()->AnimationNeedsResample();
   }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DOMSVGPointList::AppendItem(nsIDOMSVGPoint *aNewItem,
-                            nsIDOMSVGPoint **_retval)
-{
-  return InsertItemBefore(aNewItem, Length(), _retval);
-}
-
-NS_IMETHODIMP
-DOMSVGPointList::GetLength(uint32_t *aNumberOfItems)
-{
-  return GetNumberOfItems(aNumberOfItems);
+  return result.forget();
 }
 
 void
@@ -444,7 +400,7 @@ DOMSVGPointList::MaybeInsertNullInAnimValListAt(uint32_t aIndex)
   NS_ABORT_IF_FALSE(animVal->mItems.Length() == mItems.Length(),
                     "animVal list not in sync!");
 
-  animVal->mItems.InsertElementAt(aIndex, static_cast<DOMSVGPoint*>(nullptr));
+  animVal->mItems.InsertElementAt(aIndex, static_cast<nsISVGPoint*>(nullptr));
 
   UpdateListIndicesFromIndex(animVal->mItems, aIndex + 1);
 }

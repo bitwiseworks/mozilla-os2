@@ -2,13 +2,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/
 
-import datetime
-import socket
-import time
+import os
+
+from mozprofile import Profile
 from mozrunner import Runner
 
 
 class GeckoInstance(object):
+
+    required_prefs = {"marionette.defaultPrefs.enabled": True,
+                      "marionette.defaultPrefs.port": 2828,
+                      "startup.homepage_welcome_url": "about:blank",
+                      "browser.warnOnQuit": False}
 
     def __init__(self, host, port, bin, profile):
         self.marionette_host = host
@@ -18,35 +23,45 @@ class GeckoInstance(object):
         self.runner = None
 
     def start(self):
-        profile = self.profile
-        if not profile:
-            prefs = {"marionette.defaultPrefs.enabled": True,
-                     "marionette.defaultPrefs.port": 2828}
-            profile = {"preferences": prefs, "restore":False}
-        print "starting runner"
-        self.runner = Runner.create(binary=self.bin, profile_args=profile, cmdargs=['-no-remote'])
+        profile_path = self.profile
+        profile_args = {"preferences": self.required_prefs}
+        if not profile_path:
+            runner_class = Runner
+            profile_args["restore"] = False
+        else:
+            runner_class = CloneRunner
+            profile_args["path_from"] = profile_path
+
+        self.gecko_log = os.path.abspath('gecko.log')
+        if os.access(self.gecko_log, os.F_OK):
+            os.remove(self.gecko_log)
+        self.runner = runner_class.create(
+            binary=self.bin,
+            profile_args=profile_args,
+            cmdargs=['-no-remote', '-marionette'],
+            kp_kwargs={
+                'processOutputLine': [NullOutput()],
+                'logfile': self.gecko_log})
         self.runner.start()
 
     def close(self):
         self.runner.stop()
         self.runner.cleanup()
 
-    def wait_for_port(self, timeout=3000):
-        assert(self.marionette_port)
-        starttime = datetime.datetime.now()
-        while datetime.datetime.now() - starttime < datetime.timedelta(seconds=timeout):
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((self.marionette_host, self.marionette_port))
-                data = sock.recv(16)
-                print "closing socket"
-                sock.close()
-                if '"from"' in data:
-                    print "got data"
-                    time.sleep(5)
-                    return True
-            except:
-                import traceback
-                print traceback.format_exc()
-            time.sleep(1)
-        return False
+
+class B2GDesktopInstance(GeckoInstance):
+
+    required_prefs = {"focusmanager.testmode": True}
+
+apps = {'b2gdesktop': B2GDesktopInstance}
+
+
+class CloneRunner(Runner):
+
+    profile_class = Profile.clone
+
+
+class NullOutput(object):
+
+    def __call__(self, line):
+        pass

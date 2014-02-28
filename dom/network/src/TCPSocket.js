@@ -23,6 +23,8 @@ const InputStreamPump = CC(
         "@mozilla.org/binaryinputstream;1", "nsIBinaryInputStream", "setInputStream"),
       StringInputStream = CC(
         '@mozilla.org/io/string-input-stream;1', 'nsIStringInputStream'),
+      ArrayBufferInputStream = CC(
+        '@mozilla.org/io/arraybuffer-input-stream;1', 'nsIArrayBufferInputStream'),
       MultiplexInputStream = CC(
         '@mozilla.org/io/multiplex-input-stream;1', 'nsIMultiplexInputStream');
 
@@ -33,11 +35,21 @@ const kCLOSED = 'closed';
 
 const BUFFER_SIZE = 65536;
 
+// XXX we have no TCPError implementation right now because it's really hard to
+// do on b2g18.  On mozilla-central we want a proper TCPError that ideally
+// sub-classes DOMError.  Bug 867872 has been filed to implement this and
+// contains a documented TCPError.webidl that maps all the error codes we use in
+// this file to slightly more readable explanations.
+function createTCPError(aWindow, aErrorName, aErrorType) {
+  return new (aWindow ? aWindow.DOMError : DOMError)(aErrorName);
+}
+
+
 /*
  * Debug logging function
  */
 
-let debug = true;
+let debug = false;
 function LOG(msg) {
   if (debug)
     dump("TCPSocket: " + msg + "\n");
@@ -49,21 +61,21 @@ function LOG(msg) {
 
 function TCPSocketEvent(type, sock, data) {
   this._type = type;
-  this._socket = sock;
+  this._target = sock;
   this._data = data;
 }
 
 TCPSocketEvent.prototype = {
   __exposedProps__: {
     type: 'r',
-    socket: 'r',
+    target: 'r',
     data: 'r'
   },
   get type() {
     return this._type;
   },
-  get socket() {
-    return this._socket;
+  get target() {
+    return this._target;
   },
   get data() {
     return this._data;
@@ -88,6 +100,8 @@ function TCPSocket() {
   this._host = "";
   this._port = 0;
   this._ssl = false;
+
+  this.useWin = null;
 }
 
 TCPSocket.prototype = {
@@ -102,10 +116,6 @@ TCPSocket.prototype = {
     close: 'r',
     send: 'r',
     readyState: 'r',
-    CONNECTING: 'r',
-    OPEN: 'r',
-    CLOSING: 'r',
-    CLOSED: 'r',
     binaryType: 'r',
     onopen: 'rw',
     ondrain: 'rw',
@@ -113,12 +123,6 @@ TCPSocket.prototype = {
     onerror: 'rw',
     onclose: 'rw'
   },
-  // Constants
-  CONNECTING: kCONNECTING,
-  OPEN: kOPEN,
-  CLOSING: kCLOSING,
-  CLOSED: kCLOSED,
-
   // The binary type, "string" or "arraybuffer"
   _binaryType: null,
 
@@ -143,6 +147,12 @@ TCPSocket.prototype = {
   _waitingForDrain: false,
   _suspendCount: 0,
 
+  // Reported parent process buffer
+  _bufferedAmount: 0,
+
+  // IPC socket actor
+  _socketBridge: null,
+
   // Public accessors.
   get readyState() {
     return this._readyState;
@@ -160,6 +170,9 @@ TCPSocket.prototype = {
     return this._ssl;
   },
   get bufferedAmount() {
+    if (this._inChild) {
+      return this._bufferedAmount;
+    }
     return this._multiplexStream.available();
   },
   get onopen() {
@@ -221,12 +234,10 @@ TCPSocket.prototype = {
         self._asyncCopierActive = false;
         self._multiplexStream.removeStream(0);
 
-        if (status) {
-          this._readyState = kCLOSED;
-          let err = new Error("Connection closed while writing: " + status);
-          err.status = status;
-          this.callListener("onerror", err);
-          this.callListener("onclose");
+        if (!Components.isSuccessCode(status)) {
+          // Note that we can/will get an error here as well as in the
+          // onStopRequest for inbound data.
+          self._maybeReportErrorAndCloseIfOpen(status);
           return;
         }
 
@@ -235,12 +246,12 @@ TCPSocket.prototype = {
         } else {
           if (self._waitingForDrain) {
             self._waitingForDrain = false;
-            self.callListener("ondrain");
+            self.callListener("drain");
           }
           if (self._readyState === kCLOSING) {
             self._socketOutputStream.close();
             self._readyState = kCLOSED;
-            self.callListener("onclose");
+            self.callListener("close");
           }
         }
       }
@@ -248,14 +259,43 @@ TCPSocket.prototype = {
   },
 
   callListener: function ts_callListener(type, data) {
-    if (!this[type])
+    if (!this["on" + type])
       return;
 
-    this[type].call(null, new TCPSocketEvent(type, this, data || ""));
+    this["on" + type].call(null, new TCPSocketEvent(type, this, data || ""));
+  },
+
+  /* nsITCPSocketInternal methods */
+  callListenerError: function ts_callListenerError(type, name) {
+    // XXX we're not really using TCPError at this time, so there's only a name
+    // attribute to pass.
+    this.callListener(type, createTCPError(this.useWin, name));
+  },
+
+  callListenerData: function ts_callListenerString(type, data) {
+    this.callListener(type, data);
+  },
+
+  callListenerArrayBuffer: function ts_callListenerArrayBuffer(type, data) {
+    this.callListener(type, data);
+  },
+
+  callListenerVoid: function ts_callListenerVoid(type) {
+    this.callListener(type);
+  },
+
+  updateReadyStateAndBuffered: function ts_setReadyState(readyState, bufferedAmount) {
+    this._readyState = readyState;
+    this._bufferedAmount = bufferedAmount;
+  },
+  /* end nsITCPSocketInternal methods */
+
+  initWindowless: function ts_initWindowless() {
+    return Services.prefs.getBoolPref("dom.mozTCPSocket.enabled");
   },
 
   init: function ts_init(aWindow) {
-    if (!Services.prefs.getBoolPref("dom.mozTCPSocket.enabled"))
+    if (!this.initWindowless())
       return null;
 
     let principal = aWindow.document.nodePrincipal;
@@ -272,6 +312,7 @@ TCPSocket.prototype = {
       Ci.nsIInterfaceRequestor
     ).getInterface(Ci.nsIDOMWindowUtils);
 
+    this.useWin = XPCNativeWrapper.unwrap(aWindow);
     this.innerWindowID = util.currentInnerWindowID;
     LOG("window init: " + this.innerWindowID);
   },
@@ -291,6 +332,8 @@ TCPSocket.prototype = {
         this.onerror = null;
         this.onclose = null;
 
+        this.useWin = null;
+
         // Clean up our socket
         this.close();
       }
@@ -299,6 +342,13 @@ TCPSocket.prototype = {
 
   // nsIDOMTCPSocket
   open: function ts_open(host, port, options) {
+    if (!this.initWindowless())
+      return null;
+
+    this._inChild = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime)
+                       .processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+    LOG("content process: " + (this._inChild ? "true" : "false"));
+
     // in the testing case, init won't be called and
     // hasPrivileges will be null. We want to proceed to test.
     if (this._hasPrivileges !== true && this._hasPrivileges !== null) {
@@ -306,13 +356,15 @@ TCPSocket.prototype = {
     }
     let that = new TCPSocket();
 
+    that.useWin = this.useWin;
     that.innerWindowID = this.innerWindowID;
+    that._inChild = this._inChild;
 
     LOG("window init: " + that.innerWindowID);
     Services.obs.addObserver(that, "inner-window-destroyed", true);
 
-    LOG("startup called\n");
-    LOG("Host info: " + host + ":" + port + "\n");
+    LOG("startup called");
+    LOG("Host info: " + host + ":" + port);
 
     that._readyState = kCONNECTING;
     that._host = host;
@@ -326,11 +378,18 @@ TCPSocket.prototype = {
       that._binaryType = options.binaryType || that._binaryType;
     }
 
-    LOG("SSL: " + that.ssl + "\n");
+    LOG("SSL: " + that.ssl);
+
+    if (this._inChild) {
+      that._socketBridge = Cc["@mozilla.org/tcp-socket-child;1"]
+                             .createInstance(Ci.nsITCPSocketChild);
+      that._socketBridge.open(that, host, port, !!that._ssl,
+                              that._binaryType, this.useWin, this.useWin || this);
+      return that;
+    }
 
     let transport = that._transport = this._createTransport(host, port, that._ssl);
     transport.setEventSink(that, Services.tm.currentThread);
-    transport.securityCallbacks = new SecurityCallbacks(that);
 
     that._socketInputStream = transport.openInputStream(0, 0, 0);
     that._socketOutputStream = transport.openOutputStream(
@@ -366,8 +425,13 @@ TCPSocket.prototype = {
     if (this._readyState === kCLOSED || this._readyState === kCLOSING)
       return;
 
-    LOG("close called\n");
+    LOG("close called");
     this._readyState = kCLOSING;
+
+    if (this._inChild) {
+      this._socketBridge.close();
+      return;
+    }
 
     if (!this._multiplexStream.count) {
       this._socketOutputStream.close();
@@ -375,34 +439,35 @@ TCPSocket.prototype = {
     this._socketInputStream.close();
   },
 
-  send: function ts_send(data) {
+  send: function ts_send(data, byteOffset, byteLength) {
     if (this._readyState !== kOPEN) {
       throw new Error("Socket not open.");
     }
 
-    let new_stream = new StringInputStream();
     if (this._binaryType === "arraybuffer") {
-      // It would be really nice if there were an interface
-      // that took an ArrayBuffer like StringInputStream takes
-      // a string. There is one, but only in C++ and not exposed
-      // to js as far as I can tell
-      var dataLen = data.length;
-      var offset = 0;
-      var result = "";
-      while (dataLen) {
-        var fragmentLen = dataLen;
-        if (fragmentLen > 32768)
-          fragmentLen = 32768;
-        dataLen -= fragmentLen;
-
-        var fragment = data.subarray(offset, offset + fragmentLen);
-        offset += fragmentLen;
-        result += String.fromCharCode.apply(null, fragment);
-      }
-      data = result;
+      byteLength = byteLength || data.byteLength;
     }
-    var newBufferedAmount = this.bufferedAmount + data.length;
-    new_stream.setData(data, data.length);
+
+    if (this._inChild) {
+      this._socketBridge.send(data, byteOffset, byteLength);
+    }
+
+    let length = this._binaryType === "arraybuffer" ? byteLength : data.length;
+
+    var newBufferedAmount = this.bufferedAmount + length;
+    var bufferNotFull = newBufferedAmount < BUFFER_SIZE;
+    if (this._inChild) {
+      return bufferNotFull;
+    }
+
+    let new_stream;
+    if (this._binaryType === "arraybuffer") {
+      new_stream = new ArrayBufferInputStream();
+      new_stream.setData(data, byteOffset, byteLength);
+    } else {
+      new_stream = new StringInputStream();
+      new_stream.setData(data, length);
+    }
     this._multiplexStream.appendStream(new_stream);
 
     if (newBufferedAmount >= BUFFER_SIZE) {
@@ -415,10 +480,15 @@ TCPSocket.prototype = {
     }
 
     this._ensureCopying();
-    return newBufferedAmount < BUFFER_SIZE;
+    return bufferNotFull;
   },
 
   suspend: function ts_suspend() {
+    if (this._inChild) {
+      this._socketBridge.suspend();
+      return;
+    }
+
     if (this._inputStreamPump) {
       this._inputStreamPump.suspend();
     } else {
@@ -427,6 +497,11 @@ TCPSocket.prototype = {
   },
 
   resume: function ts_resume() {
+    if (this._inChild) {
+      this._socketBridge.resume();
+      return;
+    }
+
     if (this._inputStreamPump) {
       this._inputStreamPump.resume();
     } else {
@@ -434,13 +509,141 @@ TCPSocket.prototype = {
     }
   },
 
+  _maybeReportErrorAndCloseIfOpen: function(status) {
+    // If we're closed, we've already reported the error or just don't need to
+    // report the error.
+    if (this._readyState === kCLOSED)
+      return;
+    this._readyState = kCLOSED;
+
+    if (!Components.isSuccessCode(status)) {
+      // Convert the status code to an appropriate error message.  Raw constants
+      // are used inline in all cases for consistency.  Some error codes are
+      // available in Components.results, some aren't.  Network error codes are
+      // effectively stable, NSS error codes are officially not, but we have no
+      // symbolic way to dynamically resolve them anyways (other than an ability
+      // to determine the error class.)
+      let errName, errType;
+      // security module? (and this is an error)
+      if ((status & 0xff0000) === 0x5a0000) {
+        const nsINSSErrorsService = Ci.nsINSSErrorsService;
+        let nssErrorsService = Cc['@mozilla.org/nss_errors_service;1']
+                                 .getService(nsINSSErrorsService);
+        let errorClass;
+        // getErrorClass will throw a generic NS_ERROR_FAILURE if the error code is
+        // somehow not in the set of covered errors.
+        try {
+          errorClass = nssErrorsService.getErrorClass(status);
+        }
+        catch (ex) {
+          errorClass = 'SecurityProtocol';
+        }
+        switch (errorClass) {
+          case nsINSSErrorsService.ERROR_CLASS_SSL_PROTOCOL:
+            errType = 'SecurityProtocol';
+            break;
+          case nsINSSErrorsService.ERROR_CLASS_BAD_CERT:
+            errType = 'SecurityCertificate';
+            break;
+          // no default is required; the platform impl automatically defaults to
+          // ERROR_CLASS_SSL_PROTOCOL.
+        }
+
+        // NSS_SEC errors (happen below the base value because of negative vals)
+        if ((status & 0xffff) <
+            Math.abs(nsINSSErrorsService.NSS_SEC_ERROR_BASE)) {
+          // The bases are actually negative, so in our positive numeric space, we
+          // need to subtract the base off our value.
+          let nssErr = Math.abs(nsINSSErrorsService.NSS_SEC_ERROR_BASE) -
+                         (status & 0xffff);
+          switch (nssErr) {
+            case 11: // SEC_ERROR_EXPIRED_CERTIFICATE, sec(11)
+              errName = 'SecurityExpiredCertificateError';
+              break;
+            case 12: // SEC_ERROR_REVOKED_CERTIFICATE, sec(12)
+              errName = 'SecurityRevokedCertificateError';
+              break;
+            // per bsmith, we will be unable to tell these errors apart very soon,
+            // so it makes sense to just folder them all together already.
+            case 13: // SEC_ERROR_UNKNOWN_ISSUER, sec(13)
+            case 20: // SEC_ERROR_UNTRUSTED_ISSUER, sec(20)
+            case 21: // SEC_ERROR_UNTRUSTED_CERT, sec(21)
+            case 36: // SEC_ERROR_CA_CERT_INVALID, sec(36)
+              errName = 'SecurityUntrustedCertificateIssuerError';
+              break;
+            case 90: // SEC_ERROR_INADEQUATE_KEY_USAGE, sec(90)
+              errName = 'SecurityInadequateKeyUsageError';
+              break;
+            case 176: // SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED, sec(176)
+              errName = 'SecurityCertificateSignatureAlgorithmDisabledError';
+              break;
+            default:
+              errName = 'SecurityError';
+              break;
+          }
+        }
+        // NSS_SSL errors
+        else {
+          let sslErr = Math.abs(nsINSSErrorsService.NSS_SSL_ERROR_BASE) -
+                         (status & 0xffff);
+          switch (sslErr) {
+            case 3: // SSL_ERROR_NO_CERTIFICATE, ssl(3)
+              errName = 'SecurityNoCertificateError';
+              break;
+            case 4: // SSL_ERROR_BAD_CERTIFICATE, ssl(4)
+              errName = 'SecurityBadCertificateError';
+              break;
+            case 8: // SSL_ERROR_UNSUPPORTED_CERTIFICATE_TYPE, ssl(8)
+              errName = 'SecurityUnsupportedCertificateTypeError';
+              break;
+            case 9: // SSL_ERROR_UNSUPPORTED_VERSION, ssl(9)
+              errName = 'SecurityUnsupportedTLSVersionError';
+              break;
+            case 12: // SSL_ERROR_BAD_CERT_DOMAIN, ssl(12)
+              errName = 'SecurityCertificateDomainMismatchError';
+              break;
+            default:
+              errName = 'SecurityError';
+              break;
+          }
+        }
+      }
+      // must be network
+      else {
+        errType = 'Network';
+        switch (status) {
+          // connect to host:port failed
+          case 0x804B000C: // NS_ERROR_CONNECTION_REFUSED, network(13)
+            errName = 'ConnectionRefusedError';
+            break;
+          // network timeout error
+          case 0x804B000E: // NS_ERROR_NET_TIMEOUT, network(14)
+            errName = 'NetworkTimeoutError';
+            break;
+          // hostname lookup failed
+          case 0x804B001E: // NS_ERROR_UNKNOWN_HOST, network(30)
+            errName = 'DomainNotFoundError';
+            break;
+          case 0x804B0047: // NS_ERROR_NET_INTERRUPT, network(71)
+            errName = 'NetworkInterruptError';
+            break;
+          default:
+            errName = 'NetworkError';
+            break;
+        }
+      }
+      let err = createTCPError(this.useWin, errName, errType);
+      this.callListener("error", err);
+    }
+    this.callListener("close");
+  },
+
   // nsITransportEventSink (Triggered by transport.setEventSink)
   onTransportStatus: function ts_onTransportStatus(
     transport, status, progress, max) {
-
     if (status === Ci.nsISocketTransport.STATUS_CONNECTED_TO) {
       this._readyState = kOPEN;
-      this.callListener("onopen");
+      this.callListener("open");
 
       this._inputStreamPump = new InputStreamPump(
         this._socketInputStream, -1, -1, 0, 0, false
@@ -460,7 +663,8 @@ TCPSocket.prototype = {
     try {
       input.available();
     } catch (e) {
-      this.callListener("onerror", new Error("Connection refused"));
+      // NS_ERROR_CONNECTION_REFUSED
+      this._maybeReportErrorAndCloseIfOpen(0x804B000C);
     }
   },
 
@@ -474,34 +678,29 @@ TCPSocket.prototype = {
 
     this._inputStreamPump = null;
 
-    if (buffered_output && !status) {
+    let statusIsError = !Components.isSuccessCode(status);
+
+    if (buffered_output && !statusIsError) {
       // If we have some buffered output still, and status is not an
-      // error, the other side has done a half-close, but we don't 
+      // error, the other side has done a half-close, but we don't
       // want to be in the close state until we are done sending
       // everything that was buffered. We also don't want to call onclose
       // yet.
       return;
     }
 
-    this._readyState = kCLOSED;
-
-    if (status) {
-      let err = new Error("Connection closed: " + status);
-      err.status = status;
-      this.callListener("onerror", err);
-    }
-
-    this.callListener("onclose");
+    // We call this even if there is no error.
+    this._maybeReportErrorAndCloseIfOpen(status);
   },
 
   // nsIStreamListener (Triggered by _inputStreamPump.asyncRead)
   onDataAvailable: function ts_onDataAvailable(request, context, inputStream, offset, count) {
     if (this._binaryType === "arraybuffer") {
-      let ua = new Uint8Array(count);
-      ua.set(this._inputStreamBinary.readByteArray(count));
-      this.callListener("ondata", ua);
+      let buffer = new (this.useWin ? this.useWin.ArrayBuffer : ArrayBuffer)(count);
+      this._inputStreamBinary.readArrayBuffer(count, buffer);
+      this.callListener("data", buffer);
     } else {
-      this.callListener("ondata", this._inputStreamScriptable.read(count));
+      this.callListener("data", this._inputStreamScriptable.read(count));
     }
   },
 
@@ -513,44 +712,17 @@ TCPSocket.prototype = {
     classDescription: "Client TCP Socket",
     interfaces: [
       Ci.nsIDOMTCPSocket,
-      Ci.nsIDOMGlobalPropertyInitializer,
-      Ci.nsIObserver,
-      Ci.nsISupportsWeakReference
     ],
     flags: Ci.nsIClassInfo.DOM_OBJECT,
   }),
 
   QueryInterface: XPCOMUtils.generateQI([
     Ci.nsIDOMTCPSocket,
+    Ci.nsITCPSocketInternal,
     Ci.nsIDOMGlobalPropertyInitializer,
     Ci.nsIObserver,
     Ci.nsISupportsWeakReference
   ])
 }
 
-
-function SecurityCallbacks(socket) {
-  this._socket = socket;
-}
-
-SecurityCallbacks.prototype = {
-  notifyCertProblem: function sc_notifyCertProblem(socketInfo, status,
-                                                   targetSite) {
-    this._socket.callListener("onerror", status);
-    this._socket.close();
-    return true;
-  },
-
-  getInterface: function sc_getInterface(iid) {
-    return this.QueryInterface(iid);
-  },
-
-  QueryInterface: XPCOMUtils.generateQI([
-    Ci.nsIBadCertListener2,
-    Ci.nsIInterfaceRequestor,
-    Ci.nsISupports
-  ])
-};
-
-
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([TCPSocket]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([TCPSocket]);

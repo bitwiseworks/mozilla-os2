@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsPNGDecoder.h"
 #include "ImageLogging.h"
+#include "nsPNGDecoder.h"
 
 #include "nsMemory.h"
 #include "nsRect.h"
@@ -13,7 +13,6 @@
 #include "nsIInputStream.h"
 
 #include "RasterImage.h"
-#include "imgIContainerObserver.h"
 
 #include "gfxColor.h"
 #include "nsColor.h"
@@ -22,14 +21,29 @@
 #include "png.h"
 
 #include "gfxPlatform.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace image {
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *gPNGLog = PR_NewLogModule("PNGDecoder");
-static PRLogModuleInfo *gPNGDecoderAccountingLog =
-                        PR_NewLogModule("PNGDecoderAccounting");
+static PRLogModuleInfo *
+GetPNGLog()
+{
+  static PRLogModuleInfo *sPNGLog;
+  if (!sPNGLog)
+    sPNGLog = PR_NewLogModule("PNGDecoder");
+  return sPNGLog;
+}
+
+static PRLogModuleInfo *
+GetPNGDecoderAccountingLog()
+{
+  static PRLogModuleInfo *sPNGDecoderAccountingLog;
+  if (!sPNGDecoderAccountingLog)
+    sPNGDecoderAccountingLog = PR_NewLogModule("PNGDecoderAccounting");
+  return sPNGDecoderAccountingLog;
+}
 #endif
 
 /* limit image dimensions (bug #251381) */
@@ -40,18 +54,67 @@ static PRLogModuleInfo *gPNGDecoderAccountingLog =
 #define HEIGHT_OFFSET (WIDTH_OFFSET + 4)
 #define BYTES_NEEDED_FOR_DIMENSIONS (HEIGHT_OFFSET + 4)
 
+nsPNGDecoder::AnimFrameInfo::AnimFrameInfo()
+ : mDispose(FrameBlender::kDisposeKeep)
+ , mBlend(FrameBlender::kBlendOver)
+ , mTimeout(0)
+{}
+
+#ifdef PNG_APNG_SUPPORTED
+nsPNGDecoder::AnimFrameInfo::AnimFrameInfo(png_structp aPNG, png_infop aInfo)
+ : mDispose(FrameBlender::kDisposeKeep)
+ , mBlend(FrameBlender::kBlendOver)
+ , mTimeout(0)
+{
+  png_uint_16 delay_num, delay_den;
+  /* delay, in seconds is delay_num/delay_den */
+  png_byte dispose_op;
+  png_byte blend_op;
+  delay_num = png_get_next_frame_delay_num(aPNG, aInfo);
+  delay_den = png_get_next_frame_delay_den(aPNG, aInfo);
+  dispose_op = png_get_next_frame_dispose_op(aPNG, aInfo);
+  blend_op = png_get_next_frame_blend_op(aPNG, aInfo);
+
+  if (delay_num == 0) {
+    mTimeout = 0; // SetFrameTimeout() will set to a minimum
+  } else {
+    if (delay_den == 0)
+      delay_den = 100; // so says the APNG spec
+
+    // Need to cast delay_num to float to have a proper division and
+    // the result to int to avoid compiler warning
+    mTimeout = static_cast<int32_t>(static_cast<double>(delay_num) * 1000 / delay_den);
+  }
+
+  if (dispose_op == PNG_DISPOSE_OP_PREVIOUS) {
+    mDispose = FrameBlender::kDisposeRestorePrevious;
+  } else if (dispose_op == PNG_DISPOSE_OP_BACKGROUND) {
+    mDispose = FrameBlender::kDisposeClear;
+  } else {
+    mDispose = FrameBlender::kDisposeKeep;
+  }
+
+  if (blend_op == PNG_BLEND_OP_SOURCE) {
+    mBlend = FrameBlender::kBlendSource;
+  } else {
+    mBlend = FrameBlender::kBlendOver;
+  }
+}
+#endif
+
 // First 8 bytes of a PNG file
-const uint8_t 
+const uint8_t
 nsPNGDecoder::pngSignatureBytes[] = { 137, 80, 78, 71, 13, 10, 26, 10 };
 
-nsPNGDecoder::nsPNGDecoder(RasterImage &aImage, imgIDecoderObserver* aObserver)
- : Decoder(aImage, aObserver),
+nsPNGDecoder::nsPNGDecoder(RasterImage &aImage)
+ : Decoder(aImage),
    mPNG(nullptr), mInfo(nullptr),
    mCMSLine(nullptr), interlacebuf(nullptr),
    mInProfile(nullptr), mTransform(nullptr),
-   mHeaderBuf(nullptr), mHeaderBytesRead(0),
+   mHeaderBytesRead(0), mCMSMode(0),
    mChannels(0), mFrameIsHidden(false),
-   mCMSMode(0), mDisablePremultipliedAlpha(false)
+   mDisablePremultipliedAlpha(false),
+   mNumFrames(0)
 {
 }
 
@@ -70,8 +133,6 @@ nsPNGDecoder::~nsPNGDecoder()
     if (mTransform)
       qcms_transform_release(mTransform);
   }
-  if (mHeaderBuf)
-    nsMemory::Free(mHeaderBuf);
 }
 
 // CreateFrame() is used for both simple and animated images
@@ -79,82 +140,38 @@ void nsPNGDecoder::CreateFrame(png_uint_32 x_offset, png_uint_32 y_offset,
                                int32_t width, int32_t height,
                                gfxASurface::gfxImageFormat format)
 {
-  uint32_t imageDataLength;
-  nsresult rv = mImage.EnsureFrame(GetFrameCount(), x_offset, y_offset,
-                                   width, height, format,
-                                   &mImageData, &imageDataLength);
-  if (NS_FAILED(rv))
-    longjmp(png_jmpbuf(mPNG), 5); // NS_ERROR_OUT_OF_MEMORY
+  // Our first full frame is automatically created by the image decoding
+  // infrastructure. Just use it as long as it matches up.
+  MOZ_ASSERT(HasSize());
+  if (mNumFrames != 0 ||
+      !GetCurrentFrame()->GetRect().IsEqualEdges(nsIntRect(x_offset, y_offset, width, height))) {
+    NeedNewFrame(mNumFrames, x_offset, y_offset, width, height, format);
+  } else if (mNumFrames == 0) {
+    // Our preallocated frame matches up, with the possible exception of alpha.
+    if (format == gfxASurface::ImageFormatRGB24) {
+      GetCurrentFrame()->SetHasNoAlpha();
+    }
+  }
 
   mFrameRect.x = x_offset;
   mFrameRect.y = y_offset;
   mFrameRect.width = width;
   mFrameRect.height = height;
 
-#ifdef PNG_APNG_SUPPORTED
-  if (png_get_valid(mPNG, mInfo, PNG_INFO_acTL))
-    SetAnimFrameInfo();
-#endif
-
-  // Tell the superclass we're starting a frame
-  PostFrameStart();
-
-  PR_LOG(gPNGDecoderAccountingLog, PR_LOG_DEBUG,
+  PR_LOG(GetPNGDecoderAccountingLog(), PR_LOG_DEBUG,
          ("PNGDecoderAccounting: nsPNGDecoder::CreateFrame -- created "
           "image frame with %dx%d pixels in container %p",
           width, height,
           &mImage));
 
   mFrameHasNoAlpha = true;
-}
 
 #ifdef PNG_APNG_SUPPORTED
-// set timeout and frame disposal method for the current frame
-void nsPNGDecoder::SetAnimFrameInfo()
-{
-  png_uint_16 delay_num, delay_den;
-  /* delay, in seconds is delay_num/delay_den */
-  png_byte dispose_op;
-  png_byte blend_op;
-  int32_t timeout; /* in milliseconds */
-
-  delay_num = png_get_next_frame_delay_num(mPNG, mInfo);
-  delay_den = png_get_next_frame_delay_den(mPNG, mInfo);
-  dispose_op = png_get_next_frame_dispose_op(mPNG, mInfo);
-  blend_op = png_get_next_frame_blend_op(mPNG, mInfo);
-
-  if (delay_num == 0) {
-    timeout = 0; // SetFrameTimeout() will set to a minimum
-  } else {
-    if (delay_den == 0)
-      delay_den = 100; // so says the APNG spec
-
-    // Need to cast delay_num to float to have a proper division and
-    // the result to int to avoid compiler warning
-    timeout = static_cast<int32_t>
-              (static_cast<double>(delay_num) * 1000 / delay_den);
+  if (png_get_valid(mPNG, mInfo, PNG_INFO_acTL)) {
+    mAnimInfo = AnimFrameInfo(mPNG, mInfo);
   }
-
-  uint32_t numFrames = mImage.GetNumFrames();
-
-  mImage.SetFrameTimeout(numFrames - 1, timeout);
-
-  if (dispose_op == PNG_DISPOSE_OP_PREVIOUS)
-      mImage.SetFrameDisposalMethod(numFrames - 1,
-                                    RasterImage::kDisposeRestorePrevious);
-  else if (dispose_op == PNG_DISPOSE_OP_BACKGROUND)
-      mImage.SetFrameDisposalMethod(numFrames - 1,
-                                    RasterImage::kDisposeClear);
-  else
-      mImage.SetFrameDisposalMethod(numFrames - 1,
-                                    RasterImage::kDisposeKeep);
-
-  if (blend_op == PNG_BLEND_OP_SOURCE)
-      mImage.SetFrameBlendMethod(numFrames - 1, RasterImage::kBlendSource);
-  /*else // 'over' is the default
-      mImage.SetFrameBlendMethod(numFrames - 1, RasterImage::kBlendOver); */
-}
 #endif
+}
 
 // set timeout and frame disposal method for the current frame
 void nsPNGDecoder::EndImageFrame()
@@ -162,29 +179,34 @@ void nsPNGDecoder::EndImageFrame()
   if (mFrameIsHidden)
     return;
 
-  uint32_t numFrames = 1;
+  mNumFrames++;
+
+  FrameBlender::FrameAlpha alpha;
+  if (mFrameHasNoAlpha)
+    alpha = FrameBlender::kFrameOpaque;
+  else
+    alpha = FrameBlender::kFrameHasAlpha;
+
 #ifdef PNG_APNG_SUPPORTED
-  numFrames = mImage.GetNumFrames();
+  uint32_t numFrames = GetFrameCount();
 
   // We can't use mPNG->num_frames_read as it may be one ahead.
   if (numFrames > 1) {
-    // Tell the image renderer that the frame is complete
-    if (mFrameHasNoAlpha)
-      mImage.SetFrameHasNoAlpha(numFrames - 1);
-
-    // PNG is always non-premult
-    mImage.SetFrameAsNonPremult(numFrames - 1, true);
-
     PostInvalidation(mFrameRect);
   }
 #endif
 
-  PostFrameStop();
+  PostFrameStop(alpha, mAnimInfo.mDispose, mAnimInfo.mTimeout, mAnimInfo.mBlend);
 }
 
 void
 nsPNGDecoder::InitInternal()
 {
+  // For size decodes, we don't need to initialize the png decoder
+  if (IsSizeDecode()) {
+    return;
+  }
+
   mCMSMode = gfxPlatform::GetCMSMode();
   if ((mDecodeFlags & DECODER_NO_COLORSPACE_CONVERSION) != 0)
     mCMSMode = eCMSMode_Off;
@@ -208,12 +230,6 @@ nsPNGDecoder::InitInternal()
         116,  73,  77,  69, '\0',   /* tIME */
         122,  84,  88, 116, '\0'};  /* zTXt */
 #endif
-
-  // For size decodes, we only need a small buffer
-  if (IsSizeDecode()) {
-    mHeaderBuf = (uint8_t *)moz_xmalloc(BYTES_NEEDED_FOR_DIMENSIONS);
-    return;
-  }
 
   /* For full decodes, do png init stuff */
 
@@ -241,7 +257,7 @@ nsPNGDecoder::InitInternal()
     png_set_keep_unknown_chunks(mPNG, 1, color_chunks, 2);
 
   png_set_keep_unknown_chunks(mPNG, 1, unused_chunks,
-                              (int)sizeof(unused_chunks)/5);   
+                              (int)sizeof(unused_chunks)/5);
 #endif
 
 #ifdef PNG_SET_CHUNK_MALLOC_LIMIT_SUPPORTED
@@ -272,10 +288,6 @@ nsPNGDecoder::InitInternal()
 void
 nsPNGDecoder::WriteInternal(const char *aBuffer, uint32_t aCount)
 {
-  // We use gotos, so we need to declare variables here
-  uint32_t width = 0;
-  uint32_t height = 0;
-
   NS_ABORT_IF_FALSE(!HasError(), "Shouldn't call WriteInternal after error!");
 
   // If we only want width/height, we don't need to go through libpng
@@ -285,25 +297,34 @@ nsPNGDecoder::WriteInternal(const char *aBuffer, uint32_t aCount)
     if (mHeaderBytesRead == BYTES_NEEDED_FOR_DIMENSIONS)
       return;
 
-    // Read data into our header buffer
-    uint32_t bytesToRead = NS_MIN(aCount, BYTES_NEEDED_FOR_DIMENSIONS -
-                                  mHeaderBytesRead);
-    memcpy(mHeaderBuf + mHeaderBytesRead, aBuffer, bytesToRead);
-    mHeaderBytesRead += bytesToRead;
+    // Scan the header for the width and height bytes
+    uint32_t pos = 0;
+    const uint8_t *bptr = (uint8_t *)aBuffer;
+
+    while (pos < aCount && mHeaderBytesRead < BYTES_NEEDED_FOR_DIMENSIONS) {
+      // Verify the signature bytes
+      if (mHeaderBytesRead < sizeof(pngSignatureBytes)) {
+        if (bptr[pos] != nsPNGDecoder::pngSignatureBytes[mHeaderBytesRead]) {
+          PostDataError();
+          return;
+        }
+      }
+
+      // Get width and height bytes into the buffer
+      if ((mHeaderBytesRead >= WIDTH_OFFSET) &&
+          (mHeaderBytesRead < BYTES_NEEDED_FOR_DIMENSIONS)) {
+        mSizeBytes[mHeaderBytesRead - WIDTH_OFFSET] = bptr[pos];
+      }
+      pos ++;
+      mHeaderBytesRead ++;
+    }
 
     // If we're done now, verify the data and set up the container
     if (mHeaderBytesRead == BYTES_NEEDED_FOR_DIMENSIONS) {
 
-      // Check that the signature bytes are right
-      if (memcmp(mHeaderBuf, nsPNGDecoder::pngSignatureBytes, 
-                 sizeof(pngSignatureBytes))) {
-        PostDataError();
-        return;
-      }
-
       // Grab the width and height, accounting for endianness (thanks libpng!)
-      width = png_get_uint_32(mHeaderBuf + WIDTH_OFFSET);
-      height = png_get_uint_32(mHeaderBuf + HEIGHT_OFFSET);
+      uint32_t width = png_get_uint_32(mSizeBytes);
+      uint32_t height = png_get_uint_32(mSizeBytes + 4);
 
       // Too big?
       if ((width > MOZ_PNG_MAX_DIMENSION) || (height > MOZ_PNG_MAX_DIMENSION)) {
@@ -583,6 +604,8 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
   /* copy PNG info into imagelib structs (formerly png_set_dims()) */
   /*---------------------------------------------------------------*/
 
+  // This code is currently unused, but it will be needed for bug 517713.
+#if 0
   int32_t alpha_bits = 1;
 
   if (channels == 2 || channels == 4) {
@@ -601,6 +624,7 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
       alpha_bits = 8;
     }
   }
+#endif
 
   if (channels == 1 || channels == 3)
     decoder->format = gfxASurface::ImageFormatRGB24;
@@ -631,21 +655,19 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
   }
 
   if (interlace_type == PNG_INTERLACE_ADAM7) {
-    if (height < PR_INT32_MAX / (width * channels))
+    if (height < INT32_MAX / (width * channels))
       decoder->interlacebuf = (uint8_t *)moz_malloc(channels * width * height);
     if (!decoder->interlacebuf) {
       longjmp(png_jmpbuf(decoder->mPNG), 5); // NS_ERROR_OUT_OF_MEMORY
     }
   }
 
-  /* Reject any ancillary chunk after IDAT with a bad CRC (bug #397593).
-   * It would be better to show the default frame (if one has already been
-   * successfully decoded) before bailing, but it's simpler to just bail
-   * out with an error message.
-   */
-  png_set_crc_action(png_ptr, PNG_CRC_NO_CHANGE, PNG_CRC_ERROR_QUIT);
-
-  return;
+  if (decoder->NeedsNewFrame()) {
+    /* We know that we need a new frame, so pause input so the decoder
+     * infrastructure can give it to us.
+     */
+    png_process_data_pause(png_ptr, /* save = */ 1);
+  }
 }
 
 void
@@ -727,7 +749,7 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
 
         // copy as bytes until source pointer is 32-bit-aligned
         for (; (NS_PTR_TO_UINT32(line) & 0x3) && idx; --idx) {
-          *cptr32++ = GFX_PACKED_PIXEL(0xFF, line[0], line[1], line[2]);
+          *cptr32++ = gfxPackedPixel(0xFF, line[0], line[1], line[2]);
           line += 3;
         }
 
@@ -742,7 +764,7 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
         // copy remaining pixel(s)
         while (idx--) {
           // 32-bit read of final pixel will exceed buffer, so read bytes
-          *cptr32++ = GFX_PACKED_PIXEL(0xFF, line[0], line[1], line[2]);
+          *cptr32++ = gfxPackedPixel(0xFF, line[0], line[1], line[2]);
           line += 3;
         }
       }
@@ -751,14 +773,14 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
       {
         if (!decoder->mDisablePremultipliedAlpha) {
           for (uint32_t x=width; x>0; --x) {
-            *cptr32++ = GFX_PACKED_PIXEL(line[3], line[0], line[1], line[2]);
+            *cptr32++ = gfxPackedPixel(line[3], line[0], line[1], line[2]);
             if (line[3] != 0xff)
               rowHasNoAlpha = false;
             line += 4;
           }
         } else {
           for (uint32_t x=width; x>0; --x) {
-            *cptr32++ = GFX_PACKED_PIXEL_NO_PREMULTIPLY(line[3], line[0], line[1], line[2]);
+            *cptr32++ = gfxPackedPixelNoPreMultiply(line[3], line[0], line[1], line[2]);
             if (line[3] != 0xff)
               rowHasNoAlpha = false;
             line += 4;
@@ -773,8 +795,7 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
     if (!rowHasNoAlpha)
       decoder->mFrameHasNoAlpha = false;
 
-    uint32_t numFrames = decoder->mImage.GetNumFrames();
-    if (numFrames <= 1) {
+    if (decoder->mNumFrames <= 1) {
       // Only do incremental image display for the first frame
       // XXXbholley - this check should be handled in the superclass
       nsIntRect r(0, row_num, width, 1);
@@ -806,6 +827,13 @@ nsPNGDecoder::frame_info_callback(png_structp png_ptr, png_uint_32 frame_num)
   height = png_get_next_frame_height(png_ptr, decoder->mInfo);
 
   decoder->CreateFrame(x_offset, y_offset, width, height, decoder->format);
+
+  if (decoder->NeedsNewFrame()) {
+    /* We know that we need a new frame, so pause input so the decoder
+     * infrastructure can give it to us.
+     */
+    png_process_data_pause(png_ptr, /* save = */ 1);
+  }
 #endif
 }
 
@@ -830,23 +858,24 @@ nsPNGDecoder::end_callback(png_structp png_ptr, png_infop info_ptr)
   // We shouldn't get here if we've hit an error
   NS_ABORT_IF_FALSE(!decoder->HasError(), "Finishing up PNG but hit error!");
 
+  int32_t loop_count = 0;
 #ifdef PNG_APNG_SUPPORTED
   if (png_get_valid(png_ptr, info_ptr, PNG_INFO_acTL)) {
     int32_t num_plays = png_get_num_plays(png_ptr, info_ptr);
-    decoder->mImage.SetLoopCount(num_plays - 1);
+    loop_count = num_plays - 1;
   }
 #endif
 
   // Send final notifications
   decoder->EndImageFrame();
-  decoder->PostDecodeDone();
+  decoder->PostDecodeDone(loop_count);
 }
 
 
 void
 nsPNGDecoder::error_callback(png_structp png_ptr, png_const_charp error_msg)
 {
-  PR_LOG(gPNGLog, PR_LOG_ERROR, ("libpng error: %s\n", error_msg));
+  PR_LOG(GetPNGLog(), PR_LOG_ERROR, ("libpng error: %s\n", error_msg));
   longjmp(png_jmpbuf(png_ptr), 1);
 }
 
@@ -854,7 +883,7 @@ nsPNGDecoder::error_callback(png_structp png_ptr, png_const_charp error_msg)
 void
 nsPNGDecoder::warning_callback(png_structp png_ptr, png_const_charp warning_msg)
 {
-  PR_LOG(gPNGLog, PR_LOG_WARNING, ("libpng warning: %s\n", warning_msg));
+  PR_LOG(GetPNGLog(), PR_LOG_WARNING, ("libpng warning: %s\n", warning_msg));
 }
 
 Telemetry::ID

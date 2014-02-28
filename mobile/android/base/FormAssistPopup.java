@@ -6,7 +6,9 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.gfx.FloatSize;
+import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
 import org.mozilla.gecko.util.GeckoEventListener;
+import org.mozilla.gecko.util.ThreadUtils;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -14,6 +16,7 @@ import org.json.JSONObject;
 
 import android.content.Context;
 import android.content.res.Resources;
+import android.graphics.PointF;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.Pair;
@@ -44,6 +47,12 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
     private ImageView mValidationMessageArrow;
     private ImageView mValidationMessageArrowInverted;
 
+    private double mX;
+    private double mY;
+    private double mW;
+    private double mH;
+    private boolean mIsAutoComplete = true;
+
     private static int sAutoCompleteMinWidth = 0;
     private static int sAutoCompleteRowHeight = 0;
     private static int sValidationMessageHeight = 0;
@@ -51,7 +60,7 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
     private static RelativeLayout.LayoutParams sValidationTextLayoutNormal;
     private static RelativeLayout.LayoutParams sValidationTextLayoutInverted;
 
-    private static final String LOGTAG = "FormAssistPopup";
+    private static final String LOGTAG = "GeckoFormAssistPopup";
 
     // The blocklist is so short that ArrayList is probably cheaper than HashSet.
     private static final Collection<String> sInputMethodBlocklist = Arrays.asList(new String[] {
@@ -82,6 +91,7 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
         unregisterEventListener("FormAssist:Hide");
     }
 
+    @Override
     public void handleMessage(String event, JSONObject message) {
         try {
             if (event.equals("FormAssist:AutoComplete")) {
@@ -98,40 +108,42 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
 
     private void handleAutoCompleteMessage(JSONObject message) throws JSONException  {
         final JSONArray suggestions = message.getJSONArray("suggestions");
-        final JSONArray rect = message.getJSONArray("rect");
-        final double zoom = message.getDouble("zoom");
-        GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
+        final JSONObject rect = message.getJSONObject("rect");
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
             public void run() {
-                showAutoCompleteSuggestions(suggestions, rect, zoom);
+                showAutoCompleteSuggestions(suggestions, rect);
             }
         });
     }
 
     private void handleValidationMessage(JSONObject message) throws JSONException {
         final String validationMessage = message.getString("validationMessage");
-        final JSONArray rect = message.getJSONArray("rect");
-        final double zoom = message.getDouble("zoom");
-        GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
+        final JSONObject rect = message.getJSONObject("rect");
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
             public void run() {
-                showValidationMessage(validationMessage, rect, zoom);
+                showValidationMessage(validationMessage, rect);
             }
         });
     }
-    
+
     private void handleHideMessage(JSONObject message) {
-        GeckoApp.mAppContext.mMainHandler.post(new Runnable() {
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
             public void run() {
                 hide();
             }
         });
     }
 
-    private void showAutoCompleteSuggestions(JSONArray suggestions, JSONArray rect, double zoom) {
+    private void showAutoCompleteSuggestions(JSONArray suggestions, JSONObject rect) {
         if (mAutoCompleteList == null) {
             LayoutInflater inflater = LayoutInflater.from(mContext);
             mAutoCompleteList = (ListView) inflater.inflate(R.layout.autocomplete_list, null);
 
             mAutoCompleteList.setOnItemClickListener(new OnItemClickListener() {
+                @Override
                 public void onItemClick(AdapterView<?> parentView, View view, int position, long id) {
                     // Use the value stored with the autocomplete view, not the label text,
                     // since they can be different.
@@ -149,10 +161,12 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
         adapter.populateSuggestionsList(suggestions);
         mAutoCompleteList.setAdapter(adapter);
 
-        positionAndShowPopup(rect, zoom, true);
+        if (setGeckoPositionData(rect, true)) {
+            positionAndShowPopup();
+        }
     }
 
-    private void showValidationMessage(String validationMessage, JSONArray rect, double zoom) {
+    private void showValidationMessage(String validationMessage, JSONObject rect) {
         if (mValidationMessage == null) {
             LayoutInflater inflater = LayoutInflater.from(mContext);
             mValidationMessage = (RelativeLayout) inflater.inflate(R.layout.validation_message, null);
@@ -177,27 +191,45 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
         // We need to set the text as selected for the marquee text to work.
         mValidationMessageText.setSelected(true);
 
-        positionAndShowPopup(rect, zoom, false);
+        if (setGeckoPositionData(rect, false)) {
+            positionAndShowPopup();
+        }
     }
 
-    // Returns true if the popup is successfully shown, false otherwise
-    private boolean positionAndShowPopup(JSONArray rect, double zoom, boolean isAutoComplete) {
+    private boolean setGeckoPositionData(JSONObject rect, boolean isAutoComplete) {
+        try {
+            mX = rect.getDouble("x");
+            mY = rect.getDouble("y");
+            mW = rect.getDouble("w");
+            mH = rect.getDouble("h");
+        } catch (JSONException e) {
+            // Bail if we can't get the correct dimensions for the popup.
+            Log.e(LOGTAG, "Error getting FormAssistPopup dimensions", e);
+            return false;
+        }
+
+        mIsAutoComplete = isAutoComplete;
+        return true;
+    }
+
+    private void positionAndShowPopup() {
+        positionAndShowPopup(GeckoAppShell.getLayerView().getViewportMetrics());
+    }
+
+    private void positionAndShowPopup(ImmutableViewportMetrics aMetrics) {
+        ThreadUtils.assertOnUiThread();
+
         // Don't show the form assist popup when using fullscreen VKB
         InputMethodManager imm =
-                (InputMethodManager) GeckoApp.mAppContext.getSystemService(Context.INPUT_METHOD_SERVICE);
+                (InputMethodManager) GeckoAppShell.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm.isFullscreenMode())
-            return false;
-
-        if (!isShown()) {
-            setVisibility(VISIBLE);
-            startAnimation(mAnimation);
-        }
+            return;
 
         // Hide/show the appropriate popup contents
         if (mAutoCompleteList != null)
-            mAutoCompleteList.setVisibility(isAutoComplete ? VISIBLE : GONE);
+            mAutoCompleteList.setVisibility(mIsAutoComplete ? VISIBLE : GONE);
         if (mValidationMessage != null)
-            mValidationMessage.setVisibility(isAutoComplete ? GONE : VISIBLE);
+            mValidationMessage.setVisibility(mIsAutoComplete ? GONE : VISIBLE);
 
         if (sAutoCompleteMinWidth == 0) {
             Resources res = mContext.getResources();
@@ -206,28 +238,24 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
             sValidationMessageHeight = (int) (res.getDimension(R.dimen.validation_message_height));
         }
 
+        float zoom = aMetrics.zoomFactor;
+        PointF offset = aMetrics.getMarginOffset();
+
         // These values correspond to the input box for which we want to
         // display the FormAssistPopup.
-        int left = 0;
-        int top = 0; 
-        int width = 0;
-        int height = 0;
-
-        try {
-            left = (int) (rect.getDouble(0) * zoom);
-            top = (int) (rect.getDouble(1) * zoom);
-            width = (int) (rect.getDouble(2) * zoom);
-            height = (int) (rect.getDouble(3) * zoom);
-        } catch (JSONException e) { } 
+        int left = (int) (mX * zoom - aMetrics.viewportRectLeft + offset.x);
+        int top = (int) (mY * zoom - aMetrics.viewportRectTop + offset.y);
+        int width = (int) (mW * zoom);
+        int height = (int) (mH * zoom);
 
         int popupWidth = RelativeLayout.LayoutParams.FILL_PARENT;
         int popupLeft = left < 0 ? 0 : left;
 
-        FloatSize viewport = GeckoApp.mAppContext.getLayerView().getViewportMetrics().getSize();
+        FloatSize viewport = aMetrics.getSize();
 
         // For autocomplete suggestions, if the input is smaller than the screen-width,
         // shrink the popup's width. Otherwise, keep it as FILL_PARENT.
-        if (isAutoComplete && (left + width) < viewport.width) {
+        if (mIsAutoComplete && (left + width) < viewport.width) {
             popupWidth = left < 0 ? left + width : width;
 
             // Ensure the popup has a minimum width.
@@ -241,14 +269,14 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
         }
 
         int popupHeight;
-        if (isAutoComplete)
+        if (mIsAutoComplete)
             popupHeight = sAutoCompleteRowHeight * mAutoCompleteList.getAdapter().getCount();
         else
             popupHeight = sValidationMessageHeight;
 
         int popupTop = top + height;
 
-        if (!isAutoComplete) {
+        if (!mIsAutoComplete) {
             mValidationMessageText.setLayoutParams(sValidationTextLayoutNormal);
             mValidationMessageArrow.setVisibility(VISIBLE);
             mValidationMessageArrowInverted.setVisibility(GONE);
@@ -271,7 +299,7 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
                     popupHeight = top;
                 }
 
-                if (!isAutoComplete) {
+                if (!mIsAutoComplete) {
                     mValidationMessageText.setLayoutParams(sValidationTextLayoutInverted);
                     mValidationMessageArrow.setVisibility(GONE);
                     mValidationMessageArrowInverted.setVisibility(VISIBLE);
@@ -285,7 +313,10 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
         setLayoutParams(layoutParams);
         requestLayout();
 
-        return true;
+        if (!isShown()) {
+            setVisibility(VISIBLE);
+            startAnimation(mAnimation);
+        }
     }
 
     public void hide() {
@@ -298,6 +329,19 @@ public class FormAssistPopup extends RelativeLayout implements GeckoEventListene
     void onInputMethodChanged(String newInputMethod) {
         boolean blocklisted = sInputMethodBlocklist.contains(newInputMethod);
         broadcastGeckoEvent("FormAssist:Blocklisted", String.valueOf(blocklisted));
+    }
+
+    void onMetricsChanged(final ImmutableViewportMetrics aMetrics) {
+        if (!isShown()) {
+            return;
+        }
+
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
+            public void run() {
+                positionAndShowPopup(aMetrics);
+            }
+        });
     }
 
     private static void broadcastGeckoEvent(String eventName, String eventData) {

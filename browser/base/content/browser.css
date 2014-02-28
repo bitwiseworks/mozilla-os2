@@ -9,6 +9,10 @@ searchbar {
   -moz-binding: url("chrome://browser/content/search/search.xml#searchbar");
 }
 
+browser[remote="true"] {
+  -moz-binding: url("chrome://global/content/bindings/remote-browser.xml#remote-browser");
+}
+
 tabbrowser {
   -moz-binding: url("chrome://browser/content/tabbrowser.xml#tabbrowser");
 }
@@ -221,8 +225,6 @@ splitmenu {
   -moz-binding: url(chrome://browser/content/urlbarBindings.xml#urlbar);
 }
 
-.uri-element-right-align:-moz-locale-dir(rtl),
-html|input.uri-element-right-align:-moz-locale-dir(rtl),
 .ac-url-text:-moz-locale-dir(rtl),
 .ac-title:-moz-locale-dir(rtl) > description {
   direction: ltr !important;
@@ -307,9 +309,8 @@ toolbarbutton.bookmark-item {
 }
 
 %ifdef MENUBAR_CAN_AUTOHIDE
-#toolbar-menubar:not([autohide="true"]) ~ #nav-bar > #bookmarks-menu-button-container,
-#toolbar-menubar:not([autohide="true"]) ~ toolbar > #personal-bookmarks > #bookmarks-menu-button,
-#toolbar-menubar:not([autohide="true"]) > #personal-bookmarks > #bookmarks-menu-button {
+#toolbar-menubar:not([autohide="true"]) ~ toolbar > #bookmarks-menu-button,
+#toolbar-menubar:not([autohide="true"]) > #bookmarks-menu-button {
   display: none;
 }
 %endif
@@ -360,6 +361,30 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
 }
 %endif
 
+/* History Swipe Animation */
+
+#historySwipeAnimationContainer {
+  overflow: hidden;
+}
+
+#historySwipeAnimationPreviousPage,
+#historySwipeAnimationCurrentPage,
+#historySwipeAnimationNextPage {
+  background: none top left no-repeat white;
+}
+
+#historySwipeAnimationPreviousPage {
+  background-image: -moz-element(#historySwipeAnimationPreviousPageSnapshot);
+}
+
+#historySwipeAnimationCurrentPage {
+  background-image: -moz-element(#historySwipeAnimationCurrentPageSnapshot);
+}
+
+#historySwipeAnimationNextPage {
+  background-image: -moz-element(#historySwipeAnimationNextPageSnapshot);
+}
+
 /* Identity UI */
 #identity-popup-content-box.unknownIdentity > #identity-popup-connectedToLabel ,
 #identity-popup-content-box.unknownIdentity > #identity-popup-runByLabel ,
@@ -378,12 +403,12 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
 }
 
 #full-screen-warning-container {
-  pointer-events: none;
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
+  z-index: 2147483647 !important;
 }
 
 #full-screen-warning-container[fade-warning-out] {
@@ -392,11 +417,18 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
   opacity: 0.0;
 }
 
+/* When the modal fullscreen approval UI is showing, don't allow interaction
+   with the page, but when we're just showing the warning upon entering
+   fullscreen on an already approved page, do allow interaction with the page.
+ */
+#full-screen-warning-container:not([obscure-browser]) {
+  pointer-events: none;
+}
+
 #full-screen-warning-message {
-  pointer-events: auto;
   /* We must specify a max-width, otherwise word-wrap:break-word doesn't
      work in descendant <description> and <label> elements. Bug 630864. */
-  max-width: 800px;  
+  max-width: 800px;
 }
 
 #full-screen-domain-text,
@@ -414,21 +446,17 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
   display: none;
 }
 
-/* ::::: Keyboard UI Panel ::::: */
-.KUI-panel-closebutton {
-  -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton-image");
-}
+/* ::::: Ctrl-Tab Panel ::::: */
 
-.ctrlTab-preview > html|canvas,
-.allTabs-preview > html|canvas {
+.ctrlTab-preview > html|img,
+.ctrlTab-preview > html|canvas {
   min-width: inherit;
   max-width: inherit;
   min-height: inherit;
   max-height: inherit;
 }
 
-.ctrlTab-favicon-container,
-.allTabs-favicon-container {
+.ctrlTab-favicon-container {
   -moz-box-align: start;
 %ifdef XP_MACOSX
   -moz-box-pack: end;
@@ -437,25 +465,13 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
 %endif
 }
 
-.ctrlTab-favicon,
-.allTabs-favicon {
+.ctrlTab-favicon {
   width: 16px;
   height: 16px;
 }
 
-/* ::::: Ctrl-Tab Panel ::::: */
 .ctrlTab-preview {
   -moz-binding: url("chrome://browser/content/browser-tabPreviews.xml#ctrlTab-preview");
-}
-
-/* ::::: All Tabs Panel ::::: */
-.allTabs-preview {
-  -moz-binding: url("chrome://browser/content/browser-tabPreviews.xml#allTabs-preview");
-}
-
-#allTabs-tab-close-button {
-  -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton-image");
-  margin: 0;
 }
 
 
@@ -478,10 +494,6 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
   max-width: 280px;
 }
 
-#geolocation-notification {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#geolocation-notification");
-}
-
 #addon-progress-notification {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#addon-progress-notification");
 }
@@ -494,8 +506,8 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#click-to-play-plugins-notification");
 }
 
-popupnotification-centeritem {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#center-item");
+.plugin-popupnotification-centeritem {
+  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#plugin-popupnotification-center-item");
 }
 
 /* override hidden="true" for the status bar compatibility shim
@@ -564,10 +576,6 @@ statuspanel[inactive][previoustype=overLink] {
   -moz-box-align: end;
 }
 
-.styleInspector {
-  min-width: 350px;
-}
-
 .panel-inner-arrowcontentfooter[footertype="promobox"] {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#promobox");
 }
@@ -590,30 +598,23 @@ html|*#gcli-output-frame,
 }
 
 .gclitoolbar-input-node,
-.gclitoolbar-complete-node,
-.gclitoolbar-prompt {
+.gclitoolbar-complete-node {
   direction: ltr;
 }
 
-#developer-toolbar-webconsole[error-count] > .toolbarbutton-icon {
+#developer-toolbar-toolbox-button[error-count] > .toolbarbutton-icon {
   display: none;
 }
 
-#developer-toolbar-webconsole[error-count]:before {
+#developer-toolbar-toolbox-button[error-count]:before {
   content: attr(error-count);
   display: -moz-box;
   -moz-box-pack: center;
 }
 
-/* We don't show the Style Editor button in the developer toolbar for now.
-   See bug 771203 */
-#developer-toolbar-styleeditor {
-  display: none;
-}
-
 /* Responsive Mode */
 
-vbox[anonid=browserContainer][responsivemode] {
+.browserContainer[responsivemode] {
   overflow: auto;
 }
 
@@ -621,24 +622,76 @@ vbox[anonid=browserContainer][responsivemode] {
   -moz-box-pack: end;
 }
 
-stack[anonid=browserStack][responsivemode] {
+.browserStack[responsivemode] {
   transition-duration: 200ms;
   transition-timing-function: linear;
 }
 
-stack[anonid=browserStack][responsivemode] {
+.browserStack[responsivemode] {
   transition-property: min-width, max-width, min-height, max-height;
 }
 
-stack[anonid=browserStack][responsivemode][notransition] {
+.browserStack[responsivemode][notransition] {
   transition: none;
 }
 
+.toolbarbutton-badge[badge]:not([badge=""])::after {
+  content: attr(badge);
+}
+
+toolbarbutton[type="badged"] {
+  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#toolbarbutton-badged");
+}
+
+/* Note the chatbox 'width' values are duplicated in socialchat.xml */
 chatbox {
   -moz-binding: url("chrome://browser/content/socialchat.xml#chatbox");
+  transition: height 150ms ease-out, width 150ms ease-out;
+  height: 285px;
+  width: 260px; /* CHAT_WIDTH_OPEN in socialchat.xml */
+}
+
+chatbox[minimized="true"] {
+  width: 160px;
+  height: 20px; /* CHAT_WIDTH_MINIMIZED in socialchat.xml */
 }
 
 chatbar {
   -moz-binding: url("chrome://browser/content/socialchat.xml#chatbar");
   height: 0;
+  max-height: 0;
+}
+
+/* full screen chat window support */
+chatbar:-moz-full-screen-ancestor,
+chatbox:-moz-full-screen-ancestor  {
+  border: none;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  -moz-box-sizing: border-box !important; 
+}
+
+/* hide chat chrome when chat is fullscreen */
+chatbox:-moz-full-screen-ancestor > .chat-titlebar {
+  display: none;
+}
+
+/* hide chatbar if browser tab is fullscreen */
+*:-moz-full-screen-ancestor chatbar:not(:-moz-full-screen-ancestor) {
+  display: none;
+}
+
+/* hide sidebar when fullscreen */
+*:-moz-full-screen-ancestor #social-sidebar-box:not(:-moz-full-screen-ancestor) {
+  display: none;
 }

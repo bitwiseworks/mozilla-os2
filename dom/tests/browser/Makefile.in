@@ -17,9 +17,29 @@ MOCHITEST_BROWSER_FILES := \
   browser_ConsoleAPITests.js \
   test-console-api.html \
   browser_ConsoleStorageAPITests.js \
-  browser_ConsoleStoragePBTest.js \
+  browser_ConsoleStoragePBTest_perwindowpb.js \
   browser_autofocus_preference.js \
   browser_bug396843.js \
+  browser_xhr_sandbox.js \
+  browser_geolocation_privatebrowsing_page.html \
+  browser_geolocation_privatebrowsing_perwindowpb.js \
+  browser_localStorage_privatestorageevent.js \
+  network_geolocation.sjs \
+  page_privatestorageevent.html
   $(NULL)
+
+ifeq (,$(filter-out Linux WINNT,$(OS_ARCH)))
+MOCHITEST_BROWSER_FILES += \
+  browser_webapps_permissions.js \
+  test-webapp.webapp \
+  test-webapp-reinstall.webapp \
+  test-webapp-original.webapp \
+  test-webapps-permissions.html \
+  $(NULL)
+endif
+
+
+# TODO: Re-enable permissions tests on Mac, bug 795334
+# TODO: disabled test browser_webapps_perms_reinstall.js, re-enable when bug 794920 is fixed
 
 include $(topsrcdir)/config/rules.mk

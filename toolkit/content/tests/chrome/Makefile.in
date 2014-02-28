@@ -1,4 +1,3 @@
-#
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -11,11 +10,10 @@ relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS = rtltest rtlchrome
-
-
 MOCHITEST_CHROME_FILES = 	findbar_window.xul \
 		test_findbar.xul \
+		findbar_events_window.xul \
+		test_findbar_events.xul \
 		test_bug253481.xul \
 		bug263683_window.xul \
 		test_bug263683.xul \
@@ -27,6 +25,8 @@ MOCHITEST_CHROME_FILES = 	findbar_window.xul \
 		test_bug360437.xul \
 		bug366992_window.xul \
 		test_bug366992.xul \
+		test_bug409624.xul \
+		bug409624_window.xul \
 		test_bug418874.xul \
 		bug429723_window.xul \
 		test_bug429723.xul \
@@ -154,6 +154,8 @@ MOCHITEST_CHROME_FILES = 	findbar_window.xul \
 		test_mousescroll.xul \
 		test_mousecapture.xul \
 		test_arrowpanel.xul \
+		test_menuitem_commands.xul \
+		test_popup_moveToAnchor.xul \
 		$(NULL)
 
 # test_panel_focus.xul won't work if the Full Keyboard Access preference is set to
@@ -168,7 +170,7 @@ MOCHITEST_CHROME_FILES += test_autocomplete_mac_caret.xul
 endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
-MOCHITEST_CHROME_FILES += 	$(warning test_cursorsnap.xul temporarily disabled) \
+MOCHITEST_CHROME_FILES += $(filter disabled-temporarily, test_cursorsnap.xul) \
 		window_cursorsnap_dialog.xul \
 		window_cursorsnap_wizard.xul
 endif

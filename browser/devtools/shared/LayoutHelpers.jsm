@@ -8,9 +8,19 @@ const Cu = Components.utils;
 const Ci = Components.interfaces;
 const Cr = Components.results;
 
-var EXPORTED_SYMBOLS = ["LayoutHelpers"];
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-LayoutHelpers = {
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+  "resource://gre/modules/Services.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "PlatformKeys", function() {
+  return Services.strings.createBundle(
+    "chrome://global-platform/locale/platformKeys.properties");
+});
+
+this.EXPORTED_SYMBOLS = ["LayoutHelpers"];
+
+this.LayoutHelpers = LayoutHelpers = {
 
   /**
    * Compute the position and the dimensions for the visible portion
@@ -165,7 +175,7 @@ LayoutHelpers = {
     let zoom =
       aWin.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
         .getInterface(Components.interfaces.nsIDOMWindowUtils)
-        .screenPixelsPerCSSPixel;
+        .fullZoom;
 
     // adjust rect for zoom scaling
     let aRectScaled = {};
@@ -310,4 +320,65 @@ LayoutHelpers = {
       return false;
     }
   },
+
+  /**
+   * Prettifies the modifier keys for an element.
+   *
+   * @param Node aElemKey
+   *        The key element to get the modifiers from.
+   * @param boolean aAllowCloverleaf
+   *        Pass true to use the cloverleaf symbol instead of a descriptive string.
+   * @return string
+   *         A prettified and properly separated modifier keys string.
+   */
+  prettyKey: function LH_prettyKey(aElemKey, aAllowCloverleaf)
+  {
+    let elemString = "";
+    let elemMod = aElemKey.getAttribute("modifiers");
+
+    if (elemMod.match("accel")) {
+      if (Services.appinfo.OS == "Darwin") {
+        // XXX bug 779642 Use "Cmd-" literal vs. cloverleaf meta-key until
+        // Orion adds variable height lines.
+        if (!aAllowCloverleaf) {
+          elemString += "Cmd-";
+        } else {
+          elemString += PlatformKeys.GetStringFromName("VK_META") +
+                        PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+        }
+      } else {
+        elemString += PlatformKeys.GetStringFromName("VK_CONTROL") +
+                      PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+      }
+    }
+    if (elemMod.match("access")) {
+      if (Services.appinfo.OS == "Darwin") {
+        elemString += PlatformKeys.GetStringFromName("VK_CONTROL") +
+                      PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+      } else {
+        elemString += PlatformKeys.GetStringFromName("VK_ALT") +
+                      PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+      }
+    }
+    if (elemMod.match("shift")) {
+      elemString += PlatformKeys.GetStringFromName("VK_SHIFT") +
+                    PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+    }
+    if (elemMod.match("alt")) {
+      elemString += PlatformKeys.GetStringFromName("VK_ALT") +
+                    PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+    }
+    if (elemMod.match("ctrl") || elemMod.match("control")) {
+      elemString += PlatformKeys.GetStringFromName("VK_CONTROL") +
+                    PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+    }
+    if (elemMod.match("meta")) {
+      elemString += PlatformKeys.GetStringFromName("VK_META") +
+                    PlatformKeys.GetStringFromName("MODIFIER_SEPARATOR");
+    }
+
+    return elemString +
+      (aElemKey.getAttribute("keycode").replace(/^.*VK_/, "") ||
+       aElemKey.getAttribute("key")).toUpperCase();
+  }
 };

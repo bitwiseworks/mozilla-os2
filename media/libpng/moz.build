@@ -1,0 +1,38 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'png'
+
+EXPORTS += [
+    'mozpngconf.h',
+    'png.h',
+    'pngconf.h',
+]
+
+CSRCS += [
+    'png.c',
+    'pngerror.c',
+    'pngget.c',
+    'pngmem.c',
+    'pngset.c',
+    'pngtrans.c',
+]
+
+# These files enable support for reading/writing PNGs
+CSRCS += [
+    'pngpread.c',
+    'pngread.c',
+    'pngrio.c',
+    'pngrtran.c',
+    'pngrutil.c',
+    'pngwio.c',
+    'pngwrite.c',
+    'pngwtran.c',
+    'pngwutil.c',
+]
+
+LIBRARY_NAME = 'mozpng'
+

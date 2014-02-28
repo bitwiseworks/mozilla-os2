@@ -1,4 +1,6 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -12,7 +14,7 @@ JSClass global_class = {
     "global",
     JSCLASS_IS_GLOBAL | JSCLASS_GLOBAL_FLAGS,
     JS_PropertyStub,
-    JS_PropertyStub,
+    JS_DeletePropertyStub,
     JS_PropertyStub,
     JS_StrictPropertyStub,
     JS_EnumerateStub,
@@ -32,7 +34,7 @@ CallTrusted(JSContext *cx, unsigned argc, jsval *vp)
     JSBool ok = JS_FALSE;
     {
         JSAutoCompartment ac(cx, trusted_glob);
-        ok = JS_CallFunctionValue(cx, NULL, OBJECT_TO_JSVAL(trusted_fun),
+        ok = JS_CallFunctionValue(cx, NULL, JS::ObjectValue(*trusted_fun),
                                   0, NULL, vp);
     }
     JS_RestoreFrameChain(cx);
@@ -70,20 +72,24 @@ BEGIN_TEST(testChromeBuffer)
             trusted_fun = JS_GetFunctionObject(fun);
         }
 
-        jsval v = OBJECT_TO_JSVAL(trusted_fun);
-        CHECK(JS_WrapValue(cx, &v));
+        JS::RootedValue v(cx, JS::ObjectValue(*trusted_fun));
+        CHECK(JS_WrapValue(cx, v.address()));
 
         const char *paramName = "trusted";
         const char *bytes = "try {                                      "
-                            "  return untrusted(trusted);               "
+                            "    return untrusted(trusted);             "
                             "} catch (e) {                              "
-                            "  return trusted(100);                     "
+                            "    try {                                  "
+                            "        return trusted(100);               "
+                            "    } catch(e) {                           "
+                            "        return -1;                         "
+                            "    }                                      "
                             "}                                          ";
         CHECK(fun = JS_CompileFunction(cx, global, "untrusted", 1, &paramName,
                                        bytes, strlen(bytes), "", 0));
 
-        jsval rval;
-        CHECK(JS_CallFunction(cx, NULL, fun, 1, &v, &rval));
+        JS::RootedValue rval(cx);
+        CHECK(JS_CallFunction(cx, NULL, fun, 1, v.address(), rval.address()));
         CHECK(JSVAL_TO_INT(rval) == 100);
     }
 
@@ -107,8 +113,8 @@ BEGIN_TEST(testChromeBuffer)
             trusted_fun = JS_GetFunctionObject(fun);
         }
 
-        jsval v = OBJECT_TO_JSVAL(trusted_fun);
-        CHECK(JS_WrapValue(cx, &v));
+        JS::RootedValue v(cx, JS::ObjectValue(*trusted_fun));
+        CHECK(JS_WrapValue(cx, v.address()));
 
         const char *paramName = "trusted";
         const char *bytes = "try {                                      "
@@ -119,8 +125,8 @@ BEGIN_TEST(testChromeBuffer)
         CHECK(fun = JS_CompileFunction(cx, global, "untrusted", 1, &paramName,
                                        bytes, strlen(bytes), "", 0));
 
-        jsval rval;
-        CHECK(JS_CallFunction(cx, NULL, fun, 1, &v, &rval));
+        JS::RootedValue rval(cx);
+        CHECK(JS_CallFunction(cx, NULL, fun, 1, v.address(), rval.address()));
         JSBool match;
         CHECK(JS_StringEqualsAscii(cx, JSVAL_TO_STRING(rval), "From trusted: InternalError: too much recursion", &match));
         CHECK(match);
@@ -141,8 +147,8 @@ BEGIN_TEST(testChromeBuffer)
             trusted_fun = JS_GetFunctionObject(fun);
         }
 
-        JSFunction *fun = JS_NewFunction(cx, CallTrusted, 0, 0, global, "callTrusted");
-        JS::Anchor<JSObject *> callTrusted(JS_GetFunctionObject(fun));
+        JS::RootedFunction fun(cx, JS_NewFunction(cx, CallTrusted, 0, 0, global, "callTrusted"));
+        JS::RootedObject callTrusted(cx, JS_GetFunctionObject(fun));
 
         const char *paramName = "f";
         const char *bytes = "try {                                      "
@@ -153,9 +159,9 @@ BEGIN_TEST(testChromeBuffer)
         CHECK(fun = JS_CompileFunction(cx, global, "untrusted", 1, &paramName,
                                        bytes, strlen(bytes), "", 0));
 
-        jsval arg = OBJECT_TO_JSVAL(callTrusted.get());
-        jsval rval;
-        CHECK(JS_CallFunction(cx, NULL, fun, 1, &arg, &rval));
+        JS::RootedValue arg(cx, JS::ObjectValue(*callTrusted));
+        JS::RootedValue rval(cx);
+        CHECK(JS_CallFunction(cx, NULL, fun, 1, arg.address(), rval.address()));
         CHECK(JSVAL_TO_INT(rval) == 42);
     }
 

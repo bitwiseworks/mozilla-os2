@@ -1,0 +1,66 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script type="application/javascript" src="head.js"></script>
+</head>
+<body>
+<pre id="test">
+<script type="application/javascript">
+  createHTML({
+    bug: "825703",
+    title: "RTCConfiguration valid/invalid permutations"
+  });
+
+  makePC = function (config, expect_success) {
+      var exception = null;
+
+      try {
+          var pc = new mozRTCPeerConnection(config);
+      } catch (e) {
+          exception = e;
+      }
+
+      if (expect_success) {
+          ok(!exception, "mozRTCPeerConnection(" +
+             JSON.stringify(config) + ") succeeds");
+      } else {
+          ok(exception, "mozRTCPeerConnection(" +
+             JSON.stringify(config) + ") throws");
+      }
+  }
+
+  runTest(function () {
+    var pc;
+    var exception = null;
+    var config;
+
+    try { pcs = new mozRTCPeerConnection(); } catch (e) { exception = e; }
+    ok(!exception, "mozRTCPeerConnection() succeeds");
+    exception = null;
+
+    makePC(1, false);
+
+    makePC({}, true);
+
+    makePC({ iceServers: [] }, true);
+
+    makePC({ iceServers: [{ url:"" }] }, false);
+
+    makePC({ iceServers: [{ url:"http:0.0.0.0" }] }, false);
+
+    makePC({ iceServers: [
+                { url:"stun:0.0.0.0" },
+                { url:"stuns:x.net", foo:"" },
+                { url:"turn:[::192.9.5.5]:42", username:"p", credential:"p" },
+                { url:"turns:x.org:42?transport=udp", username:"p", credential:"p" }
+                ]}, true);
+
+    pcs = null;
+    SimpleTest.finish();
+  });
+</script>
+</pre>
+</body>
+</html>

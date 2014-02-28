@@ -31,6 +31,8 @@ enum nsDOMClassInfoID {
  */
 
 /**
+ * !! THIS MECHANISM IS DEPRECATED, DO NOT ADD MORE INTERFACE TO THESE LISTS !!
+ *
  * DOMCI_CASTABLE_INTERFACES contains the list of interfaces that we have a bit
  * for in nsDOMClassInfo's mInterfacesBitmap. To use it you need to define
  * DOMCI_CASTABLE_INTERFACE(interface, bit, extra) and then call
@@ -47,31 +49,38 @@ enum nsDOMClassInfoID {
 #undef DOMCI_CASTABLE_INTERFACE
 #define DOMCI_CASTABLE_INTERFACES(_extra)                                     \
 DOMCI_CASTABLE_INTERFACE(nsINode, nsINode, 0, _extra)                         \
-DOMCI_CASTABLE_INTERFACE(nsIContent, nsIContent, 1, _extra)                   \
-DOMCI_CASTABLE_INTERFACE(nsIDocument, nsIDocument, 2, _extra)                 \
-DOMCI_CASTABLE_INTERFACE(nsICSSDeclaration, nsICSSDeclaration, 4, _extra)     \
+DOMCI_CASTABLE_NODECL_INTERFACE(mozilla::dom::Element,  mozilla::dom::Element,\
+                                1, _extra)                                    \
+/* If this is ever removed, the IID for EventTarget can go away */            \
+DOMCI_CASTABLE_NODECL_INTERFACE(mozilla::dom::EventTarget,                    \
+                                mozilla::dom::EventTarget, 2, _extra)         \
+DOMCI_CASTABLE_INTERFACE(nsDOMEvent, nsIDOMEvent, 3, _extra)                  \
+DOMCI_CASTABLE_INTERFACE(nsIDocument, nsIDocument, 4, _extra)                 \
 DOMCI_CASTABLE_INTERFACE(nsDocument, nsIDocument, 5, _extra)                  \
 DOMCI_CASTABLE_INTERFACE(nsGenericHTMLElement, nsGenericHTMLElement, 6,       \
                          _extra)                                              \
 DOMCI_CASTABLE_INTERFACE(nsHTMLDocument, nsIDocument, 7, _extra)              \
 DOMCI_CASTABLE_INTERFACE(nsStyledElement, nsStyledElement, 8, _extra)         \
-DOMCI_CASTABLE_INTERFACE(nsSVGStylableElement, nsIContent, 9, _extra)         \
-DOMCI_CASTABLE_INTERFACE(nsIDOMImageData, nsIDOMImageData, 12, _extra)
- 
+DOMCI_CASTABLE_INTERFACE(nsSVGElement, nsIContent, 9, _extra)                 \
+/* NOTE: When removing the casts below, remove the nsDOMEventBase class */    \
+DOMCI_CASTABLE_INTERFACE(nsDOMMouseEvent, nsDOMEventBase, 10, _extra)         \
+DOMCI_CASTABLE_INTERFACE(nsDOMUIEvent, nsDOMEventBase, 11, _extra)
+
 // Make sure all classes mentioned in DOMCI_CASTABLE_INTERFACES
 // have been declared.
-#undef DOMCI_CASTABLE_NAMESPACED_INTERFACE
+#define DOMCI_CASTABLE_NODECL_INTERFACE(_interface, _u1, _u2, _u3) /* Nothing */
 #define DOMCI_CASTABLE_INTERFACE(_interface, _u1, _u2, _u3) class _interface;
-#define DOMCI_CASTABLE_NAMESPACED_INTERFACE(ns, className, interface, bit, _extra) \
-  namespace ns {                                                        \
-  class className;                                                      \
-  }
 DOMCI_CASTABLE_INTERFACES(unused)
 #undef DOMCI_CASTABLE_INTERFACE
-#undef DOMCI_CASTABLE_NAMESPACED_INTERFACE
+#undef DOMCI_CASTABLE_NODECL_INTERFACE
+namespace mozilla {
+namespace dom {
+class Element;
+class EventTarget;
+} // namespace dom
+} // namespace mozilla
 
-#define DOMCI_CASTABLE_NAMESPACED_INTERFACE(ns, className, interface, bit, _extra) \
-  DOMCI_CASTABLE_INTERFACE(ns::className, interface, bit, _extra)
+#define DOMCI_CASTABLE_NODECL_INTERFACE DOMCI_CASTABLE_INTERFACE
 
 #ifdef _IMPL_NS_LAYOUT
 
@@ -88,8 +97,7 @@ DOMCI_CASTABLE_INTERFACES(unused)
  * but it does the job adequately for our purposes.
  */
 
-#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 2) || \
-    _MSC_FULL_VER >= 140050215
+#if defined(__GNUC__) || _MSC_FULL_VER >= 140050215
 
 /* Use a compiler intrinsic if one is available. */
 
