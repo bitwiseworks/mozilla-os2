@@ -1,0 +1,78 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface nsIDOMWindow;
+interface nsIDOMDOMRequest;
+interface nsIDOMContact;
+
+[scriptable, uuid(dca08580-a25a-11e2-9e96-0800200c9a66)]
+interface nsIIccListener : nsISupports
+{
+  void notifyStkCommand(in DOMString aMessage);
+  void notifyStkSessionEnd();
+  void notifyIccCardLockError(in DOMString lockType,
+                              in unsigned long retryCount);
+};
+
+/**
+ * XPCOM component (in the content process) that provides the ICC information.
+ */
+[scriptable, uuid(e60ec460-a25a-11e2-9e96-0800200c9a66)]
+interface nsIIccProvider : nsISupports
+{
+  /**
+   * Called when a content process registers receiving unsolicited messages from
+   * RadioInterfaceLayer in the chrome process. Only a content process that has
+   * the 'mobileconnection' permission is allowed to register.
+   */
+  void registerIccMsg(in nsIIccListener listener);
+  void unregisterIccMsg(in nsIIccListener listener);
+
+  /**
+   * STK interfaces.
+   */
+  void sendStkResponse(in nsIDOMWindow window,
+                       in jsval        command,
+                       in jsval        response);
+  void sendStkMenuSelection(in nsIDOMWindow   window,
+                            in unsigned short itemIdentifier,
+                            in boolean        helpRequested);
+  void sendStkTimerExpiration(in nsIDOMWindow window,
+                              in jsval        timer);
+  void sendStkEventDownload(in nsIDOMWindow window,
+                            in jsval        event);
+
+  /**
+   * Card lock interfaces.
+   */
+  nsIDOMDOMRequest getCardLockState(in nsIDOMWindow window, in DOMString lockType);
+  nsIDOMDOMRequest unlockCardLock(in nsIDOMWindow window, in jsval info);
+  nsIDOMDOMRequest setCardLock(in nsIDOMWindow window, in jsval info);
+
+  /**
+   * Phonebook interfaces.
+   */
+  nsIDOMDOMRequest readContacts(in nsIDOMWindow window,
+                                in DOMString contactType);
+
+  nsIDOMDOMRequest updateContact(in nsIDOMWindow window,
+                                 in DOMString contactType,
+                                 in nsIDOMContact contact,
+                                 in DOMString pin2);
+
+  /**
+   * Secure Card Icc communication channel
+   */
+  nsIDOMDOMRequest iccOpenChannel(in nsIDOMWindow window,
+                                  in DOMString aid);
+
+  nsIDOMDOMRequest iccExchangeAPDU(in nsIDOMWindow window,
+                                   in long channel,
+                                   in jsval apdu);
+
+  nsIDOMDOMRequest iccCloseChannel(in nsIDOMWindow window,
+                                   in long channel);
+};

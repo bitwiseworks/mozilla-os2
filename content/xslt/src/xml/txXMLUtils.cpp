@@ -14,6 +14,7 @@
 #include "txStringUtils.h"
 #include "txNamespaceMap.h"
 #include "txXPathTreeWalker.h"
+#include "nsContentUtils.h"
 
 nsresult
 txExpandedName::init(const nsAString& aQName, txNamespaceMap* aResolver,
@@ -87,7 +88,7 @@ XMLUtils::splitExpatName(const PRUnichar *aExpatName, nsIAtom **aPrefix,
         nameStart = (uriEnd + 1);
         if (nameEnd)  {
             const PRUnichar *prefixStart = nameEnd + 1;
-            *aPrefix = NS_NewAtom(Substring(prefixStart, pos));
+            *aPrefix = NS_NewAtom(Substring(prefixStart, pos)).get();
             if (!*aPrefix) {
                 return NS_ERROR_OUT_OF_MEMORY;
             }
@@ -104,7 +105,7 @@ XMLUtils::splitExpatName(const PRUnichar *aExpatName, nsIAtom **aPrefix,
         *aPrefix = nullptr;
     }
 
-    *aLocalName = NS_NewAtom(Substring(nameStart, nameEnd));
+    *aLocalName = NS_NewAtom(Substring(nameStart, nameEnd)).get();
 
     return *aLocalName ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
@@ -124,27 +125,15 @@ XMLUtils::splitQName(const nsAString& aName, nsIAtom** aPrefix,
         const PRUnichar *end;
         qName.EndReading(end);
 
-        *aPrefix = NS_NewAtom(Substring(qName.get(), colon));
-        *aLocalName = NS_NewAtom(Substring(colon + 1, end));
+        *aPrefix = NS_NewAtom(Substring(qName.get(), colon)).get();
+        *aLocalName = NS_NewAtom(Substring(colon + 1, end)).get();
     }
     else {
         *aPrefix = nullptr;
-        *aLocalName = NS_NewAtom(aName);
+        *aLocalName = NS_NewAtom(aName).get();
     }
 
     return NS_OK;
-}
-
-const nsDependentSubstring XMLUtils::getLocalPart(const nsAString& src)
-{
-    // Anything after ':' is the local part of the name
-    int32_t idx = src.FindChar(':');
-    if (idx == kNotFound) {
-        return Substring(src, 0, src.Length());
-    }
-
-    NS_ASSERTION(idx > 0, "This QName looks invalid.");
-    return Substring(src, idx + 1, src.Length() - (idx + 1));
 }
 
 /**
@@ -193,6 +182,13 @@ void XMLUtils::normalizePIValue(nsAString& piValue)
         prevCh = ch;
         ++conversionLoop;
     }
+}
+
+//static
+bool XMLUtils::isValidQName(const nsAFlatString& aQName,
+                            const PRUnichar** aColon)
+{
+  return NS_SUCCEEDED(nsContentUtils::CheckQName(aQName, true, aColon));
 }
 
 //static

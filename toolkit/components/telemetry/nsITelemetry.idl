@@ -6,7 +6,13 @@
 #include "nsISupports.idl"
 #include "nsIFile.idl"
 
-[scriptable, uuid(de54f594-4c20-4968-a27a-83b38ff952b9)]
+[scriptable,function, uuid(3d3b9075-5549-4244-9c08-b64fefa1dd60)]
+interface nsIFetchTelemetryDataCallback : nsISupports
+{
+  void complete();
+};
+
+[scriptable, uuid(e70ba4cc-7ccd-41fe-a75c-e4042233a8cb)]
 interface nsITelemetry : nsISupports
 {
   /**
@@ -35,6 +41,18 @@ interface nsITelemetry : nsISupports
    */
   [implicit_jscontext]
   readonly attribute jsval histogramSnapshots;
+
+  /**
+   * The amount of time, in milliseconds, that the last session took
+   * to shutdown.  Reads as 0 to indicate failure.
+   */
+  readonly attribute uint32_t lastShutdownDuration;
+
+  /**
+   * The number of failed profile lock attempts that have occurred prior to 
+   * successfully locking the profile
+   */
+  readonly attribute uint32_t failedProfileLockCount;
 
   /*
    * An object containing information about slow SQL statements.
@@ -67,6 +85,12 @@ interface nsITelemetry : nsISupports
   [implicit_jscontext]
   readonly attribute jsval debugSlowSQL;
 
+  /**
+   * A number representing the highest number of concurrent threads
+   * reached during this session.
+   */
+  readonly attribute uint32_t maximalNumberOfConcurrentThreads;
+
   /*
    * An array of chrome hang reports. Each element is a hang report represented
    * as an object containing the hang duration, call stack PCs and information
@@ -74,6 +98,18 @@ interface nsITelemetry : nsISupports
    */
   [implicit_jscontext]
   readonly attribute jsval chromeHangs;
+
+  /*
+   * An object with two fields: memoryMap and stacks.
+   * * memoryMap is a list of loaded libraries.
+   * * stacks is a list of stacks. Each stack is a list of pairs of the form
+   *   [moduleIndex, offset]. The moduleIndex is an index into the memoryMap and
+   *   offset is an offset in the library at memoryMap[moduleIndex].
+   * This format is used to make it easier to send the stacks to the
+   * symbolication server.
+   */
+  [implicit_jscontext]
+  readonly attribute jsval lateWrites;
 
   /**
    * An object whose properties are the names of histograms defined in
@@ -179,4 +215,11 @@ interface nsITelemetry : nsISupports
    */
   [implicit_jscontext]
   readonly attribute jsval addonHistogramSnapshots;
+
+  /**
+   * Read data from the previous run. After the callback is called, the last
+   * shutdown time is available in lastShutdownDuration and any late
+   * writes in lateWrites.
+   */
+  void asyncFetchTelemetryData(in nsIFetchTelemetryDataCallback aCallback);
 };

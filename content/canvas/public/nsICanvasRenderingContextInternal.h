@@ -9,7 +9,7 @@
 #include "nsISupports.h"
 #include "nsIInputStream.h"
 #include "nsIDocShell.h"
-#include "nsHTMLCanvasElement.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 #include "gfxPattern.h"
 #include "mozilla/RefPtr.h"
 
@@ -19,7 +19,6 @@
 
 class gfxContext;
 class gfxASurface;
-class nsIPropertyBag;
 class nsDisplayListBuilder;
 
 namespace mozilla {
@@ -46,11 +45,11 @@ public:
     RenderFlagPremultAlpha = 0x1
   };
 
-  void SetCanvasElement(nsHTMLCanvasElement* aParentCanvas)
+  void SetCanvasElement(mozilla::dom::HTMLCanvasElement* aParentCanvas)
   {
     mCanvasElement = aParentCanvas;
   }
-  nsHTMLCanvasElement* GetParentObject() const
+  mozilla::dom::HTMLCanvasElement* GetParentObject() const
   {
     return mCanvasElement;
   }
@@ -81,8 +80,7 @@ public:
   NS_IMETHOD GetThebesSurface(gfxASurface **surface) = 0;
   
   // This gets an Azure SourceSurface for the canvas, this will be a snapshot
-  // of the canvas at the time it was called. This will return null for a
-  // non-azure canvas.
+  // of the canvas at the time it was called.
   virtual mozilla::TemporaryRef<mozilla::gfx::SourceSurface> GetSurfaceSnapshot() = 0;
 
   // If this context is opaque, the backing store of the canvas should
@@ -111,9 +109,7 @@ public:
   // Redraw the dirty rectangle of this canvas.
   NS_IMETHOD Redraw(const gfxRect &dirty) = 0;
 
-  // Passes a generic nsIPropertyBag options argument, along with the
-  // previous one, if any.  Optional.
-  NS_IMETHOD SetContextOptions(nsIPropertyBag *aNewOptions) { return NS_OK; }
+  NS_IMETHOD SetContextOptions(JSContext* aCx, JS::Handle<JS::Value> aOptions) { return NS_OK; }
 
   //
   // shmem support
@@ -126,13 +122,11 @@ public:
   NS_IMETHOD SetIsIPC(bool isIPC) = 0;
 
 protected:
-  nsRefPtr<nsHTMLCanvasElement> mCanvasElement;
+  nsRefPtr<mozilla::dom::HTMLCanvasElement> mCanvasElement;
 };
 
 namespace mozilla {
 namespace dom {
-
-extern bool AzureCanvasEnabled();
 
 }
 }

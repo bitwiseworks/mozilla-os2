@@ -52,10 +52,6 @@ public:
                                gfxContext *aContextForTightBoundingBox,
                                Spacing *aSpacing);
 
-    // override gfxFont table access function to bypass gfxFontEntry cache,
-    // use DWrite API to get direct access to system font data
-    virtual hb_blob_t *GetFontTable(uint32_t aTag);
-
     virtual bool ProvidesGlyphWidths();
 
     virtual int32_t GetGlyphWidth(gfxContext *aCtx, uint16_t aGID);
@@ -68,6 +64,10 @@ public:
                                      FontCacheSizes*   aSizes) const;
 
     virtual FontType GetType() const { return FONT_TYPE_DWRITE; }
+
+    virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont> GetScaledFont(mozilla::gfx::DrawTarget *aTarget);
+
+    virtual cairo_scaled_font_t *GetCairoScaledFont();
 
 protected:
     friend class gfxDWriteShaper;
@@ -82,11 +82,7 @@ protected:
 
     cairo_font_face_t *CairoFontFace();
 
-    cairo_scaled_font_t *CairoScaledFont();
-
     gfxFloat MeasureGlyphWidth(uint16_t aGlyph);
-
-    static void DestroyBlobFunc(void* userArg);
 
     DWRITE_MEASURING_MODE GetMeasuringMode();
     bool GetForceGDIClassic();
@@ -103,6 +99,7 @@ protected:
     bool mNeedsBold;
     bool mUseSubpixelPositions;
     bool mAllowManualShowGlyphs;
+    bool mAzureScaledFontIsCairo;
 };
 
 #endif

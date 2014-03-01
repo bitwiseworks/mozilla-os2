@@ -35,6 +35,18 @@ function verifyAndDelete(prefix, files, e) {
   }
 
   var filename = e.target.result.name;
+  if (filename[0] == "/") {
+    // We got /storgaeName/prefix/filename
+    // Remove the storageName (this shows up on FirefoxOS)
+    filename = filename.substring(1); // Remove leading slash
+    var slashIndex = filename.indexOf("/");
+    if (slashIndex >= 0) {
+      filename = filename.substring(slashIndex + 1); // Remove storageName
+    }
+  }
+  if (filename.startsWith(prefix)) {
+    filename = filename.substring(prefix.length + 1); // Remove prefix
+  }
 
   var index = files.indexOf(filename);
   ok(index > -1, "filename should be in the enumeration : " + e.target.result.name);
@@ -44,15 +56,15 @@ function verifyAndDelete(prefix, files, e) {
   files.remove(index);
 
   // clean up
-  var storage = navigator.getDeviceStorage("testing");
+  var storage = navigator.getDeviceStorage("pictures");
   var cleanup = storage.delete(prefix + "/" + filename);
   cleanup.onsuccess = function(e) {}
 }
 
 function addFiles(prefix, files, date, callback) {
 
-  const Cc = SpecialPowers.wrap(Components).classes;
-  const Ci = Components.interfaces;
+  const Cc = SpecialPowers.Cc;
+  const Ci = SpecialPowers.Ci;
 
   var directoryService = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
 
@@ -76,15 +88,15 @@ devicestorage_setup();
 
 var prefix = "devicestorage/" + randomFilename(12)
 
-var oldFiles = ["a", "b", "c"];
-var newFiles = ["d", "e", "f"];
+var oldFiles = ["a.png", "b.png", "c.png"];
+var newFiles = ["d.png", "e.png", "f.png"];
 
 // 157795200 is a long long time ago.
 addFiles(prefix, oldFiles, 157795200, addNewFiles);
 
 function enumerateNew() {
 
-  var storage = navigator.getDeviceStorage("testing");
+  var storage = navigator.getDeviceStorage("pictures");
   ok(navigator.getDeviceStorage, "Should have getDeviceStorage");
 
 // 836031600 is a long time ago

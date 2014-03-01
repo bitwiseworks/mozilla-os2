@@ -25,17 +25,22 @@ nsScriptElement::ScriptAvailable(nsresult aResult,
                                  int32_t aLineNo)
 {
   if (!aIsInline && NS_FAILED(aResult)) {
-    nsCOMPtr<nsIContent> cont =
-      do_QueryInterface((nsIScriptElement*) this);
-
-    return nsContentUtils::DispatchTrustedEvent(cont->OwnerDoc(),
-                                                cont,
-                                                NS_LITERAL_STRING("error"),
-                                                false /* bubbles */,
-                                                false /* cancelable */);
+    return FireErrorEvent();
   }
-
   return NS_OK;
+}
+
+/* virtual */ nsresult
+nsScriptElement::FireErrorEvent()
+{
+  nsCOMPtr<nsIContent> cont =
+    do_QueryInterface((nsIScriptElement*) this);
+
+  return nsContentUtils::DispatchTrustedEvent(cont->OwnerDoc(),
+                                              cont,
+                                              NS_LITERAL_STRING("error"),
+                                              false /* bubbles */,
+                                              false /* cancelable */);
 }
 
 NS_IMETHODIMP
@@ -54,10 +59,8 @@ nsScriptElement::ScriptEvaluated(nsresult aResult,
     nsEventStatus status = nsEventStatus_eIgnore;
     uint32_t type = NS_SUCCEEDED(aResult) ? NS_LOAD : NS_LOAD_ERROR;
     nsEvent event(true, type);
-    if (type == NS_LOAD) {
-      // Load event doesn't bubble.
-      event.flags |= NS_EVENT_FLAG_CANT_BUBBLE;
-    }
+    // Load event doesn't bubble.
+    event.mFlags.mBubbles = (type != NS_LOAD);
 
     nsEventDispatcher::Dispatch(cont, presContext, &event, nullptr, &status);
   }

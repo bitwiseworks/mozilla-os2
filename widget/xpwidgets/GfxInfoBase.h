@@ -17,6 +17,7 @@
 #include "nsString.h"
 #include "GfxInfoCollector.h"
 #include "nsIGfxInfoDebug.h"
+#include "mozilla/Mutex.h"
 
 namespace mozilla {
 namespace widget {  
@@ -68,10 +69,10 @@ public:
   static nsTArray<GfxDriverInfo>* mDriverInfo;
   static bool mDriverInfoObserverInitialized;
 
-  virtual const nsAString& Model() const { return nsString(); }
-  virtual const nsAString& Hardware() const { return nsString(); }
-  virtual const nsAString& Product() const { return nsString(); }
-  virtual const nsAString& Manufacturer() const { return nsString(); }
+  virtual nsString Model() const { return EmptyString(); }
+  virtual nsString Hardware() const { return EmptyString(); }
+  virtual nsString Product() const { return EmptyString(); }
+  virtual nsString Manufacturer() const { return EmptyString(); }
   virtual uint32_t OperatingSystemVersion() const { return 0; }
 
 protected:
@@ -95,6 +96,7 @@ private:
 
   nsCString mFailures[9]; // The choice of 9 is Ehsan's
   uint32_t mFailureCount;
+  Mutex mMutex;
 
 };
 

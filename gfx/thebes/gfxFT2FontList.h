@@ -66,11 +66,13 @@ public:
     cairo_scaled_font_t *CreateScaledFont(const gfxFontStyle *aStyle);
 
     nsresult ReadCMAP();
-    nsresult GetFontTable(uint32_t aTableTag, FallibleTArray<uint8_t>& aBuffer);
+
+    virtual nsresult CopyFontTable(uint32_t aTableTag,
+                                   FallibleTArray<uint8_t>& aBuffer) MOZ_OVERRIDE;
 
     // Check for various kinds of brokenness, and set flags on the entry
     // accordingly so that we avoid using bad font tables
-    void CheckForBrokenFont();
+    void CheckForBrokenFont(gfxFontFamily *aFamily);
 
     virtual void SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
                                      FontListSizes*    aSizes) const;
@@ -99,8 +101,7 @@ class gfxFT2FontList : public gfxPlatformFontList
 public:
     gfxFT2FontList();
 
-    virtual gfxFontEntry* GetDefaultFont(const gfxFontStyle* aStyle,
-                                         bool& aNeedsBold);
+    virtual gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle);
 
     virtual gfxFontEntry* LookupLocalFont(const gfxProxyFontEntry *aProxyEntry,
                                           const nsAString& aFontName);
@@ -130,6 +131,10 @@ protected:
                                        nsCString& aFaceList);
 
     void FindFonts();
+
+#ifdef ANDROID
+    void FindFontsInDir(const nsCString& aDir, FontNameCache* aFNC);
+#endif
 };
 
 #endif /* GFX_FT2FONTLIST_H */

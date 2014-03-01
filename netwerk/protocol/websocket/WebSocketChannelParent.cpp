@@ -7,7 +7,6 @@
 #include "WebSocketLog.h"
 #include "WebSocketChannelParent.h"
 #include "nsIAuthPromptProvider.h"
-#include "mozilla/LoadContext.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
 
@@ -20,10 +19,15 @@ NS_IMPL_THREADSAFE_ISUPPORTS2(WebSocketChannelParent,
                               nsIWebSocketListener,
                               nsIInterfaceRequestor)
 
-WebSocketChannelParent::WebSocketChannelParent(nsIAuthPromptProvider* aAuthProvider)
+WebSocketChannelParent::WebSocketChannelParent(nsIAuthPromptProvider* aAuthProvider,
+                                               nsILoadContext* aLoadContext,
+                                               PBOverrideStatus aOverrideStatus)
   : mAuthProvider(aAuthProvider)
+  , mLoadContext(aLoadContext)
   , mIPCOpen(true)
 {
+  // Websocket channels can't have a private browsing override
+  MOZ_ASSERT_IF(!aLoadContext, aOverrideStatus == kPBOverride_Unset);
 #if defined(PR_LOGGING)
   if (!webSocketLog)
     webSocketLog = PR_NewLogModule("nsWebSocket");
@@ -48,7 +52,10 @@ WebSocketChannelParent::RecvAsyncOpen(const URIParams& aURI,
                                       const nsCString& aOrigin,
                                       const nsCString& aProtocol,
                                       const bool& aSecure,
-                                      const IPC::SerializedLoadContext& loadContext)
+                                      const uint32_t& aPingInterval,
+                                      const bool& aClientSetPingInterval,
+                                      const uint32_t& aPingTimeout,
+                                      const bool& aClientSetPingTimeout)
 {
   LOG(("WebSocketChannelParent::RecvAsyncOpen() %p\n", this));
 
@@ -65,9 +72,6 @@ WebSocketChannelParent::RecvAsyncOpen(const URIParams& aURI,
   if (NS_FAILED(rv))
     goto fail;
 
-  if (loadContext.IsNotNull())
-    mLoadContext = new LoadContext(loadContext);
-
   rv = mChannel->SetNotificationCallbacks(this);
   if (NS_FAILED(rv))
     goto fail;
@@ -80,6 +84,17 @@ WebSocketChannelParent::RecvAsyncOpen(const URIParams& aURI,
   if (!uri) {
     rv = NS_ERROR_FAILURE;
     goto fail;
+  }
+
+  // only use ping values from child if they were overridden by client code.
+  if (aClientSetPingInterval) {
+    // IDL allows setting in seconds, so must be multiple of 1000 ms
+    MOZ_ASSERT(aPingInterval >= 1000 && !(aPingInterval % 1000));
+    mChannel->SetPingInterval(aPingInterval / 1000);
+  }
+  if (aClientSetPingTimeout) {
+    MOZ_ASSERT(aPingTimeout >= 1000 && !(aPingTimeout % 1000));
+    mChannel->SetPingTimeout(aPingTimeout / 1000);
   }
 
   rv = mChannel->AsyncOpen(uri, aOrigin, this, nullptr);
@@ -150,7 +165,7 @@ NS_IMETHODIMP
 WebSocketChannelParent::OnStart(nsISupports *aContext)
 {
   LOG(("WebSocketChannelParent::OnStart() %p\n", this));
-  nsCAutoString protocol, extensions;
+  nsAutoCString protocol, extensions;
   if (mChannel) {
     mChannel->GetProtocol(protocol);
     mChannel->GetExtensions(extensions);

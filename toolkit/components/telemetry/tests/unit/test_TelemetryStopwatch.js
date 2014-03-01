@@ -9,7 +9,7 @@ const Telemetry = Cc["@mozilla.org/base/telemetry;1"]
                   .getService(Ci.nsITelemetry);
 
 let tmpScope = {};
-Cu.import("resource:///modules/TelemetryStopwatch.jsm", tmpScope);
+Cu.import("resource://gre/modules/TelemetryStopwatch.jsm", tmpScope);
 let TelemetryStopwatch = tmpScope.TelemetryStopwatch;
 
 // We can't create a histogram here since the ones created with
@@ -86,10 +86,23 @@ function run_test() {
   do_check_true(TelemetryStopwatch.finish(HIST_NAME));
   do_check_true(TelemetryStopwatch.finish(HIST_NAME, refObj));
 
-
   do_check_false(TelemetryStopwatch.finish("unknown-mark")); // Unknown marker
   do_check_false(TelemetryStopwatch.finish("unknown-mark", {})); // Unknown object
   do_check_false(TelemetryStopwatch.finish(HIST_NAME, {})); // Known mark on unknown object
+
+  // Test cancel
+  do_check_true(TelemetryStopwatch.start(HIST_NAME));
+  do_check_true(TelemetryStopwatch.start(HIST_NAME, refObj));
+  do_check_true(TelemetryStopwatch.cancel(HIST_NAME));
+  do_check_true(TelemetryStopwatch.cancel(HIST_NAME, refObj));
+
+  // Verify that can not cancel twice
+  do_check_false(TelemetryStopwatch.cancel(HIST_NAME));
+  do_check_false(TelemetryStopwatch.cancel(HIST_NAME, refObj));
+
+  // Verify that cancel removes the timers
+  do_check_false(TelemetryStopwatch.finish(HIST_NAME));
+  do_check_false(TelemetryStopwatch.finish(HIST_NAME, refObj));
 
   finishTest();
 }

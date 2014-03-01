@@ -23,6 +23,7 @@
 #include "nsTArray.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/StandardInteger.h"
+#include <algorithm>
 
 const uint32_t kUnknownIndex = uint32_t(-1);
 
@@ -254,7 +255,7 @@ txXPathTreeWalker::moveToParent()
         return true;
     }
 
-    nsINode* parent = mPosition.mNode->GetNodeParent();
+    nsINode* parent = mPosition.mNode->GetParentNode();
     if (!parent) {
         return false;
     }
@@ -281,7 +282,7 @@ txXPathTreeWalker::moveToSibling(int32_t aDir)
     NS_ASSERTION(mPosition.isContent(),
                  "moveToSibling should only be called for content");
 
-    nsINode* parent = mPosition.mNode->GetNodeParent();
+    nsINode* parent = mPosition.mNode->GetParentNode();
     if (!parent) {
         return false;
     }
@@ -345,10 +346,8 @@ txXPathNodeUtils::getLocalName(const txXPathNode& aNode)
 
     if (aNode.isContent()) {
         if (aNode.mNode->IsElement()) {
-            nsIAtom* localName = aNode.Content()->Tag();
-            NS_ADDREF(localName);
-
-            return localName;
+            nsCOMPtr<nsIAtom> localName = aNode.Content()->Tag();
+            return localName.forget();
         }
 
         if (aNode.mNode->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
@@ -362,11 +361,10 @@ txXPathNodeUtils::getLocalName(const txXPathNode& aNode)
         return nullptr;
     }
 
-    nsIAtom* localName = aNode.Content()->
+    nsCOMPtr<nsIAtom> localName = aNode.Content()->
         GetAttrNameAt(aNode.mIndex)->LocalName();
-    NS_ADDREF(localName);
 
-    return localName;
+    return localName.forget();
 }
 
 nsIAtom*
@@ -568,7 +566,7 @@ txXPathNodeUtils::getXSLTId(const txXPathNode& aNode,
 void
 txXPathNodeUtils::getBaseURI(const txXPathNode& aNode, nsAString& aURI)
 {
-    aNode.mNode->GetDOMBaseURI(aURI);
+    aNode.mNode->GetBaseURI(aURI);
 }
 
 /* static */
@@ -612,8 +610,8 @@ txXPathNodeUtils::comparePosition(const txXPathNode& aNode,
     nsINode* otherNode = aOtherNode.mNode;
     nsINode* parent, *otherParent;
     while (node && otherNode) {
-        parent = node->GetNodeParent();
-        otherParent = otherNode->GetNodeParent();
+        parent = node->GetParentNode();
+        otherParent = otherNode->GetParentNode();
 
         // Hopefully this is a common case.
         if (parent == otherParent) {
@@ -635,11 +633,11 @@ txXPathNodeUtils::comparePosition(const txXPathNode& aNode,
 
     while (node) {
         parents.AppendElement(node);
-        node = node->GetNodeParent();
+        node = node->GetParentNode();
     }
     while (otherNode) {
         otherParents.AppendElement(otherNode);
-        otherNode = otherNode->GetNodeParent();
+        otherNode = otherNode->GetParentNode();
     }
 
     // Walk back down along the parent-chains until we find where they split.
@@ -647,7 +645,7 @@ txXPathNodeUtils::comparePosition(const txXPathNode& aNode,
     int32_t otherTotal = otherParents.Length() - 1;
     NS_ASSERTION(total != otherTotal, "Can't have same number of parents");
 
-    int32_t lastIndex = NS_MIN(total, otherTotal);
+    int32_t lastIndex = std::min(total, otherTotal);
     int32_t i;
     parent = nullptr;
     for (i = 0; i <= lastIndex; ++i) {

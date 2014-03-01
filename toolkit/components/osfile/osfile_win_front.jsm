@@ -16,10 +16,6 @@
     throw new Error("osfile_win_front.jsm cannot be used from the main thread yet");
   }
 
-  importScripts("resource://gre/modules/osfile/osfile_win_back.jsm");
-  importScripts("resource://gre/modules/osfile/ospath_win_back.jsm");
-  importScripts("resource://gre/modules/osfile/osfile_shared_front.jsm");
-
   (function(exports) {
      "use strict";
 
@@ -99,7 +95,7 @@
      /**
       * Read some bytes from a file.
       *
-      * @param {ArrayBuffer} buffer A buffer for holding the data
+      * @param {C pointer} buffer A buffer for holding the data
       * once it is read.
       * @param {number} nbytes The number of bytes to read. It must not
       * exceed the size of |buffer| in bytes but it may exceed the number
@@ -111,7 +107,7 @@
       * the end of the file has been reached.
       * @throws {OS.File.Error} In case of I/O error.
       */
-     File.prototype.read = function read(buffer, nbytes, options) {
+     File.prototype._read = function _read(buffer, nbytes, options) {
        // |gBytesReadPtr| is a pointer to |gBytesRead|.
        throw_on_zero("read",
          WinFile.ReadFile(this.fd, buffer, nbytes, gBytesReadPtr, null)
@@ -122,7 +118,7 @@
      /**
       * Write some bytes to a file.
       *
-      * @param {ArrayBuffer} buffer A buffer holding the data that must be
+      * @param {C pointer} buffer A buffer holding the data that must be
       * written.
       * @param {number} nbytes The number of bytes to write. It must not
       * exceed the size of |buffer| in bytes.
@@ -132,7 +128,7 @@
       * @return {number} The number of bytes effectively written.
       * @throws {OS.File.Error} In case of I/O error.
       */
-     File.prototype.write = function write(buffer, nbytes, options) {
+     File.prototype._write = function _write(buffer, nbytes, options) {
        // |gBytesWrittenPtr| is a pointer to |gBytesWritten|.
        throw_on_zero("write",
          WinFile.WriteFile(this.fd, buffer, nbytes, gBytesWrittenPtr, null)
@@ -182,8 +178,15 @@
        return new File.Info(gFileInfo);
      };
 
-     // Constant used to normalize options.
-     const noOptions = {};
+     /**
+      * Flushes the file's buffers and causes all buffered data
+      * to be written.
+      *
+      * @throws {OS.File.Error} In case of I/O error.
+      */
+     File.prototype.flush = function flush() {
+       throw_on_zero("flush", WinFile.FlushFileBuffers(this.fd));
+     };
 
      // The default sharing mode for opening files: files are not
      // locked against being reopened for reading/writing or against
@@ -249,9 +252,7 @@
       * @return {File} A file object.
       * @throws {OS.File.Error} If the file could not be opened.
       */
-     File.open = function Win_open(path, mode, options) {
-       options = options || noOptions;
-       mode = mode || noOptions;
+     File.open = function Win_open(path, mode = {}, options = {}) {
        let share = options.winShare || DEFAULT_SHARE;
        let security = options.winSecurity || null;
        let flags = options.winFlags || DEFAULT_FLAGS;
@@ -308,6 +309,23 @@
      };
 
      /**
+      * Checks if a file or directory exists
+      *
+      * @param {string} path The path to the file.
+      *
+      * @return {bool} true if the file exists, false otherwise.
+      */
+     File.exists = function Win_exists(path) {
+       try {
+         let file = File.open(path, FILE_STAT_MODE, FILE_STAT_OPTIONS);
+         file.close();
+         return true;
+       } catch (x) {
+         return false;
+       }
+     };
+
+     /**
       * Remove an existing file.
       *
       * @param {string} path The name of the file.
@@ -326,8 +344,7 @@
       *   - {bool} ignoreAbsent If |true|, do not fail if the
       *     directory does not exist yet.
       */
-     File.removeEmptyDir = function removeEmptyDir(path, options) {
-       options = options || noOptions;
+     File.removeEmptyDir = function removeEmptyDir(path, options = {}) {
        let result = WinFile.RemoveDirectory(path);
        if (!result) {
          if (options.ignoreAbsent &&
@@ -349,12 +366,18 @@
       * as per winapi function |CreateDirectory|. If unspecified,
       * use the default security descriptor, inherited from the
       * parent directory.
+      * - {bool} ignoreExisting If |true|, do not fail if the
+      * directory already exists.
       */
-     File.makeDir = function makeDir(path, options) {
-       options = options || noOptions;
+     File.makeDir = function makeDir(path, options = {}) {
        let security = options.winSecurity || null;
-       throw_on_zero("makeDir",
-         WinFile.CreateDirectory(path, security));
+       let result = WinFile.CreateDirectory(path, security);
+       if (result ||
+           options.ignoreExisting &&
+           ctypes.winLastError == OS.Constants.Win.ERROR_ALREADY_EXISTS) {
+        return;
+       }
+       throw new File.Error("makeDir");
      };
 
      /**
@@ -380,8 +403,7 @@
       * is unspecified. Metadata may or may not be copied with the file. The
       * behavior may not be the same across all platforms.
      */
-     File.copy = function copy(sourcePath, destPath, options) {
-       options = options || noOptions;
+     File.copy = function copy(sourcePath, destPath, options = {}) {
        throw_on_zero("copy",
          WinFile.CopyFile(sourcePath, destPath, options.noOverwrite || false)
        );
@@ -399,6 +421,9 @@
       * @option {bool} noOverwrite - If set, this function will fail if
       * a file already exists at |destPath|. Otherwise, if this file exists,
       * it will be erased silently.
+      * @option {bool} noCopy - If set, this function will fail if the
+      * operation is more sophisticated than a simple renaming, i.e. if
+      * |sourcePath| and |destPath| are not situated on the same drive.
       *
       * @throws {OS.File.Error} In case of any error.
       *
@@ -410,25 +435,18 @@
       * is unspecified. Metadata may or may not be moved with the file. The
       * behavior may not be the same across all platforms.
       */
-     File.move = function move(sourcePath, destPath, options) {
-       options = options || noOptions;
-       let flags;
-       if (options.noOverwrite) {
+     File.move = function move(sourcePath, destPath, options = {}) {
+       let flags = 0;
+       if (!options.noCopy) {
          flags = Const.MOVEFILE_COPY_ALLOWED;
-       } else {
-         flags = Const.MOVEFILE_COPY_ALLOWED | Const.MOVEFILE_REPLACE_EXISTING;
+       }
+       if (!options.noOverwrite) {
+         flags = flags | Const.MOVEFILE_REPLACE_EXISTING;
        }
        throw_on_zero("move",
          WinFile.MoveFileEx(sourcePath, destPath, flags)
        );
      };
-
-     /**
-      * A global value used to receive data during a
-      * |FindFirstFile|/|FindNextFile|.
-      */
-     let gFindData = new OS.Shared.Type.FindData.implementation();
-     let gFindDataPtr = gFindData.address();
 
      /**
       * A global value used to receive data during time conversions.
@@ -470,71 +488,90 @@
       * @constructor
       */
      File.DirectoryIterator = function DirectoryIterator(path, options) {
+       exports.OS.Shared.AbstractFile.AbstractIterator.call(this);
        if (options && options.winPattern) {
          this._pattern = path + "\\" + options.winPattern;
        } else {
          this._pattern = path + "\\*";
        }
-       this._handle = null;
        this._path = path;
-       this._started = false;
-     };
-     File.DirectoryIterator.prototype = {
-       __iterator__: function __iterator__() {
-         return this;
-       },
 
-       /**
-        * Fetch the next entry in the directory.
-        *
-        * @return null If we have reached the end of the directory.
-        */
-       _next: function _next() {
-         // Iterator is not fully initialized yet. Finish
-         // initialization.
-         if (!this._started) {
-            this._started = true;
-            this._handle = WinFile.FindFirstFile(this._pattern, gFindDataPtr);
-            if (this._handle == null) {
-              let error = ctypes.winLastError;
-              if (error == Const.ERROR_FILE_NOT_FOUND) {
-                this.close();
-                return null;
-              } else {
-                throw new File.Error("iter (FindFirstFile)", error);
-              }
-            }
-            return gFindData;
-         }
-
-         // We have closed this iterator already.
-         if (!this._handle) {
-           return null;
-         }
-
-         if (WinFile.FindNextFile(this._handle, gFindDataPtr)) {
-           return gFindData;
+       // Pre-open the first item.
+       this._first = true;
+       this._findData = new OS.Shared.Type.FindData.implementation();
+       this._findDataPtr = this._findData.address();
+       this._handle = WinFile.FindFirstFile(this._pattern, this._findDataPtr);
+       if (this._handle == Const.INVALID_HANDLE_VALUE) {
+         let error = ctypes.winLastError;
+         this._findData = null;
+         this._findDataPtr = null;
+         if (error == Const.ERROR_FILE_NOT_FOUND) {
+           // Directory is empty, let's behave as if it were closed
+           LOG("Directory is empty");
+           this._closed = true;
+           this._exists = true;
+         } else if (error == Const.ERROR_PATH_NOT_FOUND) {
+           // Directory does not exist, let's throw if we attempt to walk it
+           LOG("Directory does not exist");
+           this._closed = true;
+           this._exists = false;
          } else {
-           let error = ctypes.winLastError;
-           this.close();
-           if (error == Const.ERROR_NO_MORE_FILES) {
-              return null;
-           } else {
-              throw new File.Error("iter (FindNextFile)", error);
-           }
+           throw new File.Error("DirectoryIterator", error);
          }
-       },
-       /**
-        * Return the next entry in the directory, if any such entry is
-        * available.
-        *
-        * Skip special directories "." and "..".
-        *
-        * @return {File.Entry} The next entry in the directory.
-        * @throws {StopIteration} Once all files in the directory have been
-        * encountered.
-        */
-       next: function next() {
+       } else {
+         this._closed = false;
+         this._exists = true;
+       }
+     };
+
+     File.DirectoryIterator.prototype = Object.create(exports.OS.Shared.AbstractFile.AbstractIterator.prototype);
+
+
+     /**
+      * Fetch the next entry in the directory.
+      *
+      * @return null If we have reached the end of the directory.
+      */
+     File.DirectoryIterator.prototype._next = function _next() {
+       // Bailout if the directory does not exist
+       if (!this._exists) {
+         throw File.Error.noSuchFile("DirectoryIterator.prototype.next");
+       }
+       // Bailout if the iterator is closed.
+       if (this._closed) {
+         return null;
+       }
+       // If this is the first entry, we have obtained it already
+       // during construction.
+       if (this._first) {
+         this._first = false;
+         return this._findData;
+       }
+
+       if (WinFile.FindNextFile(this._handle, this._findDataPtr)) {
+         return this._findData;
+       } else {
+         let error = ctypes.winLastError;
+         this.close();
+         if (error == Const.ERROR_NO_MORE_FILES) {
+            return null;
+         } else {
+            throw new File.Error("iter (FindNextFile)", error);
+         }
+       }
+     },
+
+     /**
+      * Return the next entry in the directory, if any such entry is
+      * available.
+      *
+      * Skip special directories "." and "..".
+      *
+      * @return {File.Entry} The next entry in the directory.
+      * @throws {StopIteration} Once all files in the directory have been
+      * encountered.
+      */
+     File.DirectoryIterator.prototype.next = function next() {
          // FIXME: If we start supporting "\\?\"-prefixed paths, do not forget
          // that "." and ".." are absolutely normal file names if _path starts
          // with such prefix
@@ -546,104 +583,62 @@
            return new File.DirectoryIterator.Entry(entry, this._path);
          }
          throw StopIteration;
-       },
-       close: function close() {
-         if (!this._handle) {
-           return;
-         }
-         WinFile.FindClose(this._handle);
+     };
+
+     File.DirectoryIterator.prototype.close = function close() {
+       if (this._closed) {
+         return;
+       }
+       this._closed = true;
+       if (this._handle) {
+         // We might not have a handle if the iterator is closed
+         // before being used.
+         throw_on_zero("FindClose",
+           WinFile.FindClose(this._handle));
          this._handle = null;
        }
      };
+
+    /**
+     * Determine whether the directory exists.
+     *
+     * @return {boolean}
+     */
+     File.DirectoryIterator.prototype.exists = function exists() {
+       return this._exists;
+     };
+
      File.DirectoryIterator.Entry = function Entry(win_entry, parent) {
+       if (!win_entry.dwFileAttributes || !win_entry.ftCreationTime ||
+           !win_entry.ftLastAccessTime || !win_entry.ftLastWriteTime)
+        throw new TypeError();
+
        // Copy the relevant part of |win_entry| to ensure that
        // our data is not overwritten prematurely.
-       if (!win_entry.dwFileAttributes) {
-         throw new TypeError();
-       }
-       this._dwFileAttributes = win_entry.dwFileAttributes;
-       this._name = win_entry.cFileName.readString();
-       if (!this._name) {
+       let isDir = !!(win_entry.dwFileAttributes & Const.FILE_ATTRIBUTE_DIRECTORY);
+       let isSymLink = !!(win_entry.dwFileAttributes & Const.FILE_ATTRIBUTE_REPARSE_POINT);
+
+       let winCreationDate = FILETIME_to_Date(win_entry.ftCreationTime);
+       let winLastWriteDate = FILETIME_to_Date(win_entry.ftLastWriteTime);
+       let winLastAccessDate = FILETIME_to_Date(win_entry.ftLastAccessTime);
+
+       let name = win_entry.cFileName.readString();
+       if (!name) {
          throw new TypeError("Empty name");
        }
-       this._ftCreationTime = win_entry.ftCreationTime;
-       if (!win_entry.ftCreationTime) {
-         throw new TypeError();
-       }
-       this._ftLastAccessTime = win_entry.ftLastAccessTime;
-       if (!win_entry.ftLastAccessTime) {
-         throw new TypeError();
-       }
-       this._ftLastWriteTime = win_entry.ftLastWriteTime;
-       if (!win_entry.ftLastWriteTime) {
-         throw new TypeError();
-       }
+
        if (!parent) {
          throw new TypeError("Empty parent");
        }
        this._parent = parent;
+
+       let path = OS.Win.Path.join(this._parent, name);
+
+       exports.OS.Shared.Win.AbstractEntry.call(this, isDir, isSymLink, name,
+                                                winCreationDate, winLastWriteDate,
+                                                winLastAccessDate, path);
      };
-     File.DirectoryIterator.Entry.prototype = {
-       /**
-        * |true| if the entry is a directory, |false| otherwise
-        */
-       get isDir() {
-         return !!(this._dwFileAttributes & Const.FILE_ATTRIBUTE_DIRECTORY);
-       },
-       /**
-        * |true| if the entry is a symbolic link, |false| otherwise
-        */
-       get isSymLink() {
-         return !!(this._dwFileAttributes & Const.FILE_ATTRIBUTE_REPARSE_POINT);
-       },
-       /**
-        * The name of the entry.
-        * @type {string}
-        */
-       get name() {
-         return this._name;
-       },
-       /**
-        * The creation time of this file.
-        * @type {Date}
-        */
-       get winCreationDate() {
-         let date = FILETIME_to_Date(this._ftCreationTime);
-         delete this.winCreationDate;
-         Object.defineProperty(this, "winCreationDate", {value: date});
-         return date;
-       },
-       /**
-        * The last modification time of this file.
-        * @type {Date}
-        */
-       get winLastWriteDate() {
-         let date = FILETIME_to_Date(this._ftLastWriteTime);
-         delete this.winLastWriteDate;
-         Object.defineProperty(this, "winLastWriteDate", {value: date});
-         return date;
-       },
-       /**
-        * The last access time of this file.
-        * @type {Date}
-        */
-       get winLastAccessDate() {
-         let date = FILETIME_to_Date(this._ftLastAccessTime);
-         delete this.winLastAccessDate;
-         Object.defineProperty(this, "winLastAccessDate", {value: date});
-         return date;
-       },
-       /**
-        * The full path to the entry.
-        * @type {string}
-        */
-       get path() {
-         delete this.path;
-         let path = OS.Win.Path.join(this._parent, this.name);
-         Object.defineProperty(this, "path", {value: path});
-         return path;
-       }
-     };
+     File.DirectoryIterator.Entry.prototype = Object.create(exports.OS.Shared.Win.AbstractEntry.prototype);
 
      /**
       * Return a version of an instance of
@@ -676,78 +671,21 @@
       * @constructor
       */
      File.Info = function Info(stat) {
-       this._dwFileAttributes = stat.dwFileAttributes;
-       this._ftCreationTime = stat.ftCreationTime;
-       this._ftLastAccessTime = stat.ftLastAccessTime;
-       this._ftLastWriteTime = stat.ftLastAccessTime;
-       this._nFileSizeHigh = stat.nFileSizeHigh;
-       this._nFileSizeLow = stat.nFileSizeLow;
+       let isDir = !!(stat.dwFileAttributes & Const.FILE_ATTRIBUTE_DIRECTORY);
+       let isSymLink = !!(stat.dwFileAttributes & Const.FILE_ATTRIBUTE_REPARSE_POINT);
+       
+       let winBirthDate = FILETIME_to_Date(stat.ftCreationTime);
+       let lastAccessDate = FILETIME_to_Date(stat.ftLastAccessTime);
+       let lastWriteDate = FILETIME_to_Date(stat.ftLastWriteTime);
+
+       let value = ctypes.UInt64.join(stat.nFileSizeHigh, stat.nFileSizeLow);
+       let size = exports.OS.Shared.Type.uint64_t.importFromC(value);
+
+       exports.OS.Shared.Win.AbstractInfo.call(this, isDir, isSymLink, size,
+                                               winBirthDate, lastAccessDate,
+                                               lastWriteDate);
      };
-     File.Info.prototype = {
-       /**
-        * |true| if this file is a directory, |false| otherwise
-        */
-       get isDir() {
-         return !!(this._dwFileAttributes & Const.FILE_ATTRIBUTE_DIRECTORY);
-       },
-       /**
-        * |true| if this file is a symbolink link, |false| otherwise
-        */
-       get isSymLink() {
-         return !!(this._dwFileAttributes & Const.FILE_ATTRIBUTE_REPARSE_POINT);
-       },
-       /**
-        * The size of the file, in bytes.
-        *
-        * Note that the result may be |NaN| if the size of the file cannot be
-        * represented in JavaScript.
-        *
-        * @type {number}
-        */
-       get size() {
-         let value = ctypes.UInt64.join(this._nFileSizeHigh, this._nFileSizeLow);
-         return exports.OS.Shared.Type.uint64_t.importFromC(value);
-       },
-       /**
-        * The date of creation of this file
-        *
-        * @type {Date}
-        */
-       get creationDate() {
-         delete this.creationDate;
-         let date = FILETIME_to_Date(this._ftCreationTime);
-         Object.defineProperty(this, "creationDate", { value: date });
-         return date;
-       },
-       /**
-        * The date of last access to this file.
-        *
-        * Note that the definition of last access may depend on the
-        * underlying operating system and file system.
-        *
-        * @type {Date}
-        */
-       get lastAccessDate() {
-         delete this.lastAccess;
-         let date = FILETIME_to_Date(this._ftLastAccessTime);
-         Object.defineProperty(this, "lastAccessDate", { value: date });
-         return date;
-       },
-       /**
-        * Return the date of last modification of this file.
-        *
-        * Note that the definition of last access may depend on the
-        * underlying operating system and file system.
-        *
-        * @type {Date}
-        */
-       get lastModificationDate() {
-         delete this.lastModification;
-         let date = FILETIME_to_Date(this._ftLastWriteTime);
-         Object.defineProperty(this, "lastModificationDate", { value: date });
-         return date;
-       }
-     };
+     File.Info.prototype = Object.create(exports.OS.Shared.Win.AbstractInfo.prototype);
 
      /**
       * Return a version of an instance of File.Info that can be sent
@@ -800,15 +738,13 @@
        winDisposition: OS.Constants.Win.OPEN_EXISTING
      };
 
+     File.read = exports.OS.Shared.AbstractFile.read;
+     File.writeAtomic = exports.OS.Shared.AbstractFile.writeAtomic;
+
      /**
-      * Get/set the current directory.
+      * Get the current directory by getCurrentDirectory.
       */
-     Object.defineProperty(File, "curDir", {
-         set: function(path) {
-           throw_on_zero("set curDir",
-             WinFile.SetCurrentDirectory(path));
-         },
-         get: function() {
+     File.getCurrentDirectory = function getCurrentDirectory() {
            // This function is more complicated than one could hope.
            //
            // This is due to two facts:
@@ -821,11 +757,10 @@
            //  the function with a larger buffer, in the (unlikely byt possible)
            //  case in which the process changes directory to a directory with
            //  a longer name between both calls.
-
            let buffer_size = 4096;
            while (true) {
              let array = new (ctypes.ArrayType(ctypes.jschar, buffer_size))();
-             let expected_size = throw_on_zero("get curDir",
+         let expected_size = throw_on_zero("getCurrentDirectory",
                WinFile.GetCurrentDirectory(buffer_size, array)
              );
              if (expected_size <= buffer_size) {
@@ -839,6 +774,25 @@
              // converge, as the length of the paths cannot increase infinitely.
              buffer_size = expected_size;
            }
+     };
+
+     /**
+      * Set the current directory by setCurrentDirectory.
+      */
+     File.setCurrentDirectory = function setCurrentDirectory(path) {
+       throw_on_zero("setCurrentDirectory",
+         WinFile.SetCurrentDirectory(path));
+     };
+
+     /**
+      * Get/set the current directory by |curDir|.
+      */
+     Object.defineProperty(File, "curDir", {
+         set: function(path) {
+           this.setCurrentDirectory(path);
+         },
+         get: function() {
+           return this.getCurrentDirectory();
          }
        }
      );

@@ -13,7 +13,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=717103
 
 <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
-<body onunload="unload()">
+<body>
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=717103">Mozilla Bug 717103</a>
 <p id="display"></p>
 <div id="content" style="display: none">
@@ -22,20 +22,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=717103
 <pre id="test">
 <script class="testbody" type="text/javascript">
 
-function unload() {
-  delete gDataBlob;
-  gDataBlob = null;
-
-  delete gFileReader;
-  gFileReader = null;
-}
-
-
 devicestorage_setup();
 
-var gFileName = "devicestorage/hi";
+var gFileName = "devicestorage/hi.png";
 var gData = "My name is Doug Turner.  My IRC nick is DougT.  I like Maple cookies."
-var gDataBlob = new Blob([gData], {type: 'text/plain'});
+var gDataBlob = new Blob([gData], {type: 'image/png'});
 var gFileReader = new FileReader();
 
 function getAfterDeleteSuccess(e) {
@@ -53,7 +44,7 @@ function deleteSuccess(e) {
   ok(e.target.result == gFileName, "File name should match");
   dump(e.target.result + "\n")
 
-  var storage = navigator.getDeviceStorage("testing");
+  var storage = navigator.getDeviceStorage("pictures");
   request = storage.get(e.target.result);
   request.onsuccess = getAfterDeleteSuccess;
   request.onerror = getAfterDeleteError;
@@ -66,10 +57,13 @@ function deleteError(e) {
 }
 
 function getSuccess(e) {
-  var storage = navigator.getDeviceStorage("testing");
+  var storage = navigator.getDeviceStorage("pictures");
   ok(navigator.getDeviceStorage, "Should have getDeviceStorage");
 
   ok(e.target.result.name == gFileName, "File name should match");
+  ok(e.target.result.size > 0, "File size be greater than zero");
+  ok(e.target.result.type, "File should have a mime type");
+  ok(e.target.result.lastModifiedDate, "File should have a last modified date");
 
   var name = e.target.result.name;
 
@@ -101,7 +95,7 @@ function addSuccess(e) {
 
   ok(e.target.result == gFileName, "File name should match");
 
-  var storage = navigator.getDeviceStorage("testing");
+  var storage = navigator.getDeviceStorage("pictures");
   request = storage.get(gFileName);
   request.onsuccess = getSuccess;
   request.onerror = getError;
@@ -116,10 +110,10 @@ function addError(e) {
 
 ok(navigator.getDeviceStorage, "Should have getDeviceStorage");
 
-var storage = navigator.getDeviceStorage("testing");
+var storage = navigator.getDeviceStorage("pictures");
 ok(storage, "Should have gotten a storage");
 
-request = storage.addNamed(gDataBlob, "devicestorage/hi");
+request = storage.addNamed(gDataBlob, "devicestorage/hi.png");
 ok(request, "Should have a non-null request");
 
 request.onsuccess = addSuccess;

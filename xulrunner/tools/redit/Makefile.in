@@ -9,11 +9,7 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = redit
-
 ifeq ($(OS_ARCH),WINNT)
-CPPSRCS    = redit.cpp
-PROGRAM    = redit$(BIN_SUFFIX)
 
 SDK_BINARY =  \
 	$(PROGRAM) \

@@ -12,17 +12,7 @@ relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = test_url-classifier
-
 MOZILLA_INTERNAL_API = 1
-
-
-# mochitest tests
-DIRS += mochitest \
-	$(NULL)
-
-# xpcshell tests
-XPCSHELL_TESTS=unit
 
 # XXX Get this to work in libxul builds.
 ## simple c++ tests (no xpcom)

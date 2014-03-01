@@ -19,7 +19,6 @@ const phishyUserPassPref = "network.http.phishy-userpass-length";
 function nextTest() {
   let test = tests.shift();
   if (test) {
-    info("Running test: " + test.name);
     test(function () {
       executeSoon(nextTest);
     });
@@ -38,7 +37,7 @@ let tests = [
     });
   },
   function customize(next) {
-    whenNewWindowLoaded(null, function (win) {
+    whenNewWindowLoaded(undefined, function (win) {
       // Need to wait for delayedStartup for the customization part of the test,
       // since that's where BrowserToolboxCustomizeDone is set.
       whenDelayedStartupFinished(win, function () {

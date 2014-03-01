@@ -17,6 +17,7 @@
 #include "plstr.h"
 #include "nsCOMArray.h"
 #include "nsIComponentRegistrar.h"
+#include <algorithm>
 
 namespace TestPageLoad {
 
@@ -25,11 +26,11 @@ nsresult auxLoad(char *uriBuf);
 //----------------------------------------------------------------------
 
 
-#define RETURN_IF_FAILED(rv, step) \
+#define RETURN_IF_FAILED(rv, ret, step) \
     PR_BEGIN_MACRO \
     if (NS_FAILED(rv)) { \
-        printf(">>> %s failed: rv=%x\n", step, rv); \
-        return rv;\
+        printf(">>> %s failed: rv=%x\n", step, static_cast<uint32_t>(rv)); \
+        return ret;\
     } \
     PR_END_MACRO
 
@@ -161,7 +162,7 @@ MyListener::OnStopRequest(nsIRequest *req, nsISupports *ctxt, nsresult status)
 NS_IMETHODIMP
 MyListener::OnDataAvailable(nsIRequest *req, nsISupports *ctxt,
                             nsIInputStream *stream,
-                            uint32_t offset, uint32_t count)
+                            uint64_t offset, uint32_t count)
 {
     //printf(">>> OnDataAvailable [count=%u]\n", count);
     nsresult rv = NS_ERROR_FAILURE;
@@ -170,17 +171,18 @@ MyListener::OnDataAvailable(nsIRequest *req, nsISupports *ctxt,
 
     if(ctxt == nullptr) {
       bytesRead=0;
-      rv = stream->ReadSegments(streamParse, &offset, count, &bytesRead);
+      rv = stream->ReadSegments(streamParse, nullptr, count, &bytesRead);
     } else {
       while (count) {
-        uint32_t amount = NS_MIN<uint32_t>(count, sizeof(buf));
+        uint32_t amount = std::min<uint32_t>(count, sizeof(buf));
         rv = stream->Read(buf, amount, &bytesRead);  
         count -= bytesRead;
       }
     }
 
     if (NS_FAILED(rv)) {
-      printf(">>> stream->Read failed with rv=%x\n", rv);
+      printf(">>> stream->Read failed with rv=%x\n",
+             static_cast<uint32_t>(rv));
       return rv;
     }
 
@@ -296,11 +298,11 @@ nsresult auxLoad(char *uriBuf)
     printf("\n");
     uriList.AppendObject(uri);
     rv = NS_NewChannel(getter_AddRefs(chan), uri, nullptr, nullptr, callbacks);
-    RETURN_IF_FAILED(rv, "NS_NewChannel");
+    RETURN_IF_FAILED(rv, rv, "NS_NewChannel");
 
     gKeepRunning++;
     rv = chan->AsyncOpen(listener, myBool);
-    RETURN_IF_FAILED(rv, "AsyncOpen");
+    RETURN_IF_FAILED(rv, rv, "AsyncOpen");
 
     return NS_OK;
 
@@ -337,25 +339,22 @@ int main(int argc, char **argv)
         nsCOMPtr<nsIInterfaceRequestor> callbacks = new MyNotifications();
 
         rv = NS_NewURI(getter_AddRefs(baseURI), argv[1]);
-        RETURN_IF_FAILED(rv, "NS_NewURI");
+        RETURN_IF_FAILED(rv, -1, "NS_NewURI");
 
         rv = NS_NewChannel(getter_AddRefs(chan), baseURI, nullptr, nullptr, callbacks);
-        RETURN_IF_FAILED(rv, "NS_OpenURI");
+        RETURN_IF_FAILED(rv, -1, "NS_OpenURI");
         gKeepRunning++;
 
         //TIMER STARTED-----------------------
         printf("Starting clock ... \n");
         start = PR_Now();
         rv = chan->AsyncOpen(listener, nullptr);
-        RETURN_IF_FAILED(rv, "AsyncOpen");
+        RETURN_IF_FAILED(rv, -1, "AsyncOpen");
 
         PumpEvents();
 
         finish = PR_Now();
-        uint32_t totalTime32;
-        uint64_t totalTime64;
-        LL_SUB(totalTime64, finish, start);
-        LL_L2UI(totalTime32, totalTime64);
+        uint32_t totalTime32 = uint32_t(finish - start);
 
         printf("\n\n--------------------\nAll done:\nnum found:%d\nnum start:%d\n", numFound, numStart);
 

@@ -16,7 +16,7 @@
  * http://www.whatwg.org/specs/web-apps/current-work/
  */
 
-[scriptable, uuid(8434C7E8-5E4E-4AB5-9192-3F1C00815920)]
+[scriptable, uuid(1fb22137-c231-4eae-9ca4-557bb0852d89)]
 interface nsIDOMHTMLTableCellElement : nsIDOMHTMLElement
 {
   readonly attribute long             cellIndex;

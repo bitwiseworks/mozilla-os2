@@ -11,10 +11,7 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= gfx
 MOZILLA_INTERNAL_API = 1
-
-XPCSHELL_TESTS = unit
 
 MOCHITEST_FILES = $(addprefix mochitest/, \
 	test_bug509244.html \
@@ -47,12 +44,6 @@ MOCHITEST_FILES = $(addprefix mochitest/, \
 #CPPSRCS		= $(CPP_DISABLED_UNIT_TESTS)
 #SIMPLE_PROGRAMS	= $(CPP_DISABLED_UNIT_TESTS:.cpp=$(BIN_SUFFIX))
 #
-#ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
-#CMMSRCS		= gfxTestCocoaHelper.mm
-#HELPER_OBJS	= gfxTestCocoaHelper.$(OBJ_SUFFIX)
-#EXTRA_DEPS	+= gfxTestCocoaHelper.$(OBJ_SUFFIX)
-#endif
-#
 #LIBS		= \
 #		$(HELPER_OBJS) \
 #		$(call EXPAND_LIBNAME_PATH,thebes,../thebes) \
@@ -77,7 +68,7 @@ ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
 OS_LIBS		+= -framework Cocoa
 endif
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+ifdef MOZ_WIDGET_GTK
 OS_LIBS		+= $(MOZ_PANGO_LIBS) $(XLIBS)
 CXXFLAGS	+= $(MOZ_PANGO_CFLAGS)
 endif

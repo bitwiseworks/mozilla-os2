@@ -186,7 +186,27 @@ d2d-repeating-gradients.patch: Minimize number of gradient stops added to handle
 
 xlib-glyph-clip-region.patch: bug 709477, addressed upstream by be1ff2f45fdbc69537e513834fcffa0435e63073
 
-setlcdfilter_in_tree.patch bug 790139; force cairo to use FT_Library_SetLcdFilter from our in tree library rather than picking it up from the system
+gdi-RGB24-ARGB32.patch: bug 788794
+
+dwrite-font-printing.patch: bug 468568; don't substitute a GDI font for a DWrite font if the name tables aren't equal
+
+d2d-gradient-ensure-stops.patch: bug 792903, ensure we don't set num_stops to 0
+
+setlcdfilter_in_tree.patch: bug 790139; force cairo to use FT_Library_SetLcdFilter from our in tree library rather than picking it up from the system
+
+dwrite-font-match-robustness.patch: bug 717178, don't crash when _name_tables_match is passed a nil scaled-font
+
+handle-multi-path-clip.patch: bug 813124, handle multiple clip paths correctly
+
+win32-gdi-font-cache.patch: Bug 717178, cache GDI font faces to reduce usage of GDI resources
+
+win32-gdi-font-cache-no-HFONT.patch: Bug 717178, don't cache GDI font faces when an HFONT belonging to the caller is passed in
+
+fix-win32-font-assertion.patch: Bug 838617, fix assertion from bug 717178 that was in the wrong place
+
+xlib-flush-glyphs.patch: bug 839745, flush glyphs when necessary
+
+dasharray-zero-gap.patch: bug 885585, ensure strokes get painted when the gaps in a dash array are all zero length
 
 ==== pixman patches ====
 
@@ -208,6 +228,15 @@ pixman-16-bit-pipeline.patch: 16 bit pipeline for dithering
 
 pixman-dither.patch: Add dithering of 16 bit gradients
 
+quartz-support-color-emoji-font.patch: support Apple Color Emoji font in cairo-quartz backend
+
+use-show-text-glyphs-if-glyph-path-fails.patch: fall back to show_text_glyphs even at huge sizes if scaled_font_glyph_path didn't work
+
+pixman-enable-altivec-acceleration.patch: enable building the altivec acceleration
+
 ==== disable printing patch ====
 
 disable-printing.patch:  allows us to use NS_PRINTING to disable printing.
+
+==== cairo clamp bounday patch ====
+cairo-clamp-boundary.patch: don't call pixman_fill with negative starts or negative sizes

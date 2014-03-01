@@ -1,26 +1,18 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef GlobalObject_inl_h___
-#define GlobalObject_inl_h___
+#ifndef vm_GlobalObject_inl_h
+#define vm_GlobalObject_inl_h
+
+#include "vm/GlobalObject.h"
+
+#include "gc/Barrier-inl.h"
+#include "vm/ObjectImpl-inl.h"
 
 namespace js {
-
-inline void
-GlobalObject::setFlags(int32_t flags)
-{
-    setSlot(FLAGS, Int32Value(flags));
-}
-
-inline void
-GlobalObject::initFlags(int32_t flags)
-{
-    initSlot(FLAGS, Int32Value(flags));
-}
 
 inline void
 GlobalObject::setDetailsForKey(JSProtoKey key, JSObject *ctor, JSObject *proto)
@@ -64,13 +56,6 @@ GlobalObject::setCreateArrayFromBufferHelper(uint32_t slot, Handle<JSFunction*> 
 {
     JS_ASSERT(getSlotRef(slot).isUndefined());
     setSlot(slot, ObjectValue(*fun));
-}
-
-void
-GlobalObject::setBooleanValueOf(Handle<JSFunction*> valueOfFun)
-{
-    JS_ASSERT(getSlotRef(BOOLEAN_VALUEOF).isUndefined());
-    setSlot(BOOLEAN_VALUEOF, ObjectValue(*valueOfFun));
 }
 
 void
@@ -213,6 +198,18 @@ GlobalObject::setProtoGetter(JSFunction *protoGetter)
     setSlot(PROTO_GETTER, ObjectValue(*protoGetter));
 }
 
+bool
+GlobalObject::setIntrinsicValue(JSContext *cx, PropertyName *name, HandleValue value)
+{
+#ifdef DEBUG
+    RootedObject self(cx, this);
+    JS_ASSERT(cx->runtime()->isSelfHostingGlobal(self));
+#endif
+    RootedObject holder(cx, intrinsicsHolder());
+    RootedValue valCopy(cx, value);
+    return JSObject::setProperty(cx, holder, holder, name, &valCopy, false);
+}
+
 void
 GlobalObject::setIntrinsicsHolder(JSObject *obj)
 {
@@ -222,4 +219,4 @@ GlobalObject::setIntrinsicsHolder(JSObject *obj)
 
 } // namespace js
 
-#endif
+#endif /* vm_GlobalObject_inl_h */

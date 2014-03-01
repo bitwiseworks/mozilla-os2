@@ -12,32 +12,32 @@ include $(DEPTH)/config/autoconf.mk
 LIBRARY_NAME     = dom_network_s
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
+FAIL_ON_WARNINGS := 1
 
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
 	TCPSocket.js \
+	TCPSocketParentIntermediary.js \
 	TCPSocket.manifest \
 	$(NULL)
 
+ifdef MOZ_B2G_RIL
+DISABLED_EXTRA_COMPONENTS += \
+  NetworkStatsManager.manifest \
+  NetworkStatsManager.js \
+  $(NULL)
+endif
+
 include $(topsrcdir)/dom/dom-config.mk
-
-EXPORTS_NAMESPACES = mozilla/dom/network
-
-EXPORTS_mozilla/dom/network = \
-  Utils.h \
-  Types.h \
-  Constants.h \
-  $(NULL)
-
-CPPSRCS = \
-  Connection.cpp \
-  MobileConnection.cpp \
-  Utils.cpp \
-  USSDReceivedEvent.cpp \
-  $(NULL)
 
 LOCAL_INCLUDES = \
   -I$(topsrcdir)/content/events/src \
   $(NULL)
+
+ifdef MOZ_B2G_RIL
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/dom/icc/src \
+  $(NULL)
+endif
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

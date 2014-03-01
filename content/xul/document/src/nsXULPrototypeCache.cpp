@@ -28,6 +28,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/scache/StartupCache.h"
 #include "mozilla/scache/StartupCacheUtils.h"
+#include "mozilla/Telemetry.h"
 
 using namespace mozilla;
 using namespace mozilla::scache;
@@ -39,11 +40,24 @@ static const char kXULCachePrefix[] = "xulcache";
 
 //----------------------------------------------------------------------
 
+static void
+UpdategDisableXULCache()
+{
+    // Get the value of "nglayout.debug.disable_xul_cache" preference
+    gDisableXULCache =
+        Preferences::GetBool(kDisableXULCachePref, gDisableXULCache);
+
+    // Sets the flag if the XUL cache is disabled
+    if (gDisableXULCache) {
+        Telemetry::Accumulate(Telemetry::XUL_CACHE_DISABLED, true);
+    }
+    
+}
+
 static int
 DisableXULCacheChangedCallback(const char* aPref, void* aClosure)
 {
-    gDisableXULCache =
-        Preferences::GetBool(kDisableXULCachePref, gDisableXULCache);
+    UpdategDisableXULCache();
 
     // Flush the cache, regardless
     nsXULPrototypeCache* cache = nsXULPrototypeCache::GetInstance();
@@ -55,7 +69,6 @@ DisableXULCacheChangedCallback(const char* aPref, void* aClosure)
 
 //----------------------------------------------------------------------
 
-StartupCache*   nsXULPrototypeCache::gStartupCache = nullptr;
 nsXULPrototypeCache*  nsXULPrototypeCache::sInstance = nullptr;
 
 
@@ -87,8 +100,8 @@ nsXULPrototypeCache::GetInstance()
         sInstance->mInputStreamTable.Init();
         sInstance->mOutputStreamTable.Init();
 
-        gDisableXULCache =
-            Preferences::GetBool(kDisableXULCachePref, gDisableXULCache);
+        UpdategDisableXULCache();
+
         Preferences::RegisterCallback(DisableXULCacheChangedCallback,
                                       kDisableXULCachePref);
 
@@ -103,12 +116,6 @@ nsXULPrototypeCache::GetInstance()
 		
     }
     return sInstance;
-}
-
-/* static */ StartupCache*
-nsXULPrototypeCache::GetStartupCache()
-{
-    return gStartupCache;
 }
 
 //----------------------------------------------------------------------
@@ -163,7 +170,6 @@ nsXULPrototypeCache::GetPrototype(nsIURI* aURI)
     }
     
     mInputStreamTable.Remove(aURI);
-    RemoveFromCacheSet(aURI);
     return newProto;
 }
 
@@ -191,64 +197,33 @@ nsXULPrototypeCache::PutStyleSheet(nsCSSStyleSheet* aStyleSheet)
 JSScript*
 nsXULPrototypeCache::GetScript(nsIURI* aURI)
 {
-    CacheScriptEntry entry;
-    if (!mScriptTable.Get(aURI, &entry)) {
+    JSScript* script;
+    if (!mScriptTable.Get(aURI, &script)) {
         return nullptr;
     }
-    return entry.mScriptObject;
-}
-
-
-/* static */
-static PLDHashOperator
-ReleaseScriptObjectCallback(nsIURI* aKey, CacheScriptEntry &aData, void* aClosure)
-{
-    nsCOMPtr<nsIScriptRuntime> rt;
-    if (NS_SUCCEEDED(NS_GetJSRuntime(getter_AddRefs(rt))))
-        rt->DropScriptObject(aData.mScriptObject);
-    return PL_DHASH_REMOVE;
+    return script;
 }
 
 nsresult
-nsXULPrototypeCache::PutScript(nsIURI* aURI, JSScript* aScriptObject)
+nsXULPrototypeCache::PutScript(nsIURI* aURI,
+                               JS::Handle<JSScript*> aScriptObject)
 {
-    CacheScriptEntry existingEntry;
-    if (mScriptTable.Get(aURI, &existingEntry)) {
 #ifdef DEBUG
-        nsCAutoString scriptName;
+    JSScript* existingScript;
+    if (mScriptTable.Get(aURI, &existingScript)) {
+        nsAutoCString scriptName;
         aURI->GetSpec(scriptName);
-        nsCAutoString message("Loaded script ");
+        nsAutoCString message("Loaded script ");
         message += scriptName;
         message += " twice (bug 392650)";
         NS_WARNING(message.get());
-#endif
-        // Reuse the callback used for enumeration in FlushScripts
-        ReleaseScriptObjectCallback(aURI, existingEntry, nullptr);
     }
+#endif
 
-    CacheScriptEntry entry = {aScriptObject};
+    mScriptTable.Put(aURI, aScriptObject);
 
-    mScriptTable.Put(aURI, entry);
-
-    // Lock the object from being gc'd until it is removed from the cache
-    nsCOMPtr<nsIScriptRuntime> rt;
-    nsresult rv = NS_GetJSRuntime(getter_AddRefs(rt));
-    if (NS_SUCCEEDED(rv))
-        rv = rt->HoldScriptObject(aScriptObject);
-    NS_ASSERTION(NS_SUCCEEDED(rv), "Failed to GC lock the object");
-
-    // On failure doing the lock, we should remove the map entry?
-    return rv;
+    return NS_OK;
 }
-
-void
-nsXULPrototypeCache::FlushScripts()
-{
-    // This callback will unlock each object so it can once again be gc'd.
-    // XXX - this might be slow - we fetch the runtime each and every object.
-    mScriptTable.Enumerate(ReleaseScriptObjectCallback, nullptr);
-}
-
 
 nsresult
 nsXULPrototypeCache::PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo)
@@ -266,7 +241,7 @@ nsXULPrototypeCache::PutXBLDocumentInfo(nsXBLDocumentInfo* aDocumentInfo)
 static PLDHashOperator
 FlushSkinXBL(nsIURI* aKey, nsRefPtr<nsXBLDocumentInfo>& aDocInfo, void* aClosure)
 {
-  nsCAutoString str;
+  nsAutoCString str;
   aKey->GetPath(str);
 
   PLDHashOperator ret = PL_DHASH_NEXT;
@@ -281,7 +256,7 @@ FlushSkinXBL(nsIURI* aKey, nsRefPtr<nsXBLDocumentInfo>& aDocInfo, void* aClosure
 static PLDHashOperator
 FlushSkinSheets(nsIURI* aKey, nsRefPtr<nsCSSStyleSheet>& aSheet, void* aClosure)
 {
-  nsCAutoString str;
+  nsAutoCString str;
   aSheet->GetSheetURI()->GetPath(str);
 
   PLDHashOperator ret = PL_DHASH_NEXT;
@@ -315,15 +290,17 @@ nsXULPrototypeCache::FlushSkinFiles()
   mXBLDocTable.Enumerate(FlushScopedSkinStylesheets, nullptr);
 }
 
+void
+nsXULPrototypeCache::FlushScripts()
+{
+    mScriptTable.Clear();
+}
 
 void
 nsXULPrototypeCache::Flush()
 {
     mPrototypeTable.Clear();
-
-    // Clear the script cache, as it refers to prototype-owned mJSObjects.
-    FlushScripts();
-
+    mScriptTable.Clear();
     mStyleSheetTable.Clear();
     mXBLDocTable.Clear();
 }
@@ -355,28 +332,15 @@ nsXULPrototypeCache::AbortCaching()
 
 static const char kDisableXULDiskCachePref[] = "nglayout.debug.disable_xul_fastload";
 
-void
-nsXULPrototypeCache::RemoveFromCacheSet(nsIURI* aURI)
-{
-    mCacheURITable.Remove(aURI);
-}
-
 nsresult
 nsXULPrototypeCache::WritePrototype(nsXULPrototypeDocument* aPrototypeDocument)
 {
     nsresult rv = NS_OK, rv2 = NS_OK;
 
-    // We're here before the startupcache service has been initialized, probably because
-    // of the profile manager. Bail quietly, don't worry, we'll be back later.
-    if (!gStartupCache)
+    if (!StartupCache::GetSingleton())
         return NS_OK;
 
     nsCOMPtr<nsIURI> protoURI = aPrototypeDocument->GetURI();
-
-    // Remove this document from the cache table. We use the table's
-    // emptiness instead of a counter to decide when the caching process 
-    // has completed.
-    RemoveFromCacheSet(protoURI);
 
     nsCOMPtr<nsIObjectOutputStream> oos;
     rv = GetOutputStream(protoURI, getter_AddRefs(oos));
@@ -391,7 +355,7 @@ nsXULPrototypeCache::WritePrototype(nsXULPrototypeDocument* aPrototypeDocument)
 nsresult
 nsXULPrototypeCache::GetInputStream(nsIURI* uri, nsIObjectInputStream** stream) 
 {
-    nsCAutoString spec(kXULCachePrefix);
+    nsAutoCString spec(kXULCachePrefix);
     nsresult rv = PathifyURI(uri, spec);
     if (NS_FAILED(rv)) 
         return NS_ERROR_NOT_AVAILABLE;
@@ -399,11 +363,12 @@ nsXULPrototypeCache::GetInputStream(nsIURI* uri, nsIObjectInputStream** stream)
     nsAutoArrayPtr<char> buf;
     uint32_t len;
     nsCOMPtr<nsIObjectInputStream> ois;
-    if (!gStartupCache)
+    StartupCache* sc = StartupCache::GetSingleton();
+    if (!sc)
         return NS_ERROR_NOT_AVAILABLE;
-    
-    rv = gStartupCache->GetBuffer(spec.get(), getter_Transfers(buf), &len);
-    if (NS_FAILED(rv)) 
+
+    rv = sc->GetBuffer(spec.get(), getter_Transfers(buf), &len);
+    if (NS_FAILED(rv))
         return NS_ERROR_NOT_AVAILABLE;
 
     rv = NewObjectInputStreamFromBuffer(buf, len, getter_AddRefs(ois));
@@ -450,9 +415,10 @@ nsresult
 nsXULPrototypeCache::FinishOutputStream(nsIURI* uri) 
 {
     nsresult rv;
-    if (!gStartupCache)
+    StartupCache* sc = StartupCache::GetSingleton();
+    if (!sc)
         return NS_ERROR_NOT_AVAILABLE;
-    
+
     nsCOMPtr<nsIStorageStream> storageStream;
     bool found = mOutputStreamTable.Get(uri, getter_AddRefs(storageStream));
     if (!found)
@@ -467,14 +433,18 @@ nsXULPrototypeCache::FinishOutputStream(nsIURI* uri)
                                     &len);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCAutoString spec(kXULCachePrefix);
-    rv = PathifyURI(uri, spec);
-    if (NS_FAILED(rv))
-        return NS_ERROR_NOT_AVAILABLE;
-    rv = gStartupCache->PutBuffer(spec.get(), buf, len);
-    if (NS_SUCCEEDED(rv))
-        mOutputStreamTable.Remove(uri);
-    
+    if (!mCacheURITable.GetEntry(uri)) {
+        nsAutoCString spec(kXULCachePrefix);
+        rv = PathifyURI(uri, spec);
+        if (NS_FAILED(rv))
+            return NS_ERROR_NOT_AVAILABLE;
+        rv = sc->PutBuffer(spec.get(), buf, len);
+        if (NS_SUCCEEDED(rv)) {
+            mOutputStreamTable.Remove(uri);
+            mCacheURITable.RemoveEntry(uri);
+        }
+    }
+
     return rv;
 }
 
@@ -487,7 +457,7 @@ nsXULPrototypeCache::HasData(nsIURI* uri, bool* exists)
         *exists = true;
         return NS_OK;
     }
-    nsCAutoString spec(kXULCachePrefix);
+    nsAutoCString spec(kXULCachePrefix);
     nsresult rv = PathifyURI(uri, spec);
     if (NS_FAILED(rv)) {
         *exists = false;
@@ -495,19 +465,12 @@ nsXULPrototypeCache::HasData(nsIURI* uri, bool* exists)
     }
     nsAutoArrayPtr<char> buf;
     uint32_t len;
-    if (gStartupCache)
-        rv = gStartupCache->GetBuffer(spec.get(), getter_Transfers(buf), 
-                                      &len);
-    else {
-        // We don't have everything we need to call BeginCaching and set up
-        // gStartupCache right now, but we just need to check the cache for 
-        // this URI.
-        StartupCache* sc = StartupCache::GetSingleton();
-        if (!sc) {
-            *exists = false;
-            return NS_OK;
-        }
+    StartupCache* sc = StartupCache::GetSingleton();
+    if (sc)
         rv = sc->GetBuffer(spec.get(), getter_Transfers(buf), &len);
+    else {
+        *exists = false;
+        return NS_OK;
     }
     *exists = NS_SUCCEEDED(rv);
     return NS_OK;
@@ -535,26 +498,11 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
 {
     nsresult rv, tmp;
 
-    nsCAutoString path;
+    nsAutoCString path;
     aURI->GetPath(path);
     if (!StringEndsWith(path, NS_LITERAL_CSTRING(".xul")))
         return NS_ERROR_NOT_AVAILABLE;
 
-    // Test gStartupCache to decide whether this is the first nsXULDocument
-    // participating in the serialization.  If gStartupCache is non-null, this document
-    // must not be first, but it can join the process.  Examples of
-    // multiple master documents participating include hiddenWindow.xul and
-    // navigator.xul on the Mac, and multiple-app-component (e.g., mailnews
-    // and browser) startup due to command-line arguments.
-    //
-    if (gStartupCache) {
-        mCacheURITable.Put(aURI, 1);
-
-        return NS_OK;
-    }
-
-    // Use a local to refer to the service till we're sure we succeeded, then
-    // commit to gStartupCache.
     StartupCache* startupCache = StartupCache::GetSingleton();
     if (!startupCache)
         return NS_ERROR_FAILURE;
@@ -574,25 +522,25 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
     rv = NS_GetSpecialDirectory(NS_APP_CHROME_DIR, getter_AddRefs(chromeDir));
     if (NS_FAILED(rv))
         return rv;
-    nsCAutoString chromePath;
+    nsAutoCString chromePath;
     rv = chromeDir->GetNativePath(chromePath);
     if (NS_FAILED(rv))
         return rv;
 
     // XXXbe we assume the first package's locale is the same as the locale of
     // all subsequent packages of cached chrome URIs....
-    nsCAutoString package;
+    nsAutoCString package;
     rv = aURI->GetHost(package);
     if (NS_FAILED(rv))
         return rv;
     nsCOMPtr<nsIXULChromeRegistry> chromeReg
         = do_GetService(NS_CHROMEREGISTRY_CONTRACTID, &rv);
-    nsCAutoString locale;
+    nsAutoCString locale;
     rv = chromeReg->GetSelectedLocale(package, locale);
     if (NS_FAILED(rv))
         return rv;
 
-    nsCAutoString fileChromePath, fileLocale;
+    nsAutoCString fileChromePath, fileLocale;
     
     nsAutoArrayPtr<char> buf;
     uint32_t len, amtRead;
@@ -651,7 +599,7 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
             uint64_t len64;
             rv = inputStream->Available(&len64);
             if (NS_SUCCEEDED(rv)) {
-              if (len64 <= PR_UINT32_MAX)
+              if (len64 <= UINT32_MAX)
                 len = (uint32_t)len64;
               else
                 rv = NS_ERROR_FILE_TOO_BIG;
@@ -677,9 +625,8 @@ nsXULPrototypeCache::BeginCaching(nsIURI* aURI)
 
     // Success!  Insert this URI into the mCacheURITable
     // and commit locals to globals.
-    mCacheURITable.Put(aURI, 1);
+    mCacheURITable.PutEntry(aURI);
 
-    gStartupCache = startupCache;
     return NS_OK;
 }
 
@@ -706,4 +653,18 @@ nsXULPrototypeCache::MarkInCCGeneration(uint32_t aGeneration)
 {
     mXBLDocTable.Enumerate(MarkXBLInCCGeneration, &aGeneration);
     mPrototypeTable.Enumerate(MarkXULInCCGeneration, &aGeneration);
+}
+
+static PLDHashOperator
+MarkScriptsInGC(nsIURI* aKey, JSScript*& aScript, void* aClosure)
+{
+    JSTracer* trc = static_cast<JSTracer*>(aClosure);
+    JS_CallScriptTracer(trc, &aScript, "nsXULPrototypeCache script");
+    return PL_DHASH_NEXT;
+}
+
+void
+nsXULPrototypeCache::MarkInGC(JSTracer* aTrc)
+{
+    mScriptTable.Enumerate(MarkScriptsInGC, aTrc);
 }

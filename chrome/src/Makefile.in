@@ -10,23 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE          = chrome
 LIBRARY_NAME    = chrome_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY  = 1
 FORCE_STATIC_LIB = 1
-
-EXPORTS_NAMESPACES = mozilla/chrome
-
-EXPORTS_mozilla/chrome = \
-		RegistryMessageUtils.h \
-		$(NULL)
-
-CPPSRCS		= \
-		nsChromeRegistry.cpp \
-		nsChromeRegistryChrome.cpp \
-		nsChromeProtocolHandler.cpp \
-		nsChromeRegistryContent.cpp \
-		$(NULL)
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
@@ -37,8 +24,8 @@ LOCAL_INCLUDES += \
 		-I$(topsrcdir)/netwerk/base/src \
 		$(NULL)
 
-ifneq (,$(filter gtk2,$(MOZ_WIDGET_TOOLKIT)))
-CXXFLAGS          += $(MOZ_GTK2_CFLAGS)
+ifdef MOZ_ENABLE_GTK
+CXXFLAGS          += $(TK_CFLAGS)
 endif
 
 LOCAL_INCLUDES += \

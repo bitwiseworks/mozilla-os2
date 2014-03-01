@@ -10,10 +10,7 @@
 #include "gfxPoint.h"
 #include "nsIIdleServiceInternal.h"
 #include "nsTArray.h"
-
-#ifdef MOZ_JAVA_COMPOSITOR
 #include "AndroidJavaWrappers.h"
-#endif
 
 class gfxASurface;
 
@@ -21,12 +18,12 @@ struct ANPEvent;
 
 namespace mozilla {
     class AndroidGeckoEvent;
-    class AndroidKeyEvent;
 
     namespace layers {
         class CompositorParent;
         class CompositorChild;
         class LayerManager;
+        class AsyncPanZoomController;
     }
 }
 
@@ -50,7 +47,7 @@ public:
     void OnAndroidEvent(mozilla::AndroidGeckoEvent *ae);
     void OnDraw(mozilla::AndroidGeckoEvent *ae);
     bool OnMultitouchEvent(mozilla::AndroidGeckoEvent *ae);
-    void OnGestureEvent(mozilla::AndroidGeckoEvent *ae);
+    void OnNativeGestureEvent(mozilla::AndroidGeckoEvent *ae);
     void OnMouseEvent(mozilla::AndroidGeckoEvent *ae);
     void OnKeyEvent(mozilla::AndroidGeckoEvent *ae);
     void OnIMEEvent(mozilla::AndroidGeckoEvent *ae);
@@ -79,15 +76,15 @@ public:
     NS_IMETHOD ConstrainPosition(bool aAllowSlop,
                                  int32_t *aX,
                                  int32_t *aY);
-    NS_IMETHOD Move(int32_t aX,
-                    int32_t aY);
-    NS_IMETHOD Resize(int32_t aWidth,
-                      int32_t aHeight,
-                      bool    aRepaint);
-    NS_IMETHOD Resize(int32_t aX,
-                      int32_t aY,
-                      int32_t aWidth,
-                      int32_t aHeight,
+    NS_IMETHOD Move(double aX,
+                    double aY);
+    NS_IMETHOD Resize(double aWidth,
+                      double aHeight,
+                      bool   aRepaint);
+    NS_IMETHOD Resize(double aX,
+                      double aY,
+                      double aWidth,
+                      double aHeight,
                       bool aRepaint);
     NS_IMETHOD SetZIndex(int32_t aZIndex);
     NS_IMETHOD PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
@@ -122,43 +119,45 @@ public:
     NS_IMETHOD EnableDragDrop(bool aEnable) { return NS_OK; }
     NS_IMETHOD CaptureMouse(bool aCapture) { return NS_ERROR_NOT_IMPLEMENTED; }
     NS_IMETHOD CaptureRollupEvents(nsIRollupListener *aListener,
-                                   bool aDoCapture,
-                                   bool aConsumeRollupEvent) { return NS_ERROR_NOT_IMPLEMENTED; }
+                                   bool aDoCapture) { return NS_ERROR_NOT_IMPLEMENTED; }
 
     NS_IMETHOD GetAttention(int32_t aCycleCount) { return NS_ERROR_NOT_IMPLEMENTED; }
     NS_IMETHOD BeginResizeDrag(nsGUIEvent* aEvent, int32_t aHorizontal, int32_t aVertical) { return NS_ERROR_NOT_IMPLEMENTED; }
 
-    NS_IMETHOD ResetInputState();
+    NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
     NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                       const InputContextAction& aAction);
     NS_IMETHOD_(InputContext) GetInputContext();
-    NS_IMETHOD CancelIMEComposition();
 
-    NS_IMETHOD OnIMEFocusChange(bool aFocus);
-    NS_IMETHOD OnIMETextChange(uint32_t aStart, uint32_t aOldEnd, uint32_t aNewEnd);
-    NS_IMETHOD OnIMESelectionChange(void);
+    NS_IMETHOD NotifyIMEOfTextChange(uint32_t aStart,
+                                     uint32_t aOldEnd,
+                                     uint32_t aNewEnd) MOZ_OVERRIDE;
     virtual nsIMEUpdatePreference GetIMEUpdatePreference();
 
-    LayerManager* GetLayerManager (PLayersChild* aShadowManager = nullptr,
+    LayerManager* GetLayerManager (PLayerTransactionChild* aShadowManager = nullptr,
                                    LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                                    LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                    bool* aAllowRetaining = nullptr);
 
     NS_IMETHOD ReparentNativeWidget(nsIWidget* aNewParent);
 
-#ifdef MOZ_JAVA_COMPOSITOR
     virtual bool NeedsPaint();
     virtual void DrawWindowUnderlay(LayerManager* aManager, nsIntRect aRect);
     virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect);
 
-    static void SetCompositor(mozilla::layers::CompositorParent* aCompositorParent,
+    virtual mozilla::layers::CompositorParent* NewCompositorParent(int aSurfaceWidth, int aSurfaceHeight) MOZ_OVERRIDE;
+
+    static void SetCompositor(mozilla::layers::LayerManager* aLayerManager,
+                              mozilla::layers::CompositorParent* aCompositorParent,
                               mozilla::layers::CompositorChild* aCompositorChild);
     static void ScheduleComposite();
-    static void SchedulePauseComposition();
     static void ScheduleResumeComposition(int width, int height);
+    static void ForceIsFirstPaint();
+    static float ComputeRenderIntegrity();
+    static void SetPanZoomController(mozilla::layers::AsyncPanZoomController* apzc);
+    static mozilla::layers::AsyncPanZoomController* GetPanZoomController();
 
-    virtual bool WidgetPaintsBackground() { return true; }
-#endif
+    virtual bool WidgetPaintsBackground();
 
 protected:
     void BringToFront();
@@ -166,7 +165,9 @@ protected:
     bool DrawTo(gfxASurface *targetSurface);
     bool DrawTo(gfxASurface *targetSurface, const nsIntRect &aRect);
     bool IsTopLevel();
-    void OnIMEAddRange(mozilla::AndroidGeckoEvent *ae);
+    void RemoveIMEComposition();
+    void PostFlushIMEChanges();
+    void FlushIMEChanges();
 
     // Call this function when the users activity is the direct cause of an
     // event (like a keypress or mouse click).
@@ -177,21 +178,37 @@ protected:
     nsWindow* mParent;
     nsWindow* mFocus;
 
-    bool mGestureFinished;
     double mStartDist;
     double mLastDist;
-    nsAutoPtr<nsIntPoint> mStartPoint;
-
-    // Multitouch swipe thresholds in screen pixels
-    double mSwipeMaxPinchDelta;
-    double mSwipeMinDistance;
 
     nsCOMPtr<nsIIdleServiceInternal> mIdleService;
 
     bool mIMEComposing;
+    bool mIMEMaskSelectionUpdate, mIMEMaskTextUpdate;
+    int32_t mIMEMaskEventsCount; // Mask events when > 0
     nsString mIMEComposingText;
-    nsString mIMELastDispatchedComposingText;
     nsAutoTArray<nsTextRange, 4> mIMERanges;
+    bool mIMEUpdatingContext;
+    nsAutoTArray<mozilla::AndroidGeckoEvent, 8> mIMEKeyEvents;
+
+    struct IMEChange {
+        int32_t mStart, mOldEnd, mNewEnd;
+
+        IMEChange() :
+            mStart(-1), mOldEnd(-1), mNewEnd(-1)
+        {
+        }
+        IMEChange(int32_t start, int32_t oldEnd, int32_t newEnd) :
+            mStart(start), mOldEnd(oldEnd), mNewEnd(newEnd)
+        {
+        }
+        bool IsEmpty()
+        {
+            return mStart < 0;
+        }
+    };
+    nsAutoTArray<IMEChange, 4> mIMETextChanges;
+    bool mIMESelectionChanged;
 
     InputContext mInputContext;
 
@@ -202,23 +219,22 @@ protected:
 private:
     void InitKeyEvent(nsKeyEvent& event, mozilla::AndroidGeckoEvent& key,
                       ANPEvent* pluginEvent);
-    bool DispatchMultitouchEvent(nsTouchEvent &event,
-                             mozilla::AndroidGeckoEvent *ae);
     void DispatchMotionEvent(nsInputEvent &event,
                              mozilla::AndroidGeckoEvent *ae,
                              const nsIntPoint &refPoint);
     void DispatchGestureEvent(uint32_t msg, uint32_t direction, double delta,
                               const nsIntPoint &refPoint, uint64_t time);
     void HandleSpecialKey(mozilla::AndroidGeckoEvent *ae);
+    void CreateLayerManager(int aCompositorWidth, int aCompositorHeight);
     void RedrawAll();
 
-#ifdef MOZ_JAVA_COMPOSITOR
     mozilla::AndroidLayerRendererFrame mLayerRendererFrame;
 
+    static nsRefPtr<mozilla::layers::LayerManager> sLayerManager;
     static nsRefPtr<mozilla::layers::CompositorParent> sCompositorParent;
     static nsRefPtr<mozilla::layers::CompositorChild> sCompositorChild;
     static bool sCompositorPaused;
-#endif
+    static nsRefPtr<mozilla::layers::AsyncPanZoomController> sApzc;
 };
 
 #endif /* NSWINDOW_H_ */

@@ -4,7 +4,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #####################################################################################
-# Dependency build overhead: 
+# Dependency build overhead:
 #   o always create/update/hard link targets boomkarks.json & searchplugins
 #   o latest symlink will be correct for the current locale / local build.
 #   o logic is essentially FORCE for language packs w/o all the build overhead
@@ -88,7 +88,7 @@ GARBAGE += $(plugin-file-ts)
 # plugin-file-ts track searchlist file used ($path/list.txt)
 # and time when the file was last modified.
 ###########################################################################
-plugin-file-ts-preqs =\
+plugin-file-ts-preqs = \
   $(call mkdir_deps,$(dir $(plugin-file-ts))) \
   $(plugin_file) \
   $(NULL)
@@ -112,7 +112,7 @@ GARBAGE += $(search-jar) $(search-jar-ts) $(search-jar-common)
 SEARCH_PLUGINS = $(shell cat $(plugin_file))
 $(call errorIfEmpty,SEARCH_PLUGINS)
 
-search-jar-preqs =\
+search-jar-preqs = \
   $(plugin-file-ts) \
   $(if $(IS_LANGUAGE_REPACK),FORCE) \
   $(NULL)
@@ -125,10 +125,6 @@ $(search-jar): $(search-jar-preqs)
 	ln -fn $@ .
 	printf "$(foreach plugin,$(SEARCH_PLUGINS),$(subst __PLUGIN_SUBST__,$(plugin), \n locale/$(AB_CD)/browser/searchplugins/__PLUGIN_SUBST__.xml (__PLUGIN_SUBST__.xml)))" >>  $@
 	@echo   >> $@
-
-.PHONY: searchplugins
-searchplugins: $(search-jar-ts)
-	@echo "\nGenerating: $@"	
 
 ###################
 search-dir-deps = \
@@ -146,7 +142,8 @@ search-preqs =\
   $(GLOBAL_DEPS) \
   $(NULL)
 
-$(search-jar-ts): $(search-preqs)
+.PHONY: searchplugins
+searchplugins: $(search-preqs)
 	$(PYTHON) $(jar-maker) \
           $(QUIET) -j $(FINAL_TARGET)/chrome \
           -s $(topsrcdir)/$(relativesrcdir)/en-US/searchplugins \
@@ -164,19 +161,16 @@ libs-preqs =\
 
 libs-%: $(libs-preqs)
 	$(display-deps)
-	@$(MAKE) -C $(DEPTH)/toolkit/locales libs-$* BOTH_MANIFESTS=1
-	@$(MAKE) -C $(DEPTH)/services/sync/locales AB_CD=$* XPI_NAME=locale-$* BOTH_MANIFESTS=1
-	@$(MAKE) -C $(DEPTH)/intl/locales AB_CD=$* XPI_NAME=locale-$* BOTH_MANIFESTS=1
+	@$(MAKE) -C $(DEPTH)/toolkit/locales libs-$*
+	@$(MAKE) -C $(DEPTH)/intl/locales AB_CD=$* XPI_NAME=locale-$*
 	@$(MAKE) -B $(bookmarks) AB_CD=$*
 	@$(MAKE) -B searchplugins AB_CD=$* XPI_NAME=locale-$*
-	@$(MAKE) libs AB_CD=$* XPI_NAME=locale-$* PREF_DIR=defaults/pref BOTH_MANIFESTS=1
-	@$(MAKE) -C $(DEPTH)/$(MOZ_BRANDING_DIRECTORY)/locales AB_CD=$* XPI_NAME=locale-$* BOTH_MANIFESTS=1
+	@$(MAKE) libs AB_CD=$* XPI_NAME=locale-$* PREF_DIR=defaults/pref
+	@$(MAKE) -C $(DEPTH)/$(MOZ_BRANDING_DIRECTORY)/locales AB_CD=$* XPI_NAME=locale-$*
 
 # Tailored target to just add the chrome processing for multi-locale builds
 chrome-%:
 	$(display-deps)
-	@$(MAKE) -C $(DEPTH)/toolkit/locales chrome-$*
-	@$(MAKE) -C $(DEPTH)/services/sync/locales chrome AB_CD=$*
 	@$(MAKE) -B $(bookmarks) AB_CD=$*
 	@$(MAKE) -B searchplugins AB_CD=$*
 	@$(MAKE) chrome AB_CD=$*
@@ -195,7 +189,7 @@ bookmarks-inc-array = \
   )
 bookmarks-inc = $(firstword $(bookmarks-inc-array))
 
-bookmarks-preqs =\
+bookmarks-preqs = \
   $(bookmarks-inc) \
   $(call mkdir_deps,$(dir $(bookmarks-ts))) \
   $(src-bookmarks) \

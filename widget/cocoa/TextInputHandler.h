@@ -52,7 +52,7 @@ enum
 class TISInputSourceWrapper
 {
 public:
-  static TISInputSourceWrapper& CurrentKeyboardLayout();
+  static TISInputSourceWrapper& CurrentInputSource();
 
   TISInputSourceWrapper()
   {
@@ -102,13 +102,27 @@ public:
   void InitByCurrentKeyboardLayout();
   void InitByCurrentASCIICapableInputSource();
   void InitByCurrentASCIICapableKeyboardLayout();
+  void InitByCurrentInputMethodKeyboardLayoutOverride();
   void InitByTISInputSourceRef(TISInputSourceRef aInputSource);
   void InitByLanguage(CFStringRef aLanguage);
 
+  /**
+   * If the instance is initialized with a keyboard layout input source,
+   * returns it.
+   * If the instance is initialized with an IME mode input source, the result
+   * references the keyboard layout for the IME mode.  However, this can be
+   * initialized only when the IME mode is actually selected.  I.e, if IME mode
+   * input source is initialized with LayoutID or SourceID, this returns null.
+   */
+  TISInputSourceRef GetKeyboardLayoutInputSource() const
+  {
+    return mKeyboardLayout;
+  }
   const UCKeyboardLayout* GetUCKeyboardLayout();
 
   bool IsOpenedIMEMode();
   bool IsIMEMode();
+  bool IsKeyboardLayout();
 
   bool IsASCIICapable()
   {
@@ -175,7 +189,7 @@ public:
   }
 
   bool IsForRTLLanguage();
-  bool IsInitializedByCurrentKeyboardLayout();
+  bool IsInitializedByCurrentInputSource();
 
   enum {
     // 40 is an actual result of the ::LMGetKbdType() when we connect an
@@ -216,6 +230,13 @@ public:
    */
   uint32_t ComputeGeckoKeyCode(UInt32 aNativeKeyCode, UInt32 aKbType,
                                bool aCmdIsPressed);
+
+  /**
+   * ComputeGeckoKeyNameIndex() returns Gecko key name index for the key.
+   *
+   * @param aNativeKeyCode        A native keycode.
+   */
+  static KeyNameIndex ComputeGeckoKeyNameIndex(UInt32 aNativeKeyCode);
 
 protected:
   /**
@@ -273,6 +294,7 @@ protected:
   bool GetStringProperty(const CFStringRef aKey, nsAString &aStr);
 
   TISInputSourceRef mInputSource;
+  TISInputSourceRef mKeyboardLayout;
   CFArrayRef mInputSourceList;
   const UCKeyboardLayout* mUCKeyboardLayout;
   int8_t mIsRTL;
@@ -355,6 +377,30 @@ public:
    *                              TRUE.  Otherwise, FALSE.
    */
   static bool IsSpecialGeckoKey(UInt32 aNativeKeyCode);
+
+
+  /**
+   * EnableSecureEventInput() and DisableSecureEventInput() wrap the Carbon
+   * Event Manager APIs with the same names.  In addition they keep track of
+   * how many times we've called them (in the same process) -- unlike the
+   * Carbon Event Manager APIs, which only keep track of how many times they've
+   * been called from any and all processes.
+   *
+   * The Carbon Event Manager's IsSecureEventInputEnabled() returns whether
+   * secure event input mode is enabled (in any process).  This class's
+   * IsSecureEventInputEnabled() returns whether we've made any calls to
+   * EnableSecureEventInput() that are not (yet) offset by the calls we've
+   * made to DisableSecureEventInput().
+   */
+  static void EnableSecureEventInput();
+  static void DisableSecureEventInput();
+  static bool IsSecureEventInputEnabled();
+
+  /**
+   * EnsureSecureEventInputDisabled() calls DisableSecureEventInput() until
+   * our call count becomes 0.
+   */
+  static void EnsureSecureEventInputDisabled();
 
 protected:
   nsAutoRefCnt mRefCnt;
@@ -583,6 +629,8 @@ private:
   };
 
   KeyboardLayoutOverride mKeyboardOverride;
+
+  static int32_t sSecureEventInputCount;
 };
 
 /**
@@ -627,7 +675,7 @@ public:
   static void ConvertCocoaKeyEventToNPCocoaEvent(NSEvent* aCocoaEvent,
                                                  NPCocoaEvent& aPluginEvent);
 
-#ifndef NP_NO_CARBON
+#ifndef __LP64__
 
   /**
    * InstallPluginKeyEventsHandler() is called when initializing process.
@@ -652,7 +700,7 @@ public:
     mPluginTSMInComposition = aInComposition;
   }
 
-#endif // #ifndef NP_NO_CARBON
+#endif // #ifndef __LP64__
 
 protected:
   bool mIgnoreNextKeyUpEvent;
@@ -660,35 +708,13 @@ protected:
   PluginTextInputHandler(nsChildView* aWidget, NSView<mozView> *aNativeView);
   ~PluginTextInputHandler();
 
-#ifndef NP_NO_CARBON
-
-  /**
-   * ConvertCocoaKeyEventToCarbonEvent() converts aCocoaKeyEvent to
-   * aCarbonKeyEvent.
-   *
-   * @param aCocoaKeyEvent        A Cocoa key event.
-   * @param aCarbonKeyEvent       Converted Carbon event from aCocoaEvent.
-   * @param aMakeKeyDownEventIfNSFlagsChanged
-   *                              If aCocoaKeyEvent isn't NSFlagsChanged event,
-   *                              this is ignored.  Otherwise, i.e., if
-   *                              aCocoaKeyEvent is NSFlagsChanged event,
-   *                              set TRUE if you need a keydown event.
-   *                              Otherwise, Set FALSE for a keyup event.
-   */
-  static void ConvertCocoaKeyEventToCarbonEvent(
-                NSEvent* aCocoaKeyEvent,
-                EventRecord& aCarbonKeyEvent,
-                bool aMakeKeyDownEventIfNSFlagsChanged = false);
-
-#endif // #ifndef NP_NO_CARBON
-
 private:
 
-#ifndef NP_NO_CARBON
+#ifndef __LP64__
   TSMDocumentID mPluginTSMDoc;
 
   bool mPluginTSMInComposition;
-#endif // #ifndef NP_NO_CARBON
+#endif // #ifndef __LP64__
 
   bool mPluginComplexTextInputRequested;
 
@@ -711,7 +737,7 @@ private:
    */
   bool IsInPluginComposition();
 
-#ifndef NP_NO_CARBON
+#ifndef __LP64__
 
   /**
    * Create a TSM document for use with plugins, so that we can support IME in
@@ -735,17 +761,6 @@ private:
   void HandleCarbonPluginKeyEvent(EventRef aKeyEvent);
 
   /**
-   * ConvertUnicodeToCharCode() converts aUnichar to native encoded string.
-   *
-   * @param aUniChar              A unicode character.
-   * @param aOutChar              Native encoded string for aUniChar.
-   * @return                      TRUE if the converting succeeded.
-   *                              Otherwise, FALSE.
-   */
-  static bool ConvertUnicodeToCharCode(PRUnichar aUniChar,
-                                         unsigned char* aOutChar);
-
-  /**
    * Target for text services events sent as the result of calls made to
    * TSMProcessRawKeyEvent() in HandleKeyDownEventForPlugin() when a plugin has
    * the focus.  The calls to TSMProcessRawKeyEvent() short-circuit Cocoa-based
@@ -760,7 +775,7 @@ private:
 
   static EventHandlerRef sPluginKeyEventsHandler;
 
-#endif // #ifndef NP_NO_CARBON
+#endif // #ifndef __LP64__
 };
 
 /**
@@ -1115,6 +1130,46 @@ public:
   }
 
 protected:
+  // Stores the association of device dependent modifier flags with a modifier
+  // keyCode.  Being device dependent, this association may differ from one kind
+  // of hardware to the next.
+  struct ModifierKey
+  {
+    NSUInteger flags;
+    unsigned short keyCode;
+
+    ModifierKey(NSUInteger aFlags, unsigned short aKeyCode) :
+      flags(aFlags), keyCode(aKeyCode)
+    {
+    }
+
+    NSUInteger GetDeviceDependentFlags() const
+    {
+      return (flags & ~NSDeviceIndependentModifierFlagsMask);
+    }
+
+    NSUInteger GetDeviceIndependentFlags() const
+    {
+      return (flags & NSDeviceIndependentModifierFlagsMask);
+    }
+  };
+  typedef nsTArray<ModifierKey> ModifierKeyArray;
+  ModifierKeyArray mModifierKeys;
+
+  /**
+   * GetModifierKeyForNativeKeyCode() returns the stored ModifierKey for
+   * the key.
+   */
+  ModifierKey*
+    GetModifierKeyForNativeKeyCode(unsigned short aKeyCode) const;
+
+  /**
+   * GetModifierKeyForDeviceDependentFlags() returns the stored ModifierKey for
+   * the device dependent flags.
+   */
+  ModifierKey*
+    GetModifierKeyForDeviceDependentFlags(NSUInteger aFlags) const;
+
   /**
    * DispatchKeyEventForFlagsChanged() dispatches keydown event or keyup event
    * for the aNativeEvent.

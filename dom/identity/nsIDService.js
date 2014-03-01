@@ -8,11 +8,12 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-function IDService() {
+this.IDService = function IDService() {
   this.wrappedJSObject = this;
-}
-IDService.prototype = {
-  classID: Components.ID("{baa581e5-8e72-406c-8c9f-dcd4b23a6f82}"),
+};
+
+this.IDService.prototype = {
+  classID: Components.ID("{4e0a0e98-b1d3-4745-a1eb-f815199dd06b}"),
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
                                          Ci.nsISupportsWeakReference]),
@@ -31,4 +32,4 @@ IDService.prototype = {
   }
 };
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([IDService]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([IDService]);

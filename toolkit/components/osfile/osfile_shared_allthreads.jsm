@@ -4,7 +4,7 @@
 
 {
   if (typeof Components != "undefined") {
-    var EXPORTED_SYMBOLS = ["OS"];
+    this.EXPORTED_SYMBOLS = ["OS"];
   }
   (function(exports) {
      "use strict";
@@ -22,17 +22,59 @@
      if (exports.OS.Shared.Type) {
        return; // Avoid double-initialization
      }
-
+     OS.Shared.TEST = false;
      // Import components after having initialized |exports.OS|, to ensure
      // that everybody uses the same definition of |OS|.
      if (typeof Components != "undefined") {
-       Components.utils.import("resource://gre/modules/ctypes.jsm");
+       const Cu = Components.utils;
+       Cu.import("resource://gre/modules/ctypes.jsm");
        Components.classes["@mozilla.org/net/osfileconstantsservice;1"].
          getService(Components.interfaces.nsIOSFileConstantsService).init();
+
+       if (typeof exports.OS.Shared.DEBUG !== "undefined") {
+         return; // Avoid reading and attaching an observer more than once.
+       }
+
+       Cu.import("resource://gre/modules/Services.jsm");
+
+       const PREF_OSFILE_LOG = "toolkit.osfile.log";
+
+       /**
+        * Safely read a PREF_OSFILE_LOG preference.
+        * Returns a value read or, in case of an error, oldPref or false.
+        *
+        * @param bool oldPref
+        *        An optional value that the DEBUG flag was set to previously.
+        */
+       let readDebugPref = function readDebugPref(oldPref) {
+         let pref;
+         try {
+           pref = Services.prefs.getBoolPref(PREF_OSFILE_LOG);
+         } catch (x) {
+           // In case of an error when reading a pref keep it as is.
+           pref = oldPref;
+         }
+         // If neither pref nor oldPref were set, default it to false.
+         return pref || false;
+       };
+
+       /**
+        * A variable controlling if osfile logs should be printed.
+        */
+       exports.OS.Shared.DEBUG = readDebugPref(exports.OS.Shared.DEBUG);
+
+       /**
+        * Listen to PREF_OSFILE_LOG changes and update the shared DEBUG flag
+        * appropriately.
+        */
+       Services.prefs.addObserver(PREF_OSFILE_LOG,
+         function prefObserver(aSubject, aTopic, aData) {
+           exports.OS.Shared.DEBUG = readDebugPref(exports.OS.Shared.DEBUG);
+         }, false);
      }
 
      // Define a lazy getter for a property
-     let defineLazyGetter = function(object, name, getter) {
+     let defineLazyGetter = function defineLazyGetter(object, name, getter) {
        Object.defineProperty(object, name, {
          configurable: true,
          get: function lazy() {
@@ -45,11 +87,8 @@
          }
        });
      };
+     exports.OS.Shared.defineLazyGetter = defineLazyGetter;
 
-     /**
-      * A variable controlling whether we should printout logs.
-      */
-     exports.OS.Shared.DEBUG = false;
      let LOG;
      if (typeof console != "undefined" && console.log) {
        LOG = console.log.bind(console, "OS");
@@ -62,7 +101,62 @@
          dump(text + "\n");
        };
      }
-     exports.OS.Shared.LOG = LOG;
+
+     /**
+      * Returns |arg.toString()| if available, otherwise
+      * applies JSON.stringify.
+      * Return itself otherwise.
+      *
+      * @param arg An argument to be stringified if possible.
+      */
+     let stringifyArg = function stringifyArg(arg) {
+       if (typeof arg === "string") {
+         return arg;
+       }
+       if (arg && typeof arg === "object") {
+         let argToString = arg.toString();
+
+         /**
+           * The only way to detect whether this object has a non-default
+           * implementation of |toString| is to check whether it returns
+           * '[object Object]'. Unfortunately, we cannot simply compare |arg.toString|
+           * and |Object.prototype.toString| as |arg| typically comes from another
+           * compartment.
+           */
+         if (argToString === "[object Object]") {
+           return JSON.stringify(arg);
+         } else {
+           return argToString;
+         }
+       }
+       return arg;
+     };
+
+     /**
+      * A Shared LOG utility function that only logs when DEBUG is set.
+      *
+      * @params {string|object}
+      *         An arbitrary number of arguments to be logged.
+      */
+     exports.OS.Shared.LOG = function (...args) {
+       // If DEBUG is falsy, do nothing.
+       if (!exports.OS.Shared.DEBUG) {
+         return;
+       }
+
+       let logFunc = LOG;
+
+       if (exports.OS.Shared.TEST && Services) {
+         // If TEST is true and the file is loaded in the main thread,
+         // use Services.console for logging and listening to.
+         logFunc = function logFunc(...args) {
+           let message = ["TEST", "OS"].concat(args).join(" ");
+           Services.console.logStringMessage(message + "\n");
+         };
+       }
+
+       logFunc.apply(null, [stringifyArg(arg) for (arg of args)]);
+     };
 
      /**
       * An OS error.
@@ -235,6 +329,14 @@
        }
      };
 
+     /**
+      * Utility function used to determine whether an object is a typed array
+      */
+     let isTypedArray = function isTypedArray(obj) {
+       return typeof obj == "object"
+         && "byteOffset" in obj;
+     };
+     exports.OS.Shared.isTypedArray = isTypedArray;
 
      /**
       * A |Type| of pointers.
@@ -263,7 +365,7 @@
       * Protocol:
       * - |null| returns |null|
       * - a string returns |{string: value}|
-      * - an ArrayBuffer returns |{ptr: address_of_buffer}|
+      * - a typed array returns |{ptr: address_of_buffer}|
       * - a C array returns |{ptr: address_of_buffer}|
       * everything else raises an error
       */
@@ -275,8 +377,11 @@
          return { string: value };
        }
        let normalized;
-       if ("byteLength" in value) { // ArrayBuffer
-         normalized = Types.uint8_t.in_ptr.implementation(value);
+       if (isTypedArray(value)) { // Typed array
+         normalized = Types.uint8_t.in_ptr.implementation(value.buffer);
+         if (value.byteOffset != 0) {
+           normalized = exports.OS.Shared.offsetBy(normalized, value.byteOffset);
+         }
        } else if ("addressOfElement" in value) { // C array
          normalized = value.addressOfElement(0);
        } else if ("isNull" in value) { // C pointer
@@ -333,10 +438,8 @@
      };
 
      function projector(type, signed) {
-       if (exports.OS.Shared.DEBUG) {
-         LOG("Determining best projection for", type,
-             "(size: ", type.size, ")", signed?"signed":"unsigned");
-       }
+       exports.OS.Shared.LOG("Determining best projection for", type,
+         "(size: ", type.size, ")", signed?"signed":"unsigned");
        if (type instanceof Type) {
          type = type.implementation;
        }
@@ -352,22 +455,16 @@
            || type == ctypes.ssize_t
            || type == ctypes.intptr_t
            || type == ctypes.uintptr_t
-           || type == ctypes.off_t){
-          if (signed) {
-	    if (exports.OS.Shared.DEBUG) {
-             LOG("Projected as a large signed integer");
-	    }
-            return projectLargeInt;
-          } else {
-	    if (exports.OS.Shared.DEBUG) {
-             LOG("Projected as a large unsigned integer");
-	    }
-            return projectLargeUInt;
-          }
+           || type == ctypes.off_t) {
+         if (signed) {
+           exports.OS.Shared.LOG("Projected as a large signed integer");
+           return projectLargeInt;
+         } else {
+           exports.OS.Shared.LOG("Projected as a large unsigned integer");
+           return projectLargeUInt;
+         }
        }
-       if (exports.OS.Shared.DEBUG) {
-         LOG("Projected as a regular number");
-       }
+       exports.OS.Shared.LOG("Projected as a regular number");
        return projectValue;
      };
      exports.OS.Shared.projectValue = projectValue;
@@ -770,9 +867,7 @@
         // thread
      let declareFFI = function declareFFI(lib, symbol, abi,
                                           returnType /*, argTypes ...*/) {
-       if (exports.OS.Shared.DEBUG) {
-         LOG("Attempting to declare FFI ", symbol);
-       }
+       exports.OS.Shared.LOG("Attempting to declare FFI ", symbol);
        // We guard agressively, to avoid any late surprise
        if (typeof symbol != "string") {
          throw new TypeError("declareFFI expects as first argument a string");
@@ -810,35 +905,16 @@
          if (exports.OS.Shared.DEBUG) {
            result.fun = fun; // Also return the raw FFI function.
          }
-	 if (exports.OS.Shared.DEBUG) {
-          LOG("Function", symbol, "declared");
-	 }
+         exports.OS.Shared.LOG("Function", symbol, "declared");
          return result;
        } catch (x) {
          // Note: Not being able to declare a function is normal.
          // Some functions are OS (or OS version)-specific.
-	 if (exports.OS.Shared.DEBUG) {
-          LOG("Could not declare function " + symbol, x);
-	 }
+         exports.OS.Shared.LOG("Could not declare function ", symbol, x);
          return null;
        }
      };
      exports.OS.Shared.declareFFI = declareFFI;
-
-
-     /**
-      * Libxul-based utilities, shared by all back-ends.
-      */
-
-     // Lazy getter for libxul
-     defineLazyGetter(exports.OS.Shared, "libxul",
-       function init_libxul() {
-         return ctypes.open(OS.Constants.Path.libxul);
-       });
-
-     exports.OS.Shared.Utils = {};
-
-     let Strings = exports.OS.Shared.Utils.Strings = {};
 
      // A bogus array type used to perform pointer arithmetics
      let gOffsetByType;
@@ -884,73 +960,7 @@
          return ctypes.cast(addr, type);
      };
 
-     /**
-      * Import a wide string (e.g. a |jschar.ptr|) as a string.
-      *
-      * @param {CData} wstring The C representation of a widechar string
-      * (can be jschar* or a jschar[]).
-      * @return {string} The same string, as a JavaScript String.
-      */
-     Strings.importWString = function importWString(wstring) {
-       return wstring.readString();
-     };
-
-
-     let Pointers = {};
-     defineLazyGetter(Pointers, "NS_Free",
-       function init_NS_Free() {
-         return exports.OS.Shared.libxul.declare("osfile_ns_free",
-           ctypes.default_abi,
-          /*return*/ Types.void_t.implementation,
-          /*ptr*/ Types.voidptr_t.implementation);
-       });
-
-     /**
-      * Export a string as a wide string (e.g. a |jschar.ptr|).
-      *
-      * @param {string} string A JavaScript String.
-      * @return {CData} The C representation of that string, as a |jschar*|.
-      * This value will be automatically garbage-collected once it is
-      * not referenced anymore.
-      */
-     defineLazyGetter(Strings, "exportWString",
-       function init_exportWString() {
-         return declareFFI(exports.OS.Shared.libxul,
-           "osfile_wstrdup",
-           ctypes.default_abi,
-           /*return*/ Types.out_wstring.releaseWith(Pointers.NS_Free),
-           /*ptr*/ Types.wstring);
-       });
-
 // Encodings
 
-     defineLazyGetter(Strings, "encodeAll",
-       function init_encodeAll() {
-         return declareFFI(exports.OS.Shared.libxul,
-           "osfile_EncodeAll",
-           ctypes.default_abi,
-           /*return*/     Types.void_t.out_ptr.releaseWith(Pointers.NS_Free),
-           /*encoding*/   Types.cstring,
-           /*source*/     Types.wstring,
-           /*bytes*/      Types.uint32_t.out_ptr);
-       });
-
-     defineLazyGetter(Strings, "decodeAll",
-       function init_decodeAll() {
-         let _decodeAll = declareFFI(exports.OS.Shared.libxul, "osfile_DecodeAll",
-           ctypes.default_abi,
-            /*return*/     Types.out_wstring.releaseWith(Pointers.NS_Free),
-            /*encoding*/   Types.cstring,
-            /*source*/     Types.void_t.in_ptr,
-            /*bytes*/      Types.uint32_t);
-         return function decodeAll(encoding, source, bytes) {
-           let decoded = _decodeAll(encoding, source, bytes);
-           if (!decoded) {
-             return null;
-           }
-           return Strings.importWString(decoded);
-          };
-        }
-     );
    })(this);
 }

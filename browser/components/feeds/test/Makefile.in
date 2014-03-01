@@ -10,19 +10,15 @@ relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= test_browser_feeds
-XPCSHELL_TESTS	= unit
-
-DIRS = \
-	chrome \
-	$(NULL)
-
-MOCHITEST_FILES =	bug408328-data.xml \
+MOCHITEST_FILES = \
+		bug408328-data.xml \
 		bug368464-data.xml \
 		test_bug494328.html \
 		bug494328-data.xml \
 		test_bug589543.html \
 		bug589543-data.xml \
+		test_bug436801.html \
+		bug436801-data.xml \
 		test_registerHandler.html \
 		valid-feed.xml \
 		valid-unsniffable-feed.xml \

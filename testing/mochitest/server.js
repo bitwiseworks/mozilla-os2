@@ -108,6 +108,7 @@ if (this["nsHttpServer"]) {
 }
 
 var serverBasePath;
+var displayResults = true;
 
 //
 // SERVER SETUP
@@ -145,6 +146,11 @@ function runServer()
       SERVER_PORT = _SERVER_PORT;
   } else {
     throw "please define _SERVER_PORT (as a port number) before running server.js";
+  }
+
+  // If DISPLAY_RESULTS is not specified, it defaults to true
+  if (typeof(_DISPLAY_RESULTS) != "undefined") {
+    displayResults = _DISPLAY_RESULTS;
   }
 
   server._start(SERVER_PORT, gServerAddress);
@@ -577,8 +583,14 @@ function testListing(metadata, response)
                             true);
   var table_class = metadata.queryString.indexOf("hideResultsTable=1") > -1 ? "invisible": "";
 
+  let testname = (metadata.queryString.indexOf("testname=") > -1)
+                 ? metadata.queryString.match(/testname=([^&]+)/)[1]
+                 : "";
+
   dumpn("count: " + count);
-  var tests = jsonArrayOfTestFiles(links);
+  var tests = testname
+              ? "['/" + testname + "']"
+              : jsonArrayOfTestFiles(links);
   response.write(
     HTML(
       HEAD(
@@ -592,6 +604,8 @@ function testListing(metadata, response)
                  src: "/tests/SimpleTest/TestRunner.js"}),
         SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/MozillaLogger.js"}),
+        SCRIPT({type: "text/javascript",
+                 src: "/chunkifyTests.js"}),
         SCRIPT({type: "text/javascript",
                  src: "/tests/SimpleTest/setup.js"}),
         SCRIPT({type: "text/javascript"},
@@ -629,10 +643,13 @@ function testListing(metadata, response)
             A({href: "#", id: "toggleNonTests"}, "Show Non-Tests"),
             BR()
           ),
-    
-          TABLE({cellpadding: 0, cellspacing: 0, class: table_class, id: "test-table"},
-            TR(TD("Passed"), TD("Failed"), TD("Todo"), TD("Test Files")),
-            linksToTableRows(links, 0)
+
+          (
+           displayResults ?
+            TABLE({cellpadding: 0, cellspacing: 0, class: table_class, id: "test-table"},
+              TR(TD("Passed"), TD("Failed"), TD("Todo"), TD("Test Files")),
+              linksToTableRows(links, 0)
+            ) : ""
           ),
 
           BR(),

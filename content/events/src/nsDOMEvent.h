@@ -6,6 +6,7 @@
 #ifndef nsDOMEvent_h__
 #define nsDOMEvent_h__
 
+#include "mozilla/Attributes.h"
 #include "nsIDOMEvent.h"
 #include "nsISupports.h"
 #include "nsCOMPtr.h"
@@ -16,188 +17,81 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsAutoPtr.h"
 #include "nsIJSNativeInitializer.h"
+#include "mozilla/dom/EventTarget.h"
+#include "mozilla/dom/EventBinding.h"
+#include "nsIScriptGlobalObject.h"
 
 class nsIContent;
 class nsPresContext;
 struct JSContext;
-struct JSObject;
- 
-class nsDOMEvent : public nsIDOMEvent,
-                   public nsIJSNativeInitializer
+class JSObject;
+
+// Dummy class so we can cast through it to get from nsISupports to
+// nsDOMEvent subclasses with only two non-ambiguous static casts.
+class nsDOMEventBase : public nsIDOMEvent
+{
+};
+
+class nsDOMEvent : public nsDOMEventBase,
+                   public nsWrapperCache
 {
 public:
-
-  // Note: this enum must be kept in sync with sEventNames in nsDOMEvent.cpp
-  enum nsDOMEvents {
-    eDOMEvents_mousedown=0,
-    eDOMEvents_mouseup,
-    eDOMEvents_click,
-    eDOMEvents_dblclick,
-    eDOMEvents_mouseenter,
-    eDOMEvents_mouseleave,
-    eDOMEvents_mouseover,
-    eDOMEvents_mouseout,
-    eDOMEvents_MozMouseHittest,
-    eDOMEvents_mousemove,
-    eDOMEvents_contextmenu,
-    eDOMEvents_keydown,
-    eDOMEvents_keyup,
-    eDOMEvents_keypress,
-    eDOMEvents_focus,
-    eDOMEvents_blur,
-    eDOMEvents_load,
-    eDOMEvents_popstate,
-    eDOMEvents_beforescriptexecute,
-    eDOMEvents_afterscriptexecute,
-    eDOMEvents_beforeunload,
-    eDOMEvents_unload,
-    eDOMEvents_hashchange,
-    eDOMEvents_readystatechange,
-    eDOMEvents_abort,
-    eDOMEvents_error,
-    eDOMEvents_submit,
-    eDOMEvents_reset,
-    eDOMEvents_change,
-    eDOMEvents_select,
-    eDOMEvents_input,
-    eDOMEvents_invalid,
-    eDOMEvents_text,
-    eDOMEvents_compositionstart,
-    eDOMEvents_compositionend,
-    eDOMEvents_compositionupdate,
-    eDOMEvents_popupShowing,
-    eDOMEvents_popupShown,
-    eDOMEvents_popupHiding,
-    eDOMEvents_popupHidden,
-    eDOMEvents_close,
-    eDOMEvents_command,
-    eDOMEvents_broadcast,
-    eDOMEvents_commandupdate,
-    eDOMEvents_dragenter,
-    eDOMEvents_dragover,
-    eDOMEvents_dragexit,
-    eDOMEvents_dragdrop,
-    eDOMEvents_draggesture,
-    eDOMEvents_drag,
-    eDOMEvents_dragend,
-    eDOMEvents_dragstart,
-    eDOMEvents_dragleave,
-    eDOMEvents_drop,
-    eDOMEvents_resize,
-    eDOMEvents_scroll,
-    eDOMEvents_overflow,
-    eDOMEvents_underflow,
-    eDOMEvents_overflowchanged,
-    eDOMEvents_subtreemodified,
-    eDOMEvents_nodeinserted,
-    eDOMEvents_noderemoved,
-    eDOMEvents_noderemovedfromdocument,
-    eDOMEvents_nodeinsertedintodocument,
-    eDOMEvents_attrmodified,
-    eDOMEvents_characterdatamodified,
-    eDOMEvents_DOMActivate,
-    eDOMEvents_DOMFocusIn,
-    eDOMEvents_DOMFocusOut,
-    eDOMEvents_pageshow,
-    eDOMEvents_pagehide,
-    eDOMEvents_DOMMouseScroll,
-    eDOMEvents_MozMousePixelScroll,
-    eDOMEvents_wheel,
-    eDOMEvents_offline,
-    eDOMEvents_online,
-    eDOMEvents_copy,
-    eDOMEvents_cut,
-    eDOMEvents_paste,
-    eDOMEvents_open,
-    eDOMEvents_message,
-    eDOMEvents_show,
-    eDOMEvents_SVGLoad,
-    eDOMEvents_SVGUnload,
-    eDOMEvents_SVGAbort,
-    eDOMEvents_SVGError,
-    eDOMEvents_SVGResize,
-    eDOMEvents_SVGScroll,
-    eDOMEvents_SVGZoom,
-    eDOMEvents_beginEvent,
-    eDOMEvents_endEvent,
-    eDOMEvents_repeatEvent,
-#ifdef MOZ_MEDIA
-    eDOMEvents_loadstart,
-    eDOMEvents_progress,
-    eDOMEvents_suspend,
-    eDOMEvents_emptied,
-    eDOMEvents_stalled,
-    eDOMEvents_play,
-    eDOMEvents_pause,
-    eDOMEvents_loadedmetadata,
-    eDOMEvents_loadeddata,
-    eDOMEvents_waiting,
-    eDOMEvents_playing,
-    eDOMEvents_canplay,
-    eDOMEvents_canplaythrough,
-    eDOMEvents_seeking,
-    eDOMEvents_seeked,
-    eDOMEvents_timeupdate,
-    eDOMEvents_ended,
-    eDOMEvents_ratechange,
-    eDOMEvents_durationchange,
-    eDOMEvents_volumechange,
-    eDOMEvents_mozaudioavailable,
-#endif
-    eDOMEvents_afterpaint,
-    eDOMEvents_beforeresize,
-    eDOMEvents_mozfullscreenchange,
-    eDOMEvents_mozfullscreenerror,
-    eDOMEvents_mozpointerlockchange,
-    eDOMEvents_mozpointerlockerror,
-    eDOMEvents_MozSwipeGesture,
-    eDOMEvents_MozMagnifyGestureStart,
-    eDOMEvents_MozMagnifyGestureUpdate,
-    eDOMEvents_MozMagnifyGesture,
-    eDOMEvents_MozRotateGestureStart,
-    eDOMEvents_MozRotateGestureUpdate,
-    eDOMEvents_MozRotateGesture,
-    eDOMEvents_MozTapGesture,
-    eDOMEvents_MozPressTapGesture,
-    eDOMEvents_MozEdgeUIGesture,
-    eDOMEvents_MozTouchDown,
-    eDOMEvents_MozTouchMove,
-    eDOMEvents_MozTouchUp,
-    eDOMEvents_touchstart,
-    eDOMEvents_touchend,
-    eDOMEvents_touchmove,
-    eDOMEvents_touchcancel,
-    eDOMEvents_touchenter,
-    eDOMEvents_touchleave,
-    eDOMEvents_MozScrolledAreaChanged,
-    eDOMEvents_transitionend,
-    eDOMEvents_animationstart,
-    eDOMEvents_animationend,
-    eDOMEvents_animationiteration,
-    eDOMEvents_devicemotion,
-    eDOMEvents_deviceorientation,
-    eDOMEvents_deviceproximity,
-    eDOMEvents_userproximity,
-    eDOMEvents_devicelight
-  };
-
-  nsDOMEvent(nsPresContext* aPresContext, nsEvent* aEvent);
+  nsDOMEvent(mozilla::dom::EventTarget* aOwner, nsPresContext* aPresContext,
+             nsEvent* aEvent);
+  nsDOMEvent(nsPIDOMWindow* aWindow);
   virtual ~nsDOMEvent();
+private:
+  void ConstructorInit(mozilla::dom::EventTarget* aOwner,
+                       nsPresContext* aPresContext, nsEvent* aEvent);
+public:
+  void GetParentObject(nsIScriptGlobalObject** aParentObject)
+  {
+    if (mOwner) {
+      CallQueryInterface(mOwner, aParentObject);
+    } else {
+      *aParentObject = nullptr;
+    }
+  }
+
+  static nsDOMEvent* FromSupports(nsISupports* aSupports)
+  {
+    nsIDOMEvent* event =
+      static_cast<nsIDOMEvent*>(aSupports);
+#ifdef DEBUG
+    {
+      nsCOMPtr<nsIDOMEvent> target_qi =
+        do_QueryInterface(aSupports);
+
+      // If this assertion fires the QI implementation for the object in
+      // question doesn't use the nsIDOMEvent pointer as the
+      // nsISupports pointer. That must be fixed, or we'll crash...
+      MOZ_ASSERT(target_qi == event, "Uh, fix QI!");
+    }
+#endif
+    return static_cast<nsDOMEvent*>(event);
+  }
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsDOMEvent, nsIDOMEvent)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsDOMEvent)
+
+  nsISupports* GetParentObject()
+  {
+    return mOwner;
+  }
+
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  {
+    return mozilla::dom::EventBinding::Wrap(aCx, aScope, this);
+  }
 
   // nsIDOMEvent Interface
   NS_DECL_NSIDOMEVENT
 
-  // nsIJSNativeInitializer
-  NS_IMETHOD Initialize(nsISupports* aOwner, JSContext* aCx, JSObject* aObj,
-                        uint32_t aArgc, jsval* aArgv);
-
-  virtual nsresult InitFromCtor(const nsAString& aType,
-                                JSContext* aCx, jsval* aVal);
-
   void InitPresContextData(nsPresContext* aPresContext);
+
+  // Returns true if the event should be trusted.
+  bool Init(mozilla::dom::EventTarget* aGlobal);
 
   static PopupControlState GetEventPopupControlState(nsEvent *aEvent);
 
@@ -217,6 +111,70 @@ public:
   static nsIntPoint GetScreenCoords(nsPresContext* aPresContext,
                                     nsEvent* aEvent,
                                     nsIntPoint aPoint);
+
+  static already_AddRefed<nsDOMEvent> Constructor(const mozilla::dom::GlobalObject& aGlobal,
+                                                  const nsAString& aType,
+                                                  const mozilla::dom::EventInit& aParam,
+                                                  mozilla::ErrorResult& aRv);
+
+  // Implemented as xpidl method
+  // void GetType(nsString& aRetval) {}
+
+  mozilla::dom::EventTarget* GetTarget() const;
+  mozilla::dom::EventTarget* GetCurrentTarget() const;
+
+  uint16_t EventPhase() const;
+
+  // xpidl implementation
+  // void StopPropagation();
+
+  // xpidl implementation
+  // void StopImmediatePropagation();
+
+  bool Bubbles() const
+  {
+    return mEvent->mFlags.mBubbles;
+  }
+
+  bool Cancelable() const
+  {
+    return mEvent->mFlags.mCancelable;
+  }
+
+  // xpidl implementation
+  // void PreventDefault();
+
+  bool DefaultPrevented() const
+  {
+    return mEvent && mEvent->mFlags.mDefaultPrevented;
+  }
+
+  bool MultipleActionsPrevented() const
+  {
+    return mEvent->mFlags.mMultipleActionsPrevented;
+  }
+
+  bool IsTrusted() const
+  {
+    return mEvent->mFlags.mIsTrusted;
+  }
+
+  uint64_t TimeStamp() const
+  {
+    return mEvent->time;
+  }
+
+  void InitEvent(const nsAString& aType, bool aBubbles, bool aCancelable,
+                 mozilla::ErrorResult& aRv)
+  {
+    aRv = InitEvent(aType, aBubbles, aCancelable);
+  }
+
+  mozilla::dom::EventTarget* GetOriginalTarget() const;
+  mozilla::dom::EventTarget* GetExplicitOriginalTarget() const;
+
+  bool GetPreventDefault() const;
+
 protected:
 
   // Internal helper functions
@@ -225,7 +183,8 @@ protected:
 
   nsEvent*                    mEvent;
   nsRefPtr<nsPresContext>     mPresContext;
-  nsCOMPtr<nsIDOMEventTarget> mExplicitOriginalTarget;
+  nsCOMPtr<mozilla::dom::EventTarget> mExplicitOriginalTarget;
+  nsCOMPtr<nsPIDOMWindow>     mOwner; // nsPIDOMWindow for now.
   nsString                    mCachedType;
   bool                        mEventIsInternal;
   bool                        mPrivateDataDuplicated;
@@ -249,16 +208,28 @@ protected:
   NS_IMETHOD StopImmediatePropagation(void) { return _to StopImmediatePropagation(); } \
   NS_IMETHOD GetOriginalTarget(nsIDOMEventTarget** aOriginalTarget) { return _to GetOriginalTarget(aOriginalTarget); } \
   NS_IMETHOD GetExplicitOriginalTarget(nsIDOMEventTarget** aExplicitOriginalTarget) { return _to GetExplicitOriginalTarget(aExplicitOriginalTarget); } \
-  NS_IMETHOD PreventBubble() { return _to PreventBubble(); } \
-  NS_IMETHOD PreventCapture() { return _to PreventCapture(); } \
   NS_IMETHOD GetPreventDefault(bool* aRetval) { return _to GetPreventDefault(aRetval); } \
   NS_IMETHOD GetIsTrusted(bool* aIsTrusted) { return _to GetIsTrusted(aIsTrusted); } \
   NS_IMETHOD SetTarget(nsIDOMEventTarget *aTarget) { return _to SetTarget(aTarget); } \
   NS_IMETHOD_(bool) IsDispatchStopped(void) { return _to IsDispatchStopped(); } \
   NS_IMETHOD_(nsEvent *) GetInternalNSEvent(void) { return _to GetInternalNSEvent(); } \
-  NS_IMETHOD SetTrusted(bool aTrusted) { return _to SetTrusted(aTrusted); }
+  NS_IMETHOD_(void) SetTrusted(bool aTrusted) { _to SetTrusted(aTrusted); } \
+  NS_IMETHOD_(void) SetOwner(mozilla::dom::EventTarget* aOwner) { _to SetOwner(aOwner); } \
+  NS_IMETHOD_(nsDOMEvent *) InternalDOMEvent(void) { return _to InternalDOMEvent(); }
 
 #define NS_FORWARD_TO_NSDOMEVENT_NO_SERIALIZATION_NO_DUPLICATION \
   NS_FORWARD_NSIDOMEVENT_NO_SERIALIZATION_NO_DUPLICATION(nsDOMEvent::)
+
+inline nsISupports*
+ToSupports(nsDOMEvent* e)
+{
+  return static_cast<nsIDOMEvent*>(e);
+}
+
+inline nsISupports*
+ToCanonicalSupports(nsDOMEvent* e)
+{
+  return static_cast<nsIDOMEvent*>(e);
+}
 
 #endif // nsDOMEvent_h__

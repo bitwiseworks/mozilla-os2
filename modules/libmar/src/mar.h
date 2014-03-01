@@ -7,13 +7,21 @@
 #ifndef MAR_H__
 #define MAR_H__
 
-/* We use NSPR here just to import the definition of uint32_t */
-#include "prtypes.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/StandardInteger.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* We have a MAX_SIGNATURES limit so that an invalid MAR will never
+ * waste too much of either updater's or signmar's time.
+ * It is also used at various places internally and will affect memory usage.
+ * If you want to increase this value above 9 then you need to adjust parsing
+ * code in tool/mar.c.
+*/
+#define MAX_SIGNATURES 8
+MOZ_STATIC_ASSERT(MAX_SIGNATURES <= 9, "too many signatures");
 
 struct ProductInformationBlock {
   const char *MARChannelID;
@@ -58,7 +66,7 @@ typedef int (* MarItemCallback)(MarFile *mar, const MarItem *item, void *data);
 MarFile *mar_open(const char *path);
 
 #ifdef XP_WIN
-MarFile *mar_wopen(const PRUnichar *path);
+MarFile *mar_wopen(const wchar_t *path);
 #endif
 
 /**
@@ -123,22 +131,30 @@ int mar_create(const char *dest,
 int mar_extract(const char *path);
 
 /**
- * Verifies the embedded signature for the specified mar file.
+ * Verifies a MAR file by verifying each signature with the corresponding
+ * certificate. That is, the first signature will be verified using the first
+ * certificate given, the second signature will be verified using the second
+ * certificate given, etc. The signature count must exactly match the number of
+ * certificates given, and all signature verifications must succeed.
  * We do not check that the certificate was issued by any trusted authority. 
  * We assume it to be self-signed.  We do not check whether the certificate 
  * is valid for this usage.
  * 
  * @param mar            The already opened MAR file.
- * @param certData       The certificate file data.
- * @param sizeOfCertData The size of the cert data.
+ * @param certData       Pointer to the first element in an array of certificate
+ *                       file data.
+ * @param certDataSizes  Pointer to the first element in an array for size of
+ *                       the cert data.
+ * @param certCount      The number of elements in certData and certDataSizes
  * @return 0 on success
  *         a negative number if there was an error
  *         a positive number if the signature does not verify
  */
 #ifdef XP_WIN
-int mar_verify_signatureW(MarFile *mar, 
-                          const char *certData,
-                          uint32_t sizeOfCertData);
+int mar_verify_signaturesW(MarFile *mar,
+                           const uint8_t * const *certData,
+                           const uint32_t *certDataSizes,
+                           uint32_t certCount);
 #endif
 
 /** 

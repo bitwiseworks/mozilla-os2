@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "prmem.h"
 
 #include "gfxAlphaRecovery.h"
 #include "gfxImageSurface.h"
@@ -11,6 +10,7 @@
 #include "cairo.h"
 #include "mozilla/gfx/2D.h"
 #include "gfx2DGlue.h"
+#include <algorithm>
 
 using namespace mozilla::gfx;
 
@@ -95,12 +95,26 @@ TryAllocAlignedBytes(size_t aSize)
 #endif
 }
 
-gfxImageSurface::gfxImageSurface(const gfxIntSize& size, gfxImageFormat format, bool aClear) :
-    mSize(size), mOwnsData(false), mData(nullptr), mFormat(format)
+gfxImageSurface::gfxImageSurface(const gfxIntSize& size, gfxImageFormat format, bool aClear)
+ : mSize(size), mData(nullptr), mFormat(format)
 {
-    mStride = ComputeStride();
+    AllocateAndInit(0, 0, aClear);
+}
 
-    if (!CheckSurfaceSize(size))
+void 
+gfxImageSurface::AllocateAndInit(long aStride, int32_t aMinimalAllocation,
+                                 bool aClear)
+{
+    // The callers should set mSize and mFormat.
+    MOZ_ASSERT(!mData);
+    mData = nullptr;
+    mOwnsData = false;
+
+    mStride = aStride > 0 ? aStride : ComputeStride();
+    if (aMinimalAllocation < mSize.height * mStride)
+        aMinimalAllocation = mSize.height * mStride;
+
+    if (!CheckSurfaceSize(mSize))
         MakeInvalid();
 
     // if we have a zero-sized surface, just leave mData nullptr
@@ -108,18 +122,18 @@ gfxImageSurface::gfxImageSurface(const gfxIntSize& size, gfxImageFormat format, 
 
         // This can fail to allocate memory aligned as we requested,
         // or it can fail to allocate any memory at all.
-        mData = (unsigned char *) TryAllocAlignedBytes(mSize.height * mStride);
+        mData = (unsigned char *) TryAllocAlignedBytes(aMinimalAllocation);
         if (!mData)
             return;
         if (aClear)
-            memset(mData, 0, mSize.height * mStride);
+            memset(mData, 0, aMinimalAllocation);
     }
 
     mOwnsData = true;
 
     cairo_surface_t *surface =
         cairo_image_surface_create_for_data((unsigned char*)mData,
-                                            (cairo_format_t)format,
+                                            (cairo_format_t)mFormat,
                                             mSize.width,
                                             mSize.height,
                                             mStride);
@@ -130,6 +144,13 @@ gfxImageSurface::gfxImageSurface(const gfxIntSize& size, gfxImageFormat format, 
         RecordMemoryUsed(mSize.height * ComputeStride() +
                          sizeof(gfxImageSurface));
     }
+}
+
+gfxImageSurface::gfxImageSurface(const gfxIntSize& size, gfxImageFormat format,
+                                 long aStride, int32_t aExtraBytes, bool aClear)
+ : mSize(size), mData(nullptr), mFormat(format)
+{
+    AllocateAndInit(aStride, aExtraBytes, aClear);
 }
 
 gfxImageSurface::gfxImageSurface(cairo_surface_t *csurf)
@@ -175,6 +196,28 @@ gfxImageSurface::ComputeStride(const gfxIntSize& aSize, gfxImageFormat aFormat)
     return stride;
 }
 
+size_t
+gfxImageSurface::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+{
+    size_t n = gfxASurface::SizeOfExcludingThis(aMallocSizeOf);
+    if (mOwnsData) {
+        n += aMallocSizeOf(mData);
+    }
+    return n;
+}
+
+size_t
+gfxImageSurface::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+{
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
+bool
+gfxImageSurface::SizeOfIsMeasured() const
+{
+    return true;
+}
+
 // helper function for the CopyFrom methods
 static void
 CopyForStride(unsigned char* aDest, unsigned char* aSrc, const gfxIntSize& aSize, long aDestStride, long aSrcStride)
@@ -182,7 +225,7 @@ CopyForStride(unsigned char* aDest, unsigned char* aSrc, const gfxIntSize& aSize
     if (aDestStride == aSrcStride) {
         memcpy (aDest, aSrc, aSrcStride * aSize.height);
     } else {
-        int lineSize = NS_MIN(aDestStride, aSrcStride);
+        int lineSize = std::min(aDestStride, aSrcStride);
         for (int i = 0; i < aSize.height; i++) {
             unsigned char* src = aSrc + aSrcStride * i;
             unsigned char* dst = aDest + aDestStride * i;
@@ -261,7 +304,7 @@ gfxImageSurface::GetSubimage(const gfxRect& aRect)
         new gfxSubimageSurface(this, subData,
                                gfxIntSize((int)r.Width(), (int)r.Height()));
 
-    return image.forget().get();
+    return image.forget();
 }
 
 gfxSubimageSurface::gfxSubimageSurface(gfxImageSurface* aParent,

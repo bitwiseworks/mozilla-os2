@@ -1,0 +1,79 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+XPIDL_SOURCES += [
+    'nsIHttpActivityObserver.idl',
+    'nsIHttpAuthManager.idl',
+    'nsIHttpAuthenticableChannel.idl',
+    'nsIHttpAuthenticator.idl',
+    'nsIHttpChannel.idl',
+    'nsIHttpChannelAuthProvider.idl',
+    'nsIHttpChannelChild.idl',
+    'nsIHttpChannelInternal.idl',
+    'nsIHttpEventSink.idl',
+    'nsIHttpHeaderVisitor.idl',
+    'nsIHttpProtocolHandler.idl',
+]
+
+XPIDL_MODULE = 'necko_http'
+
+XPIDL_FLAGS += [
+    '-I$(topsrcdir)/netwerk/base/public',
+]
+
+MODULE = 'necko'
+
+EXPORTS += [
+    'nsHttp.h',
+    'nsHttpAtomList.h',
+    'nsHttpHeaderArray.h',
+    'nsHttpResponseHead.h',
+]
+
+EXPORTS.mozilla.net += [
+    'HttpBaseChannel.h',
+    'HttpChannelChild.h',
+    'HttpChannelParent.h',
+    'HttpInfo.h',
+    'PHttpChannelParams.h',
+    'PSpdyPush3.h',
+]
+
+CPP_SOURCES += [
+    'ASpdySession.cpp',
+    'ConnectionDiagnostics.cpp',
+    'HttpBaseChannel.cpp',
+    'HttpChannelChild.cpp',
+    'HttpChannelParent.cpp',
+    'HttpChannelParentListener.cpp',
+    'HttpInfo.cpp',
+    'NullHttpTransaction.cpp',
+    'SpdyPush3.cpp',
+    'SpdySession2.cpp',
+    'SpdySession3.cpp',
+    'SpdyStream2.cpp',
+    'SpdyStream3.cpp',
+    'nsHttp.cpp',
+    'nsHttpActivityDistributor.cpp',
+    'nsHttpAuthCache.cpp',
+    'nsHttpAuthManager.cpp',
+    'nsHttpBasicAuth.cpp',
+    'nsHttpChannel.cpp',
+    'nsHttpChannelAuthProvider.cpp',
+    'nsHttpChunkedDecoder.cpp',
+    'nsHttpConnection.cpp',
+    'nsHttpConnectionInfo.cpp',
+    'nsHttpConnectionMgr.cpp',
+    'nsHttpDigestAuth.cpp',
+    'nsHttpHandler.cpp',
+    'nsHttpHeaderArray.cpp',
+    'nsHttpNTLMAuth.cpp',
+    'nsHttpPipeline.cpp',
+    'nsHttpRequestHead.cpp',
+    'nsHttpResponseHead.cpp',
+    'nsHttpTransaction.cpp',
+]
+

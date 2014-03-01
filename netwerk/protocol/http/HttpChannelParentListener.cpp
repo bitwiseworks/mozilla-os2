@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "HttpChannelParentListener.h"
 #include "mozilla/net/HttpChannelParent.h"
 #include "mozilla/dom/TabParent.h"
@@ -14,8 +17,6 @@
 #include "nsNetUtil.h"
 #include "nsISupportsPriority.h"
 #include "nsIAuthPromptProvider.h"
-#include "nsIDocShellTreeItem.h"
-#include "nsIBadCertListener2.h"
 #include "nsICacheEntryDescriptor.h"
 #include "nsSerializationHelper.h"
 #include "nsISerializable.h"
@@ -44,7 +45,7 @@ HttpChannelParentListener::~HttpChannelParentListener()
 // HttpChannelParentListener::nsISupports
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS5(HttpChannelParentListener, 
+NS_IMPL_ISUPPORTS5(HttpChannelParentListener,
                    nsIInterfaceRequestor,
                    nsIStreamListener,
                    nsIRequestObserver,
@@ -61,19 +62,19 @@ HttpChannelParentListener::OnStartRequest(nsIRequest *aRequest, nsISupports *aCo
   if (!mActiveChannel)
     return NS_ERROR_UNEXPECTED;
 
-  LOG(("HttpChannelParentListener::OnStartRequest [this=%x]\n", this));
+  LOG(("HttpChannelParentListener::OnStartRequest [this=%p]\n", this));
   return mActiveChannel->OnStartRequest(aRequest, aContext);
 }
 
 NS_IMETHODIMP
-HttpChannelParentListener::OnStopRequest(nsIRequest *aRequest, 
-                                          nsISupports *aContext, 
+HttpChannelParentListener::OnStopRequest(nsIRequest *aRequest,
+                                          nsISupports *aContext,
                                           nsresult aStatusCode)
 {
   if (!mActiveChannel)
     return NS_ERROR_UNEXPECTED;
 
-  LOG(("HttpChannelParentListener::OnStopRequest: [this=%x status=%ul]\n", 
+  LOG(("HttpChannelParentListener::OnStopRequest: [this=%p status=%ul]\n",
        this, aStatusCode));
   nsresult rv = mActiveChannel->OnStopRequest(aRequest, aContext, aStatusCode);
 
@@ -86,16 +87,16 @@ HttpChannelParentListener::OnStopRequest(nsIRequest *aRequest,
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-HttpChannelParentListener::OnDataAvailable(nsIRequest *aRequest, 
-                                            nsISupports *aContext, 
-                                            nsIInputStream *aInputStream, 
-                                            uint32_t aOffset, 
+HttpChannelParentListener::OnDataAvailable(nsIRequest *aRequest,
+                                            nsISupports *aContext,
+                                            nsIInputStream *aInputStream,
+                                            uint64_t aOffset,
                                             uint32_t aCount)
 {
   if (!mActiveChannel)
     return NS_ERROR_UNEXPECTED;
 
-  LOG(("HttpChannelParentListener::OnDataAvailable [this=%x]\n", this));
+  LOG(("HttpChannelParentListener::OnDataAvailable [this=%p]\n", this));
   return mActiveChannel->OnDataAvailable(aRequest, aContext, aInputStream, aOffset, aCount);
 }
 
@@ -103,7 +104,7 @@ HttpChannelParentListener::OnDataAvailable(nsIRequest *aRequest,
 // HttpChannelParentListener::nsIInterfaceRequestor
 //-----------------------------------------------------------------------------
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 HttpChannelParentListener::GetInterface(const nsIID& aIID, void **result)
 {
   if (aIID.Equals(NS_GET_IID(nsIChannelEventSink)) ||
@@ -184,7 +185,7 @@ HttpChannelParentListener::OnRedirectResult(bool succeeded)
       nsCOMPtr<nsIChannel> newChannel;
       rv = registrar->GetRegisteredChannel(mRedirectChannelId,
                                            getter_AddRefs(newChannel));
-      NS_ASSERTION(newChannel, "Already registered channel not found");
+      MOZ_ASSERT(newChannel, "Already registered channel not found");
 
       if (NS_SUCCEEDED(rv))
         newChannel->Cancel(NS_BINDING_ABORTED);
@@ -199,7 +200,7 @@ HttpChannelParentListener::OnRedirectResult(bool succeeded)
 
   nsCOMPtr<nsIParentRedirectingChannel> activeRedirectingChannel =
       do_QueryInterface(mActiveChannel);
-  NS_ABORT_IF_FALSE(activeRedirectingChannel,
+  MOZ_ASSERT(activeRedirectingChannel,
     "Channel finished a redirect response, but doesn't implement "
     "nsIParentRedirectingChannel to complete it.");
 

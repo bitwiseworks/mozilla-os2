@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #ifdef MOZ_LOGGING
 #define FORCE_PR_LOG /* Allow logging in the release build */
 #endif // MOZ_LOGGING
@@ -261,7 +263,7 @@ MouseScrollHandler::SynthesizeNativeMouseScrollEvent(nsWindow* aWindow,
     case WM_HSCROLL:
       lParam = (aAdditionalFlags &
                   nsIDOMWindowUtils::MOUSESCROLL_WIN_SCROLL_LPARAM_NOT_NULL) ?
-        reinterpret_cast<LPARAM>(target) : NULL;
+        reinterpret_cast<LPARAM>(target) : 0;
       wParam = aDelta;
       break;
     default:
@@ -275,7 +277,7 @@ MouseScrollHandler::SynthesizeNativeMouseScrollEvent(nsWindow* aWindow,
   memset(kbdState, 0, sizeof(kbdState));
 
   nsAutoTArray<KeyPair,10> keySequence;
-  nsWindow::SetupKeyModifiersSequence(&keySequence, aModifierFlags);
+  WinUtils::SetupKeyModifiersSequence(&keySequence, aModifierFlags);
 
   for (uint32_t i = 0; i < keySequence.Length(); ++i) {
     uint8_t key = keySequence[i].mGeneral;
@@ -310,7 +312,7 @@ MouseScrollHandler::InitEvent(nsWindow* aWindow,
                               nsGUIEvent& aEvent,
                               nsIntPoint* aPoint)
 {
-  NS_ENSURE_TRUE(aWindow, );
+  NS_ENSURE_TRUE_VOID(aWindow);
   nsIntPoint point;
   if (aPoint) {
     point = *aPoint;
@@ -1371,7 +1373,7 @@ MouseScrollHandler::Device::UltraNav::IsObsoleteDriverInstalled()
     ("MouseScroll::Device::UltraNav::IsObsoleteDriverInstalled(): "
      "found driver version = %d.%d",
      majorVersion, minorVersion));
-  return majorVersion < 15 || majorVersion == 15 && minorVersion == 0;
+  return majorVersion < 15 || (majorVersion == 15 && minorVersion == 0);
 }
 
 /******************************************************************************

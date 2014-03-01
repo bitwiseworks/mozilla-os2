@@ -20,6 +20,8 @@ PlacesViewBase.prototype = {
   _viewElt: null,
   get viewElt() this._viewElt,
 
+  get associatedElement() this._viewElt,
+
   get controllers() this._viewElt.controllers,
 
   // The xul element that represents the root container.
@@ -280,7 +282,7 @@ PlacesViewBase.prototype = {
     }
     else {
       let itemId = aPlacesNode.itemId;
-      if (PlacesUtils.uriTypes.indexOf(type) != -1) {
+      if (type == Ci.nsINavHistoryResultNode.RESULT_TYPE_URI) {
         element = document.createElement("menuitem");
         element.className = "menuitem-iconic bookmark-item menuitem-with-favicon";
         element.setAttribute("scheme",
@@ -541,26 +543,6 @@ PlacesViewBase.prototype = {
       // root.
       if (parentElt._startMarker.nextSibling == parentElt._endMarker)
         this._setEmptyPopupStatus(parentElt, true);
-    }
-  },
-
-  nodeReplaced:
-  function PVB_nodeReplaced(aParentPlacesNode, aOldPlacesNode, aNewPlacesNode, aIndex) {
-    let parentElt = this._getDOMNodeForPlacesNode(aParentPlacesNode);
-    if (parentElt._built) {
-      let elt = this._getDOMNodeForPlacesNode(aOldPlacesNode);
-
-      // Here we need the <menu>.
-      if (elt.localName == "menupopup")
-        elt = elt.parentNode;
-
-      parentElt.removeChild(elt);
-
-      // No worries: If elt is the last item (i.e. no nextSibling),
-      // _insertNewItem/_insertNewItemToPopup will insert the new element as
-      // the last item.
-      let nextElt = elt.nextSibling;
-      this._insertNewItemToPopup(aNewPlacesNode, parentElt, nextElt);
     }
   },
 
@@ -1277,31 +1259,6 @@ PlacesToolbar.prototype = {
       // Node is on the toolbar
       this.updateChevron();
     }
-  },
-
-  nodeReplaced:
-  function PT_nodeReplaced(aParentPlacesNode,
-                           aOldPlacesNode, aNewPlacesNode, aIndex) {
-    let parentElt = this._getDOMNodeForPlacesNode(aParentPlacesNode);
-    if (parentElt == this._rootElt) {
-      let elt = this._getDOMNodeForPlacesNode(aOldPlacesNode);
-
-      // Here we need the <menu>.
-      if (elt.localName == "menupopup")
-        elt = elt.parentNode;
-
-      this._removeChild(elt);
-
-      // No worries: If elt is the last item (i.e. no nextSibling),
-      // _insertNewItem/_insertNewItemToPopup will insert the new element as
-      // the last item.
-      let next = elt.nextSibling;
-      this._insertNewItem(aNewPlacesNode, next);
-      this.updateChevron();
-      return;
-    }
-
-    PlacesViewBase.prototype.nodeReplaced.apply(this, arguments);
   },
 
   invalidateContainer: function PT_invalidateContainer(aPlacesNode) {

@@ -11,23 +11,10 @@ FAIL_ON_WARNINGS = 1
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = necko
-LIBRARY_NAME   = nkfile_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
-XPIDL_MODULE   = necko_file
-GRE_MODULE     = 1
 
 FORCE_STATIC_LIB = 1
-
-XPIDLSRCS = \
-  nsIFileChannel.idl \
-  nsIFileProtocolHandler.idl \
-  $(NULL)
-
-CPPSRCS = \
-  nsFileProtocolHandler.cpp \
-  nsFileChannel.cpp \
-  $(NULL)
 
 LOCAL_INCLUDES = \
   -I$(srcdir)/../../base/src \
@@ -38,4 +25,3 @@ include $(topsrcdir)/config/rules.mk
 
 DEFINES += -DIMPL_NS_NET
 
-XPIDL_FLAGS += -I$(topsrcdir)/netwerk/base/public

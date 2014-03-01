@@ -13,7 +13,6 @@
 #include "nsICharsetConverterManager.h"
 #include "nsEncoderDecoderUtils.h"
 #include "nsIStringBundle.h"
-#include "prmem.h"
 #include "nsCRT.h"
 #include "nsTArray.h"
 #include "nsStringEnumerator.h"
@@ -117,7 +116,7 @@ bool nsCharsetConverterManager::IsInternal(const nsACString& aCharset)
   nsAutoString str;
   // fully qualify to possibly avoid vtable call
   nsresult rv = GetCharsetDataImpl(PromiseFlatCString(aCharset).get(),
-                                   NS_LITERAL_STRING(".isXSSVulnerable").get(),
+                                   NS_LITERAL_STRING(".isInternal").get(),
                                    str);
 
   return NS_SUCCEEDED(rv);
@@ -132,7 +131,7 @@ nsCharsetConverterManager::GetUnicodeEncoder(const char * aDest,
                                              nsIUnicodeEncoder ** aResult)
 {
   // resolve the charset first
-  nsCAutoString charset;
+  nsAutoCString charset;
   
   // fully qualify to possibly avoid vtable call
   nsCharsetConverterManager::GetCharsetAlias(aDest, charset);
@@ -151,7 +150,7 @@ nsCharsetConverterManager::GetUnicodeEncoderRaw(const char * aDest,
 
   nsresult rv = NS_OK;
 
-  nsCAutoString
+  nsAutoCString
     contractid(NS_LITERAL_CSTRING(NS_UNICODEENCODER_CONTRACTID_BASE) +
                nsDependentCString(aDest));
 
@@ -173,7 +172,7 @@ nsCharsetConverterManager::GetUnicodeDecoder(const char * aSrc,
                                              nsIUnicodeDecoder ** aResult)
 {
   // resolve the charset first
-  nsCAutoString charset;
+  nsAutoCString charset;
 
   // fully qualify to possibly avoid vtable call
   if (NS_FAILED(nsCharsetConverterManager::GetCharsetAlias(aSrc, charset)))
@@ -188,7 +187,7 @@ nsCharsetConverterManager::GetUnicodeDecoderInternal(const char * aSrc,
                                                      nsIUnicodeDecoder ** aResult)
 {
   // resolve the charset first
-  nsCAutoString charset;
+  nsAutoCString charset;
 
   nsresult rv = nsCharsetAlias::GetPreferredInternal(nsDependentCString(aSrc),
                                                      charset);
@@ -250,11 +249,11 @@ nsresult GetList(const nsACString& aCategory,
     if (!supStr)
       continue;
 
-    nsCAutoString name;
+    nsAutoCString name;
     if (NS_FAILED(supStr->GetData(name)))
       continue;
 
-    nsCAutoString fullName(aPrefix);
+    nsAutoCString fullName(aPrefix);
     fullName.Append(name);
     NS_ENSURE_TRUE(array->AppendElement(fullName), NS_ERROR_OUT_OF_MEMORY);
   }
@@ -332,7 +331,7 @@ nsCharsetConverterManager::GetCharsetLangGroup(const char * aCharset,
                                                nsIAtom** aResult)
 {
   // resolve the charset first
-  nsCAutoString charset;
+  nsAutoCString charset;
 
   nsresult rv = GetCharsetAlias(aCharset, charset);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -355,7 +354,7 @@ nsCharsetConverterManager::GetCharsetLangGroupRaw(const char * aCharset,
 
   if (NS_SUCCEEDED(rv)) {
     ToLowerCase(langGroup); // use lowercase for all language atoms
-    *aResult = NS_NewAtom(langGroup);
+    *aResult = NS_NewAtom(langGroup).get();
   }
 
   return rv;

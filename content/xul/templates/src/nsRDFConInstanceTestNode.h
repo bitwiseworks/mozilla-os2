@@ -6,8 +6,8 @@
 #ifndef nsRDFConInstanceTestNode_h__
 #define nsRDFConInstanceTestNode_h__
 
+#include "mozilla/Attributes.h"
 #include "nscore.h"
-#include "nsFixedSizeAllocator.h"
 #include "nsRDFTestNode.h"
 #include "nsIRDFResource.h"
 #include "nsIRDFDataSource.h"
@@ -29,27 +29,21 @@ public:
                              Test aEmpty);
 
     virtual nsresult FilterInstantiations(InstantiationSet& aInstantiations,
-                                          bool* aCantHandleYet) const;
+                                          bool* aCantHandleYet) const MOZ_OVERRIDE;
 
     virtual bool
     CanPropagate(nsIRDFResource* aSource,
                  nsIRDFResource* aProperty,
                  nsIRDFNode* aTarget,
-                 Instantiation& aInitialBindings) const;
+                 Instantiation& aInitialBindings) const MOZ_OVERRIDE;
 
     virtual void
     Retract(nsIRDFResource* aSource,
             nsIRDFResource* aProperty,
-            nsIRDFNode* aTarget) const;
+            nsIRDFNode* aTarget) const MOZ_OVERRIDE;
 
 
     class Element : public MemoryElement {
-    protected:
-        // Hide so that only Create() and Destroy() can be used to
-        // allocate and deallocate from the heap
-        static void* operator new(size_t) CPP_THROW_NEW { return 0; }
-        static void operator delete(void*, size_t) {}
-
     public:
         Element(nsIRDFResource* aContainer,
                 Test aContainerTest,
@@ -61,25 +55,14 @@ public:
 
         virtual ~Element() { MOZ_COUNT_DTOR(nsRDFConInstanceTestNode::Element); }
 
-        static Element*
-        Create(nsIRDFResource* aContainer,
-               Test aContainerTest, Test aEmptyTest) {
-            void* place = MemoryElement::gPool.Alloc(sizeof(Element));
-            return place ? ::new (place) Element(aContainer, aContainerTest, aEmptyTest) : nullptr; }
-
-        void Destroy() {
-            this->~Element();
-            MemoryElement::gPool.Free(this, sizeof(Element));
-        }
-
-        virtual const char* Type() const {
+        virtual const char* Type() const MOZ_OVERRIDE {
             return "nsRDFConInstanceTestNode::Element"; }
 
-        virtual PLHashNumber Hash() const {
+        virtual PLHashNumber Hash() const MOZ_OVERRIDE {
             return mozilla::HashGeneric(mContainerTest, mEmptyTest, mContainer.get());
         }
 
-        virtual bool Equals(const MemoryElement& aElement) const {
+        virtual bool Equals(const MemoryElement& aElement) const MOZ_OVERRIDE {
             if (aElement.Type() == Type()) {
                 const Element& element = static_cast<const Element&>(aElement);
                 return mContainer == element.mContainer

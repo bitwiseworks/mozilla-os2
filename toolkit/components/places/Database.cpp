@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Util.h"
+
 #include "Database.h"
 
 #include "nsINavBookmarksService.h"
@@ -20,10 +24,8 @@
 #include "nsDirectoryServiceUtils.h"
 #include "prsystem.h"
 #include "nsPrintfCString.h"
-#include "mozilla/Util.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/Attributes.h"
 
 // Time between corrupt database backups.
 #define RECENT_BACKUP_TIME_MICROSEC (int64_t)86400 * PR_USEC_PER_SEC // 24H
@@ -161,10 +163,10 @@ SetJournalMode(nsCOMPtr<mozIStorageConnection>& aDBConn,
                              enum JournalMode aJournalMode)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  nsCAutoString journalMode;
+  nsAutoCString journalMode;
   switch (aJournalMode) {
     default:
-      MOZ_ASSERT("Trying to set an unknown journal mode.");
+      MOZ_ASSERT(false, "Trying to set an unknown journal mode.");
       // Fall through to the default DELETE journal.
     case JOURNAL_DELETE:
       journalMode.AssignLiteral("delete");
@@ -181,7 +183,7 @@ SetJournalMode(nsCOMPtr<mozIStorageConnection>& aDBConn,
   }
 
   nsCOMPtr<mozIStorageStatement> statement;
-  nsCAutoString query(MOZ_STORAGE_UNIQUIFY_QUERY_STR
+  nsAutoCString query(MOZ_STORAGE_UNIQUIFY_QUERY_STR
 		      "PRAGMA journal_mode = ");
   query.Append(journalMode);
   aDBConn->CreateStatement(query, getter_AddRefs(statement));
@@ -340,9 +342,9 @@ Database::Database()
   , mMainThreadAsyncStatements(mMainConn)
   , mAsyncThreadStatements(mMainConn)
   , mDBPageSize(0)
-  , mCurrentJournalMode(JOURNAL_DELETE)
   , mDatabaseStatus(nsINavHistoryService::DATABASE_STATUS_OK)
   , mShuttingDown(false)
+  , mClosed(false)
 {
   // Attempting to create two instances of the service?
   MOZ_ASSERT(!gDatabase);
@@ -364,12 +366,6 @@ Database::~Database()
 nsresult
 Database::Init()
 {
-#ifdef MOZ_ANDROID_HISTORY
-  // Currently places has deeply weaved it way throughout the gecko codebase.
-  // Here we disable all database creation and loading of places.
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
-
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<mozIStorageService> storage =
@@ -560,14 +556,14 @@ Database::InitSchema(bool* aDatabaseMigrated)
 
   // Be sure to set journal mode after page_size.  WAL would prevent the change
   // otherwise.
-  if (NS_SUCCEEDED(SetJournalMode(mMainConn, JOURNAL_WAL))) {
+  if (JOURNAL_WAL == SetJournalMode(mMainConn, JOURNAL_WAL)) {
     // Set the WAL journal size limit.  We want it to be small, since in
     // synchronous = NORMAL mode a crash could cause loss of all the
     // transactions in the journal.  For added safety we will also force
     // checkpointing at strategic moments.
     int32_t checkpointPages =
       static_cast<int32_t>(DATABASE_MAX_WAL_SIZE_IN_KIBIBYTES * 1024 / mDBPageSize);
-    nsCAutoString checkpointPragma("PRAGMA wal_autocheckpoint = ");
+    nsAutoCString checkpointPragma("PRAGMA wal_autocheckpoint = ");
     checkpointPragma.AppendInt(checkpointPages);
     rv = mMainConn->ExecuteSimpleSQL(checkpointPragma);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -591,7 +587,7 @@ Database::InitSchema(bool* aDatabaseMigrated)
   // Since exceeding the limit will cause a truncate, allow a slightly
   // larger limit than DATABASE_MAX_WAL_SIZE_IN_KIBIBYTES to reduce the number
   // of times it is needed.
-  nsCAutoString journalSizePragma("PRAGMA journal_size_limit = ");
+  nsAutoCString journalSizePragma("PRAGMA journal_size_limit = ");
   journalSizePragma.AppendInt(DATABASE_MAX_WAL_SIZE_IN_KIBIBYTES * 3);
   (void)mMainConn->ExecuteSimpleSQL(journalSizePragma);
 
@@ -725,6 +721,20 @@ Database::InitSchema(bool* aDatabaseMigrated)
       }
 
       // Firefox 14 uses schema version 21.
+
+      if (currentSchemaVersion < 22) {
+        rv = MigrateV22Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 22 uses schema version 22.
+
+      if (currentSchemaVersion < 23) {
+        rv = MigrateV23Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 24 uses schema version 23.
 
       // Schema Upgrades must add migration code here.
 
@@ -1038,7 +1048,7 @@ Database::CheckAndUpdateGUIDs()
     int64_t itemId;
     rv = stmt->GetInt64(0, &itemId);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCAutoString guid;
+    nsAutoCString guid;
     rv = stmt->GetUTF8String(1, guid);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1112,7 +1122,7 @@ Database::CheckAndUpdateGUIDs()
     int64_t placeId;
     rv = stmt->GetInt64(0, &placeId);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCAutoString guid;
+    nsAutoCString guid;
     rv = stmt->GetUTF8String(1, guid);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1862,12 +1872,34 @@ Database::MigrateV21Up()
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  // Update prefixes.
+  return NS_OK;
+}
+
+nsresult
+Database::MigrateV22Up()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Reset all session IDs to 0 since we don't support them anymore.
+  // We don't set them to NULL to avoid breaking downgrades.
+  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_historyvisits SET session = 0"
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+
+nsresult
+Database::MigrateV23Up()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Recalculate hosts prefixes.
   nsCOMPtr<mozIStorageAsyncStatement> updatePrefixesStmt;
-  rv = mMainConn->CreateAsyncStatement(NS_LITERAL_CSTRING(
-    "UPDATE moz_hosts SET prefix = ( "
-      HOSTS_PREFIX_PRIORITY_FRAGMENT
-    ") "
+  nsresult rv = mMainConn->CreateAsyncStatement(NS_LITERAL_CSTRING(
+    "UPDATE moz_hosts SET prefix = ( " HOSTS_PREFIX_PRIORITY_FRAGMENT ") "
   ), getter_AddRefs(updatePrefixesStmt));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1883,6 +1915,9 @@ Database::Shutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mShuttingDown);
+  MOZ_ASSERT(!mClosed);
+
+  mShuttingDown = true;
 
   mMainThreadStatements.FinalizeStatements();
   mMainThreadAsyncStatements.FinalizeStatements();
@@ -1898,9 +1933,7 @@ Database::Shutdown()
   (void)mMainConn->AsyncClose(closeListener);
   closeListener->Spin();
 
-  // Don't set this earlier, otherwise some internal helper used on shutdown
-  // may bail out.
-  mShuttingDown = true;
+  mClosed = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

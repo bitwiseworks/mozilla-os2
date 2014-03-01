@@ -30,7 +30,7 @@ var testNum = 0;
 
 function hasTabModalPrompts() {
   var prefName = "prompts.tab_modal.enabled";
-  var Services = SpecialPowers.wrap(Components).utils
+  var Services = SpecialPowers.Cu
                               .import("resource://gre/modules/Services.jsm")
                               .Services;
   return Services.prefs.getPrefType(prefName) == Services.prefs.PREF_BOOL &&
@@ -88,7 +88,6 @@ function handleDialog(ui, testNum)
   } else {
     synthesizeMouse($("text"), 25, 55, { type: "mousemove" });
     is(window.getSelection().toString(), "", "selection not made");
-    synthesizeMouse(ui.button0, 5, 5, { }, ui.button0.ownerDocument.defaultView);
   }
 
   ok(true, "handleDialog sending mouseclick to dialog...");

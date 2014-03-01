@@ -65,6 +65,51 @@ CGBlendMode ToBlendMode(CompositionOp op)
     case OP_XOR:
       mode = kCGBlendModeXOR;
       break;
+    case OP_MULTIPLY:
+      mode = kCGBlendModeMultiply;
+      break;
+    case OP_SCREEN:
+      mode = kCGBlendModeScreen;
+      break;
+    case OP_OVERLAY:
+      mode = kCGBlendModeOverlay;
+      break;
+    case OP_DARKEN:
+      mode = kCGBlendModeDarken;
+      break;
+    case OP_LIGHTEN:
+      mode = kCGBlendModeLighten;
+      break;
+    case OP_COLOR_DODGE:
+      mode = kCGBlendModeColorDodge;
+      break;
+    case OP_COLOR_BURN:
+      mode = kCGBlendModeColorBurn;
+      break;
+    case OP_HARD_LIGHT:
+      mode = kCGBlendModeHardLight;
+      break;
+    case OP_SOFT_LIGHT:
+      mode = kCGBlendModeSoftLight;
+      break;
+    case OP_DIFFERENCE:
+      mode = kCGBlendModeDifference;
+      break;
+    case OP_EXCLUSION:
+      mode = kCGBlendModeExclusion;
+      break;
+    case OP_HUE:
+      mode = kCGBlendModeHue;
+      break;
+    case OP_SATURATION:
+      mode = kCGBlendModeSaturation;
+      break;
+    case OP_COLOR:
+      mode = kCGBlendModeColor;
+      break;
+    case OP_LUMINOSITY:
+      mode = kCGBlendModeLuminosity;
+      break;
       /*
     case OP_CLEAR:
       mode = kCGBlendModeClear;
@@ -77,7 +122,7 @@ CGBlendMode ToBlendMode(CompositionOp op)
 
 
 
-DrawTargetCG::DrawTargetCG() : mSnapshot(nullptr), mCg(nullptr)
+DrawTargetCG::DrawTargetCG() : mCg(nullptr), mSnapshot(nullptr)
 {
 }
 
@@ -255,6 +300,38 @@ DrawTargetCG::DrawSurface(SourceSurface *aSurface,
   CGImageRelease(subimage);
 }
 
+void
+DrawTargetCG::MaskSurface(const Pattern &aSource,
+                          SourceSurface *aMask,
+                          Point aOffset,
+                          const DrawOptions &aDrawOptions)
+{
+  MarkChanged();
+
+  CGImageRef image;
+  CGContextSaveGState(mCg);
+
+  CGContextSetBlendMode(mCg, ToBlendMode(aDrawOptions.mCompositionOp));
+  UnboundnessFixer fixer;
+  CGContextRef cg = fixer.Check(mCg, aDrawOptions.mCompositionOp);
+  CGContextSetAlpha(cg, aDrawOptions.mAlpha);
+
+  CGContextConcatCTM(cg, GfxMatrixToCGAffineTransform(mTransform));
+  image = GetImageFromSourceSurface(aMask);
+
+  CGContextScaleCTM(cg, 1, -1);
+
+  IntSize size = aMask->GetSize();
+  CGContextClipToMask(cg, CGRectMake(aOffset.x, aOffset.y, size.width, size.height), image);
+  
+  FillRect(Rect(0, 0, size.width, size.height), aSource, aDrawOptions);
+  
+  fixer.Fix(mCg);
+
+  CGContextRestoreGState(mCg);
+
+}
+
 static CGColorRef ColorToCGColor(CGColorSpaceRef aColorSpace, const Color& aColor)
 {
   CGFloat components[4] = {aColor.r, aColor.g, aColor.b, aColor.a};
@@ -409,7 +486,11 @@ CreateCGPattern(const Pattern &aPattern, CGAffineTransform aUserSpace)
     {0, 0,},
     {static_cast<CGFloat>(CGImageGetWidth(image)), static_cast<CGFloat>(CGImageGetHeight(image))}
   };
-  CGAffineTransform transform = CGAffineTransformConcat(CGAffineTransformMakeScale(1, -1), aUserSpace);
+  CGAffineTransform transform =
+      CGAffineTransformConcat(CGAffineTransformConcat(CGAffineTransformMakeScale(1,
+                                                                                 -1),
+                                                      GfxMatrixToCGAffineTransform(pat.mMatrix)),
+                              aUserSpace);
   transform = CGAffineTransformTranslate(transform, 0, -static_cast<float>(CGImageGetHeight(image)));
   return CGPatternCreate(CGImageRetain(image), bounds, transform, xStep, yStep, kCGPatternTilingConstantSpacing,
                          true, &patternCallbacks);
@@ -496,6 +577,13 @@ DrawTargetCG::FillRect(const Rect &aRect,
 void
 DrawTargetCG::StrokeLine(const Point &p1, const Point &p2, const Pattern &aPattern, const StrokeOptions &aStrokeOptions, const DrawOptions &aDrawOptions)
 {
+  if (!std::isfinite(p1.x) ||
+      !std::isfinite(p1.y) ||
+      !std::isfinite(p2.x) ||
+      !std::isfinite(p2.y)) {
+    return;
+  }
+
   MarkChanged();
 
   CGContextSaveGState(mCg);
@@ -533,6 +621,10 @@ DrawTargetCG::StrokeRect(const Rect &aRect,
                          const StrokeOptions &aStrokeOptions,
                          const DrawOptions &aDrawOptions)
 {
+  if (!aRect.IsFinite()) {
+    return;
+  }
+
   MarkChanged();
 
   CGContextSaveGState(mCg);
@@ -595,6 +687,10 @@ DrawTargetCG::ClearRect(const Rect &aRect)
 void
 DrawTargetCG::Stroke(const Path *aPath, const Pattern &aPattern, const StrokeOptions &aStrokeOptions, const DrawOptions &aDrawOptions)
 {
+  if (!aPath->GetBounds().IsFinite()) {
+    return;
+  }
+
   MarkChanged();
 
   CGContextSaveGState(mCg);
@@ -621,10 +717,7 @@ DrawTargetCG::Stroke(const Path *aPath, const Pattern &aPattern, const StrokeOpt
     CGContextClip(cg);
     DrawGradient(cg, aPattern);
   } else {
-    CGContextBeginPath(cg);
     // XXX: we could put fill mode into the path fill rule if we wanted
-    const PathCG *cgPath = static_cast<const PathCG*>(aPath);
-    CGContextAddPath(cg, cgPath->GetPath());
 
     SetStrokeFromPattern(cg, mColorSpace, aPattern);
     CGContextStrokePath(cg);
@@ -701,9 +794,7 @@ DrawTargetCG::FillGlyphs(ScaledFont *aFont, const GlyphBuffer &aBuffer, const Pa
 
   CGContextConcatCTM(cg, GfxMatrixToCGAffineTransform(mTransform));
 
-  ScaledFontMac* cgFont = static_cast<ScaledFontMac*>(aFont);
-  CGContextSetFont(cg, cgFont->mFont);
-  CGContextSetFontSize(cg, cgFont->mSize);
+  ScaledFontMac* macFont = static_cast<ScaledFontMac*>(aFont);
 
   //XXX: we should use a stack vector here when we have a class like that
   std::vector<CGGlyph> glyphs;
@@ -729,14 +820,32 @@ DrawTargetCG::FillGlyphs(ScaledFont *aFont, const GlyphBuffer &aBuffer, const Pa
   //XXX: CGContextShowGlyphsAtPositions is 10.5+ for older versions use CGContextShowGlyphsWithAdvances
   if (isGradient(aPattern)) {
     CGContextSetTextDrawingMode(cg, kCGTextClip);
-    CGContextShowGlyphsAtPositions(cg, &glyphs.front(), &positions.front(), aBuffer.mNumGlyphs);
+    if (ScaledFontMac::CTFontDrawGlyphsPtr != nullptr) {
+      ScaledFontMac::CTFontDrawGlyphsPtr(macFont->mCTFont, &glyphs.front(),
+                                         &positions.front(),
+                                         aBuffer.mNumGlyphs, cg);
+    } else {
+      CGContextSetFont(cg, macFont->mFont);
+      CGContextSetFontSize(cg, macFont->mSize);
+      CGContextShowGlyphsAtPositions(cg, &glyphs.front(), &positions.front(),
+                                     aBuffer.mNumGlyphs);
+    }
     DrawGradient(cg, aPattern);
   } else {
     //XXX: with CoreGraphics we can stroke text directly instead of going
     // through GetPath. It would be nice to add support for using that
     CGContextSetTextDrawingMode(cg, kCGTextFill);
     SetFillFromPattern(cg, mColorSpace, aPattern);
-    CGContextShowGlyphsAtPositions(cg, &glyphs.front(), &positions.front(), aBuffer.mNumGlyphs);
+    if (ScaledFontMac::CTFontDrawGlyphsPtr != nullptr) {
+      ScaledFontMac::CTFontDrawGlyphsPtr(macFont->mCTFont, &glyphs.front(),
+                                         &positions.front(),
+                                         aBuffer.mNumGlyphs, cg);
+    } else {
+      CGContextSetFont(cg, macFont->mFont);
+      CGContextSetFontSize(cg, macFont->mSize);
+      CGContextShowGlyphsAtPositions(cg, &glyphs.front(), &positions.front(),
+                                     aBuffer.mNumGlyphs);
+    }
   }
 
   fixer.Fix(mCg);
@@ -964,8 +1073,8 @@ DrawTargetCG::CreatePathBuilder(FillRule aFillRule) const
 void*
 DrawTargetCG::GetNativeSurface(NativeSurfaceType aType)
 {
-  if (aType == NATIVE_SURFACE_CGCONTEXT && GetContextType(mCg) == CG_CONTEXT_TYPE_BITMAP ||
-      aType == NATIVE_SURFACE_CGCONTEXT_ACCELERATED && GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE) {
+  if ((aType == NATIVE_SURFACE_CGCONTEXT && GetContextType(mCg) == CG_CONTEXT_TYPE_BITMAP) ||
+      (aType == NATIVE_SURFACE_CGCONTEXT_ACCELERATED && GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE)) {
     return mCg;
   } else {
     return nullptr;

@@ -6,13 +6,12 @@
 "use strict";
 
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
-
   var iframe = document.createElement('iframe');
-  iframe.mozbrowser = true;
+  SpecialPowers.wrap(iframe).mozbrowser = true;
 
   iframe.addEventListener('mozbrowseropenwindow', function(e) {
     ok(false, 'Not expecting an openwindow event.');
@@ -29,4 +28,4 @@ function runTest() {
   iframe.src = 'file_browserElement_TargetTop.html';
 }
 
-runTest();
+addEventListener('testready', runTest);

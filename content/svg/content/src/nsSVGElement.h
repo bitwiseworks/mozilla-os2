@@ -11,18 +11,19 @@
   It implements all the common DOM interfaces and handles attributes.
 */
 
+#include "mozilla/Attributes.h"
 #include "mozilla/css/StyleRule.h"
 #include "nsAutoPtr.h"
 #include "nsChangeHint.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
-#include "nsGenericElement.h"
+#include "mozilla/dom/Element.h"
 #include "nsISupportsImpl.h"
 #include "nsStyledElement.h"
+#include "nsSVGClass.h"
+#include "nsIDOMSVGElement.h"
 
-class nsIDOMSVGElement;
-class nsIDOMSVGSVGElement;
 class nsSVGAngle;
 class nsSVGBoolean;
 class nsSVGEnum;
@@ -32,10 +33,19 @@ class nsSVGLength2;
 class nsSVGNumber2;
 class nsSVGNumberPair;
 class nsSVGString;
-class nsSVGSVGElement;
 class nsSVGViewBox;
 
 namespace mozilla {
+namespace dom {
+class CSSValue;
+class SVGSVGElement;
+
+static const unsigned short SVG_UNIT_TYPE_UNKNOWN           = 0;
+static const unsigned short SVG_UNIT_TYPE_USERSPACEONUSE    = 1;
+static const unsigned short SVG_UNIT_TYPE_OBJECTBOUNDINGBOX = 2;
+
+}
+
 class SVGAnimatedNumberList;
 class SVGNumberList;
 class SVGAnimatedLengthList;
@@ -43,7 +53,7 @@ class SVGUserUnitList;
 class SVGAnimatedPointList;
 class SVGAnimatedPathSegList;
 class SVGAnimatedPreserveAspectRatio;
-class SVGAnimatedTransformList;
+class nsSVGAnimatedTransformList;
 class SVGStringList;
 class DOMSVGStringList;
 }
@@ -54,13 +64,19 @@ struct nsSVGEnumMapping;
 typedef nsStyledElementNotElementCSSInlineStyle nsSVGElementBase;
 
 class nsSVGElement : public nsSVGElementBase    // nsIContent
+                   , public nsIDOMSVGElement
 {
 protected:
   nsSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  friend nsresult NS_NewSVGElement(nsIContent **aResult,
+                                   already_AddRefed<nsINodeInfo> aNodeInfo);
   nsresult Init();
   virtual ~nsSVGElement(){}
 
 public:
+
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
+
   typedef mozilla::SVGNumberList SVGNumberList;
   typedef mozilla::SVGAnimatedNumberList SVGAnimatedNumberList;
   typedef mozilla::SVGUserUnitList SVGUserUnitList;
@@ -68,29 +84,32 @@ public:
   typedef mozilla::SVGAnimatedPointList SVGAnimatedPointList;
   typedef mozilla::SVGAnimatedPathSegList SVGAnimatedPathSegList;
   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
-  typedef mozilla::SVGAnimatedTransformList SVGAnimatedTransformList;
+  typedef mozilla::nsSVGAnimatedTransformList nsSVGAnimatedTransformList;
   typedef mozilla::SVGStringList SVGStringList;
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
+  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
+  void DidAnimateClass();
+
   // nsIContent interface methods
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
-                              bool aCompileEventHandlers);
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
 
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify);
+                             bool aNotify) MOZ_OVERRIDE;
 
   virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
-                                              int32_t aModType) const;
+                                              int32_t aModType) const MOZ_OVERRIDE;
 
-  virtual bool IsNodeOfType(uint32_t aFlags) const;
+  virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
 
-  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker);
+  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) MOZ_OVERRIDE;
 
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   static const MappedAttributeEntry sFillStrokeMap[];
   static const MappedAttributeEntry sGraphicsMap[];
@@ -103,21 +122,16 @@ public:
   static const MappedAttributeEntry sFiltersMap[];
   static const MappedAttributeEntry sFEFloodMap[];
   static const MappedAttributeEntry sLightingEffectsMap[];
+  static const MappedAttributeEntry sMaskMap[];
 
-  // nsIDOMNode
-  NS_IMETHOD IsSupported(const nsAString& aFeature, const nsAString& aVersion,
-                         bool* aReturn);
-  
-  // nsIDOMSVGElement
-  NS_IMETHOD GetId(nsAString & aId);
-  NS_IMETHOD SetId(const nsAString & aId);
-  NS_IMETHOD GetOwnerSVGElement(nsIDOMSVGSVGElement** aOwnerSVGElement);
-  NS_IMETHOD GetViewportElement(nsIDOMSVGElement** aViewportElement);
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+  NS_DECL_NSIDOMSVGELEMENT
 
   // Gets the element that establishes the rectangular viewport against which
   // we should resolve percentage lengths (our "coordinate context"). Returns
   // nullptr for outer <svg> or SVG without an <svg> parent (invalid SVG).
-  nsSVGSVGElement* GetCtx() const;
+  mozilla::dom::SVGSVGElement* GetCtx() const;
 
   enum TransformTypes {
      eAllTransforms
@@ -251,27 +265,27 @@ public:
     return nullptr;
   }
   /**
-   * Get the SVGAnimatedTransformList for this element.
+   * Get the nsSVGAnimatedTransformList for this element.
    *
    * Despite the fact that animated transform lists are used for a variety of
    * attributes, no SVG element uses more than one.
    *
    * It's relatively uncommon for elements to have their transform attribute
-   * set, so to save memory the SVGAnimatedTransformList is not allocated until
+   * set, so to save memory the nsSVGAnimatedTransformList is not allocated until
    * the attribute is set/animated or its DOM wrapper is created. Callers that
-   * require the SVGAnimatedTransformList to be allocated and for this method
+   * require the nsSVGAnimatedTransformList to be allocated and for this method
    * to return non-null must pass the DO_ALLOCATE flag.
    */
-  virtual SVGAnimatedTransformList* GetAnimatedTransformList(
+  virtual nsSVGAnimatedTransformList* GetAnimatedTransformList(
                                                         uint32_t aFlags = 0) {
     return nullptr;
   }
 
-  virtual nsISMILAttr* GetAnimatedAttr(int32_t aNamespaceID, nsIAtom* aName);
+  virtual nsISMILAttr* GetAnimatedAttr(int32_t aNamespaceID, nsIAtom* aName) MOZ_OVERRIDE;
   void AnimationNeedsResample();
   void FlushAnimations();
 
-  virtual void RecompileScriptEventListeners();
+  virtual void RecompileScriptEventListeners() MOZ_OVERRIDE;
 
   void GetStringBaseValue(uint8_t aAttrEnum, nsAString& aResult) const;
   void SetStringBaseValue(uint8_t aAttrEnum, const nsAString& aValue);
@@ -286,7 +300,18 @@ public:
     return nullptr;
   }
 
+  virtual nsIDOMNode* AsDOMNode() MOZ_FINAL MOZ_OVERRIDE { return this; }
+  virtual bool IsTransformable() { return false; }
+
+  // WebIDL
+  mozilla::dom::SVGSVGElement* GetOwnerSVGElement(mozilla::ErrorResult& rv);
+  nsSVGElement* GetViewportElement();
+  already_AddRefed<mozilla::dom::SVGAnimatedString> ClassName();
+  already_AddRefed<mozilla::dom::CSSValue> GetPresentationAttribute(const nsAString& aName, mozilla::ErrorResult& rv);
 protected:
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+
 #ifdef DEBUG
   // We define BeforeSetAttr here and mark it MOZ_FINAL to ensure it is NOT used
   // by SVG elements.
@@ -295,18 +320,15 @@ protected:
   // See the comment in nsSVGElement::WillChangeValue.
   virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                  const nsAttrValueOrString* aValue,
-                                 bool aNotify) MOZ_FINAL { return NS_OK; }
+                                 bool aNotify) MOZ_OVERRIDE MOZ_FINAL { return NS_OK; }
 #endif // DEBUG
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify);
+                                const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
   virtual bool ParseAttribute(int32_t aNamespaceID, nsIAtom* aAttribute,
-                                const nsAString& aValue, nsAttrValue& aResult);
+                                const nsAString& aValue, nsAttrValue& aResult) MOZ_OVERRIDE;
   static nsresult ReportAttributeParseFailure(nsIDocument* aDocument,
                                               nsIAtom* aAttribute,
                                               const nsAString& aValue);
-
-  // Hooks for subclasses
-  virtual bool IsEventName(nsIAtom* aName);
 
   void UpdateContentStyleRule();
   void UpdateAnimatedContentStyleRule();
@@ -596,6 +618,8 @@ private:
   void UnsetAttrInternal(int32_t aNameSpaceID, nsIAtom* aAttribute,
                          bool aNotify);
 
+  nsSVGClass mClassAttribute;
+  nsAutoPtr<nsAttrValue> mClassAnimAttr;
   nsRefPtr<mozilla::css::StyleRule> mContentStyleRule;
 };
 
@@ -621,14 +645,13 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
   return rv;                                                                 \
 }
 
-#define NS_IMPL_NS_NEW_SVG_ELEMENT_CHECK_PARSER(_elementName)                \
+#define NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(_elementName)                  \
 nsresult                                                                     \
 NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
-                                 already_AddRefed<nsINodeInfo> aNodeInfo,    \
-                                 FromParser aFromParser)                     \
+                                 already_AddRefed<nsINodeInfo> aNodeInfo)    \
 {                                                                            \
-  nsRefPtr<nsSVG##_elementName##Element> it =                                \
-    new nsSVG##_elementName##Element(aNodeInfo, aFromParser);                \
+  nsRefPtr<mozilla::dom::SVG##_elementName##Element> it =                    \
+    new mozilla::dom::SVG##_elementName##Element(aNodeInfo);                 \
                                                                              \
   nsresult rv = it->Init();                                                  \
                                                                              \
@@ -641,14 +664,44 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
   return rv;                                                                 \
 }
 
- // No unlinking, we'd need to null out the value pointer (the object it
+#define NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT_CHECK_PARSER(_elementName)     \
+nsresult                                                                     \
+NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
+                                 already_AddRefed<nsINodeInfo> aNodeInfo,    \
+                                 mozilla::dom::FromParser aFromParser)       \
+{                                                                            \
+  nsRefPtr<mozilla::dom::SVG##_elementName##Element> it =                    \
+    new mozilla::dom::SVG##_elementName##Element(aNodeInfo, aFromParser);    \
+                                                                             \
+  nsresult rv = it->Init();                                                  \
+                                                                             \
+  if (NS_FAILED(rv)) {                                                       \
+    return rv;                                                               \
+  }                                                                          \
+                                                                             \
+  it.forget(aResult);                                                        \
+                                                                             \
+  return rv;                                                                 \
+}
+
+// No unlinking, we'd need to null out the value pointer (the object it
 // points to is held by the element) and null-check it everywhere.
 #define NS_SVG_VAL_IMPL_CYCLE_COLLECTION(_val, _element)                     \
-NS_IMPL_CYCLE_COLLECTION_CLASS(_val)                                         \
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_val)                                \
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(_element, nsIContent) \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_element) \
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                        \
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(_val)
 
+#define NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(_val, _element)       \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_val)                                  \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER                            \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END                                          \
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_val)                                \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_element)                                \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS                           \
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                        \
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(_val)                                   \
+NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER                             \
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 #endif // __NS_SVGELEMENT_H__

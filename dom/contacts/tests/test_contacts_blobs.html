@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html>
 <!--
-https://bugzilla.mozilla.org/show_bug.cgi?id={674720}
+https://bugzilla.mozilla.org/show_bug.cgi?id=674720
 -->
 <head>
-  <title>Test for Bug {674720} WebContacts</title>
+  <title>Test for Bug 674720 WebContacts</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
 
-<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id={674720}">Mozilla Bug {674720}</a>
+<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=674720">Mozilla Bug 674720</a>
 <p id="display"></p>
 <div id="content" style="display: none">
 
@@ -21,11 +21,14 @@ https://bugzilla.mozilla.org/show_bug.cgi?id={674720}
 
 "use strict";
 
-var comp = SpecialPowers.wrap(Components);
-comp.utils.import("resource://gre/modules/ContactService.jsm");
-comp.utils.import("resource://gre/modules/PermissionPromptHelper.jsm");
-SpecialPowers.setBoolPref("dom.mozContacts.enabled", true);
-SpecialPowers.addPermission("contacts", true, document);
+if (SpecialPowers.isMainProcess()) {
+  SpecialPowers.Cu.import("resource://gre/modules/ContactService.jsm");
+  SpecialPowers.Cu.import("resource://gre/modules/PermissionPromptHelper.jsm");
+}
+
+SpecialPowers.addPermission("contacts-write", true, document);
+SpecialPowers.addPermission("contacts-read", true, document);
+SpecialPowers.addPermission("contacts-create", true, document);
 
 var utils = SpecialPowers.getDOMWindowUtils(window);
 
@@ -48,7 +51,7 @@ function getRandomView(size)
 
 function getBlob(type, view)
 {
-  return utils.getBlob([view], {type: type});
+  return SpecialPowers.unwrap(utils.getBlob([view], {type: type}));
 }
 
 function getRandomBlob(size)
@@ -82,12 +85,12 @@ var randomBlob = getRandomBlob(1024);
 var randomBlob2 = getRandomBlob(1024);
 
 var properties1 = {
-  name: "xTestname1",
+  givenName: "xTestname1",
   photo: [randomBlob]
 };
 
 var properties2 = {
-  name: "yTestname2",
+  givenName: "yTestname2",
   photo: [randomBlob, randomBlob2]
 };
 
@@ -105,11 +108,10 @@ function onFailure() {
 
 function verifyBlob(blob1, blob2, isLast)
 {
-  dump("islast? " + isLast + "\n");
-  is(blob1 instanceof Components.interfaces.nsIDOMBlob, true,
+  is(blob1 instanceof SpecialPowers.Ci.nsIDOMBlob, true,
      "Instance of nsIDOMBlob");
-  is(blob1 instanceof Components.interfaces.nsIDOMFile,
-     blob2 instanceof Components.interfaces.nsIDOMFile,
+  is(blob1 instanceof SpecialPowers.Ci.nsIDOMFile,
+     blob2 instanceof SpecialPowers.Ci.nsIDOMFile,
      "Instance of nsIDOMFile");
   is(blob1.size, blob2.size, "Correct size");
   is(blob1.type, blob2.type, "Correct type");
@@ -125,7 +127,7 @@ function verifyBlob(blob1, blob2, isLast)
       verifyBuffers(buffer1, buffer2, isLast);
     }
   }
-  
+
   var reader2 = new FileReader();
   reader2.readAsArrayBuffer(blob1);
   reader2.onload = function(event) {
@@ -150,7 +152,6 @@ function verifyBlobArray(blobs1, blobs2)
     verifyBlob(blobs1[i], blobs2[i], i == blobs1.length - 1);
 }
 
-
 var req;
 var index = 0;
 
@@ -170,7 +171,6 @@ var steps = [
     ok(true, "Adding contact with photo");
     createResult1 = new mozContact();
     createResult1.init(properties1);
-    dump("CreateResult1: " + JSON.stringify(createResult1));
     req = navigator.mozContacts.save(createResult1);
     req.onsuccess = function () {
       ok(createResult1.id, "The contact now has an ID.");
@@ -181,9 +181,9 @@ var steps = [
   },
   function () {
     ok(true, "Retrieving by substring");
-    var options = {filterBy: ["name"],
-                   filterOp: "contains",
-                   filterValue: properties1.name.substring(0,3)};
+    var options = {filterBy: ["givenName"],
+                   filterOp: "startsWith",
+                   filterValue: properties1.givenName.substring(0,3)};
     req = mozContacts.find(options);
     req.onsuccess = function () {
       ok(req.result.length == 1, "Found exactly 1 contact.");
@@ -197,7 +197,6 @@ var steps = [
     ok(true, "Adding contact with 2 photos");
     createResult1 = new mozContact();
     createResult1.init(properties2);
-    dump("CreateResult1: " + JSON.stringify(createResult1));
     req = navigator.mozContacts.save(createResult1);
     req.onsuccess = function () {
       ok(createResult1.id, "The contact now has an ID.");
@@ -208,9 +207,9 @@ var steps = [
   },
   function () {
     ok(true, "Retrieving by substring");
-    var options = {filterBy: ["name"],
-                   filterOp: "contains",
-                   filterValue: properties2.name.substring(0,3)};
+    var options = {filterBy: ["givenName"],
+                   filterOp: "startsWith",
+                   filterValue: properties2.givenName.substring(0,3)};
     req = mozContacts.find(options);
     req.onsuccess = function () {
       ok(req.result.length == 1, "Found exactly 1 contact.");
@@ -223,8 +222,7 @@ var steps = [
   function () {
     ok(true, "Adding photo as String");
     createResult1 = new mozContact();
-    createResult1.init({name: "asdf", photo: ["xyz"]});
-    dump("CreateResult1: " + JSON.stringify(createResult1));
+    createResult1.init({givenName: "asdf", photo: ["xyz"]});
     req = navigator.mozContacts.save(createResult1);
     req.onsuccess = function () {
       ok(createResult1.id, "The contact now has an ID.");
@@ -237,8 +235,7 @@ var steps = [
   function () {
     ok(true, "Adding photo as String");
     createResult1 = new mozContact();
-    createResult1.init({name: "jkl", photo: "xyz"});
-    dump("CreateResult1: " + JSON.stringify(createResult1));
+    createResult1.init({givenName: "jkl", photo: "xyz"});
     req = navigator.mozContacts.save(createResult1);
     req.onsuccess = function () {
       ok(createResult1.id, "The contact now has an ID.");
@@ -249,8 +246,8 @@ var steps = [
   },
   function () {
     ok(true, "Retrieving by substring");
-    var options = {filterBy: ["name"],
-                   filterOp: "contains",
+    var options = {filterBy: ["givenName"],
+                   filterOp: "startsWith",
                    filterValue: "asdf"};
     req = mozContacts.find(options);
     req.onsuccess = function () {
@@ -266,7 +263,6 @@ var steps = [
     ok(true, "Adding photo as Object");
     createResult1 = new mozContact();
     createResult1.init({photo: [{}]});
-    dump("CreateResult1: " + JSON.stringify(createResult1));
     req = navigator.mozContacts.save(createResult1);
     req.onsuccess = function () {
       ok(createResult1.id, "The contact now has an ID.");
@@ -305,20 +301,8 @@ function next() {
   index += 1;
 }
 
-function permissionTest() {
-  if (gContactsEnabled) {
-    next();
-  } else {
-    is(mozContacts, null, "mozContacts is null when not enabled.");
-    SimpleTest.finish();
-  }
-}
-
-var gContactsEnabled = SpecialPowers.getBoolPref("dom.mozContacts.enabled");
 SimpleTest.waitForExplicitFinish();
-addLoadEvent(permissionTest);
-
-ok(true, "test passed");
+addLoadEvent(next);
 </script>
 </pre>
 </body>

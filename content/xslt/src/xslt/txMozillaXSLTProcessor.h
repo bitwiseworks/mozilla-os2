@@ -27,7 +27,7 @@ class txIGlobalParameter;
 
 /* bacd8ad0-552f-11d3-a9f7-000064657374 */
 #define TRANSFORMIIX_XSLT_PROCESSOR_CID   \
-{ 0xbacd8ad0, 0x552f, 0x11d3, {0xa9, 0xf7, 0x00, 0x00, 0x64, 0x65, 0x73, 0x74} }
+{ 0x618ee71d, 0xd7a7, 0x41a1, {0xa3, 0xfb, 0xc2, 0xbe, 0xdc, 0x6a, 0x21, 0x7e} }
 
 #define TRANSFORMIIX_XSLT_PROCESSOR_CONTRACTID \
 "@mozilla.org/document-transformer;1?type=xslt"
@@ -66,18 +66,18 @@ public:
     NS_DECL_NSIXSLTPROCESSORPRIVATE
 
     // nsIDocumentTransformer interface
-    NS_IMETHOD Init(nsIPrincipal* aPrincipal);
-    NS_IMETHOD SetTransformObserver(nsITransformObserver* aObserver);
-    NS_IMETHOD LoadStyleSheet(nsIURI* aUri, nsILoadGroup* aLoadGroup);
-    NS_IMETHOD SetSourceContentModel(nsIDOMNode* aSource);
-    NS_IMETHOD CancelLoads() {return NS_OK;}
+    NS_IMETHOD Init(nsIPrincipal* aPrincipal) MOZ_OVERRIDE;
+    NS_IMETHOD SetTransformObserver(nsITransformObserver* aObserver) MOZ_OVERRIDE;
+    NS_IMETHOD LoadStyleSheet(nsIURI* aUri, nsILoadGroup* aLoadGroup) MOZ_OVERRIDE;
+    NS_IMETHOD SetSourceContentModel(nsIDOMNode* aSource) MOZ_OVERRIDE;
+    NS_IMETHOD CancelLoads() MOZ_OVERRIDE {return NS_OK;}
     NS_IMETHOD AddXSLTParamNamespace(const nsString& aPrefix,
-                                     const nsString& aNamespace);
+                                     const nsString& aNamespace) MOZ_OVERRIDE;
     NS_IMETHOD AddXSLTParam(const nsString& aName,
                             const nsString& aNamespace,
                             const nsString& aSelect,
                             const nsString& aValue,
-                            nsIDOMNode* aContext);
+                            nsIDOMNode* aContext) MOZ_OVERRIDE;
 
     // nsIMutationObserver interface
     NS_DECL_NSIMUTATIONOBSERVER_CHARACTERDATACHANGED
@@ -96,7 +96,8 @@ public:
         return mSource;
     }
 
-    nsresult TransformToDoc(nsIDOMDocument **aResult);
+    nsresult TransformToDoc(nsIDOMDocument **aResult,
+                            bool aCreateDataDocument);
 
     bool IsLoadDisabled()
     {
@@ -105,7 +106,7 @@ public:
 
     // nsIJSNativeInitializer
     NS_IMETHODIMP Initialize(nsISupports* aOwner, JSContext *cx, JSObject *obj,
-                             uint32_t argc, jsval *argv);
+                             const JS::CallArgs& aArgs);
 
     static nsresult Startup();
     static void Shutdown();

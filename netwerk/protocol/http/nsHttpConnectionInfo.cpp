@@ -1,9 +1,37 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set sw=4 ts=8 et tw=80 : */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttpConnectionInfo.h"
+
+nsHttpConnectionInfo::nsHttpConnectionInfo(const nsACString &host, int32_t port,
+                                           nsProxyInfo* proxyInfo,
+                                           bool usingSSL)
+    : mRef(0)
+    , mProxyInfo(proxyInfo)
+    , mUsingSSL(usingSSL)
+    , mUsingConnect(false)
+{
+    LOG(("Creating nsHttpConnectionInfo @%x\n", this));
+
+    mUsingHttpProxy = (proxyInfo && proxyInfo->IsHTTP());
+
+    if (mUsingHttpProxy) {
+        mUsingConnect = mUsingSSL;  // SSL always uses CONNECT
+        uint32_t resolveFlags = 0;
+        if (NS_SUCCEEDED(mProxyInfo->GetResolveFlags(&resolveFlags)) &&
+            resolveFlags & nsIProtocolProxyService::RESOLVE_ALWAYS_TUNNEL) {
+            mUsingConnect = true;
+        }
+    }
+
+    SetOriginServer(host, port);
+}
 
 void
 nsHttpConnectionInfo::SetOriginServer(const nsACString &host, int32_t port)
@@ -33,7 +61,7 @@ nsHttpConnectionInfo::SetOriginServer(const nsACString &host, int32_t port)
         keyPort = Port();
     }
 
-    mHashKey.AssignLiteral("...");
+    mHashKey.AssignLiteral("....");
     mHashKey.Append(keyHost);
     mHashKey.Append(':');
     mHashKey.AppendInt(keyPort);
@@ -44,11 +72,23 @@ nsHttpConnectionInfo::SetOriginServer(const nsACString &host, int32_t port)
         mHashKey.SetCharAt('S', 1);
 
     // NOTE: for transparent proxies (e.g., SOCKS) we need to encode the proxy
-    // type in the hash key (this ensures that we will continue to speak the
+    // info in the hash key (this ensures that we will continue to speak the
     // right protocol even if our proxy preferences change).
-    if (!mUsingHttpProxy && ProxyHost()) {
+    //
+    // NOTE: for SSL tunnels add the proxy information to the cache key.
+    // We cannot use the proxy as the host parameter (as we do for non SSL)
+    // because this is a single host tunnel, but we need to include the proxy
+    // information so that a change in proxy config will mean this connection
+    // is not reused
+
+    if ((!mUsingHttpProxy && ProxyHost()) ||
+        (mUsingHttpProxy && mUsingConnect)) {
         mHashKey.AppendLiteral(" (");
         mHashKey.Append(ProxyType());
+        mHashKey.Append(':');
+        mHashKey.Append(ProxyHost());
+        mHashKey.Append(':');
+        mHashKey.AppendInt(ProxyPort());
         mHashKey.Append(')');
     }
 }
@@ -58,9 +98,18 @@ nsHttpConnectionInfo::Clone() const
 {
     nsHttpConnectionInfo* clone = new nsHttpConnectionInfo(mHost, mPort, mProxyInfo, mUsingSSL);
 
-    // Make sure the anonymous flag is transferred!
-    clone->SetAnonymous(mHashKey.CharAt(2) == 'A');
+    // Make sure the anonymous and private flags are transferred!
+    clone->SetAnonymous(GetAnonymous());
+    clone->SetPrivate(GetPrivate());
 
     return clone;
+}
+
+bool
+nsHttpConnectionInfo::UsingProxy()
+{
+    if (!mProxyInfo)
+        return false;
+    return !mProxyInfo->IsDirect();
 }
 

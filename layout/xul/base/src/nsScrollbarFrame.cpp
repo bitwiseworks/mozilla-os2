@@ -15,11 +15,16 @@
 #include "nsGkAtoms.h"
 #include "nsIScrollableFrame.h"
 #include "nsIScrollbarMediator.h"
+#include "mozilla/LookAndFeel.h"
+#include "nsThemeConstants.h"
+#include "nsRenderingContext.h"
+
+using namespace mozilla;
 
 //
-// NS_NewToolbarFrame
+// NS_NewScrollbarFrame
 //
-// Creates a new Toolbar frame and returns it
+// Creates a new scrollbar frame and returns it
 //
 nsIFrame*
 NS_NewScrollbarFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -33,20 +38,18 @@ NS_QUERYFRAME_HEAD(nsScrollbarFrame)
   NS_QUERYFRAME_ENTRY(nsScrollbarFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
-NS_IMETHODIMP
+void
 nsScrollbarFrame::Init(nsIContent* aContent,
                        nsIFrame*   aParent,
                        nsIFrame*   aPrevInFlow)
 {
-  nsresult  rv = nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
+  nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
 
   // We want to be a reflow root since we use reflows to move the
   // slider.  Any reflow inside the scrollbar frame will be a reflow to
   // move the slider and will thus not change anything outside of the
   // scrollbar or change the size of the scrollbar frame.
   mState |= NS_FRAME_REFLOW_ROOT;
-
-  return rv;
 }
 
 NS_IMETHODIMP
@@ -93,6 +96,7 @@ nsScrollbarFrame::AttributeChanged(int32_t aNameSpaceID,
   if (!scrollable)
     return rv;
 
+  nsCOMPtr<nsIContent> kungFuDeathGrip(mContent);
   scrollable->CurPosAttributeChanged(mContent);
   return rv;
 }
@@ -152,4 +156,37 @@ nsScrollbarFrame::GetScrollbarMediator()
 
   nsIScrollbarMediator* sbm = do_QueryFrame(f);
   return sbm;
+}
+
+NS_IMETHODIMP
+nsScrollbarFrame::GetMargin(nsMargin& aMargin)
+{
+  aMargin.SizeTo(0,0,0,0);
+
+  if (LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars) != 0) {
+    nsPresContext* presContext = PresContext();
+    nsITheme* theme = presContext->GetTheme();
+    if (theme) {
+      nsIntSize size;
+      bool isOverridable;
+      nsRefPtr<nsRenderingContext> rc =
+        presContext->PresShell()->GetReferenceRenderingContext();
+      theme->GetMinimumWidgetSize(rc, this, NS_THEME_SCROLLBAR, &size,
+                                  &isOverridable);
+      if (IsHorizontal()) {
+        aMargin.top = -presContext->DevPixelsToAppUnits(size.height);
+      }
+      else {
+        if (StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL) {
+          aMargin.right = -presContext->DevPixelsToAppUnits(size.width);
+        }
+        else {
+          aMargin.left = -presContext->DevPixelsToAppUnits(size.width);
+        }
+      }
+      return NS_OK;
+    }
+  }
+
+  return nsBox::GetMargin(aMargin);
 }

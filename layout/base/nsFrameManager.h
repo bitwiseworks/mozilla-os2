@@ -49,13 +49,13 @@ class nsFrameManager : public nsFrameManagerBase
   typedef nsIFrame::ChildListID ChildListID;
 
 public:
-  nsFrameManager(nsIPresShell *aPresShell) NS_HIDDEN {
+  nsFrameManager(nsIPresShell *aPresShell, nsStyleSet* aStyleSet) NS_HIDDEN {
     mPresShell = aPresShell;
+    mStyleSet = aStyleSet;
+    MOZ_ASSERT(mPresShell, "need a pres shell");
+    MOZ_ASSERT(mStyleSet, "need a style set");
   }
   ~nsFrameManager() NS_HIDDEN;
-
-  // Initialization
-  NS_HIDDEN_(nsresult) Init(nsStyleSet* aStyleSet);
 
   /*
    * After Destroy is called, it is an error to call any FrameManager methods.
@@ -95,8 +95,7 @@ public:
                                     nsFrameList&    aFrameList);
 
   NS_HIDDEN_(nsresult) RemoveFrame(ChildListID     aListID,
-                                   nsIFrame*       aOldFrame,
-                                   bool            aInvalidate = true);
+                                   nsIFrame*       aOldFrame);
 
   /*
    * Notification that a frame is about to be destroyed. This allows any
@@ -143,17 +142,12 @@ public:
 
   /*
    * Add/restore state for one frame
-   * (special, global type, like scroll position)
    */
   NS_HIDDEN_(void) CaptureFrameStateFor(nsIFrame*              aFrame,
-                                        nsILayoutHistoryState* aState,
-                                        nsIStatefulFrame::SpecialStateID aID =
-                                                      nsIStatefulFrame::eNoID);
+                                        nsILayoutHistoryState* aState);
 
   NS_HIDDEN_(void) RestoreFrameStateFor(nsIFrame*              aFrame,
-                                        nsILayoutHistoryState* aState,
-                                        nsIStatefulFrame::SpecialStateID aID =
-                                                      nsIStatefulFrame::eNoID);
+                                        nsILayoutHistoryState* aState);
 
 #ifdef DEBUG
   /**
@@ -191,6 +185,7 @@ private:
                           nsIContent        *aParentContent,
                           nsStyleChangeList *aChangeList, 
                           nsChangeHint       aMinChange,
+                          nsChangeHint       aParentFrameHintsNotHandledForDescendants,
                           nsRestyleHint      aRestyleHint,
                           RestyleTracker&    aRestyleTracker,
                           DesiredA11yNotifications aDesiredA11yNotifications,

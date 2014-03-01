@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -8,10 +9,8 @@
 #include "nsAutoPtr.h"
 #include "nsThreadManager.h"
 #include "nsThreadUtils.h"
-#include "prmem.h"
-#include "sampler.h"
-#include NEW_H
-#include "nsFixedSizeAllocator.h"
+#include "plarena.h"
+#include "GeckoProfiler.h"
 
 using mozilla::TimeDuration;
 using mozilla::TimeStamp;
@@ -20,6 +19,16 @@ static int32_t          gGenerator = 0;
 static TimerThread*     gThread = nullptr;
 
 #ifdef DEBUG_TIMERS
+
+PRLogModuleInfo*
+GetTimerLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("nsTimerImpl");
+  return sLog;
+}
+
 #include <math.h>
 
 double nsTimerImpl::sDeltaSumSquared = 0;
@@ -48,45 +57,63 @@ myNS_MeanAndStdDev(double n, double sumOfValues, double sumOfSquaredValues,
 
 namespace {
 
-// TimerEventAllocator is a fixed size allocator class which is used in order
-// to avoid the default allocator lock contention when firing timer events.
-// It is a thread-safe wrapper around nsFixedSizeAllocator.  The thread-safety
-// is required because nsTimerEvent objects are allocated on the timer thread,
-// and freed on the main thread.  Since this is a TimerEventAllocator specific
-// lock, the lock contention issue is only limited to the allocation and
-// deallocation of nsTimerEvent objects.
-class TimerEventAllocator : public nsFixedSizeAllocator {
+// TimerEventAllocator is a thread-safe allocator used only for nsTimerEvents.
+// It's needed to avoid contention over the default allocator lock when
+// firing timer events (see bug 733277).  The thread-safety is required because
+// nsTimerEvent objects are allocated on the timer thread, and freed on another
+// thread.  Because TimerEventAllocator has its own lock, contention over that
+// lock is limited to the allocation and deallocation of nsTimerEvent objects.
+//
+// Because this allocator is layered over PLArenaPool, it never shrinks -- even
+// "freed" nsTimerEvents aren't truly freed, they're just put onto a free-list
+// for later recycling.  So the amount of memory consumed will always be equal
+// to the high-water mark consumption.  But nsTimerEvents are small and it's
+// unusual to have more than a few hundred of them, so this shouldn't be a
+// problem in practice.
+
+class TimerEventAllocator
+{
+private:
+  struct FreeEntry {
+    FreeEntry* mNext;
+  };
+
+  PLArenaPool mPool;
+  FreeEntry* mFirstFree;
+  mozilla::Monitor mMonitor;
+
 public:
-    TimerEventAllocator() :
+  TimerEventAllocator()
+    : mFirstFree(nullptr),
       mMonitor("TimerEventAllocator")
   {
+    PL_InitArenaPool(&mPool, "TimerEventPool", 4096, /* align = */ 0);
   }
 
-  void* Alloc(size_t aSize)
+  ~TimerEventAllocator()
   {
-    mozilla::MonitorAutoLock lock(mMonitor);
-    return nsFixedSizeAllocator::Alloc(aSize);
-  }
-  void Free(void* aPtr, size_t aSize)
-  {
-    mozilla::MonitorAutoLock lock(mMonitor);
-    nsFixedSizeAllocator::Free(aPtr, aSize);
+    PL_FinishArenaPool(&mPool);
   }
 
-private:
-  mozilla::Monitor mMonitor;
+  void* Alloc(size_t aSize);
+  void Free(void* aPtr);
 };
 
-}
+} // anonymous namespace
 
 class nsTimerEvent : public nsRunnable {
 public:
   NS_IMETHOD Run();
 
   nsTimerEvent(nsTimerImpl *timer, int32_t generation)
-    : mTimer(timer), mGeneration(generation) {
+    : mTimer(dont_AddRef(timer)), mGeneration(generation) {
     // timer is already addref'd for us
     MOZ_COUNT_CTOR(nsTimerEvent);
+
+    MOZ_ASSERT(gThread->IsOnTimerThread(),
+               "nsTimer must always be allocated on the timer thread");
+
+    PR_ATOMIC_INCREMENT(&sAllocatorUsers);
   }
 
 #ifdef DEBUG_TIMERS
@@ -95,30 +122,71 @@ public:
 
   static void Init();
   static void Shutdown();
+  static void DeleteAllocatorIfNeeded();
 
   static void* operator new(size_t size) CPP_THROW_NEW {
     return sAllocator->Alloc(size);
   }
   void operator delete(void* p) {
-    sAllocator->Free(p, sizeof(nsTimerEvent));
+    sAllocator->Free(p);
+    DeleteAllocatorIfNeeded();
   }
 
 private:
+  nsTimerEvent(); // Not implemented
   ~nsTimerEvent() {
-#ifdef DEBUG
-    if (mTimer)
-      NS_WARNING("leaking reference to nsTimerImpl");
-#endif
     MOZ_COUNT_DTOR(nsTimerEvent);
+
+    MOZ_ASSERT(!sCanDeleteAllocator || sAllocatorUsers > 0,
+               "This will result in us attempting to deallocate the nsTimerEvent allocator twice");
+    PR_ATOMIC_DECREMENT(&sAllocatorUsers);
   }
 
-  nsTimerImpl *mTimer;
+  nsRefPtr<nsTimerImpl> mTimer;
   int32_t      mGeneration;
 
   static TimerEventAllocator* sAllocator;
+  static int32_t sAllocatorUsers;
+  static bool sCanDeleteAllocator;
 };
 
 TimerEventAllocator* nsTimerEvent::sAllocator = nullptr;
+int32_t nsTimerEvent::sAllocatorUsers = 0;
+bool nsTimerEvent::sCanDeleteAllocator = false;
+
+namespace {
+
+void* TimerEventAllocator::Alloc(size_t aSize)
+{
+  MOZ_ASSERT(aSize == sizeof(nsTimerEvent));
+
+  mozilla::MonitorAutoLock lock(mMonitor);
+
+  void* p;
+  if (mFirstFree) {
+    p = mFirstFree;
+    mFirstFree = mFirstFree->mNext;
+  }
+  else {
+    PL_ARENA_ALLOCATE(p, &mPool, aSize);
+    if (!p)
+      return nullptr;
+  }
+
+  return p;
+}
+
+void TimerEventAllocator::Free(void* aPtr)
+{
+  mozilla::MonitorAutoLock lock(mMonitor);
+
+  FreeEntry* entry = reinterpret_cast<FreeEntry*>(aPtr);
+
+  entry->mNext = mFirstFree;
+  mFirstFree = entry;
+}
+
+} // anonymous namespace
 
 NS_IMPL_THREADSAFE_QUERY_INTERFACE1(nsTimerImpl, nsITimer)
 NS_IMPL_THREADSAFE_ADDREF(nsTimerImpl)
@@ -127,7 +195,7 @@ NS_IMETHODIMP_(nsrefcnt) nsTimerImpl::Release(void)
 {
   nsrefcnt count;
 
-  NS_PRECONDITION(0 != mRefCnt, "dup release");
+  MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
   count = NS_AtomicDecrementRefcnt(mRefCnt);
   NS_LOG_RELEASE(this, count, "nsTimerImpl");
   if (count == 0) {
@@ -171,7 +239,7 @@ NS_IMETHODIMP_(nsrefcnt) nsTimerImpl::Release(void)
   if (count == 1 && mArmed) {
     mCanceled = true;
 
-    NS_ASSERTION(gThread, "An armed timer exists after the thread timer stopped.");
+    MOZ_ASSERT(gThread, "Armed timer exists after the thread timer stopped.");
     if (NS_SUCCEEDED(gThread->RemoveTimer(this)))
       return 0;
   }
@@ -223,12 +291,12 @@ nsTimerImpl::Startup()
 void nsTimerImpl::Shutdown()
 {
 #ifdef DEBUG_TIMERS
-  if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
+  if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
     double mean = 0, stddev = 0;
     myNS_MeanAndStdDev(sDeltaNum, sDeltaSum, sDeltaSumSquared, &mean, &stddev);
 
-    PR_LOG(gTimerLog, PR_LOG_DEBUG, ("sDeltaNum = %f, sDeltaSum = %f, sDeltaSumSquared = %f\n", sDeltaNum, sDeltaSum, sDeltaSumSquared));
-    PR_LOG(gTimerLog, PR_LOG_DEBUG, ("mean: %fms, stddev: %fms\n", mean, stddev));
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("sDeltaNum = %f, sDeltaSum = %f, sDeltaSumSquared = %f\n", sDeltaNum, sDeltaSum, sDeltaSumSquared));
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("mean: %fms, stddev: %fms\n", mean, stddev));
   }
 #endif
 
@@ -247,6 +315,10 @@ nsresult nsTimerImpl::InitCommon(uint32_t aType, uint32_t aDelay)
   nsresult rv;
 
   NS_ENSURE_TRUE(gThread, NS_ERROR_NOT_INITIALIZED);
+  if (!mEventTarget) {
+    NS_ERROR("mEventTarget is NULL");
+    return NS_ERROR_NOT_INITIALIZED;
+  }
 
   rv = gThread->Init();
   NS_ENSURE_SUCCESS(rv, rv);
@@ -422,11 +494,11 @@ void nsTimerImpl::Fire()
   if (mCanceled)
     return;
 
-  SAMPLE_LABEL("Timer", "Fire");
+  PROFILER_LABEL("Timer", "Fire");
 
   TimeStamp now = TimeStamp::Now();
 #ifdef DEBUG_TIMERS
-  if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
+  if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
     TimeDuration   a = now - mStart; // actual delay in intervals
     TimeDuration   b = TimeDuration::FromMilliseconds(mDelay); // expected delay in intervals
     TimeDuration   delta = (a > b) ? a - b : b - a;
@@ -435,10 +507,10 @@ void nsTimerImpl::Fire()
     sDeltaSumSquared += double(d) * double(d);
     sDeltaNum++;
 
-    PR_LOG(gTimerLog, PR_LOG_DEBUG, ("[this=%p] expected delay time %4ums\n", this, mDelay));
-    PR_LOG(gTimerLog, PR_LOG_DEBUG, ("[this=%p] actual delay time   %fms\n", this, a.ToMilliseconds()));
-    PR_LOG(gTimerLog, PR_LOG_DEBUG, ("[this=%p] (mType is %d)       -------\n", this, mType));
-    PR_LOG(gTimerLog, PR_LOG_DEBUG, ("[this=%p]     delta           %4dms\n", this, (a > b) ? (int32_t)d : -(int32_t)d));
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("[this=%p] expected delay time %4ums\n", this, mDelay));
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("[this=%p] actual delay time   %fms\n", this, a.ToMilliseconds()));
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("[this=%p] (mType is %d)       -------\n", this, mType));
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG, ("[this=%p]     delta           %4dms\n", this, (a > b) ? (int32_t)d : -(int32_t)d));
 
     mStart = mStart2;
     mStart2 = TimeStamp();
@@ -451,8 +523,6 @@ void nsTimerImpl::Fire()
     // calling Fire().
     timeout -= TimeDuration::FromMilliseconds(mDelay);
   }
-  if (gThread)
-    gThread->UpdateFilter(mDelay, timeout, now);
 
   if (mCallbackType == CALLBACK_TYPE_INTERFACE)
     mTimerCallbackWhileFiring = mCallback.i;
@@ -501,8 +571,8 @@ void nsTimerImpl::Fire()
   mTimerCallbackWhileFiring = nullptr;
 
 #ifdef DEBUG_TIMERS
-  if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
-    PR_LOG(gTimerLog, PR_LOG_DEBUG,
+  if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG,
            ("[this=%p] Took %fms to fire timer callback\n",
             this, (TimeStamp::Now() - now).ToMilliseconds()));
   }
@@ -524,42 +594,48 @@ void nsTimerImpl::Fire()
 void nsTimerEvent::Init()
 {
   sAllocator = new TimerEventAllocator();
-  static const size_t kBucketSizes[] = {sizeof(nsTimerEvent)};
-  static const int32_t kNumBuckets = mozilla::ArrayLength(kBucketSizes);
-  static const int32_t kInitialPoolSize = 1024 * sizeof(nsTimerEvent);
-  sAllocator->Init("TimerEventPool", kBucketSizes, kNumBuckets, kInitialPoolSize);
 }
 
 void nsTimerEvent::Shutdown()
 {
-  delete sAllocator;
-  sAllocator = nullptr;
+  sCanDeleteAllocator = true;
+  DeleteAllocatorIfNeeded();
+}
+
+void nsTimerEvent::DeleteAllocatorIfNeeded()
+{
+  if (sCanDeleteAllocator && sAllocatorUsers == 0) {
+    delete sAllocator;
+    sAllocator = nullptr;
+  }
 }
 
 NS_IMETHODIMP nsTimerEvent::Run()
 {
-  nsRefPtr<nsTimerImpl> timer;
-  timer.swap(mTimer);
-
-  if (mGeneration != timer->GetGeneration())
+  if (mGeneration != mTimer->GetGeneration())
     return NS_OK;
 
 #ifdef DEBUG_TIMERS
-  if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
+  if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
     TimeStamp now = TimeStamp::Now();
-    PR_LOG(gTimerLog, PR_LOG_DEBUG,
+    PR_LOG(GetTimerLog(), PR_LOG_DEBUG,
            ("[this=%p] time between PostTimerEvent() and Fire(): %fms\n",
             this, (now - mInitTime).ToMilliseconds()));
   }
 #endif
 
-  timer->Fire();
+  mTimer->Fire();
 
   return NS_OK;
 }
 
 nsresult nsTimerImpl::PostTimerEvent()
 {
+  if (!mEventTarget) {
+    NS_ERROR("Attempt to post timer event to NULL event target");
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
   // XXX we may want to reuse this nsTimerEvent in the case of repeating timers.
 
   // Since TimerThread addref'd 'this' for us, we don't need to addref here.
@@ -572,7 +648,7 @@ nsresult nsTimerImpl::PostTimerEvent()
     return NS_ERROR_OUT_OF_MEMORY;
 
 #ifdef DEBUG_TIMERS
-  if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
+  if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
     event->mInitTime = TimeStamp::Now();
   }
 #endif
@@ -609,7 +685,7 @@ void nsTimerImpl::SetDelayInternal(uint32_t aDelay)
   mTimeout += delayInterval;
 
 #ifdef DEBUG_TIMERS
-  if (PR_LOG_TEST(gTimerLog, PR_LOG_DEBUG)) {
+  if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
     if (mStart.IsNull())
       mStart = now;
     else

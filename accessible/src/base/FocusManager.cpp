@@ -60,7 +60,7 @@ FocusManager::IsFocused(const Accessible* aAccessible) const
       DocAccessible* doc = 
         GetAccService()->GetDocAccessible(focusedNode->OwnerDoc());
       return aAccessible ==
-	(doc ? doc->GetAccessibleOrContainer(focusedNode) : nullptr);
+        (doc ? doc->GetAccessibleOrContainer(focusedNode) : nullptr);
     }
   }
   return false;
@@ -114,8 +114,10 @@ FocusManager::IsInOrContainsFocus(const Accessible* aAccessible) const
 void
 FocusManager::NotifyOfDOMFocus(nsISupports* aTarget)
 {
-  A11YDEBUG_FOCUS_NOTIFICATION_SUPPORTSTARGET("DOM focus", "DOM focus target",
-                                              aTarget)
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eFocus))
+    logging::FocusNotificationTarget("DOM focus", "Target", aTarget);
+#endif
 
   mActiveItem = nullptr;
 
@@ -125,11 +127,8 @@ FocusManager::NotifyOfDOMFocus(nsISupports* aTarget)
       GetAccService()->GetDocAccessible(targetNode->OwnerDoc());
     if (document) {
       // Set selection listener for focused element.
-      if (targetNode->IsElement()) {
-        RootAccessible* root = document->RootAccessible();
-        nsCaretAccessible* caretAcc = root->GetCaretAccessible();
-        caretAcc->SetControlSelectionListener(targetNode->AsElement());
-      }
+      if (targetNode->IsElement())
+        SelectionMgr()->SetControlSelectionListener(targetNode->AsElement());
 
       document->HandleNotification<FocusManager, nsINode>
         (this, &FocusManager::ProcessDOMFocus, targetNode);
@@ -140,8 +139,10 @@ FocusManager::NotifyOfDOMFocus(nsISupports* aTarget)
 void
 FocusManager::NotifyOfDOMBlur(nsISupports* aTarget)
 {
-  A11YDEBUG_FOCUS_NOTIFICATION_SUPPORTSTARGET("DOM blur", "DOM blur target",
-                                              aTarget)
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eFocus))
+    logging::FocusNotificationTarget("DOM blur", "Target", aTarget);
+#endif
 
   mActiveItem = nullptr;
 
@@ -153,6 +154,10 @@ FocusManager::NotifyOfDOMBlur(nsISupports* aTarget)
     DocAccessible* document =
       GetAccService()->GetDocAccessible(DOMDoc);
     if (document) {
+      // Clear selection listener for previously focused element.
+      if (targetNode->IsElement())
+        SelectionMgr()->ClearControlSelectionListener();
+
       document->HandleNotification<FocusManager, nsINode>
         (this, &FocusManager::ProcessDOMFocus, DOMDoc);
     }
@@ -162,8 +167,10 @@ FocusManager::NotifyOfDOMBlur(nsISupports* aTarget)
 void
 FocusManager::ActiveItemChanged(Accessible* aItem, bool aCheckIfActive)
 {
-  A11YDEBUG_FOCUS_NOTIFICATION_ACCTARGET("active item changed",
-                                         "Active item", aItem)
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eFocus))
+    logging::FocusNotificationTarget("active item changed", "Item", aItem);
+#endif
 
   // Nothing changed, happens for XUL trees and HTML selects.
   if (aItem && aItem == mActiveItem)
@@ -173,7 +180,10 @@ FocusManager::ActiveItemChanged(Accessible* aItem, bool aCheckIfActive)
 
   if (aItem && aCheckIfActive) {
     Accessible* widget = aItem->ContainerWidget();
-    A11YDEBUG_FOCUS_LOG_WIDGET("Active item widget", widget)
+#ifdef A11Y_LOG
+    if (logging::IsEnabled(logging::eFocus))
+      logging::ActiveWidget(widget);
+#endif
     if (!widget || !widget->IsActiveWidget() || !widget->AreItemsOperable())
       return;
   }
@@ -210,17 +220,22 @@ FocusManager::DispatchFocusEvent(DocAccessible* aDocument,
     nsRefPtr<AccEvent> event =
       new AccEvent(nsIAccessibleEvent::EVENT_FOCUS, aTarget,
                    eAutoDetect, AccEvent::eCoalesceOfSameType);
-    aDocument->FireDelayedAccessibleEvent(event);
+    aDocument->FireDelayedEvent(event);
 
-    A11YDEBUG_FOCUS_LOG_ACCTARGET("Focus notification", aTarget)
+#ifdef A11Y_LOG
+    if (logging::IsEnabled(logging::eFocus))
+      logging::FocusDispatched(aTarget);
+#endif
   }
 }
 
 void
 FocusManager::ProcessDOMFocus(nsINode* aTarget)
 {
-  A11YDEBUG_FOCUS_NOTIFICATION_DOMTARGET("Process DOM focus",
-                                         "Notification target", aTarget)
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eFocus))
+    logging::FocusNotificationTarget("process DOM focus", "Target", aTarget);
+#endif
 
   DocAccessible* document =
     GetAccService()->GetDocAccessible(aTarget->OwnerDoc());
@@ -308,8 +323,10 @@ FocusManager::ProcessFocusEvent(AccEvent* aEvent)
     mActiveARIAMenubar = nullptr;
   }
 
-  A11YDEBUG_FOCUS_NOTIFICATION_ACCTARGET("FIRE FOCUS EVENT", "Focus target",
-                                         target)
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eFocus))
+    logging::FocusNotificationTarget("fire focus event", "Target", target);
+#endif
 
   nsRefPtr<AccEvent> focusEvent =
     new AccEvent(nsIAccessibleEvent::EVENT_FOCUS, target, fromUserInputFlag);

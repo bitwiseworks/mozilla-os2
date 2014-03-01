@@ -11,10 +11,11 @@
 #error GL_CONTEXT_PROVIDER_NAME not defined
 #endif
 
-class THEBES_API GL_CONTEXT_PROVIDER_NAME
+class GL_CONTEXT_PROVIDER_NAME
 {
 public:
     typedef GLContext::ContextFlags ContextFlags;
+    typedef gfx::SurfaceCaps SurfaceCaps;
     /**
      * Create a context that renders to the surface of the widget that is
      * passed in.  The context is always created with an RGB pixel format,
@@ -37,14 +38,13 @@ public:
      * @return Context to use for the window
      */
     static already_AddRefed<GLContext>
-    CreateForWindow(nsIWidget *aWidget);
+    CreateForWindow(nsIWidget* widget);
 
     /**
      * Create a context for offscreen rendering.  The target of this
      * context should be treated as opaque -- it might be a FBO, or a
      * pbuffer, or some other construct.  Users of this GLContext
-     * should not bind framebuffer 0 directly, and instead should bind
-     * the framebuffer returned by GetOffscreenFBO().
+     * should bind framebuffer 0 directly to use this offscreen buffer.
      *
      * The offscreen context returned by this method will always have
      * the ability to be rendered into a context created by a window.
@@ -59,15 +59,28 @@ public:
      * @return Context to use for offscreen rendering
      */
     static already_AddRefed<GLContext>
-    CreateOffscreen(const gfxIntSize& aSize,
-                    const ContextFormat& aFormat = ContextFormat::BasicRGBA32Format,
-                    const ContextFlags aFlags = GLContext::ContextFlagsNone);
+    CreateOffscreen(const gfxIntSize& size,
+                    const SurfaceCaps& caps,
+                    ContextFlags flags = GLContext::ContextFlagsNone);
 
     /**
      * Get a pointer to the global context, creating it if it doesn't exist.
      */
-    static GLContext *
-    GetGlobalContext( const ContextFlags aFlags = GLContext::ContextFlagsNone);
+    static GLContext*
+    GetGlobalContext(ContextFlags flags = GLContext::ContextFlagsNone);
+    
+    /*
+     * Create a new shared GLContext content handle, using the passed buffer as a source.
+     * Must be released by ReleaseSharedHandle. UpdateSharedHandle will have no effect
+     * on handles created with this method, as the caller owns the source (the passed buffer)
+     * and is responsible for updating it accordingly.
+     */
+    static SharedTextureHandle CreateSharedHandle(GLContext::SharedTextureShareType shareType,
+                                                  void* buffer,
+                                                  GLContext::SharedTextureBufferType bufferType);
+
+    static already_AddRefed<gfxASurface> GetSharedHandleAsSurface(GLContext::SharedTextureShareType shareType,
+                                                                  SharedTextureHandle sharedHandle);
 
     /**
      * Free any resources held by this Context Provider.

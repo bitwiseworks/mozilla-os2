@@ -48,8 +48,8 @@ void nsColorNames::AddRefTable(void)
     {
       // let's verify the table...
       for (uint32_t index = 0; index < eColorName_COUNT; ++index) {
-        nsCAutoString temp1(kColorNames[index]);
-        nsCAutoString temp2(kColorNames[index]);
+        nsAutoCString temp1(kColorNames[index]);
+        nsAutoCString temp2(kColorNames[index]);
         ToLowerCase(temp1);
         NS_ASSERTION(temp1.Equals(temp2), "upper case char in table");
       }
@@ -287,4 +287,16 @@ NS_HSL2RGB(float h, float s, float l)
   g = uint8_t(255 * HSL_HueToRGB(m1, m2, h));
   b = uint8_t(255 * HSL_HueToRGB(m1, m2, h - 1.0f/3.0f));
   return NS_RGB(r, g, b);  
+}
+
+NS_GFX_(const char*)
+NS_RGBToColorName(nscolor aColor)
+{
+  for (size_t idx = 0; idx < ArrayLength(kColors); ++idx) {
+    if (kColors[idx] == aColor) {
+      return kColorNames[idx];
+    }
+  }
+
+  return nullptr;
 }

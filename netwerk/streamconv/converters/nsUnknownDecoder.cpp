@@ -17,7 +17,6 @@
 #include "nsIPrefBranch.h"
 #include "nsICategoryManager.h"
 #include "nsISupportsPrimitives.h"
-#include "nsIContentSniffer.h"
 
 #include "nsCRT.h"
 
@@ -26,6 +25,7 @@
 #include "nsIViewSourceChannel.h"
 #include "nsIHttpChannel.h"
 #include "nsNetCID.h"
+#include "nsNetUtil.h"
 
 
 #define MAX_BUFFER_SIZE 512
@@ -110,7 +110,7 @@ NS_IMETHODIMP
 nsUnknownDecoder::OnDataAvailable(nsIRequest* request, 
                                   nsISupports *aCtxt,
                                   nsIInputStream *aStream, 
-                                  uint32_t aSourceOffset, 
+                                  uint64_t aSourceOffset, 
                                   uint32_t aCount)
 {
   nsresult rv = NS_OK;
@@ -316,8 +316,8 @@ void nsUnknownDecoder::DetermineContentType(nsIRequest* aRequest)
       NS_ASSERTION(sSnifferEntries[i].mMimeType ||
                    sSnifferEntries[i].mContentTypeSniffer,
                    "Must have either a type string or a function to set the type");
-      NS_ASSERTION(sSnifferEntries[i].mMimeType == nullptr ||
-                   sSnifferEntries[i].mContentTypeSniffer == nullptr,
+      NS_ASSERTION(!sSnifferEntries[i].mMimeType ||
+                   !sSnifferEntries[i].mContentTypeSniffer,
                    "Both a type string and a type sniffing function set;"
                    " using type string");
       if (sSnifferEntries[i].mMimeType) {
@@ -334,9 +334,9 @@ void nsUnknownDecoder::DetermineContentType(nsIRequest* aRequest)
     }
   }
 
-  if (TryContentSniffers(aRequest)) {
-    NS_ASSERTION(!mContentType.IsEmpty(), 
-                 "Content type should be known by now.");
+  NS_SniffContent(NS_DATA_SNIFFER_CATEGORY, aRequest,
+                  (const uint8_t*)mBuffer, mBufferLen, mContentType);
+  if (!mContentType.IsEmpty()) {
     return;
   }
 
@@ -357,49 +357,6 @@ void nsUnknownDecoder::DetermineContentType(nsIRequest* aRequest)
   LastDitchSniff(aRequest);
   NS_ASSERTION(!mContentType.IsEmpty(), 
                "Content type should be known by now.");
-}
-
-bool nsUnknownDecoder::TryContentSniffers(nsIRequest* aRequest)
-{
-  // Enumerate content sniffers
-  nsCOMPtr<nsICategoryManager> catMan(do_GetService("@mozilla.org/categorymanager;1"));
-  if (!catMan) {
-    return false;
-  }
-
-  nsCOMPtr<nsISimpleEnumerator> sniffers;
-  catMan->EnumerateCategory("content-sniffing-services", getter_AddRefs(sniffers));
-  if (!sniffers) {
-    return false;
-  }
-
-  bool hasMore;
-  while (NS_SUCCEEDED(sniffers->HasMoreElements(&hasMore)) && hasMore) {
-    nsCOMPtr<nsISupports> elem;
-    sniffers->GetNext(getter_AddRefs(elem));
-    NS_ASSERTION(elem, "No element even though hasMore returned true!?");
-
-    nsCOMPtr<nsISupportsCString> sniffer_id(do_QueryInterface(elem));
-    NS_ASSERTION(sniffer_id, "element is no nsISupportsCString!?");
-    nsCAutoString contractid;
-    nsresult rv = sniffer_id->GetData(contractid);
-    if (NS_FAILED(rv)) {
-      continue;
-    }
-
-    nsCOMPtr<nsIContentSniffer> sniffer(do_GetService(contractid.get()));
-    if (!sniffer) {
-      continue;
-    }
-
-    rv = sniffer->GetMIMETypeFromContent(aRequest, (const uint8_t*)mBuffer,
-                                         mBufferLen, mContentType);
-    if (NS_SUCCEEDED(rv)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 bool nsUnknownDecoder::SniffForHTML(nsIRequest* aRequest)
@@ -505,7 +462,7 @@ bool nsUnknownDecoder::SniffURI(nsIRequest* aRequest)
       nsCOMPtr<nsIURI> uri;
       nsresult result = channel->GetURI(getter_AddRefs(uri));
       if (NS_SUCCEEDED(result) && uri) {
-        nsCAutoString type;
+        nsAutoCString type;
         result = mimeService->GetTypeFromURI(uri, type);
         if (NS_SUCCEEDED(result)) {
           mContentType = type;
@@ -549,7 +506,9 @@ bool nsUnknownDecoder::LastDitchSniff(nsIRequest* aRequest)
   // just call it text/plain...
   //
   uint32_t i;
-  for (i=0; i<mBufferLen && IS_TEXT_CHAR(mBuffer[i]); i++);
+  for (i = 0; i < mBufferLen && IS_TEXT_CHAR(mBuffer[i]); i++) {
+    continue;
+  }
 
   if (i == mBufferLen) {
     mContentType = TEXT_PLAIN;
@@ -643,10 +602,10 @@ nsBinaryDetector::DetermineContentType(nsIRequest* aRequest)
   }
 
   // It's an HTTP channel.  Check for the text/plain mess
-  nsCAutoString contentTypeHdr;
+  nsAutoCString contentTypeHdr;
   httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("Content-Type"),
                                  contentTypeHdr);
-  nsCAutoString contentType;
+  nsAutoCString contentType;
   httpChannel->GetContentType(contentType);
 
   // Make sure to do a case-sensitive exact match comparison here.  Apache
@@ -668,7 +627,7 @@ nsBinaryDetector::DetermineContentType(nsIRequest* aRequest)
   // detect the type.
   // XXXbz we could improve this by doing a local decompress if we
   // wanted, I'm sure.  
-  nsCAutoString contentEncoding;
+  nsAutoCString contentEncoding;
   httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("Content-Encoding"),
                                  contentEncoding);
   if (!contentEncoding.IsEmpty()) {

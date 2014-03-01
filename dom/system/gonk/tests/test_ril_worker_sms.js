@@ -54,6 +54,167 @@ add_test(function test_nl_single_shift_tables_validity() {
   run_next_test();
 });
 
+add_test(function test_gsm_sms_strict_7bit_charmap_validity() {
+  let defaultTable = PDU_NL_LOCKING_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
+  let defaultShiftTable = PDU_NL_SINGLE_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
+  for (let from in GSM_SMS_STRICT_7BIT_CHARMAP) {
+    let to = GSM_SMS_STRICT_7BIT_CHARMAP[from];
+    do_print("Verifying GSM_SMS_STRICT_7BIT_CHARMAP[\"\\u0x"
+             + from.charCodeAt(0).toString(16) + "\"] => \"\\u"
+             + to.charCodeAt(0).toString(16) + "\"");
+
+    // Make sure "from" is not in default table
+    do_check_eq(defaultTable.indexOf(from), -1);
+    do_check_eq(defaultShiftTable.indexOf(from), -1);
+    // Make sure "to" is in default table
+    if ((defaultTable.indexOf(to) < 0)
+        && (defaultShiftTable.indexOf(to) < 0)) {
+      do_check_eq(false, true);
+    }
+  }
+
+  run_next_test();
+});
+
+/**
+ * Verify GsmPDUHelper#readDataCodingScheme.
+ */
+add_test(function test_GsmPDUHelper_readDataCodingScheme() {
+  let worker = newWorker({
+    postRILMessage: function fakePostRILMessage(data) {
+      // Do nothing
+    },
+    postMessage: function fakePostMessage(message) {
+      // Do nothing
+    }
+  });
+
+  let helper = worker.GsmPDUHelper;
+  function test_dcs(dcs, encoding, messageClass, mwi) {
+    helper.readHexOctet = function () {
+      return dcs;
+    }
+
+    let msg = {};
+    helper.readDataCodingScheme(msg);
+
+    do_check_eq(msg.dcs, dcs);
+    do_check_eq(msg.encoding, encoding);
+    do_check_eq(msg.messageClass, messageClass);
+    do_check_eq(msg.mwi == null, mwi == null);
+    if (mwi != null) {
+      do_check_eq(msg.mwi.active, mwi.active);
+      do_check_eq(msg.mwi.discard, mwi.discard);
+      do_check_eq(msg.mwi.msgCount, mwi.msgCount);
+    }
+  }
+
+  // Group 00xx
+  //   Bit 3 and 2 indicate the character set being used.
+  test_dcs(0x00, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0x04, PDU_DCS_MSG_CODING_8BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0x08, PDU_DCS_MSG_CODING_16BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0x0C, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  //   Bit 4, if set to 0, indicates that bits 1 to 0 are reserved and have no
+  //   message class meaning.
+  test_dcs(0x01, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0x02, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0x03, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  //   Bit 4, if set to 1, indicates that bits 1 to 0 have a message class meaning.
+  test_dcs(0x10, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]);
+  test_dcs(0x11, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_1]);
+  test_dcs(0x12, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]);
+  test_dcs(0x13, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_3]);
+
+  // Group 01xx
+  test_dcs(0x50, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]);
+
+  // Group 1000..1011: reserved
+  test_dcs(0x8F, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0x9F, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0xAF, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+  test_dcs(0xBF, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL]);
+
+  // Group 1100: Message Waiting Indication Group: Discard Message
+  //   Bit 3 indicates Indication Sense:
+  test_dcs(0xC0, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: false, discard: true, msgCount: 0});
+  test_dcs(0xC8, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: true, discard: true, msgCount: -1});
+  //   Bit 2 is reserved, and set to 0:
+  test_dcs(0xCC, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: true, discard: true, msgCount: -1});
+
+  // Group 1101: Message Waiting Indication Group: Store Message
+  //   Bit 3 indicates Indication Sense:
+  test_dcs(0xD0, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: false, discard: false, msgCount: 0});
+  test_dcs(0xD8, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: true, discard: false, msgCount: -1});
+  //   Bit 2 is reserved, and set to 0:
+  test_dcs(0xDC, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: true, discard: false, msgCount: -1});
+
+  // Group 1110: Message Waiting Indication Group: Store Message, UCS2
+  //   Bit 3 indicates Indication Sense:
+  test_dcs(0xE0, PDU_DCS_MSG_CODING_16BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: false, discard: false, msgCount: 0});
+  test_dcs(0xE8, PDU_DCS_MSG_CODING_16BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: true, discard: false, msgCount: -1});
+  //   Bit 2 is reserved, and set to 0:
+  test_dcs(0xEC, PDU_DCS_MSG_CODING_16BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_NORMAL],
+           {active: true, discard: false, msgCount: -1});
+
+  // Group 1111
+  test_dcs(0xF0, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]);
+  test_dcs(0xF1, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_1]);
+  test_dcs(0xF2, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]);
+  test_dcs(0xF3, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_3]);
+  test_dcs(0xF4, PDU_DCS_MSG_CODING_8BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]);
+  test_dcs(0xF5, PDU_DCS_MSG_CODING_8BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_1]);
+  test_dcs(0xF6, PDU_DCS_MSG_CODING_8BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]);
+  test_dcs(0xF7, PDU_DCS_MSG_CODING_8BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_3]);
+  //   Bit 3 is reserved and should be set to 0, but if it doesn't we should
+  //   ignore it.
+  test_dcs(0xF8, PDU_DCS_MSG_CODING_7BITS_ALPHABET,
+           GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]);
+
+  run_next_test();
+});
+
 /**
  * Verify RadioInterfaceLayer#_countGsm7BitSeptets() and
  * GsmPDUHelper#writeStringAsSeptets() algorithm match each other.
@@ -78,14 +239,16 @@ add_test(function test_RadioInterfaceLayer__countGsm7BitSeptets() {
     helper.octetsWritten++;
   };
 
-  function do_check_calc(str, expectedCalcLen, lst, sst) {
+  function do_check_calc(str, expectedCalcLen, lst, sst, strict7BitEncoding, strToWrite) {
     do_check_eq(expectedCalcLen,
                 ril._countGsm7BitSeptets(str,
                                          PDU_NL_LOCKING_SHIFT_TABLES[lst],
-                                         PDU_NL_SINGLE_SHIFT_TABLES[sst]));
+                                         PDU_NL_SINGLE_SHIFT_TABLES[sst],
+                                         strict7BitEncoding));
 
     helper.resetOctetWritten();
-    helper.writeStringAsSeptets(str, 0, lst, sst);
+    strToWrite = strToWrite || str;
+    helper.writeStringAsSeptets(strToWrite, 0, lst, sst);
     do_check_eq(Math.ceil(expectedCalcLen * 7 / 8), helper.octetsWritten);
   }
 
@@ -129,6 +292,21 @@ add_test(function test_RadioInterfaceLayer__countGsm7BitSeptets() {
     }
   }
 
+  // Bug 790192: support strict GSM SMS 7-Bit encoding
+  let str = "", strToWrite = "", gsmLen = 0;
+  for (let c in GSM_SMS_STRICT_7BIT_CHARMAP) {
+    str += c;
+    strToWrite += GSM_SMS_STRICT_7BIT_CHARMAP[c];
+    if (PDU_NL_LOCKING_SHIFT_TABLES.indexOf(GSM_SMS_STRICT_7BIT_CHARMAP[c])) {
+      gsmLen += 1;
+    } else {
+      gsmLen += 2;
+    }
+  }
+  do_check_calc(str, gsmLen,
+                PDU_NL_IDENTIFIER_DEFAULT, PDU_NL_IDENTIFIER_DEFAULT,
+                true, strToWrite);
+
   run_next_test();
 });
 
@@ -139,9 +317,9 @@ add_test(function test_RadioInterfaceLayer__countGsm7BitSeptets() {
 add_test(function test_RadioInterfaceLayer__calculateUserDataLength() {
   let ril = newRadioInterfaceLayer();
 
-  function test_calc(str, expected, enabledGsmTableTuples) {
+  function test_calc(str, expected, enabledGsmTableTuples, strict7BitEncoding) {
     ril.enabledGsmTableTuples = enabledGsmTableTuples;
-    let options = ril._calculateUserDataLength(str);
+    let options = ril._calculateUserDataLength(str, strict7BitEncoding);
 
     do_check_eq(expected[0], options.dcs);
     do_check_eq(expected[1], options.encodedFullBodyLength);
@@ -200,6 +378,22 @@ add_test(function test_RadioInterfaceLayer__calculateUserDataLength() {
   test_calc(ESCAPE + ESCAPE + ESCAPE + ESCAPE + ESCAPE + "\\",
             [PDU_DCS_MSG_CODING_7BITS_ALPHABET, 2, 0, 0, 0], [[3, 0], [0, 0]]);
 
+  // Test Bug 790192: support strict GSM SMS 7-Bit encoding
+  let str = "", gsmLen = 0, udhl = 0;
+  for (let c in GSM_SMS_STRICT_7BIT_CHARMAP) {
+    str += c;
+    if (PDU_NL_LOCKING_SHIFT_TABLES.indexOf(GSM_SMS_STRICT_7BIT_CHARMAP[c])) {
+      gsmLen += 1;
+    } else {
+      gsmLen += 2;
+    }
+  }
+  if (str.length > PDU_MAX_USER_DATA_UCS2) {
+    udhl = 5;
+  }
+  test_calc(str, [PDU_DCS_MSG_CODING_7BITS_ALPHABET, gsmLen, 0, 0, 0], [[0, 0]], true);
+  test_calc(str, [PDU_DCS_MSG_CODING_16BITS_ALPHABET, str.length * 2, udhl], [[0, 0]]);
+
   run_next_test();
 });
 
@@ -238,62 +432,57 @@ add_test(function test_RadioInterfaceLayer__calculateUserDataLength7Bit_multipar
 });
 
 /**
- * Verify RadioInterfaceLayer#_fragmentText7Bit().
+ * Verify RadioInterfaceLayer#_fragmentText().
  */
 add_test(function test_RadioInterfaceLayer__fragmentText7Bit() {
   let ril = newRadioInterfaceLayer();
 
-  function test_calc(str, expected) {
-    let options = ril._fragmentText(str);
-    if (expected) {
-      do_check_eq(expected, options.segments.length);
-    } else {
-      do_check_eq(null, options.segments);
-    }
+  function test_calc(str, strict7BitEncoding, expectedSegments) {
+    expectedSegments = expectedSegments || 1;
+    let options = ril._fragmentText(str, null, strict7BitEncoding);
+    do_check_eq(expectedSegments, options.segments.length);
   }
 
+  // 7-Bit
+
   // Boundary checks
-  test_calc("");
-  test_calc(generateStringOfLength("A", PDU_MAX_USER_DATA_7BIT));
-  test_calc(generateStringOfLength("A", PDU_MAX_USER_DATA_7BIT + 1), 2);
+  test_calc(generateStringOfLength("A", PDU_MAX_USER_DATA_7BIT), false);
+  test_calc(generateStringOfLength("A", PDU_MAX_USER_DATA_7BIT), true);
+  test_calc(generateStringOfLength("A", PDU_MAX_USER_DATA_7BIT + 1), false, 2);
+  test_calc(generateStringOfLength("A", PDU_MAX_USER_DATA_7BIT + 1), true, 2);
 
   // Escaped character
-  test_calc(generateStringOfLength("{", PDU_MAX_USER_DATA_7BIT / 2));
-  test_calc(generateStringOfLength("{", PDU_MAX_USER_DATA_7BIT / 2 + 1), 2);
+  test_calc(generateStringOfLength("{", PDU_MAX_USER_DATA_7BIT / 2), false);
+  test_calc(generateStringOfLength("{", PDU_MAX_USER_DATA_7BIT / 2 + 1), false, 2);
   // Escaped character cannot be separated
-  test_calc(generateStringOfLength("{", (PDU_MAX_USER_DATA_7BIT - 7) * 2 / 2), 3);
+  test_calc(generateStringOfLength("{", (PDU_MAX_USER_DATA_7BIT - 7) * 2 / 2), false, 3);
 
   // Test headerLen, 7 = Math.ceil(6 * 8 / 7), 6 = headerLen + 1
   test_calc(generateStringOfLength("A", PDU_MAX_USER_DATA_7BIT - 7));
-  test_calc(generateStringOfLength("A", (PDU_MAX_USER_DATA_7BIT - 7) * 2), 2);
-  test_calc(generateStringOfLength("A", (PDU_MAX_USER_DATA_7BIT - 7) * 3), 3);
+  test_calc(generateStringOfLength("A", (PDU_MAX_USER_DATA_7BIT - 7) * 2), false, 2);
+  test_calc(generateStringOfLength("A", (PDU_MAX_USER_DATA_7BIT - 7) * 3), false, 3);
 
-  run_next_test();
-});
-
-/**
- * Verify RadioInterfaceLayer#_fragmentTextUCS2().
- */
-add_test(function test_RadioInterfaceLayer__fragmentTextUCS2() {
-  let ril = newRadioInterfaceLayer();
-
-  function test_calc(str, expected) {
-    let options = ril._fragmentText(str);
-    if (expected) {
-      do_check_eq(expected, options.segments.length);
-    } else {
-      do_check_eq(null, options.segments);
-    }
-  }
+  // UCS-2
 
   // Boundary checks
   test_calc(generateStringOfLength("\ua2db", PDU_MAX_USER_DATA_UCS2));
-  test_calc(generateStringOfLength("\ua2db", PDU_MAX_USER_DATA_UCS2 + 1), 2);
+  test_calc(generateStringOfLength("\ua2db", PDU_MAX_USER_DATA_UCS2), true);
+  test_calc(generateStringOfLength("\ua2db", PDU_MAX_USER_DATA_UCS2 + 1), false, 2);
+  // Bug 816082: when strict GSM SMS 7-Bit encoding is enabled, replace unicode
+  // chars with '*'.
+  test_calc(generateStringOfLength("\ua2db", PDU_MAX_USER_DATA_UCS2 + 1), true, 1);
 
   // UCS2 character cannot be separated
   ril.segmentRef16Bit = true;
-  test_calc(generateStringOfLength("\ua2db", (PDU_MAX_USER_DATA_UCS2 * 2 - 7) * 2 / 2), 3);
+  test_calc(generateStringOfLength("\ua2db", (PDU_MAX_USER_DATA_UCS2 * 2 - 7) * 2 / 2), false, 3);
   ril.segmentRef16Bit = false;
+
+  // Test Bug 790192: support strict GSM SMS 7-Bit encoding
+  for (let c in GSM_SMS_STRICT_7BIT_CHARMAP) {
+    test_calc(generateStringOfLength(c, PDU_MAX_USER_DATA_7BIT), false, 3);
+    test_calc(generateStringOfLength(c, PDU_MAX_USER_DATA_7BIT), true);
+    test_calc(generateStringOfLength(c, PDU_MAX_USER_DATA_UCS2), false);
+  }
 
   run_next_test();
 });
@@ -539,3 +728,94 @@ for (let lst = 0; lst < PDU_NL_LOCKING_SHIFT_TABLES.length; lst++) {
 }
 test_receiving_ucs2_alphabets(ucs2str);
 
+// Bug 820220: B2G SMS: wrong order and truncated content in multi-part messages
+add_test(function test_sendSMS_UCS2_without_langIndex_langShiftIndex_defined() {
+  let worker = newWriteHexOctetAsUint8Worker();
+
+  worker.Buf.sendParcel = function () {
+    // Each sendParcel() call represents one outgoing segment of a multipart
+    // SMS message. Here, we have the first segment send, so it's "Hello "
+    // only.
+    //
+    // 4(parcel size) + 4(request type) + 4(token)
+    // + 4(two messages) + 4(null SMSC) + 4(message string length)
+    // + 1(first octet) + 1(message reference)
+    // + 2(DA len, TOA) + 4(addr)
+    // + 1(pid) + 1(dcs)
+    // + 1(UDL) + 6(UDHL, type, len, ref, max, seq)
+    // + 12(2 * strlen("Hello "))
+    // + 4(two delimitors) = 57
+    //
+    // If we have additional 6(type, len, langIndex, type len, langShiftIndex)
+    // octets here, then bug 809553 is not fixed.
+    do_check_eq(this.outgoingIndex, 57);
+
+    run_next_test();
+  };
+
+  worker.RIL.sendSMS({
+    number: "1",
+    segmentMaxSeq: 2,
+    fullBody: "Hello World!",
+    dcs: PDU_DCS_MSG_CODING_16BITS_ALPHABET,
+    segmentRef16Bit: false,
+    userDataHeaderLength: 5,
+    requestStatusReport: true,
+    segments: [
+      {
+        body: "Hello ",
+        encodedBodyLength: 12,
+      }, {
+        body: "World!",
+        encodedBodyLength: 12,
+      }
+    ],
+  });
+});
+
+/**
+ * Verify GsmPDUHelper#readAddress
+ */
+add_test(function test_GsmPDUHelper_readAddress() {
+  let worker = newWorker({
+    postRILMessage: function fakePostRILMessage(data) {
+      // Do nothing
+    },
+    postMessage: function fakePostMessage(message) {
+      // Do nothing
+    }
+
+  });
+
+  let helper = worker.GsmPDUHelper;
+  function test_address(addrHex, addrString) {
+    let uint16Array = [];
+    let ix = 0;
+    for (let i = 0; i < addrHex.length; ++i) {
+      uint16Array[i] = addrHex[i].charCodeAt();
+    }
+
+    worker.Buf.readUint16 = function (){
+      if(ix >= uint16Array.length) {
+        do_throw("out of range in uint16Array");
+      }
+      return uint16Array[ix++];
+    }
+    let length = helper.readHexOctet();
+    let parsedAddr = helper.readAddress(length);
+    do_check_eq(parsedAddr, addrString);
+  }
+
+  // For AlphaNumeric
+  test_address("04D01100", "_@");
+  test_address("04D01000", "\u0394@");
+
+  // Direct prepand
+  test_address("0B914151245584F6", "+14154255486");
+  test_address("0E914151245584B633", "+14154255486#33");
+
+  // PDU_TOA_NATIONAL
+  test_address("0BA14151245584F6", "14154255486");
+
+  run_next_test();
+});

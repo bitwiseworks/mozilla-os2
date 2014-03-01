@@ -9,8 +9,8 @@ import java.util.HashMap;
 
 import org.json.simple.JSONObject;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.sync.GlobalConstants;
-import org.mozilla.gecko.sync.Logger;
+import org.mozilla.gecko.background.common.log.Logger;
+import org.mozilla.gecko.sync.SyncConstants;
 import org.mozilla.gecko.sync.ThreadPool;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.jpake.JPakeClient;
@@ -64,13 +64,12 @@ public class SetupSyncActivity extends AccountAuthenticatorActivity {
 
   public SetupSyncActivity() {
     super();
-    Logger.info(LOG_TAG, "SetupSyncActivity constructor called.");
   }
 
   /** Called when the activity is first created. */
   @Override
   public void onCreate(Bundle savedInstanceState) {
-    setTheme(R.style.SyncTheme);
+    ActivityUtils.prepareLogging();
     Logger.info(LOG_TAG, "Called SetupSyncActivity.onCreate.");
     super.onCreate(savedInstanceState);
 
@@ -89,11 +88,17 @@ public class SetupSyncActivity extends AccountAuthenticatorActivity {
 
   @Override
   public void onResume() {
+    ActivityUtils.prepareLogging();
     Logger.info(LOG_TAG, "Called SetupSyncActivity.onResume.");
     super.onResume();
 
     if (!hasInternet()) {
-      setContentView(R.layout.sync_setup_nointernet);
+      runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+          setContentView(R.layout.sync_setup_nointernet);
+        }
+      });
       return;
     }
 
@@ -102,7 +107,8 @@ public class SetupSyncActivity extends AccountAuthenticatorActivity {
     ThreadPool.run(new Runnable() {
       @Override
       public void run() {
-        Account[] accts = mAccountManager.getAccountsByType(GlobalConstants.ACCOUNTTYPE_SYNC);
+        ActivityUtils.prepareLogging();
+        Account[] accts = mAccountManager.getAccountsByType(SyncConstants.ACCOUNTTYPE_SYNC);
         finishResume(accts);
       }
     });
@@ -315,7 +321,7 @@ public class SetupSyncActivity extends AccountAuthenticatorActivity {
     }
   }
 
-  @SuppressWarnings("unchecked")
+  @SuppressWarnings({ "unchecked", "static-method" })
   protected JSONObject makeAccountJSON(String username, String password,
                                        String syncKey, String serverURL) {
 
@@ -342,7 +348,7 @@ public class SetupSyncActivity extends AccountAuthenticatorActivity {
    */
   public void onPaired() {
     // Extract Sync account data.
-    Account[] accts = mAccountManager.getAccountsByType(GlobalConstants.ACCOUNTTYPE_SYNC);
+    Account[] accts = mAccountManager.getAccountsByType(SyncConstants.ACCOUNTTYPE_SYNC);
     if (accts.length == 0) {
       // Error, no account present.
       Logger.error(LOG_TAG, "No accounts present.");
@@ -433,8 +439,8 @@ public class SetupSyncActivity extends AccountAuthenticatorActivity {
         if (isSuccess) {
           Bundle resultBundle = new Bundle();
           resultBundle.putString(AccountManager.KEY_ACCOUNT_NAME, syncAccount.username);
-          resultBundle.putString(AccountManager.KEY_ACCOUNT_TYPE, GlobalConstants.ACCOUNTTYPE_SYNC);
-          resultBundle.putString(AccountManager.KEY_AUTHTOKEN, GlobalConstants.ACCOUNTTYPE_SYNC);
+          resultBundle.putString(AccountManager.KEY_ACCOUNT_TYPE, SyncConstants.ACCOUNTTYPE_SYNC);
+          resultBundle.putString(AccountManager.KEY_AUTHTOKEN, SyncConstants.ACCOUNTTYPE_SYNC);
           setAccountAuthenticatorResult(resultBundle);
         }
         displayResultAndFinish(isSuccess);

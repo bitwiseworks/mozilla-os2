@@ -44,6 +44,9 @@ struct IndexInfo;
 struct IndexUpdateInfo;
 struct ObjectStoreInfo;
 
+struct FileHandleData;
+struct BlobOrFileData;
+
 class IDBObjectStore MOZ_FINAL : public nsIIDBObjectStore
 {
 public:
@@ -64,7 +67,7 @@ public:
                         bool aUnique,
                         bool aMultiEntry,
                         JSContext* aCx,
-                        jsval aObject,
+                        JS::Handle<JS::Value> aObject,
                         nsTArray<IndexUpdateInfo>& aUpdateInfoArray);
 
   static nsresult
@@ -91,13 +94,14 @@ public:
   static bool
   DeserializeValue(JSContext* aCx,
                    StructuredCloneReadInfo& aCloneReadInfo,
-                   jsval* aValue);
+                   JS::MutableHandle<JS::Value> aValue);
 
   static bool
   SerializeValue(JSContext* aCx,
                  StructuredCloneWriteInfo& aCloneWriteInfo,
-                 jsval aValue);
+                 JS::Handle<JS::Value> aValue);
 
+  template <class DeserializationTraits>
   static JSObject*
   StructuredCloneReadCallback(JSContext* aCx,
                               JSStructuredCloneReader* aReader,
@@ -107,7 +111,7 @@ public:
   static JSBool
   StructuredCloneWriteCallback(JSContext* aCx,
                                JSStructuredCloneWriter* aWriter,
-                               JSObject* aObj,
+                               JS::Handle<JSObject*> aObj,
                                void* aClosure);
 
   static nsresult
@@ -143,7 +147,7 @@ public:
 
   int64_t Id() const
   {
-    NS_ASSERTION(mId != LL_MININT, "Don't ask for this yet!");
+    NS_ASSERTION(mId != INT64_MIN, "Don't ask for this yet!");
     return mId;
   }
 
@@ -253,8 +257,8 @@ protected:
   ~IDBObjectStore();
 
   nsresult GetAddInfo(JSContext* aCx,
-                      jsval aValue,
-                      jsval aKeyVal,
+                      JS::Handle<JS::Value> aValue,
+                      JS::Handle<JS::Value> aKeyVal,
                       StructuredCloneWriteInfo& aCloneWriteInfo,
                       Key& aKey,
                       nsTArray<IndexUpdateInfo>& aUpdateInfoArray);
@@ -269,13 +273,21 @@ protected:
   static void
   ClearStructuredCloneBuffer(JSAutoStructuredCloneBuffer& aBuffer);
 
+  static bool
+  ReadFileHandle(JSStructuredCloneReader* aReader,
+                 FileHandleData* aRetval);
+
+  static bool
+  ReadBlobOrFile(JSStructuredCloneReader* aReader,
+                 uint32_t aTag,
+                 BlobOrFileData* aRetval);
 private:
   nsRefPtr<IDBTransaction> mTransaction;
 
   int64_t mId;
   nsString mName;
   KeyPath mKeyPath;
-  JS::Value mCachedKeyPath;
+  JS::Heap<JS::Value> mCachedKeyPath;
   bool mRooted;
   bool mAutoIncrement;
   nsCOMPtr<nsIAtom> mDatabaseId;

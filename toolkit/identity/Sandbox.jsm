@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = ["Sandbox"];
+this.EXPORTED_SYMBOLS = ["Sandbox"];
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
@@ -31,15 +31,15 @@ XPCOMUtils.defineLazyModuleGetter(this,
  * @param aCallback
  *        (function) Callback to be invoked with a Sandbox, when ready.
  */
-function Sandbox(aURL, aCallback) {
+this.Sandbox = function Sandbox(aURL, aCallback) {
   // Normalize the URL so the comparison in _makeSandboxContentLoaded works
   this._url = Services.io.newURI(aURL, null, null).spec;
   this._log("Creating sandbox for:", this._url);
   this._createFrame();
   this._createSandbox(aCallback);
-}
+};
 
-Sandbox.prototype = {
+this.Sandbox.prototype = {
 
   /**
    * Use the outer window ID as the identifier of the sandbox.
@@ -82,8 +82,8 @@ Sandbox.prototype = {
 
     // Insert iframe in to create docshell.
     let frame = doc.createElementNS(XHTML_NS, "iframe");
-    frame.setAttribute("mozbrowser", true);
     frame.setAttribute("mozframetype", "content");
+    frame.sandbox = "allow-forms allow-scripts allow-same-origin";
     frame.style.visibility = "collapse";
     doc.documentElement.appendChild(frame);
 
@@ -92,9 +92,6 @@ Sandbox.prototype = {
                                       .QueryInterface(Ci.nsIInterfaceRequestor)
                                       .getInterface(Ci.nsIDocShell);
 
-    // Mark this docShell as a "browserFrame", to break script access to e.g. window.top
-    docShell.setIsBrowserElement();
-
     // Stop about:blank from being loaded.
     docShell.stop(Ci.nsIWebNavigation.STOP_NETWORK);
 
@@ -102,8 +99,8 @@ Sandbox.prototype = {
     docShell.allowAuth = false;
     docShell.allowPlugins = false;
     docShell.allowImages = false;
+    docShell.allowMedia = false;
     docShell.allowWindowControl = false;
-    // TODO: disable media (bug 759964)
 
     // Disable stylesheet loading since the document is not visible.
     let markupDocViewer = docShell.contentViewer

@@ -9,47 +9,56 @@
 #include "nsSVGElement.h"
 #include "nsCOMPtr.h"
 #include "nsSVGAttrTearoffTable.h"
+#include "mozilla/dom/SVGAnimatedNumberListBinding.h"
+#include "nsContentUtils.h"
 
 // See the architecture comment in this file's header.
 
 namespace mozilla {
 
-static nsSVGAttrTearoffTable<SVGAnimatedNumberList, DOMSVGAnimatedNumberList>
-  sSVGAnimatedNumberListTearoffTable;
+  static inline
+nsSVGAttrTearoffTable<SVGAnimatedNumberList, DOMSVGAnimatedNumberList>&
+SVGAnimatedNumberListTearoffTable()
+{
+  static nsSVGAttrTearoffTable<SVGAnimatedNumberList, DOMSVGAnimatedNumberList>
+    sSVGAnimatedNumberListTearoffTable;
+  return sSVGAnimatedNumberListTearoffTable;
+}
 
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(DOMSVGAnimatedNumberList, mElement)
+NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(DOMSVGAnimatedNumberList, mElement)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGAnimatedNumberList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGAnimatedNumberList)
 
-} // namespace mozilla
-DOMCI_DATA(SVGAnimatedNumberList, mozilla::DOMSVGAnimatedNumberList)
-namespace mozilla {
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGAnimatedNumberList)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedNumberList)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAnimatedNumberList)
 NS_INTERFACE_MAP_END
 
-NS_IMETHODIMP
-DOMSVGAnimatedNumberList::GetBaseVal(nsIDOMSVGNumberList **_retval)
+JSObject*
+DOMSVGAnimatedNumberList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return mozilla::dom::SVGAnimatedNumberListBinding::Wrap(aCx, aScope, this);
+}
+
+already_AddRefed<DOMSVGNumberList>
+DOMSVGAnimatedNumberList::BaseVal()
 {
   if (!mBaseVal) {
     mBaseVal = new DOMSVGNumberList(this, InternalAList().GetBaseValue());
   }
-  NS_ADDREF(*_retval = mBaseVal);
-  return NS_OK;
+  nsRefPtr<DOMSVGNumberList> baseVal = mBaseVal;
+  return baseVal.forget();
 }
 
-NS_IMETHODIMP
-DOMSVGAnimatedNumberList::GetAnimVal(nsIDOMSVGNumberList **_retval)
+already_AddRefed<DOMSVGNumberList>
+DOMSVGAnimatedNumberList::AnimVal()
 {
   if (!mAnimVal) {
     mAnimVal = new DOMSVGNumberList(this, InternalAList().GetAnimValue());
   }
-  NS_ADDREF(*_retval = mAnimVal);
-  return NS_OK;
+  nsRefPtr<DOMSVGNumberList> animVal = mAnimVal;
+  return animVal.forget();
 }
 
 /* static */ already_AddRefed<DOMSVGAnimatedNumberList>
@@ -58,10 +67,10 @@ DOMSVGAnimatedNumberList::GetDOMWrapper(SVGAnimatedNumberList *aList,
                                         uint8_t aAttrEnum)
 {
   nsRefPtr<DOMSVGAnimatedNumberList> wrapper =
-    sSVGAnimatedNumberListTearoffTable.GetTearoff(aList);
+    SVGAnimatedNumberListTearoffTable().GetTearoff(aList);
   if (!wrapper) {
     wrapper = new DOMSVGAnimatedNumberList(aElement, aAttrEnum);
-    sSVGAnimatedNumberListTearoffTable.AddTearoff(aList, wrapper);
+    SVGAnimatedNumberListTearoffTable().AddTearoff(aList, wrapper);
   }
   return wrapper.forget();
 }
@@ -69,14 +78,14 @@ DOMSVGAnimatedNumberList::GetDOMWrapper(SVGAnimatedNumberList *aList,
 /* static */ DOMSVGAnimatedNumberList*
 DOMSVGAnimatedNumberList::GetDOMWrapperIfExists(SVGAnimatedNumberList *aList)
 {
-  return sSVGAnimatedNumberListTearoffTable.GetTearoff(aList);
+  return SVGAnimatedNumberListTearoffTable().GetTearoff(aList);
 }
 
 DOMSVGAnimatedNumberList::~DOMSVGAnimatedNumberList()
 {
   // Script no longer has any references to us, to our base/animVal objects, or
   // to any of their list items.
-  sSVGAnimatedNumberListTearoffTable.RemoveTearoff(&InternalAList());
+  SVGAnimatedNumberListTearoffTable().RemoveTearoff(&InternalAList());
 }
 
 void
@@ -91,7 +100,7 @@ DOMSVGAnimatedNumberList::InternalBaseValListWillChangeTo(const SVGNumberList& a
 
   nsRefPtr<DOMSVGAnimatedNumberList> kungFuDeathGrip;
   if (mBaseVal) {
-    if (aNewValue.Length() < mBaseVal->Length()) {
+    if (aNewValue.Length() < mBaseVal->LengthNoFlush()) {
       // InternalListLengthWillChange might clear last reference to |this|.
       // Retain a temporary reference to keep from dying before returning.
       kungFuDeathGrip = this;

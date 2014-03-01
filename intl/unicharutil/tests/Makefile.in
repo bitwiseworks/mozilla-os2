@@ -11,16 +11,9 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= test_intl_unicharutil
-XPCSHELL_TESTS	= unit
-
 USE_STATIC_LIBS = 1
 
-CPPSRCS		= UnicharSelfTest.cpp \
-		  NormalizationTest.cpp \
-		  $(NULL)
-
-SIMPLE_PROGRAMS	= $(CPPSRCS:.cpp=$(BIN_SUFFIX))
+DISABLE_SIMPLE_PROGRAMS	= $(CPPSRCS:.cpp=$(BIN_SUFFIX))
 
 LIBS		= \
 	$(XPCOM_STATICRUNTIME_GLUE_LDOPTS) \

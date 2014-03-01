@@ -10,18 +10,11 @@ VPATH=@srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= storage
-LIBRARY_NAME = storagecomps
-SHORT_LIBNAME = strgcmps
 EXPORT_LIBRARY = 1
 IS_COMPONENT = 1
 MODULE_NAME = mozStorageModule
 LIBXUL_LIBRARY = 1
 
-
-EXPORTS = mozStorageCID.h
-
-CPPSRCS = mozStorageModule.cpp
 
 LOCAL_INCLUDES = \
 	$(SQLITE_CFLAGS) \

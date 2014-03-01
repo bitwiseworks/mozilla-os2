@@ -5,58 +5,48 @@
 
 <resources>
 
-    <style name="Gecko" parent="@android:style/Theme.Holo">
+    <!--
+        Base application theme. This could be overridden by GeckoBaseTheme
+        in other res/values-XXX/themes.xml.
+    -->
+    <style name="GeckoBase" parent="@android:style/Theme.Holo.Light">
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="arrowPopupWidth">fill_parent</item>
+    </style>
+
+    <style name="GeckoDialogBase" parent="@android:style/Theme.Holo.Light.Dialog">
         <item name="android:windowContentOverlay">@null</item>
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
     </style>
-    
-    <style name="Gecko.TitleBar" parent="Gecko">
+
+    <style name="GeckoAwesomeBarBase" parent="GeckoBase">
+        <item name="android:windowBackground">@color/background_normal</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <style name="GeckoPreferencesBase" parent="GeckoBase">
         <item name="android:windowActionBar">true</item>
         <item name="android:windowNoTitle">false</item>
-    </style>
-
-    <style name="Gecko.NoActionBar" parent="@android:style/Theme.Holo">
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowNoTitle">true</item>
-    </style>
-    
-    <style name="Gecko.Light" parent="@android:style/Theme.Holo.Light">
-        <item name="android:windowContentOverlay">@null</item>
-    </style>
-    
-    <style name="Gecko.Light.TitleBar" parent="Gecko.Light"/>
-
-    <style name="Gecko.Light.NoActionBar" parent="@android:style/Theme.Holo.Light">
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowNoTitle">true</item>
-    </style>
-    
-    <style name="Gecko.Translucent" parent="@android:style/Theme.Translucent">
-        <item name="android:windowActionBar">true</item>
-        <item name="android:windowNoTitle">false</item>
-    </style>
-
-    <style name="Gecko.Translucent.NoActionBar">
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowNoTitle">true</item>
-    </style>
-
-    <style name="Gecko.App">
-        <item name="android:windowBackground">@drawable/abouthome_bg_repeat</item>
-        <item name="android:panelBackground">@drawable/menu_panel_bg</item>
-    </style>
-
-    <style name="Gecko.Light.AwesomeBar">
-        <item name="android:actionBarStyle">@style/ActionBar.AwesomeBar</item>
-    </style>
-
-    <style name="Gecko.TitleBar.Preferences">
         <item name="android:actionBarStyle">@style/ActionBar.GeckoPreferences</item>
     </style>
 
-    <style name="Gecko.Translucent.TabsTray">
-        <item name="android:actionBarStyle">@style/ActionBar.TabsTray</item>
+    <!--
+        Activity based themes.
+    -->
+    <style name="Gecko.App">
+        <item name="android:windowBackground">@color/background_normal</item>
+        <item name="android:panelBackground">@drawable/menu_panel_bg</item>
+        <item name="android:listViewStyle">@style/Widget.ListView</item>
+        <item name="android:spinnerStyle">@style/Widget.Spinner</item>
+        <item name="android:spinnerItemStyle">@style/Widget.TextView.SpinnerItem</item>
+        <item name="android:spinnerDropDownItemStyle">@style/Widget.DropDownItem.Spinner</item>
+        <item name="menuItemActionBarStyle">@style/Widget.MenuItemActionBar</item>
+        <item name="menuItemActionViewStyle">@style/Widget.MenuItemActionView</item>
+        <item name="menuItemDefaultStyle">@style/Widget.MenuItemDefault</item>
     </style>
-    
+
 </resources>

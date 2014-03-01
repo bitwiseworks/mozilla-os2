@@ -8,23 +8,10 @@
 
 #include <cmath>
 #include <mozilla/Assertions.h>
+#include <algorithm>
 
 namespace mozilla {
 namespace gfx {
-
-// XXX - <algorithm> conflicts with exceptions on 10.6. Define our own gfx_min/gfx_max
-// functions here. Avoid min/max to avoid conflicts with existing #defines on windows.
-template<typename T>
-T gfx_min(T aVal1, T aVal2)
-{
-  return (aVal1 < aVal2) ? aVal1 : aVal2;
-}
-
-template<typename T>
-T gfx_max(T aVal1, T aVal2)
-{
-  return (aVal1 > aVal2) ? aVal1 : aVal2;
-}
 
 /**
  * Rectangles have two interpretations: a set of (zero-size) points,
@@ -69,6 +56,15 @@ struct BaseRect {
   bool IsEmpty() const { return height <= 0 || width <= 0; }
   void SetEmpty() { width = height = 0; }
 
+  // "Finite" means not inf and not NaN
+  bool IsFinite() const
+  {
+    return (std::isfinite(x) &&
+            std::isfinite(y) &&
+            std::isfinite(width) &&
+            std::isfinite(height));
+  }
+
   // Returns true if this rectangle contains the interior of aRect. Always
   // returns true if aRect is empty, and always returns false is aRect is
   // nonempty but this rect is empty.
@@ -97,15 +93,15 @@ struct BaseRect {
   }
   // Returns the rectangle containing the intersection of the points
   // (including edges) of *this and aRect. If there are no points in that
-  // intersection, returns an empty rectangle with x/y set to the gfx_max of the x/y
+  // intersection, returns an empty rectangle with x/y set to the std::max of the x/y
   // of *this and aRect.
   Sub Intersect(const Sub& aRect) const
   {
     Sub result;
-    result.x = gfx_max(x, aRect.x);
-    result.y = gfx_max(y, aRect.y);
-    result.width = gfx_min(XMost(), aRect.XMost()) - result.x;
-    result.height = gfx_min(YMost(), aRect.YMost()) - result.y;
+    result.x = std::max<T>(x, aRect.x);
+    result.y = std::max<T>(y, aRect.y);
+    result.width = std::min<T>(XMost(), aRect.XMost()) - result.x;
+    result.height = std::min<T>(YMost(), aRect.YMost()) - result.y;
     if (result.width < 0 || result.height < 0) {
       result.SizeTo(0, 0);
     }
@@ -113,7 +109,7 @@ struct BaseRect {
   }
   // Sets *this to be the rectangle containing the intersection of the points
   // (including edges) of *this and aRect. If there are no points in that
-  // intersection, sets *this to be an empty rectangle with x/y set to the gfx_max
+  // intersection, sets *this to be an empty rectangle with x/y set to the std::max
   // of the x/y of *this and aRect.
   //
   // 'this' can be the same object as either aRect1 or aRect2
@@ -143,10 +139,10 @@ struct BaseRect {
   Sub UnionEdges(const Sub& aRect) const
   {
     Sub result;
-    result.x = gfx_min(x, aRect.x);
-    result.y = gfx_min(y, aRect.y);
-    result.width = gfx_max(XMost(), aRect.XMost()) - result.x;
-    result.height = gfx_max(YMost(), aRect.YMost()) - result.y;
+    result.x = std::min(x, aRect.x);
+    result.y = std::min(y, aRect.y);
+    result.width = std::max(XMost(), aRect.XMost()) - result.x;
+    result.height = std::max(YMost(), aRect.YMost()) - result.y;
     return result;
   }
   // Computes the smallest rectangle that contains both the area of both
@@ -207,15 +203,15 @@ struct BaseRect {
   {
     x += aDx;
     y += aDy;
-    width = gfx_max(T(0), width - 2 * aDx);
-    height = gfx_max(T(0), height - 2 * aDy);
+    width = std::max(T(0), width - 2 * aDx);
+    height = std::max(T(0), height - 2 * aDy);
   }
   void Deflate(const Margin& aMargin)
   {
     x += aMargin.left;
     y += aMargin.top;
-    width = gfx_max(T(0), width - aMargin.LeftRight());
-    height = gfx_max(T(0), height - aMargin.TopBottom());
+    width = std::max(T(0), width - aMargin.LeftRight());
+    height = std::max(T(0), height - aMargin.TopBottom());
   }
   void Deflate(const SizeT& aSize) { Deflate(aSize.width, aSize.height); }
 
@@ -257,8 +253,10 @@ struct BaseRect {
   // Find difference as a Margin
   Margin operator-(const Sub& aRect) const
   {
-    return Margin(aRect.x - x, aRect.y - y,
-                  XMost() - aRect.XMost(), YMost() - aRect.YMost());
+    return Margin(aRect.y - y,
+                  XMost() - aRect.XMost(),
+                  YMost() - aRect.YMost(),
+                  aRect.x - x);
   }
 
   // Helpers for accessing the vertices
@@ -354,6 +352,18 @@ struct BaseRect {
     height = y1 - y0;
   }
 
+  // Scale 'this' by aScale without doing any rounding.
+  void Scale(T aScale) { Scale(aScale, aScale); }
+  // Scale 'this' by aXScale and aYScale, without doing any rounding.
+  void Scale(T aXScale, T aYScale)
+  {
+    T right = XMost() * aXScale;
+    T bottom = YMost() * aYScale;
+    x = x * aXScale;
+    y = y * aYScale;
+    width = right - x;
+    height = bottom - y;
+  }
   // Scale 'this' by aScale, converting coordinates to integers so that the result is
   // the smallest integer-coordinate rectangle containing the unrounded result.
   // Note: this can turn an empty rectangle into a non-empty rectangle
@@ -383,8 +393,8 @@ struct BaseRect {
     T bottom = static_cast<T>(floor(double(YMost()) * aYScale));
     x = static_cast<T>(ceil(double(x) * aXScale));
     y = static_cast<T>(ceil(double(y) * aYScale));
-    width = gfx_max<T>(0, right - x);
-    height = gfx_max<T>(0, bottom - y);
+    width = std::max<T>(0, right - x);
+    height = std::max<T>(0, bottom - y);
   }
   // Scale 'this' by 1/aScale, converting coordinates to integers so that the result is
   // the smallest integer-coordinate rectangle containing the unrounded result.
@@ -403,6 +413,21 @@ struct BaseRect {
     width = right - x;
     height = bottom - y;
   }
+  // Scale 'this' by 1/aScale, converting coordinates to integers so that the result is
+  // the largest integer-coordinate rectangle contained by the unrounded result.
+  void ScaleInverseRoundIn(double aScale) { ScaleInverseRoundIn(aScale, aScale); }
+  // Scale 'this' by 1/aXScale and 1/aYScale, converting coordinates to integers so
+  // that the result is the largest integer-coordinate rectangle contained by the
+  // unrounded result.
+  void ScaleInverseRoundIn(double aXScale, double aYScale)
+  {
+    T right = static_cast<T>(floor(double(XMost()) / aXScale));
+    T bottom = static_cast<T>(floor(double(YMost()) / aYScale));
+    x = static_cast<T>(ceil(double(x) / aXScale));
+    y = static_cast<T>(ceil(double(y) / aYScale));
+    width = std::max<T>(0, right - x);
+    height = std::max<T>(0, bottom - y);
+  }
 
   /**
    * Clamp aPoint to this rectangle. It is allowed to end up on any
@@ -410,8 +435,24 @@ struct BaseRect {
    */
   Point ClampPoint(const Point& aPoint) const
   {
-    return Point(NS_MAX(x, NS_MIN(XMost(), aPoint.x)),
-                 NS_MAX(y, NS_MIN(YMost(), aPoint.y)));
+    return Point(std::max(x, std::min(XMost(), aPoint.x)),
+                 std::max(y, std::min(YMost(), aPoint.y)));
+  }
+
+  /**
+   * Clamp aRect to this rectangle. This returns aRect after it is forced
+   * inside the bounds of this rectangle. It will attempt to retain the size
+   * but will shrink the dimensions that don't fit.
+   */
+  Sub ClampRect(const Sub& aRect) const
+  {
+    Sub rect(std::max(aRect.x, x),
+             std::max(aRect.y, y),
+             std::min(aRect.width, width),
+             std::min(aRect.height, height));
+    rect.x = std::min(rect.XMost(), XMost()) - rect.width;
+    rect.y = std::min(rect.YMost(), YMost()) - rect.height;
+    return rect;
   }
 
 private:

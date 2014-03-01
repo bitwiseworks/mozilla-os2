@@ -310,10 +310,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
                               flatType.get(), flatExt.get()));
 
   // Create a Mac-specific MIME info so we can use Mac-specific members.
-  nsMIMEInfoMac* mimeInfoMac = new nsMIMEInfoMac(aMIMEType);
-  if (!mimeInfoMac)
-    return nullptr;
-  NS_ADDREF(mimeInfoMac);
+  nsRefPtr<nsMIMEInfoMac> mimeInfoMac = new nsMIMEInfoMac(aMIMEType);
 
   NSAutoreleasePool *localPool = [[NSAutoreleasePool alloc] init];
 
@@ -433,7 +430,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
       NSString *extStr = [NSString stringWithCString:flatExt.get() encoding:NSASCIIStringEncoding];
       NSString *typeStr = map ? [map MIMETypeForExtension:extStr] : NULL;
       if (typeStr) {
-        nsCAutoString mimeType;
+        nsAutoCString mimeType;
         mimeType.Assign((char *)[typeStr cStringUsingEncoding:NSASCIIStringEncoding]);
         mimeInfoMac->SetMIMEType(mimeType);
         haveAppForType = true;
@@ -463,7 +460,6 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
 
     nsCOMPtr<nsILocalFileMac> app(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID));
     if (!app) {
-      NS_RELEASE(mimeInfoMac);
       [localPool release];
       return nullptr;
     }
@@ -496,7 +492,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
     mimeInfoMac->SetPreferredAction(nsIMIMEInfo::saveToDisk);
   }
 
-  nsCAutoString mimeType;
+  nsAutoCString mimeType;
   mimeInfoMac->GetMIMEType(mimeType);
   if (*aFound && !mimeType.IsEmpty()) {
     // If we have a MIME type, make sure its preferred extension is included
@@ -505,33 +501,35 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aMIMEType,
     NSString *typeStr = [NSString stringWithCString:mimeType.get() encoding:NSASCIIStringEncoding];
     NSString *extStr = map ? [map preferredExtensionForMIMEType:typeStr] : NULL;
     if (extStr) {
-      nsCAutoString preferredExt;
+      nsAutoCString preferredExt;
       preferredExt.Assign((char *)[extStr cStringUsingEncoding:NSASCIIStringEncoding]);
       mimeInfoMac->AppendExtension(preferredExt);
     }
 
     CFStringRef cfType = ::CFStringCreateWithCString(NULL, mimeType.get(), kCFStringEncodingUTF8);
-    CFStringRef cfTypeDesc = NULL;
-    if (::LSCopyKindStringForMIMEType(cfType, &cfTypeDesc) == noErr) {
-      nsAutoTArray<UniChar, 255> buffer;
-      CFIndex typeDescLength = ::CFStringGetLength(cfTypeDesc);
-      buffer.SetLength(typeDescLength);
-      ::CFStringGetCharacters(cfTypeDesc, CFRangeMake(0, typeDescLength),
-                              buffer.Elements());
-      nsAutoString typeDesc;
-      typeDesc.Assign(buffer.Elements(), typeDescLength);
-      mimeInfoMac->SetDescription(typeDesc);
+    if (cfType) {
+      CFStringRef cfTypeDesc = NULL;
+      if (::LSCopyKindStringForMIMEType(cfType, &cfTypeDesc) == noErr) {
+        nsAutoTArray<UniChar, 255> buffer;
+        CFIndex typeDescLength = ::CFStringGetLength(cfTypeDesc);
+        buffer.SetLength(typeDescLength);
+        ::CFStringGetCharacters(cfTypeDesc, CFRangeMake(0, typeDescLength),
+                                buffer.Elements());
+        nsAutoString typeDesc;
+        typeDesc.Assign(buffer.Elements(), typeDescLength);
+        mimeInfoMac->SetDescription(typeDesc);
+      }
+      if (cfTypeDesc) {
+        ::CFRelease(cfTypeDesc);
+      }
+      ::CFRelease(cfType);
     }
-    if (cfTypeDesc) {
-      ::CFRelease(cfTypeDesc);
-    }
-    ::CFRelease(cfType);
   }
 
   PR_LOG(mLog, PR_LOG_DEBUG, ("OS gave us: type '%s' found '%i'\n", mimeType.get(), *aFound));
 
   [localPool release];
-  return mimeInfoMac;
+  return mimeInfoMac.forget();
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSNULL;
 }

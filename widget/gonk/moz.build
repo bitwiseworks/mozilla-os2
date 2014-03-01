@@ -1,0 +1,61 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# Copyright 2013 Mozilla Foundation and Mozilla contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+MODULE = 'widget'
+
+EXPORTS += [
+    'OrientationObserver.h',
+]
+
+DIRS += ['libdisplay']
+
+CPP_SOURCES += [
+    'EventHub.cpp',
+    'Framebuffer.cpp',
+    'GonkMemoryPressureMonitoring.cpp',
+    'Input.cpp',
+    'InputApplication.cpp',
+    'InputDispatcher.cpp',
+    'InputListener.cpp',
+    'InputReader.cpp',
+    'InputTransport.cpp',
+    'InputWindow.cpp',
+    'KeyCharacterMap.cpp',
+    'KeyLayoutMap.cpp',
+    'Keyboard.cpp',
+    'OrientationObserver.cpp',
+    'PixelFormat.cpp',
+    'PointerController.cpp',
+    'PropertyMap.cpp',
+    'SpriteController.cpp',
+    'Static.cpp',
+    'String16.cpp',
+    'String8.cpp',
+    'Timers.cpp',
+    'Tokenizer.cpp',
+    'Unicode.cpp',
+    'VirtualKeyMap.cpp',
+    'nsAppShell.cpp',
+    'nsIdleServiceGonk.cpp',
+    'nsLookAndFeel.cpp',
+    'nsWidgetFactory.cpp',
+    'nsWindow.cpp',
+]
+
+if CONFIG['ANDROID_VERSION'] == '15':
+    CPP_SOURCES += [
+        'HwcComposer2D.cpp'
+    ]

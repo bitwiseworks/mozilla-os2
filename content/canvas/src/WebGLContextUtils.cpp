@@ -9,14 +9,13 @@
 
 #include "prprf.h"
 
-#include "nsIJSContextStack.h"
 #include "jsapi.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIVariant.h"
+#include "nsCxPusher.h"
 
 #include "nsIDOMEvent.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMDataContainerEvent.h"
 
 #include "mozilla/Preferences.h"
@@ -47,15 +46,12 @@ WebGLContext::GenerateWarning(const char *fmt, va_list ap)
 
     // no need to print to stderr, as JS_ReportWarning takes care of this for us.
 
-    nsCOMPtr<nsIJSContextStack> stack = do_GetService("@mozilla.org/js/xpc/ContextStack;1");
-    JSContext* ccx = nullptr;
-    if (stack && NS_SUCCEEDED(stack->Peek(&ccx)) && ccx) {
-        JS_ReportWarning(ccx, "WebGL: %s", buf);
-        if (!ShouldGenerateWarnings()) {
-            JS_ReportWarning(ccx,
-                "WebGL: No further warnings will be reported for this WebGL context "
-                "(already reported %d warnings)", mAlreadyGeneratedWarnings);
-        }
+    AutoJSContext cx;
+    JS_ReportWarning(cx, "WebGL: %s", buf);
+    if (!ShouldGenerateWarnings()) {
+        JS_ReportWarning(cx,
+            "WebGL: No further warnings will be reported for this WebGL context "
+            "(already reported %d warnings)", mAlreadyGeneratedWarnings);
     }
 }
 
@@ -198,6 +194,13 @@ WebGLContext::IsTextureFormatCompressed(GLenum format)
         case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
         case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
         case LOCAL_GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        case LOCAL_GL_ATC_RGB:
+        case LOCAL_GL_ATC_RGBA_EXPLICIT_ALPHA:
+        case LOCAL_GL_ATC_RGBA_INTERPOLATED_ALPHA:
+        case LOCAL_GL_COMPRESSED_RGB_PVRTC_4BPPV1:
+        case LOCAL_GL_COMPRESSED_RGB_PVRTC_2BPPV1:
+        case LOCAL_GL_COMPRESSED_RGBA_PVRTC_4BPPV1:
+        case LOCAL_GL_COMPRESSED_RGBA_PVRTC_2BPPV1:
             return true;
     }
 

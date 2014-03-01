@@ -9,35 +9,29 @@ VPATH       = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE      = dom
 LIBRARY_NAME    = domsystemunix_s
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
 EXPORT_LIBRARY = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 
 ifdef MOZ_MAEMO_LIBLOCATION
-        CPPSRCS         += MaemoLocationProvider.cpp
         LOCAL_INCLUDES  += $(MOZ_PLATFORM_MAEMO_CFLAGS) \
                            -I$(topsrcdir)/dom/src/geolocation \
                            $(NULL)
 endif
 
 ifdef MOZ_PLATFORM_MAEMO
-CPPSRCS += nsHapticFeedback.cpp
 LOCAL_INCLUDES  += $(MOZ_DBUS_CFLAGS) \
                    $(NULL)
 endif
 ifdef MOZ_ENABLE_QTMOBILITY
-MOCSRCS         += moc_QTMLocationProvider.cpp
-CPPSRCS         += $(MOCSRCS) \
-                   QTMLocationProvider.cpp \
-                   $(NULL)
 LOCAL_INCLUDES  += $(MOZ_QT_CFLAGS) \
                    -I$(topsrcdir)/dom/src/geolocation \
                    $(NULL)

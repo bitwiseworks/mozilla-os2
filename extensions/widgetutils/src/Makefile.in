@@ -10,14 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= widgetutils
 XPI_NAME	= widgetutils
-LIBRARY_NAME    = widgetutils
 SHORT_LIBNAME = widgetutils
 FORCE_SHARED_LIB = 1
 IS_COMPONENT = 1
-
-CPPSRCS		= nsWidgetUtils.cpp
 
 EXTRA_DSO_LDOPTS = \
 	$(XPCOM_GLUE_LDOPTS) \

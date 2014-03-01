@@ -47,6 +47,10 @@ public:
     virtual nsresult ResumeSend() = 0;
     virtual nsresult ResumeRecv() = 0;
 
+    // called by a transaction to force a "read from network" iteration
+    // even if not scheduled by socket associated with connection
+    virtual nsresult ForceRecv() = 0;
+
     // After a connection has had ResumeSend() called by a transaction,
     // and it is ready to write to the network it may need to know the
     // transaction that has data to write. This is only an issue for
@@ -124,6 +128,10 @@ public:
     // The number of transaction bytes written out on this HTTP Connection, does
     // not count CONNECT tunnel setup
     virtual int64_t BytesWritten() = 0;
+
+    // Update the callbacks used to provide security info. May be called on
+    // any thread.
+    virtual void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks) = 0;
 };
 
 #define NS_DECL_NSAHTTPCONNECTION(fwdObject)                    \
@@ -171,6 +179,12 @@ public:
             return NS_ERROR_FAILURE;       \
         return (fwdObject)->ResumeRecv();  \
     }                                      \
+    nsresult ForceRecv()                   \
+    {                                      \
+        if (!(fwdObject))                  \
+            return NS_ERROR_FAILURE;       \
+        return (fwdObject)->ForceRecv();   \
+    }                                      \
     nsISocketTransport *Transport()        \
     {                                      \
         if (!(fwdObject))                  \
@@ -195,6 +209,11 @@ public:
         return (fwdObject)->Classify(newclass);             \
     }                                                       \
     int64_t BytesWritten()                                  \
-    {     return fwdObject ? (fwdObject)->BytesWritten() : 0; }
+    {     return fwdObject ? (fwdObject)->BytesWritten() : 0; } \
+    void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks) \
+    {                                                       \
+        if (fwdObject)                                      \
+            (fwdObject)->SetSecurityCallbacks(aCallbacks);  \
+    }
 
 #endif // nsAHttpConnection_h__

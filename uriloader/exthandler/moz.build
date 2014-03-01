@@ -1,0 +1,113 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+TEST_DIRS += ['tests']
+
+XPIDL_SOURCES += [
+    'nsCExternalHandlerService.idl',
+    'nsIContentDispatchChooser.idl',
+    'nsIExternalHelperAppService.idl',
+    'nsIExternalProtocolService.idl',
+    'nsIExternalSharingAppService.idl',
+    'nsIExternalURLHandlerService.idl',
+    'nsIHandlerService.idl',
+    'nsIHelperAppLauncherDialog.idl',
+]
+
+MODULE = 'exthandler'
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    osdir = 'os2'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    osdir = 'win'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    osdir = 'win'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    osdir = 'android'
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    osdir = 'gonk'
+else:
+    osdir = 'unix'
+
+EXPORTS += [
+    osdir + '/nsOSHelperAppService.h'
+]
+
+EXPORTS += [
+    'nsExternalHelperAppService.h',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    EXPORTS += [
+        'nsExternalSharingAppService.h',
+        'nsExternalURLHandlerService.h',
+    ]
+
+if CONFIG['MOZ_ENABLE_MEEGOTOUCHSHARE']:
+    EXPORTS += ['nsExternalSharingAppService.h']
+
+EXPORTS.mozilla.dom += [
+    'ExternalHelperAppChild.h',
+    'ExternalHelperAppParent.h',
+]
+
+CPP_SOURCES += [
+    'ExternalHelperAppChild.cpp',
+    'ExternalHelperAppParent.cpp',
+    'nsExternalHelperAppService.cpp',
+    'nsExternalProtocolHandler.cpp',
+    'nsLocalHandlerApp.cpp',
+    'nsMIMEInfoImpl.cpp',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    # TODO: CMMSRCS go here
+    pass
+else:
+    CPP_SOURCES += [
+        'nsOSHelperAppService.cpp',
+    ]
+
+if CONFIG['MOZ_ENABLE_GTK']:
+    CPP_SOURCES += [
+        'nsGNOMERegistry.cpp',
+        'nsMIMEInfoUnix.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    CPP_SOURCES += [
+        'nsMIMEInfoAndroid.cpp',
+        'nsAndroidHandlerApp.cpp',
+        'nsExternalSharingAppService.cpp',
+        'nsExternalURLHandlerService.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
+    CPP_SOURCES += [
+        'nsGNOMERegistry.cpp',
+        'nsMIMEInfoUnix.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+    CPP_SOURCES += [
+        'nsMIMEInfoWin.cpp',
+    ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    CPP_SOURCES += [
+        'nsMIMEInfoOS2.cpp',
+    ]
+
+if CONFIG['MOZ_ENABLE_DBUS']:
+    CPP_SOURCES += [
+        'nsDBusHandlerApp.cpp',
+    ]
+
+if CONFIG['MOZ_ENABLE_MEEGOTOUCHSHARE']:
+    CPP_SOURCES += [
+        'nsMeegoExternalSharingAppService.cpp',
+    ]
+
+if CONFIG['MOZ_ENABLE_CONTENTACTION']:
+    CPP_SOURCES += [
+        'nsContentHandlerApp.cpp',
+    ]

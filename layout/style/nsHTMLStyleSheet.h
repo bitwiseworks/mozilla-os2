@@ -12,62 +12,46 @@
 #ifndef nsHTMLStyleSheet_h_
 #define nsHTMLStyleSheet_h_
 
-#include "mozilla/Attributes.h"
-
-#include "nsIStyleSheet.h"
-#include "nsIStyleRuleProcessor.h"
-#include "nsIStyleRule.h"
-#include "pldhash.h"
-#include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 #include "nsColor.h"
+#include "nsCOMPtr.h"
+#include "nsIStyleRule.h"
+#include "nsIStyleRuleProcessor.h"
+#include "nsIStyleSheet.h"
+#include "pldhash.h"
 #include "mozilla/Attributes.h"
+#include "nsString.h"
 
 class nsMappedAttributes;
 
-class nsHTMLStyleSheet MOZ_FINAL : public nsIStyleSheet,
-                                   public nsIStyleRuleProcessor
+class nsHTMLStyleSheet MOZ_FINAL : public nsIStyleRuleProcessor
 {
 public:
-  nsHTMLStyleSheet(nsIURI* aURL, nsIDocument* aDocument);
+  nsHTMLStyleSheet(nsIDocument* aDocument);
+
+  void SetOwningDocument(nsIDocument* aDocument);
 
   NS_DECL_ISUPPORTS
 
-  // nsIStyleSheet api
-  virtual nsIURI* GetSheetURI() const;
-  virtual nsIURI* GetBaseURI() const;
-  virtual void GetTitle(nsString& aTitle) const;
-  virtual void GetType(nsString& aType) const;
-  virtual bool HasRules() const;
-  virtual bool IsApplicable() const;
-  virtual void SetEnabled(bool aEnabled);
-  virtual bool IsComplete() const;
-  virtual void SetComplete();
-  virtual nsIStyleSheet* GetParentSheet() const;  // will be null
-  virtual nsIDocument* GetOwningDocument() const;
-  virtual void SetOwningDocument(nsIDocument* aDocumemt);
-#ifdef DEBUG
-  virtual void List(FILE* out = stdout, int32_t aIndent = 0) const;
-#endif
-
   // nsIStyleRuleProcessor API
-  virtual void RulesMatching(ElementRuleProcessorData* aData);
-  virtual void RulesMatching(PseudoElementRuleProcessorData* aData);
-  virtual void RulesMatching(AnonBoxRuleProcessorData* aData);
+  virtual void RulesMatching(ElementRuleProcessorData* aData) MOZ_OVERRIDE;
+  virtual void RulesMatching(PseudoElementRuleProcessorData* aData) MOZ_OVERRIDE;
+  virtual void RulesMatching(AnonBoxRuleProcessorData* aData) MOZ_OVERRIDE;
 #ifdef MOZ_XUL
-  virtual void RulesMatching(XULTreeRuleProcessorData* aData);
+  virtual void RulesMatching(XULTreeRuleProcessorData* aData) MOZ_OVERRIDE;
 #endif
-  virtual nsRestyleHint HasStateDependentStyle(StateRuleProcessorData* aData);
-  virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData);
+  virtual nsRestyleHint HasStateDependentStyle(StateRuleProcessorData* aData) MOZ_OVERRIDE;
+  virtual bool HasDocumentStateDependentStyle(StateRuleProcessorData* aData) MOZ_OVERRIDE;
   virtual nsRestyleHint
-    HasAttributeDependentStyle(AttributeRuleProcessorData* aData);
-  virtual bool MediumFeaturesChanged(nsPresContext* aPresContext);
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE;
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE;
+    HasAttributeDependentStyle(AttributeRuleProcessorData* aData) MOZ_OVERRIDE;
+  virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) MOZ_OVERRIDE;
+  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
   size_t DOMSizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
-  void Reset(nsIURI* aURL);
+  void Reset();
   nsresult SetLinkColor(nscolor aColor);
   nsresult SetActiveLinkColor(nscolor aColor);
   nsresult SetVisitedLinkColor(nscolor aColor);
@@ -76,6 +60,8 @@ public:
   already_AddRefed<nsMappedAttributes>
     UniqueMappedAttributes(nsMappedAttributes* aMapped);
   void DropMappedAttributes(nsMappedAttributes* aMapped);
+
+  nsIStyleRule* LangRuleFor(const nsString& aLanguage);
 
 private: 
   nsHTMLStyleSheet(const nsHTMLStyleSheet& aCopy) MOZ_DELETE;
@@ -92,9 +78,9 @@ private:
     NS_DECL_ISUPPORTS
 
     // nsIStyleRule interface
-    virtual void MapRuleInfoInto(nsRuleData* aRuleData);
+    virtual void MapRuleInfoInto(nsRuleData* aRuleData) MOZ_OVERRIDE;
   #ifdef DEBUG
-    virtual void List(FILE* out = stdout, int32_t aIndent = 0) const;
+    virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
   #endif
 
     nscolor             mColor;
@@ -113,9 +99,9 @@ private:
     NS_DECL_ISUPPORTS
 
     // nsIStyleRule interface
-    virtual void MapRuleInfoInto(nsRuleData* aRuleData) = 0;
+    virtual void MapRuleInfoInto(nsRuleData* aRuleData) MOZ_OVERRIDE = 0;
   #ifdef DEBUG
-    virtual void List(FILE* out = stdout, int32_t aIndent = 0) const;
+    virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
   #endif
   };
 
@@ -126,7 +112,7 @@ private:
   public:
     TableTHRule() {}
 
-    virtual void MapRuleInfoInto(nsRuleData* aRuleData);
+    virtual void MapRuleInfoInto(nsRuleData* aRuleData) MOZ_OVERRIDE;
   };
 
   // Rule to handle quirk table colors
@@ -134,10 +120,29 @@ private:
   public:
     TableQuirkColorRule() {}
 
-    virtual void MapRuleInfoInto(nsRuleData* aRuleData);
+    virtual void MapRuleInfoInto(nsRuleData* aRuleData) MOZ_OVERRIDE;
   };
 
-  nsCOMPtr<nsIURI>        mURL;
+public: // for mLangRuleTable structures only
+
+  // Rule to handle xml:lang attributes, of which we have exactly one
+  // per language string, maintained in mLangRuleTable.
+  class LangRule MOZ_FINAL : public nsIStyleRule {
+  public:
+    LangRule(const nsSubstring& aLang) : mLang(aLang) {}
+
+    NS_DECL_ISUPPORTS
+
+    // nsIStyleRule interface
+    virtual void MapRuleInfoInto(nsRuleData* aRuleData) MOZ_OVERRIDE;
+  #ifdef DEBUG
+    virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
+  #endif
+
+    nsString mLang;
+  };
+
+private:
   nsIDocument*            mDocument;
   nsRefPtr<HTMLColorRule> mLinkRule;
   nsRefPtr<HTMLColorRule> mVisitedRule;
@@ -146,6 +151,7 @@ private:
   nsRefPtr<TableTHRule>   mTableTHRule;
 
   PLDHashTable            mMappedAttrTable;
+  PLDHashTable            mLangRuleTable;
 };
 
 #endif /* !defined(nsHTMLStyleSheet_h_) */

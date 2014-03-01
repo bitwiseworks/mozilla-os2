@@ -30,7 +30,6 @@
 #include "nsAutoPtr.h"
 
 #include "nsQuickSort.h"
-#include "prmem.h"
 #include "pldhash.h"
 
 #include "prefapi.h"
@@ -42,6 +41,7 @@
 
 #include "nsTArray.h"
 #include "nsRefPtrHashtable.h"
+#include "nsIMemoryReporter.h"
 
 namespace mozilla {
 
@@ -151,12 +151,77 @@ struct CacheData {
     bool defaultValueBool;
     int32_t defaultValueInt;
     uint32_t defaultValueUint;
+    float defaultValueFloat;
   };
 };
 
 static nsTArray<nsAutoPtr<CacheData> >* gCacheData = nullptr;
 static nsRefPtrHashtable<ValueObserverHashKey,
                          ValueObserver>* gObserverTable = nullptr;
+
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(PreferencesMallocSizeOf)
+
+static size_t
+SizeOfObserverEntryExcludingThis(ValueObserverHashKey* aKey,
+                                 const nsRefPtr<ValueObserver>& aData,
+                                 nsMallocSizeOfFun aMallocSizeOf,
+                                 void*)
+{
+  size_t n = 0;
+  n += aKey->mPrefName.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+  n += aData->mClosures.SizeOfExcludingThis(aMallocSizeOf);
+  return n;
+}
+
+// static
+int64_t
+Preferences::GetPreferencesMemoryUsed()
+{
+  NS_ENSURE_TRUE(InitStaticMembers(), 0);
+
+  size_t n = 0;
+  n += PreferencesMallocSizeOf(sPreferences);
+  if (gHashTable.ops) {
+    // pref keys are allocated in a private arena, which we count elsewhere.
+    // pref stringvals are allocated out of the same private arena.
+    n += PL_DHashTableSizeOfExcludingThis(&gHashTable, nullptr,
+                                          PreferencesMallocSizeOf);
+  }
+  if (gCacheData) {
+    n += gCacheData->SizeOfIncludingThis(PreferencesMallocSizeOf);
+    for (uint32_t i = 0, count = gCacheData->Length(); i < count; ++i) {
+      n += PreferencesMallocSizeOf((*gCacheData)[i]);
+    }
+  }
+  if (gObserverTable) {
+    n += PreferencesMallocSizeOf(gObserverTable);
+    n += gObserverTable->SizeOfExcludingThis(SizeOfObserverEntryExcludingThis,
+                                             PreferencesMallocSizeOf);
+  }
+  // We don't measure sRootBranch and sDefaultRootBranch here because
+  // DMD indicates they are not significant.
+  n += pref_SizeOfPrivateData(PreferencesMallocSizeOf);
+  return n;
+}
+
+NS_MEMORY_REPORTER_IMPLEMENT(Preferences,
+  "explicit/preferences",
+  KIND_HEAP,
+  UNITS_BYTES,
+  Preferences::GetPreferencesMemoryUsed,
+  "Memory used by the preferences system.")
+
+namespace {
+class AddPreferencesMemoryReporterRunnable : public nsRunnable
+{
+  NS_IMETHOD Run()
+  {
+    nsCOMPtr<nsIMemoryReporter> reporter =
+      new NS_MEMORY_REPORTER_NAME(Preferences);
+    return NS_RegisterMemoryReporter(reporter);
+  }
+};
+} // anonymous namespace
 
 // static
 Preferences*
@@ -187,6 +252,14 @@ Preferences::GetInstanceForService()
 
   gObserverTable = new nsRefPtrHashtable<ValueObserverHashKey, ValueObserver>();
   gObserverTable->Init();
+
+  // Preferences::GetInstanceForService() can be called from GetService(), and
+  // NS_RegisterMemoryReporter calls GetService(nsIMemoryReporter).  To avoid a
+  // potential recursive GetService() call, we can't register the memory
+  // reporter here; instead, do it off a runnable.
+  nsRefPtr<AddPreferencesMemoryReporterRunnable> runnable =
+    new AddPreferencesMemoryReporterRunnable();
+  NS_DispatchToMainThread(runnable);
 
   NS_ADDREF(sPreferences);
   return sPreferences;
@@ -317,6 +390,7 @@ Preferences::Init()
   rv = observerService->AddObserver(this, "profile-before-change", true);
 
   observerService->AddObserver(this, "load-extension-defaults", true);
+  observerService->AddObserver(this, "suspend_process_notification", true);
 
   return(rv);
 }
@@ -352,6 +426,11 @@ Preferences::Observe(nsISupports *aSubject, const char *aTopic,
   } else if (!nsCRT::strcmp(aTopic, "reload-default-prefs")) {
     // Reload the default prefs from file.
     pref_InitInitialObjects();
+  } else if (!nsCRT::strcmp(aTopic, "suspend_process_notification")) {
+    // Our process is being suspended. The OS may wake our process later,
+    // or it may kill the process. In case our process is going to be killed
+    // from the suspended state, we save preferences before suspending.
+    rv = SavePrefFile(nullptr);
   }
   return rv;
 }
@@ -440,7 +519,7 @@ ReadExtensionPrefs(nsIFile *aFile)
 
   bool more;
   while (NS_SUCCEEDED(rv = files->HasMore(&more)) && more) {
-    nsCAutoString entry;
+    nsAutoCString entry;
     rv = files->GetNext(entry);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -699,10 +778,8 @@ Preferences::WritePrefFile(nsIFile* aFile)
   if (NS_FAILED(rv)) 
       return rv;  
 
-  char** valueArray = (char **)PR_Calloc(sizeof(char *), gHashTable.entryCount);
-  if (!valueArray)
-    return NS_ERROR_OUT_OF_MEMORY;
-  
+  nsAutoArrayPtr<char*> valueArray(new char*[gHashTable.entryCount]);
+  memset(valueArray, 0, gHashTable.entryCount * sizeof(char*));
   pref_saveArgs saveArgs;
   saveArgs.prefArray = valueArray;
   saveArgs.saveTypes = SAVE_ALL;
@@ -724,7 +801,6 @@ Preferences::WritePrefFile(nsIFile* aFile)
       NS_Free(*walker);
     }
   }
-  PR_Free(valueArray);
 
   // tell the safe output stream to overwrite the real prefs file
   // (it'll abort if there were any errors during writing)
@@ -754,7 +830,7 @@ static nsresult openPrefFile(nsIFile* aFile)
   rv = inStr->Available(&fileSize64);
   if (NS_FAILED(rv))
     return rv;
-  NS_ENSURE_TRUE(fileSize64 <= PR_UINT32_MAX, NS_ERROR_FILE_TOO_BIG);
+  NS_ENSURE_TRUE(fileSize64 <= UINT32_MAX, NS_ERROR_FILE_TOO_BIG);
 
   uint32_t fileSize = (uint32_t)fileSize64;
   nsAutoArrayPtr<char> fileBuffer(new char[fileSize]);
@@ -788,7 +864,7 @@ static nsresult openPrefFile(nsIFile* aFile)
 static int
 pref_CompareFileNames(nsIFile* aFile1, nsIFile* aFile2, void* /*unused*/)
 {
-  nsCAutoString filename1, filename2;
+  nsAutoCString filename1, filename2;
   aFile1->GetNativeLeafName(filename1);
   aFile2->GetNativeLeafName(filename2);
 
@@ -826,7 +902,7 @@ pref_LoadPrefsInDir(nsIFile* aDir, char const *const *aSpecialFiles, uint32_t aS
   nsCOMPtr<nsIFile> prefFile;
 
   while (hasMoreElements && NS_SUCCEEDED(rv)) {
-    nsCAutoString leafName;
+    nsAutoCString leafName;
 
     rv = dirIterator->GetNext(getter_AddRefs(prefFile));
     if (NS_FAILED(rv)) {
@@ -919,7 +995,7 @@ static nsresult pref_LoadPrefsInDirList(const char *listId)
     if (!path)
       continue;
 
-    nsCAutoString leaf;
+    nsAutoCString leaf;
     path->GetNativeLeafName(leaf);
 
     // Do we care if a file provided by this process fails to load?
@@ -1111,6 +1187,21 @@ Preferences::GetInt(const char* aPref, int32_t* aResult)
 }
 
 // static
+nsresult
+Preferences::GetFloat(const char* aPref, float* aResult)
+{
+  NS_PRECONDITION(aResult, "aResult must not be NULL");
+  NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
+  nsAutoCString result;
+  nsresult rv = PREF_CopyCharPref(aPref, getter_Copies(result), false);
+  if (NS_SUCCEEDED(rv)) {
+    *aResult = result.ToFloat(&rv);
+  }
+
+  return rv;
+}
+
+// static
 nsAdoptingCString
 Preferences::GetCString(const char* aPref)
 {
@@ -1134,7 +1225,7 @@ Preferences::GetCString(const char* aPref, nsACString* aResult)
 {
   NS_PRECONDITION(aResult, "aResult must not be NULL");
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
-  nsCAutoString result;
+  nsAutoCString result;
   nsresult rv = PREF_CopyCharPref(aPref, getter_Copies(result), false);
   if (NS_SUCCEEDED(rv)) {
     *aResult = result;
@@ -1148,7 +1239,7 @@ Preferences::GetString(const char* aPref, nsAString* aResult)
 {
   NS_PRECONDITION(aResult, "aResult must not be NULL");
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
-  nsCAutoString result;
+  nsAutoCString result;
   nsresult rv = PREF_CopyCharPref(aPref, getter_Copies(result), false);
   if (NS_SUCCEEDED(rv)) {
     CopyUTF8toUTF16(result, *aResult);
@@ -1399,6 +1490,19 @@ Preferences::RegisterCallback(PrefChangedFunc aCallback,
 
 // static
 nsresult
+Preferences::RegisterCallbackAndCall(PrefChangedFunc aCallback,
+                                     const char* aPref,
+                                     void* aClosure)
+{
+  nsresult rv = RegisterCallback(aCallback, aPref, aClosure);
+  if (NS_SUCCEEDED(rv)) {
+    (*aCallback)(aPref, aClosure);
+  }
+  return rv;
+}
+
+// static
+nsresult
 Preferences::UnregisterCallback(PrefChangedFunc aCallback,
                                 const char* aPref,
                                 void* aClosure)
@@ -1492,6 +1596,29 @@ Preferences::AddUintVarCache(uint32_t* aCache,
   return RegisterCallback(UintVarChanged, aPref, data);
 }
 
+static int FloatVarChanged(const char* aPref, void* aClosure)
+{
+  CacheData* cache = static_cast<CacheData*>(aClosure);
+  *((float*)cache->cacheLocation) =
+    Preferences::GetFloat(aPref, cache->defaultValueFloat);
+  return 0;
+}
+
+// static
+nsresult
+Preferences::AddFloatVarCache(float* aCache,
+                             const char* aPref,
+                             float aDefault)
+{
+  NS_ASSERTION(aCache, "aCache must not be NULL");
+  *aCache = Preferences::GetFloat(aPref, aDefault);
+  CacheData* data = new CacheData();
+  data->cacheLocation = aCache;
+  data->defaultValueFloat = aDefault;
+  gCacheData->AppendElement(data);
+  return RegisterCallback(FloatVarChanged, aPref, data);
+}
+
 // static
 nsresult
 Preferences::GetDefaultBool(const char* aPref, bool* aResult)
@@ -1516,7 +1643,7 @@ Preferences::GetDefaultCString(const char* aPref, nsACString* aResult)
 {
   NS_PRECONDITION(aResult, "aResult must not be NULL");
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
-  nsCAutoString result;
+  nsAutoCString result;
   nsresult rv = PREF_CopyCharPref(aPref, getter_Copies(result), true);
   if (NS_SUCCEEDED(rv)) {
     *aResult = result;
@@ -1530,7 +1657,7 @@ Preferences::GetDefaultString(const char* aPref, nsAString* aResult)
 {
   NS_PRECONDITION(aResult, "aResult must not be NULL");
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
-  nsCAutoString result;
+  nsAutoCString result;
   nsresult rv = PREF_CopyCharPref(aPref, getter_Copies(result), true);
   if (NS_SUCCEEDED(rv)) {
     CopyUTF8toUTF16(result, *aResult);

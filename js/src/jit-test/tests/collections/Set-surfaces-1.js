@@ -30,3 +30,17 @@ function checkMethod(name, arity) {
 checkMethod("has", 1);
 checkMethod("add", 1);
 checkMethod("delete", 1);
+checkMethod("values", 0);
+checkMethod("entries", 0);
+
+var desc = Object.getOwnPropertyDescriptor(Set.prototype, "size");
+assertEq(desc.enumerable, false);
+assertEq(desc.configurable, true);
+assertEq(typeof desc.get, 'function');
+assertEq(desc.get.length, 0);
+assertEq(desc.set, undefined);
+checkMethod("clear", 0);
+
+// Set.prototype.keys, .values, and .iterator are the same function object
+assertEq(Set.prototype.keys, Set.prototype.values);
+assertEq(Set.prototype.iterator, Set.prototype.values);

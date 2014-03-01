@@ -1,7 +1,7 @@
 /*
  * Copyright © 1998-2004  David Turner and Werner Lemberg
  * Copyright © 2004,2007,2009,2010  Red Hat, Inc.
- * Copyright © 2011  Google, Inc.
+ * Copyright © 2011,2012  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -36,45 +36,8 @@
 #include "hb-unicode-private.hh"
 
 
-
 ASSERT_STATIC (sizeof (hb_glyph_info_t) == 20);
 ASSERT_STATIC (sizeof (hb_glyph_info_t) == sizeof (hb_glyph_position_t));
-
-
-/*
- * hb_segment_properties_t
- */
-
-typedef struct hb_segment_properties_t {
-    hb_direction_t      direction;
-    hb_script_t         script;
-    hb_language_t       language;
-    ASSERT_POD ();
-} hb_segment_properties_t;
-
-#define _HB_BUFFER_PROPS_DEFAULT { HB_DIRECTION_INVALID, HB_SCRIPT_INVALID, HB_LANGUAGE_INVALID }
-
-static inline hb_bool_t
-hb_segment_properties_equal (const hb_segment_properties_t *a,
-			     const hb_segment_properties_t *b)
-{
-  return a->direction == b->direction &&
-	 a->script    == b->script    &&
-	 a->language  == b->language;
-}
-
-
-#if 0
-static inline unsigned int
-hb_segment_properties_hash (const hb_segment_properties_t *p)
-{
-  /* TODO improve */
-  return (unsigned int) p->direction +
-	 (unsigned int) p->script +
-	 (intptr_t) (p->language);
-}
-#endif
-
 
 
 /*
@@ -89,8 +52,11 @@ struct hb_buffer_t {
 
   hb_unicode_funcs_t *unicode; /* Unicode functions */
   hb_segment_properties_t props; /* Script, language, direction */
+  hb_buffer_flags_t flags; /* BOT / EOT / etc. */
 
   /* Buffer contents */
+
+  hb_buffer_content_type_t content_type;
 
   bool in_error; /* Allocation failed */
   bool have_output; /* Whether we have an output buffer going on */
@@ -115,13 +81,23 @@ struct hb_buffer_t {
   inline hb_glyph_info_t prev (void) const { return info[out_len - 1]; }
 
   unsigned int serial;
+
+  /* These reflect current allocations of the bytes in glyph_info_t's var1 and var2. */
   uint8_t allocated_var_bytes[8];
   const char *allocated_var_owner[8];
+
+  /* Text before / after the main buffer contents.
+   * Always in Unicode, and ordered outward.
+   * Index 0 is for "pre-context", 1 for "post-context". */
+  static const unsigned int CONTEXT_LENGTH = 5;
+  hb_codepoint_t context[2][CONTEXT_LENGTH];
+  unsigned int context_len[2];
 
 
   /* Methods */
 
   HB_INTERNAL void reset (void);
+  HB_INTERNAL void clear (void);
 
   inline unsigned int backtrack_len (void) const
   { return have_output? out_len : idx; }
@@ -129,18 +105,20 @@ struct hb_buffer_t {
 
   HB_INTERNAL void allocate_var (unsigned int byte_i, unsigned int count, const char *owner);
   HB_INTERNAL void deallocate_var (unsigned int byte_i, unsigned int count, const char *owner);
+  HB_INTERNAL void assert_var (unsigned int byte_i, unsigned int count, const char *owner);
   HB_INTERNAL void deallocate_var_all (void);
 
   HB_INTERNAL void add (hb_codepoint_t  codepoint,
-			hb_mask_t       mask,
 			unsigned int    cluster);
+  HB_INTERNAL void add_info (const hb_glyph_info_t &glyph_info);
 
   HB_INTERNAL void reverse_range (unsigned int start, unsigned int end);
   HB_INTERNAL void reverse (void);
   HB_INTERNAL void reverse_clusters (void);
-  HB_INTERNAL void guess_properties (void);
+  HB_INTERNAL void guess_segment_properties (void);
 
   HB_INTERNAL void swap_buffers (void);
+  HB_INTERNAL void remove_output (void);
   HB_INTERNAL void clear_output (void);
   HB_INTERNAL void clear_positions (void);
 
@@ -151,11 +129,26 @@ struct hb_buffer_t {
   HB_INTERNAL void replace_glyph (hb_codepoint_t glyph_index);
   /* Makes a copy of the glyph at idx to output and replace glyph_index */
   HB_INTERNAL void output_glyph (hb_codepoint_t glyph_index);
+  HB_INTERNAL void output_info (const hb_glyph_info_t &glyph_info);
   /* Copies glyph at idx to output but doesn't advance idx */
   HB_INTERNAL void copy_glyph (void);
   /* Copies glyph at idx to output and advance idx.
    * If there's no output, just advance idx. */
-  HB_INTERNAL void next_glyph (void);
+  inline void
+  next_glyph (void)
+  {
+    if (have_output)
+    {
+      if (unlikely (out_info != info || out_len != idx)) {
+	if (unlikely (!make_room_for (1, 1))) return;
+	out_info[out_len] = info[idx];
+      }
+      out_len++;
+    }
+
+    idx++;
+  }
+
   /* Advance idx without copying to output. */
   inline void skip_glyph (void) { idx++; }
 
@@ -188,6 +181,8 @@ struct hb_buffer_t {
   HB_INTERNAL bool make_room_for (unsigned int num_in, unsigned int num_out);
 
   HB_INTERNAL void *get_scratch_buffer (unsigned int *size);
+
+  inline void clear_context (unsigned int side) { context_len[side] = 0; }
 };
 
 
@@ -198,6 +193,8 @@ struct hb_buffer_t {
 	HB_BUFFER_XALLOCATE_VAR (b, allocate_var, var (), #var)
 #define HB_BUFFER_DEALLOCATE_VAR(b, var) \
 	HB_BUFFER_XALLOCATE_VAR (b, deallocate_var, var (), #var)
+#define HB_BUFFER_ASSERT_VAR(b, var) \
+	HB_BUFFER_XALLOCATE_VAR (b, assert_var, var (), #var)
 
 
 #endif /* HB_BUFFER_PRIVATE_HH */

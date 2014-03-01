@@ -13,8 +13,10 @@
 #include "prnetdb.h"
 #include "prio.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/net/DNS.h"
 
 using namespace mozilla;
+using namespace mozilla::net;
 
 static NS_DEFINE_CID(kSocketTransportServiceCID, NS_SOCKETTRANSPORTSERVICE_CID);
 
@@ -43,6 +45,7 @@ nsServerSocket::nsServerSocket()
   : mLock("nsServerSocket.mLock")
   , mFD(nullptr)
   , mAttached(false)
+  , mKeepWhenOffline(false)
 {
   // we want to be able to access the STS directly, and it may not have been
   // constructed yet.  the STS constructor sets gSocketTransportService.
@@ -167,9 +170,11 @@ nsServerSocket::OnSocketReady(PRFileDesc *fd, int16_t outFlags)
   }
 
   PRFileDesc *clientFD;
-  PRNetAddr clientAddr;
+  PRNetAddr prClientAddr;
+  NetAddr clientAddr;
 
-  clientFD = PR_Accept(mFD, &clientAddr, PR_INTERVAL_NO_WAIT);
+  clientFD = PR_Accept(mFD, &prClientAddr, PR_INTERVAL_NO_WAIT);
+  PRNetAddrToNetAddr(&prClientAddr, &clientAddr);
   if (!clientFD)
   {
     NS_WARNING("PR_Accept failed");
@@ -222,6 +227,18 @@ nsServerSocket::OnSocketDetached(PRFileDesc *fd)
   }
 }
 
+void
+nsServerSocket::IsLocal(bool *aIsLocal)
+{
+  // If bound to loopback, this server socket only accepts local connections.
+  *aIsLocal = PR_IsNetAddrType(&mAddr, PR_IpAddrLoopback);
+}
+
+void
+nsServerSocket::KeepWhenOffline(bool *aKeepWhenOffline)
+{
+  *aKeepWhenOffline = mKeepWhenOffline;
+}
 
 //-----------------------------------------------------------------------------
 // nsServerSocket::nsISupports
@@ -237,17 +254,25 @@ NS_IMPL_THREADSAFE_ISUPPORTS1(nsServerSocket, nsIServerSocket)
 NS_IMETHODIMP
 nsServerSocket::Init(int32_t aPort, bool aLoopbackOnly, int32_t aBackLog)
 {
+  return InitSpecialConnection(aPort, aLoopbackOnly ? LoopbackOnly : 0, aBackLog);
+}
+
+NS_IMETHODIMP
+nsServerSocket::InitSpecialConnection(int32_t aPort, nsServerSocketFlag aFlags,
+                                      int32_t aBackLog)
+{
   PRNetAddrValue val;
   PRNetAddr addr;
 
   if (aPort < 0)
     aPort = 0;
-  if (aLoopbackOnly)
+  if (aFlags & nsIServerSocket::LoopbackOnly)
     val = PR_IpAddrLoopback;
   else
     val = PR_IpAddrAny;
   PR_SetNetAddr(val, PR_AF_INET, aPort, &addr);
 
+  mKeepWhenOffline = ((aFlags & nsIServerSocket::KeepWhenOffline) != 0);
   return InitWithAddress(&addr, aBackLog);
 }
 
@@ -335,7 +360,7 @@ class ServerSocketListenerProxy MOZ_FINAL : public nsIServerSocketListener
 {
 public:
   ServerSocketListenerProxy(nsIServerSocketListener* aListener)
-    : mListener(aListener)
+    : mListener(new nsMainThreadPtrHolder<nsIServerSocketListener>(aListener))
     , mTargetThread(do_GetCurrentThread())
   { }
 
@@ -345,7 +370,7 @@ public:
   class OnSocketAcceptedRunnable : public nsRunnable
   {
   public:
-    OnSocketAcceptedRunnable(nsIServerSocketListener* aListener,
+    OnSocketAcceptedRunnable(nsMainThreadPtrHolder<nsIServerSocketListener>* aListener,
                              nsIServerSocket* aServ,
                              nsISocketTransport* aTransport)
       : mListener(aListener)
@@ -356,7 +381,7 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    nsCOMPtr<nsIServerSocketListener> mListener;
+    nsMainThreadPtrHandle<nsIServerSocketListener> mListener;
     nsCOMPtr<nsIServerSocket> mServ;
     nsCOMPtr<nsISocketTransport> mTransport;
   };
@@ -364,7 +389,7 @@ public:
   class OnStopListeningRunnable : public nsRunnable
   {
   public:
-    OnStopListeningRunnable(nsIServerSocketListener* aListener,
+    OnStopListeningRunnable(nsMainThreadPtrHolder<nsIServerSocketListener>* aListener,
                             nsIServerSocket* aServ,
                             nsresult aStatus)
       : mListener(aListener)
@@ -375,13 +400,13 @@ public:
     NS_DECL_NSIRUNNABLE
 
   private:
-    nsCOMPtr<nsIServerSocketListener> mListener;
+    nsMainThreadPtrHandle<nsIServerSocketListener> mListener;
     nsCOMPtr<nsIServerSocket> mServ;
     nsresult mStatus;
   };
 
 private:
-  nsCOMPtr<nsIServerSocketListener> mListener;
+  nsMainThreadPtrHandle<nsIServerSocketListener> mListener;
   nsCOMPtr<nsIEventTarget> mTargetThread;
 };
 

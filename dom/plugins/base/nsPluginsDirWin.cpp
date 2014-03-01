@@ -11,7 +11,8 @@
   by Alex Musil
  */
 
-#include "mozilla/Util.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Util.h" // ArrayLength
 
 #include "nsPluginsDir.h"
 #include "prlink.h"
@@ -25,6 +26,41 @@
 #include "nsString.h"
 #include "nsIFile.h"
 #include "nsUnicharUtils.h"
+
+#include <shlwapi.h>
+#define SHOCKWAVE_BASE_FILENAME L"np32dsw"
+/**
+ * Determines whether or not SetDllDirectory should be called for this plugin.
+ *
+ * @param pluginFilePath The full path of the plugin file
+ * @return true if SetDllDirectory can be called for the plugin
+ */
+bool
+ShouldProtectPluginCurrentDirectory(LPCWSTR pluginFilePath)
+{
+  LPCWSTR passedInFilename = PathFindFileName(pluginFilePath);
+  if (!passedInFilename) {
+    return true;
+  }
+
+  // Somewhere in the middle of 11.6 version of Shockwave, naming of the DLL
+  // after its version number is introduced.
+  if (!wcsicmp(passedInFilename, SHOCKWAVE_BASE_FILENAME L".dll")) {
+    return false;
+  }
+
+  // Shockwave versions before 1202122 will break if you call SetDllDirectory
+  const uint64_t kFixedShockwaveVersion = 1202122;
+  uint64_t version;
+  int found = swscanf(passedInFilename, SHOCKWAVE_BASE_FILENAME L"_%llu.dll",
+                      &version);
+  if (found && version < kFixedShockwaveVersion) {
+    return false;
+  }
+
+  // We always want to call SetDllDirectory otherwise
+  return true;
+}
 
 using namespace mozilla;
 
@@ -188,7 +224,7 @@ static bool CanLoadPlugin(const PRUnichar* aBinaryPath)
 // The file name must be in the form "np*.dll"
 bool nsPluginsDir::IsPluginFile(nsIFile* file)
 {
-  nsCAutoString path;
+  nsAutoCString path;
   if (NS_FAILED(file->GetNativePath(path)))
     return false;
 
@@ -205,8 +241,8 @@ bool nsPluginsDir::IsPluginFile(nsIFile* file)
   if (extension)
     ++extension;
 
-  uint32_t fullLength = PL_strlen(filename);
-  uint32_t extLength = PL_strlen(extension);
+  uint32_t fullLength = strlen(filename);
+  uint32_t extLength = extension ? strlen(extension) : 0;
   if (fullLength >= 7 && extLength == 3) {
     if (!PL_strncasecmp(filename, "np", 2) && !PL_strncasecmp(extension, "dll", 3)) {
       // don't load OJI-based Java plugins
@@ -244,17 +280,13 @@ nsresult nsPluginFile::LoadPlugin(PRLibrary **outLibrary)
 
   bool protectCurrentDirectory = true;
 
-  nsAutoString pluginFolderPath;
-  mPlugin->GetPath(pluginFolderPath);
+  nsAutoString pluginFilePath;
+  mPlugin->GetPath(pluginFilePath);
+  protectCurrentDirectory =
+    ShouldProtectPluginCurrentDirectory(pluginFilePath.BeginReading());
 
-  int32_t idx = pluginFolderPath.RFindChar('\\');
-  if (kNotFound == idx)
-    return NS_ERROR_FILE_INVALID_PATH;
-
-  if (Substring(pluginFolderPath, idx).LowerCaseEqualsLiteral("\\np32dsw.dll")) {
-    protectCurrentDirectory = false;
-  }
-
+  nsAutoString pluginFolderPath = pluginFilePath;
+  int32_t idx = pluginFilePath.RFindChar('\\');
   pluginFolderPath.SetLength(idx);
 
   BOOL restoreOrigDir = FALSE;
@@ -280,7 +312,7 @@ nsresult nsPluginFile::LoadPlugin(PRLibrary **outLibrary)
   }
 
   if (restoreOrigDir) {
-    BOOL bCheck = SetCurrentDirectoryW(aOrigDir);
+    DebugOnly<BOOL> bCheck = SetCurrentDirectoryW(aOrigDir);
     NS_ASSERTION(bCheck, "Error in Loading plugin");
   }
 
@@ -321,7 +353,7 @@ nsresult nsPluginFile::GetPluginInfo(nsPluginInfo& info, PRLibrary **outLibrary)
   if (!verbuf)
     return NS_ERROR_OUT_OF_MEMORY;
 
-  if (::GetFileVersionInfoW(lpFilepath, NULL, versionsize, verbuf))
+  if (::GetFileVersionInfoW(lpFilepath, 0, versionsize, verbuf))
   {
     // TODO: get appropriately-localized info from plugin file
     UINT lang = 1033; // language = English

@@ -9,7 +9,12 @@
 #include "2D.h"
 #include "skia/SkCanvas.h"
 #include "skia/SkDashPathEffect.h"
+#include "skia/SkShader.h"
+#ifdef USE_SKIA_GPU
+#include "skia/GrTypes.h"
+#endif
 #include "mozilla/Assertions.h"
+#include <vector>
 
 namespace mozilla {
 namespace gfx {
@@ -34,6 +39,27 @@ GfxFormatToSkiaConfig(SurfaceFormat format)
   return SkBitmap::kARGB_8888_Config;
 }
 
+#ifdef USE_SKIA_GPU
+static inline GrPixelConfig
+GfxFormatToGrConfig(SurfaceFormat format)
+{
+  switch (format)
+  {
+    case FORMAT_B8G8R8A8:
+      return kBGRA_8888_GrPixelConfig;
+    case FORMAT_B8G8R8X8:
+      // We probably need to do something here.
+      return kBGRA_8888_GrPixelConfig;
+    case FORMAT_R5G6B5:
+      return kRGB_565_GrPixelConfig;
+    case FORMAT_A8:
+      return kAlpha_8_GrPixelConfig;
+    default:
+      return kRGBA_8888_GrPixelConfig;
+  }
+
+}
+#endif
 static inline void
 GfxMatrixToSkiaMatrix(const Matrix& mat, SkMatrix& retval)
 {
@@ -111,6 +137,130 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
 
   aPaint.setStyle(SkPaint::kStroke_Style);
   return true;
+}
+
+static inline void
+ConvertBGRXToBGRA(unsigned char* aData, const IntSize &aSize, int32_t aStride)
+{
+    uint32_t* pixel = reinterpret_cast<uint32_t*>(aData);
+
+    for (int row = 0; row < aSize.height; ++row) {
+        for (int column = 0; column < aSize.width; ++column) {
+            pixel[column] |= 0xFF000000;
+        }
+        pixel += (aStride/4);
+    }
+}
+
+static inline SkXfermode::Mode
+GfxOpToSkiaOp(CompositionOp op)
+{
+  switch (op)
+  {
+    case OP_OVER:
+      return SkXfermode::kSrcOver_Mode;
+    case OP_ADD:
+      return SkXfermode::kPlus_Mode;
+    case OP_ATOP:
+      return SkXfermode::kSrcATop_Mode;
+    case OP_OUT:
+      return SkXfermode::kSrcOut_Mode;
+    case OP_IN:
+      return SkXfermode::kSrcIn_Mode;
+    case OP_SOURCE:
+      return SkXfermode::kSrc_Mode;
+    case OP_DEST_IN:
+      return SkXfermode::kDstIn_Mode;
+    case OP_DEST_OUT:
+      return SkXfermode::kDstOut_Mode;
+    case OP_DEST_OVER:
+      return SkXfermode::kDstOver_Mode;
+    case OP_DEST_ATOP:
+      return SkXfermode::kDstATop_Mode;
+    case OP_XOR:
+      return SkXfermode::kXor_Mode;
+    case OP_MULTIPLY:
+      return SkXfermode::kMultiply_Mode;
+    case OP_SCREEN:
+      return SkXfermode::kScreen_Mode;
+    case OP_OVERLAY:
+      return SkXfermode::kOverlay_Mode;
+    case OP_DARKEN:
+      return SkXfermode::kDarken_Mode;
+    case OP_LIGHTEN:
+      return SkXfermode::kLighten_Mode;
+    case OP_COLOR_DODGE:
+      return SkXfermode::kColorDodge_Mode;
+    case OP_COLOR_BURN:
+      return SkXfermode::kColorBurn_Mode;
+    case OP_HARD_LIGHT:
+      return SkXfermode::kHardLight_Mode;
+    case OP_SOFT_LIGHT:
+      return SkXfermode::kSoftLight_Mode;
+    case OP_DIFFERENCE:
+      return SkXfermode::kDifference_Mode;
+    case OP_EXCLUSION:
+      return SkXfermode::kExclusion_Mode;
+    case OP_HUE:
+      return SkXfermode::kHue_Mode;
+    case OP_SATURATION:
+      return SkXfermode::kSaturation_Mode;
+    case OP_COLOR:
+      return SkXfermode::kColor_Mode;
+    case OP_LUMINOSITY:
+      return SkXfermode::kLuminosity_Mode;
+    default:
+      return SkXfermode::kSrcOver_Mode;
+  }
+}
+
+static inline SkColor ColorToSkColor(const Color &color, Float aAlpha)
+{
+  //XXX: do a better job converting to int
+  return SkColorSetARGB(U8CPU(color.a*aAlpha*255.0), U8CPU(color.r*255.0),
+                        U8CPU(color.g*255.0), U8CPU(color.b*255.0));
+}
+
+static inline SkRect
+RectToSkRect(const Rect& aRect)
+{
+  return SkRect::MakeXYWH(SkFloatToScalar(aRect.x), SkFloatToScalar(aRect.y), 
+                          SkFloatToScalar(aRect.width), SkFloatToScalar(aRect.height));
+}
+
+static inline SkRect
+IntRectToSkRect(const IntRect& aRect)
+{
+  return SkRect::MakeXYWH(SkIntToScalar(aRect.x), SkIntToScalar(aRect.y), 
+                          SkIntToScalar(aRect.width), SkIntToScalar(aRect.height));
+}
+
+static inline SkIRect
+RectToSkIRect(const Rect& aRect)
+{
+  return SkIRect::MakeXYWH(int32_t(aRect.x), int32_t(aRect.y),
+                           int32_t(aRect.width), int32_t(aRect.height));
+}
+
+static inline SkIRect
+IntRectToSkIRect(const IntRect& aRect)
+{
+  return SkIRect::MakeXYWH(aRect.x, aRect.y, aRect.width, aRect.height);
+}
+
+static inline SkShader::TileMode
+ExtendModeToTileMode(ExtendMode aMode)
+{
+  switch (aMode)
+  {
+    case EXTEND_CLAMP:
+      return SkShader::kClamp_TileMode;
+    case EXTEND_REPEAT:
+      return SkShader::kRepeat_TileMode;
+    case EXTEND_REFLECT:
+      return SkShader::kMirror_TileMode;
+  }
+  return SkShader::kClamp_TileMode;
 }
 
 }

@@ -7,9 +7,6 @@ topsrcdir = @top_srcdir@
 srcdir    = @srcdir@
 VPATH     = @srcdir@
 
-LIBRARY_NAME  = IA2Marshal
-MODULE        = accessibility
-GRE_MODULE    = 1
 DEFFILE       = $(win_srcdir)/IA2Marshal.def
 
 IA2DIR        = $(topsrcdir)/other-licenses/ia2
@@ -22,36 +19,36 @@ GARBAGE       += $(MIDL_GENERATED_FILES)
 
 FORCE_SHARED_LIB = 1
 
-SRCS_IN_OBJDIR   = 1
-
+# Please keep this list in sync with the moz.build file until the rest of this
+# Makefile is ported over.
 MIDL_INTERFACES = \
   Accessible2.idl \
+  Accessible2_2.idl \
   AccessibleAction.idl \
   AccessibleApplication.idl \
   AccessibleComponent.idl \
+  AccessibleDocument.idl \
   AccessibleEditableText.idl \
   AccessibleHyperlink.idl \
   AccessibleHypertext.idl \
+  AccessibleHypertext2.idl \
   AccessibleImage.idl \
   AccessibleRelation.idl \
   AccessibleTable.idl \
   AccessibleTable2.idl \
   AccessibleTableCell.idl \
   AccessibleText.idl \
+  AccessibleText2.idl \
   AccessibleValue.idl \
   $(NULL)
 
+# Please keep this list in sync with the moz.build file until the rest of this
+# Makefile is ported over.
 MIDL_ENUMS = \
   AccessibleEventId.idl \
   AccessibleRole.idl \
   AccessibleStates.idl \
   IA2CommonTypes.idl \
-  $(NULL)
-
-EXPORTS = \
-  $(MIDL_INTERFACES:%.idl=%.h) \
-  $(MIDL_INTERFACES:%.idl=%_i.c) \
-  $(MIDL_ENUMS:%.idl=%.h) \
   $(NULL)
 
 CSRCS	= \
@@ -72,13 +69,7 @@ EMBED_MANIFEST_AT = 2
 
 include $(topsrcdir)/config/rules.mk
 
-OS_LIBS = \
-  kernel32.lib \
-  rpcns4.lib \
-  rpcrt4.lib \
-  ole32.lib \
-  oleaut32.lib \
-  $(NULL)
+OS_LIBS = $(call EXPAND_LIBNAME,uuid kernel32 rpcns4 rpcrt4 ole32 oleaut32)
 
 # generate list of to-be-generated files that are missing
 # but ignore special file dlldata.c

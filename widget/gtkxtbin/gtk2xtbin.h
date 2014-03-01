@@ -9,6 +9,9 @@
 #define __GTK_XTBIN_H__
 
 #include <gtk/gtk.h>
+#if (MOZ_WIDGET_GTK == 3)
+#include <gtk/gtkx.h>
+#endif
 #include <X11/Intrinsic.h>
 #include <X11/Xutil.h>
 #include <X11/Xlib.h>
@@ -58,8 +61,6 @@ struct _GtkXtBin
   Display       *xtdisplay;        /* Xt Toolkit Display */
 
   Window         xtwindow;         /* Xt Toolkit XWindow */
-  gint           x, y;
-  gint           width, height;
   XtClient	 xtclient;         /* Xt Client for XEmbed */
 };
   
@@ -70,12 +71,6 @@ struct _GtkXtBinClass
 
 GTKXTBIN_API(GType)       gtk_xtbin_get_type (void);
 GTKXTBIN_API(GtkWidget *) gtk_xtbin_new (GdkWindow *parent_window, String *f);
-GTKXTBIN_API(void)        gtk_xtbin_set_position (GtkXtBin *xtbin,
-                                                  gint       x,
-                                                  gint       y);
-GTKXTBIN_API(void)       gtk_xtbin_resize (GtkWidget *widget,
-                                           gint       width,
-                                           gint       height);
 
 typedef struct _XtTMRec {
     XtTranslations  translations;       /* private to Translation Manager    */

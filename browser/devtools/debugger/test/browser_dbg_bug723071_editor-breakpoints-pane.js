@@ -12,9 +12,11 @@ let gPane = null;
 let gTab = null;
 let gDebuggee = null;
 let gDebugger = null;
-let gScripts = null;
+let gEditor = null;
+let gSources = null;
 let gBreakpoints = null;
-let gBreakpointsElement = null;
+let gBreakpointsParent = null;
+let gBreakpointsList = null;
 
 function test()
 {
@@ -27,8 +29,10 @@ function test()
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
     resumed = true;
+
+    gDebugger.addEventListener("Debugger:SourceShown", onScriptShown);
 
     gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
       framesAdded = true;
@@ -46,12 +50,10 @@ function test()
     executeSoon(startTest);
   }
 
-  window.addEventListener("Debugger:ScriptShown", onScriptShown);
-
   function startTest()
   {
     if (scriptShown && framesAdded && resumed && !testStarted) {
-      window.removeEventListener("Debugger:ScriptShown", onScriptShown);
+      gDebugger.removeEventListener("Debugger:SourceShown", onScriptShown);
       testStarted = true;
       Services.tm.currentThread.dispatch({ run: performTest }, 0);
     }
@@ -63,33 +65,35 @@ function test()
 
   function performTest()
   {
-    gScripts = gDebugger.DebuggerView.Scripts;
+    gEditor = gDebugger.editor;
+    gSources = gDebugger.DebuggerView.Sources;
+    gBreakpoints = gPane.getAllBreakpoints();
 
     is(gDebugger.DebuggerController.activeThread.state, "paused",
       "Should only be getting stack frames while paused.");
 
-    is(gScripts._scripts.itemCount, 2, "Found the expected number of scripts.");
+    is(gSources.itemCount, 2,
+      "Found the expected number of scripts.");
 
-    let editor = gDebugger.editor;
+    isnot(gEditor.getText().indexOf("debugger"), -1,
+      "The correct script was loaded initially.");
 
-    isnot(editor.getText().indexOf("debugger"), -1,
-          "The correct script was loaded initially.");
-    isnot(gScripts.selected, gScripts.scriptLocations[0],
-          "the correct script is selected");
+    isnot(gSources.selectedValue, gSources.values[0],
+      "The correct script is selected");
 
-    gBreakpoints = gPane.breakpoints;
-    is(Object.keys(gBreakpoints), 0, "no breakpoints");
+    is(Object.keys(gBreakpoints).length, 0, "no breakpoints");
     ok(!gPane.getBreakpoint("chocolate", 3), "getBreakpoint('chocolate', 3) returns falsey");
+    is(gEditor.getBreakpoints().length, 0, "no breakpoints in the editor");
 
-    is(editor.getBreakpoints().length, 0, "no breakpoints in the editor");
+    gBreakpointsParent = gSources.widget._parent;
+    gBreakpointsList = gSources.widget._list;
 
-    gBreakpointsElement = gDebugger.DebuggerView.Breakpoints._breakpoints;
-    is(gBreakpointsElement.childNodes.length, 1,
-      "The breakpoints pane should be empty, but showing a " +
-      "'no breakpoints' information message.");
-    is(gBreakpointsElement.childNodes.length,
-       gBreakpointsElement.querySelectorAll(".list-item.empty").length,
-       "Found junk in the breakpoints container.");
+    is(gBreakpointsParent.childNodes.length, 1, // one sources list
+      "Found junk in the breakpoints container.");
+    is(gBreakpointsList.childNodes.length, 1, // one sources group
+      "Found junk in the breakpoints container.");
+    is(gBreakpointsList.querySelectorAll(".dbg-breakpoint").length, 0,
+      "No breakpoints should be visible at this point.");
 
     addBreakpoints(function() {
       is(breakpointsAdded, 3,
@@ -99,9 +103,12 @@ function test()
       is(breakpointsRemoved, 0,
         "Shouldn't have removed anything so far.");
 
-      is(gBreakpointsElement.childNodes.length,
-         gBreakpointsElement.querySelectorAll(".dbg-breakpoint").length,
-         "Found junk in the breakpoints container.");
+      is(gBreakpointsParent.childNodes.length, 1, // one sources list
+        "Found junk in the breakpoints container.");
+      is(gBreakpointsList.childNodes.length, 1, // one sources group
+        "Found junk in the breakpoints container.");
+      is(gBreakpointsList.querySelectorAll(".dbg-breakpoint").length, 3,
+        "3 breakpoints should be visible at this point.");
 
       disableBreakpoints(function() {
         is(breakpointsAdded, 3,
@@ -111,9 +118,13 @@ function test()
         is(breakpointsRemoved, 0,
           "Shouldn't have removed anything so far.");
 
-        is(gBreakpointsElement.childNodes.length, breakpointsAdded,
+        is(gBreakpointsParent.childNodes.length, 1, // one sources list
+          "Found junk in the breakpoints container.");
+        is(gBreakpointsList.childNodes.length, 1, // one sources group
+          "Found junk in the breakpoints container.");
+        is(gBreakpointsList.querySelectorAll(".dbg-breakpoint").length, breakpointsAdded,
           "Should have the same number of breakpoints in the pane.");
-        is(gBreakpointsElement.childNodes.length, breakpointsDisabled,
+        is(gBreakpointsList.querySelectorAll(".dbg-breakpoint").length, breakpointsDisabled,
           "Should have the same number of disabled breakpoints.");
 
         addBreakpoints(function() {
@@ -124,23 +135,24 @@ function test()
           is(breakpointsRemoved, 0,
             "Shouldn't have removed anything so far.");
 
-          is(gBreakpointsElement.childNodes.length, breakpointsAdded,
+          is(gBreakpointsParent.childNodes.length, 1, // one sources list
+            "Found junk in the breakpoints container.");
+          is(gBreakpointsList.childNodes.length, 1, // one sources group
+            "Found junk in the breakpoints container.");
+          is(gBreakpointsList.querySelectorAll(".dbg-breakpoint").length, breakpointsAdded,
             "Since half of the breakpoints already existed, but disabled, " +
             "only half of the added breakpoints are actually in the pane.");
-          is(gBreakpointsElement.childNodes.length,
-             gBreakpointsElement.querySelectorAll(".dbg-breakpoint").length,
-             "Found junk in the breakpoints container.");
 
           removeBreakpoints(function() {
             is(breakpointsRemoved, 3,
               "Should have 3 removed breakpoints.");
 
-            is(gBreakpointsElement.childNodes.length, 1,
-              "The breakpoints pane should be empty, but showing a " +
-              "'no breakpoints' information message.");
-            is(gBreakpointsElement.childNodes.length,
-               gBreakpointsElement.querySelectorAll(".list-item.empty").length,
+            is(gBreakpointsParent.childNodes.length, 1, // one sources list
                "Found junk in the breakpoints container.");
+            is(gBreakpointsList.childNodes.length, 1, // one sources group
+               "Found junk in the breakpoints container.");
+            is(gBreakpointsList.querySelectorAll(".dbg-breakpoint").length, 0,
+               "No breakpoints should be visible at this point.");
 
             executeSoon(function() {
               gDebugger.gClient.addOneTimeListener("resumed", function() {
@@ -160,18 +172,18 @@ function test()
 
       executeSoon(function()
       {
-        line = 4;
-        gPane.addBreakpoint({url: gScripts.selected, line: line},
+        line = 6;
+        gPane.addBreakpoint({url: gSources.selectedValue, line: line},
           function(cl, err) {
           onBreakpointAdd.call({ increment: increment, line: line }, cl, err);
 
-          line = 5;
-          gPane.addBreakpoint({url: gScripts.selected, line: line},
+          line = 7;
+          gPane.addBreakpoint({url: gSources.selectedValue, line: line},
             function(cl, err) {
             onBreakpointAdd.call({ increment: increment, line: line }, cl, err);
 
-            line = 6;
-            gPane.addBreakpoint({url: gScripts.selected, line: line},
+            line = 9;
+            gPane.addBreakpoint({url: gSources.selectedValue, line: line},
               function(cl, err) {
               onBreakpointAdd.call({ increment: increment, line: line }, cl, err);
 
@@ -186,39 +198,47 @@ function test()
 
     function disableBreakpoints(callback)
     {
-      let nodes = Array.slice(gBreakpointsElement.childNodes);
+      let nodes = Array.slice(gBreakpointsList.querySelectorAll(".dbg-breakpoint"));
       info("Nodes to disable: " + breakpointsAdded);
+
       is(nodes.length, breakpointsAdded,
         "The number of nodes to disable is incorrect.");
 
       Array.forEach(nodes, function(bkp) {
         info("Disabling breakpoint: " + bkp.id);
 
-        gDebugger.DebuggerView.Breakpoints.disableBreakpoint(bkp, function() {
+        let sourceItem = gSources.getItemForElement(bkp);
+        let breakpointItem = gSources.getItemForElement.call(sourceItem, bkp);
+        let { sourceLocation: url, lineNumber: line } = breakpointItem.attachment;
+        info("Found data: " + breakpointItem.attachment.toSource());
+
+        gSources.disableBreakpoint(url, line, { callback: function() {
           if (++breakpointsDisabled !== breakpointsAdded) {
             return;
           }
           executeSoon(function() {
             callback();
           });
-        });
+        }});
       });
     }
 
     function removeBreakpoints(callback)
     {
-      let nodes = Array.slice(gBreakpointsElement.childNodes);
+      let nodes = Array.slice(gBreakpointsList.querySelectorAll(".dbg-breakpoint"));
       info("Nodes to remove: " + breakpointsAdded);
+
       is(nodes.length, breakpointsAdded,
         "The number of nodes to remove is incorrect.");
 
       Array.forEach(nodes, function(bkp) {
         info("Removing breakpoint: " + bkp.id);
 
-        let [url, line, actor] =
-          [bkp.breakpointUrl, bkp.breakpointLine, bkp.breakpointActor];
+        let sourceItem = gSources.getItemForElement(bkp);
+        let breakpointItem = gSources.getItemForElement.call(sourceItem, bkp);
+        let { sourceLocation: url, lineNumber: line } = breakpointItem.attachment;
+        info("Found data: " + breakpointItem.attachment.toSource());
 
-        gDebugger.DebuggerView.Breakpoints.removeBreakpoint(actor);
         gPane.removeBreakpoint(gPane.getBreakpoint(url, line), function() {
           if (++breakpointsRemoved !== breakpointsAdded) {
             return;
@@ -236,41 +256,31 @@ function test()
         breakpointsAdded++;
       }
 
-      is(gBreakpointsElement.childNodes.length, breakpointsAdded, this.increment
-        ? "Should have added a breakpoint in the pane."
-        : "Should have the same number of breakpoints in the pane.");
+      is(gBreakpointsList.querySelectorAll(".dbg-breakpoint").length, breakpointsAdded,
+        this.increment ? "Should have added a breakpoint in the pane."
+                       : "Should have the same number of breakpoints in the pane.");
 
       let id = "breakpoint-" + aBreakpointClient.actor;
       let bkp = gDebugger.document.getElementById(id);
-      let info = bkp.getElementsByClassName("dbg-breakpoint-info")[0];
+      let line = bkp.getElementsByClassName("dbg-breakpoint-line")[0];
       let text = bkp.getElementsByClassName("dbg-breakpoint-text")[0];
       let check = bkp.querySelector("checkbox");
 
       is(bkp.id, id,
-        "Breakpoint element " + id + " found succesfully.");
-      is(info.getAttribute("value"), getExpectedBreakpointInfo(this.line),
+        "Breakpoint element " + id + " found successfully.");
+      is(line.getAttribute("value"), this.line,
         "The expected information wasn't found in the breakpoint element.");
-      is(text.getAttribute("value"), getExpectedLineText(this.line).trim(),
+      is(text.getAttribute("value"), gDebugger.DebuggerView.getEditorLineText(this.line - 1).trim(),
         "The expected line text wasn't found in the breakpoint element.");
       is(check.getAttribute("checked"), "true",
         "The breakpoint enable checkbox is checked as expected.");
-    }
-
-    function getExpectedBreakpointInfo(line) {
-      let url = gDebugger.DebuggerView.Scripts.selected;
-      let label = gDebugger.DebuggerController.SourceScripts.getScriptLabel(url);
-      return label + ":" + line;
-    }
-
-    function getExpectedLineText(line) {
-      return gDebugger.DebuggerController.SourceScripts.getLineText(line - 1);
     }
   }
 
   function finalCheck() {
     is(Object.keys(gBreakpoints).length, 0, "no breakpoint in the debugger");
-    ok(!gPane.getBreakpoint(gScripts.scriptLocations[0], 5),
-       "getBreakpoint(scriptLocations[0], 5) returns no breakpoint");
+    ok(!gPane.getBreakpoint(gSources.values[0], 5),
+       "getBreakpoint(locations[0], 5) returns no breakpoint");
   }
 
   registerCleanupFunction(function() {
@@ -282,8 +292,10 @@ function test()
     gTab = null;
     gDebuggee = null;
     gDebugger = null;
-    gScripts = null;
+    gEditor = null;
+    gSources = null;
     gBreakpoints = null;
-    gBreakpointsElement = null;
+    gBreakpointsParent = null;
+    gBreakpointsList = null;
   });
 }

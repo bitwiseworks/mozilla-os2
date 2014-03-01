@@ -240,13 +240,8 @@ struct DateHashEntry : public PLDHashEntryHdr {
     {
         // xor the low 32 bits with the high 32 bits.
         PRTime t = *static_cast<const PRTime *>(key);
-        int64_t h64, l64;
-        LL_USHR(h64, t, 32);
-        l64 = LL_INIT(0, 0xffffffff);
-        LL_AND(l64, l64, t);
-        int32_t h32, l32;
-        LL_L2I(h32, h64);
-        LL_L2I(l32, l64);
+        int32_t h32 = int32_t(t >> 32);
+        int32_t l32 = int32_t(0xffffffff & t);
         return PLDHashNumber(l32 ^ h32);
     }
 
@@ -257,7 +252,7 @@ struct DateHashEntry : public PLDHashEntryHdr {
         const DateHashEntry *entry =
             static_cast<const DateHashEntry *>(hdr);
 
-        return LL_EQ(*static_cast<const PRTime *>(key), entry->mKey);
+        return *static_cast<const PRTime *>(key) == entry->mKey;
     }
 };
 
@@ -876,7 +871,7 @@ static inline bool
 IsLegalSchemeCharacter(const char aChar)
 {
     uint8_t mask = kLegalSchemeChars[aChar >> 3];
-    uint8_t bit = PR_BIT(aChar & 0x7);
+    uint8_t bit = 1u << (aChar & 0x7);
     return bool((mask & bit) != 0);
 }
 
@@ -939,7 +934,7 @@ RDFServiceImpl::GetResource(const nsACString& aURI, nsIRDFResource** aResource)
             // Try to find a factory using the component manager.
             nsACString::const_iterator begin;
             aURI.BeginReading(begin);
-            nsCAutoString contractID;
+            nsAutoCString contractID;
             contractID = NS_LITERAL_CSTRING(NS_RDF_RESOURCE_FACTORY_CONTRACTID_PREFIX) +
                          Substring(begin, p);
 
@@ -1013,11 +1008,11 @@ static int32_t kShift = 6;
         // 3. The same anonymous resource gets requested, and refers
         //    to something completely different.
         // 4. The serialization is read back in.
-        LL_L2UI(gCounter, PR_Now());
+        gCounter = uint32_t(PR_Now());
     }
 
     nsresult rv;
-    nsCAutoString s;
+    nsAutoCString s;
 
     do {
         // Ugh, this is a really sloppy way to do this; I copied the
@@ -1371,7 +1366,7 @@ RDFServiceImpl::GetDataSource(const char* aURI, bool aBlock, nsIRDFDataSource** 
     // Attempt to canonify the URI before we look for it in the
     // cache. We won't bother doing this on `rdf:' URIs to avoid
     // useless (and expensive) protocol handler lookups.
-    nsCAutoString spec(aURI);
+    nsAutoCString spec(aURI);
 
     if (!StringBeginsWith(spec, NS_LITERAL_CSTRING("rdf:"))) {
         nsCOMPtr<nsIURI> uri;
@@ -1397,7 +1392,7 @@ RDFServiceImpl::GetDataSource(const char* aURI, bool aBlock, nsIRDFDataSource** 
     nsCOMPtr<nsIRDFDataSource> ds;
     if (StringBeginsWith(spec, NS_LITERAL_CSTRING("rdf:"))) {
         // It's a built-in data source. Convert it to a contract ID.
-        nsCAutoString contractID(
+        nsAutoCString contractID(
                 NS_LITERAL_CSTRING(NS_RDF_DATASOURCE_CONTRACTID_PREFIX) +
                 Substring(spec, 4, spec.Length() - 4));
 

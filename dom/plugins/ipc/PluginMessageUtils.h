@@ -7,7 +7,7 @@
 #ifndef DOM_PLUGINS_PLUGINMESSAGEUTILS_H
 #define DOM_PLUGINS_PLUGINMESSAGEUTILS_H
 
-#include "IPC/IPCMessageUtils.h"
+#include "ipc/IPCMessageUtils.h"
 #include "base/message_loop.h"
 
 #include "mozilla/ipc/RPCChannel.h"
@@ -53,7 +53,7 @@ MungePluginDsoPath(const std::string& path);
 std::string
 UnmungePluginDsoPath(const std::string& munged);
 
-extern PRLogModuleInfo* gPluginLog;
+extern PRLogModuleInfo* GetPluginLog();
 
 const uint32_t kAllowAsyncDrawing = 0x1;
 
@@ -67,15 +67,15 @@ inline bool IsDrawingModelAsync(int16_t aModel) {
 
 #if defined(_MSC_VER)
 #define FULLFUNCTION __FUNCSIG__
-#elif (__GNUC__ >= 4)
+#elif defined(__GNUC__)
 #define FULLFUNCTION __PRETTY_FUNCTION__
 #else
 #define FULLFUNCTION __FUNCTION__
 #endif
 
-#define PLUGIN_LOG_DEBUG(args) PR_LOG(gPluginLog, PR_LOG_DEBUG, args)
-#define PLUGIN_LOG_DEBUG_FUNCTION PR_LOG(gPluginLog, PR_LOG_DEBUG, ("%s", FULLFUNCTION))
-#define PLUGIN_LOG_DEBUG_METHOD PR_LOG(gPluginLog, PR_LOG_DEBUG, ("%s [%p]", FULLFUNCTION, (void*) this))
+#define PLUGIN_LOG_DEBUG(args) PR_LOG(GetPluginLog(), PR_LOG_DEBUG, args)
+#define PLUGIN_LOG_DEBUG_FUNCTION PR_LOG(GetPluginLog(), PR_LOG_DEBUG, ("%s", FULLFUNCTION))
+#define PLUGIN_LOG_DEBUG_METHOD PR_LOG(GetPluginLog(), PR_LOG_DEBUG, ("%s [%p]", FULLFUNCTION, (void*) this))
 
 /**
  * This is NPByteRange without the linked list.
@@ -110,6 +110,9 @@ struct NPRemoteWindow
 #endif /* XP_UNIX */
 #if defined(XP_WIN) || defined(XP_OS2)
   base::SharedMemoryHandle surfaceHandle;
+#endif
+#if defined(XP_MACOSX)
+  double contentsScaleFactor;
 #endif
 };
 
@@ -323,12 +326,12 @@ struct ParamTraits<NPWindowType>
 
   static void Write(Message* aMsg, const paramType& aParam)
   {
-    aMsg->WriteInt16(int16(aParam));
+    aMsg->WriteInt16(int16_t(aParam));
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    int16 result;
+    int16_t result;
     if (aMsg->ReadInt16(aIter, &result)) {
       *aResult = paramType(result);
       return true;
@@ -338,7 +341,7 @@ struct ParamTraits<NPWindowType>
 
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
-    aLog->append(StringPrintf(L"%d", int16(aParam)));
+    aLog->append(StringPrintf(L"%d", int16_t(aParam)));
   }
 };
 
@@ -349,12 +352,12 @@ struct ParamTraits<NPImageFormat>
 
   static void Write(Message* aMsg, const paramType& aParam)
   {
-    aMsg->WriteInt16(int16(aParam));
+    aMsg->WriteInt16(int16_t(aParam));
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    int16 result;
+    int16_t result;
     if (aMsg->ReadInt16(aIter, &result)) {
       *aResult = paramType(result);
       return true;
@@ -364,7 +367,7 @@ struct ParamTraits<NPImageFormat>
 
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
-    aLog->append(StringPrintf(L"%d", int16(aParam)));
+    aLog->append(StringPrintf(L"%d", int16_t(aParam)));
   }
 };
 
@@ -393,6 +396,9 @@ struct ParamTraits<mozilla::plugins::NPRemoteWindow>
 #if defined(XP_WIN) || defined(XP_OS2)
     WriteParam(aMsg, aParam.surfaceHandle);
 #endif
+#if defined(XP_MACOSX)
+    aMsg->WriteDouble(aParam.contentsScaleFactor);
+#endif
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
@@ -400,7 +406,7 @@ struct ParamTraits<mozilla::plugins::NPRemoteWindow>
 #if defined(XP_OS2)
     void* window;
 #else
-    uint64 window;
+    uint64_t window;
 #endif
     int32_t x, y;
     uint32_t width, height;
@@ -434,6 +440,12 @@ struct ParamTraits<mozilla::plugins::NPRemoteWindow>
       return false;
 #endif
 
+#if defined(XP_MACOSX)
+    double contentsScaleFactor;
+    if (!aMsg->ReadDouble(aIter, &contentsScaleFactor))
+      return false;
+#endif
+
     aResult->window = window;
     aResult->x = x;
     aResult->y = y;
@@ -447,6 +459,9 @@ struct ParamTraits<mozilla::plugins::NPRemoteWindow>
 #endif
 #if defined(XP_WIN) || defined(XP_OS2)
     aResult->surfaceHandle = surfaceHandle;
+#endif
+#if defined(XP_MACOSX)
+    aResult->contentsScaleFactor = contentsScaleFactor;
 #endif
     return true;
   }
@@ -732,7 +747,7 @@ struct ParamTraits<NPVariant>
       } break;
 
       case 3: {
-        int32 value;
+        int32_t value;
         if (ReadParam(aMsg, aIter, &value)) {
           INT32_TO_NPVARIANT(value, *aResult);
           return true;
@@ -876,12 +891,12 @@ struct ParamTraits<NPCoordinateSpace>
 
   static void Write(Message* aMsg, const paramType& aParam)
   {
-    WriteParam(aMsg, int32(aParam));
+    WriteParam(aMsg, int32_t(aParam));
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    int32 intval;
+    int32_t intval;
     if (ReadParam(aMsg, aIter, &intval)) {
       switch (intval) {
       case NPCoordinateSpacePlugin:

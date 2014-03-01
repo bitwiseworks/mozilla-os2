@@ -9,30 +9,11 @@ srcdir		= @srcdir@
 VPATH		= @srcdir@
 relativesrcdir  = @relativesrcdir@
 
-MODULE = test_docshell
-
-DIRS += chrome \
-	navigation \
-	$(NULL)
-
 include $(DEPTH)/config/autoconf.mk
 
-XPCSHELL_TESTS = unit
-# FIXME/bug 575918: out-of-process xpcshell is broken on OS X
-ifneq ($(OS_ARCH),Darwin)
-XPCSHELL_TESTS += unit_ipc
-endif
-
-ifneq (mobile,$(MOZ_BUILD_APP))
-	DIRS += browser
-endif
-
 MOCHITEST_FILES = \
-		test_bug94514.html \
-		bug94514-postpage.html \
 		test_bug123696.html \
 		bug123696-subframe.html \
-		test_bug344861.html \
 		test_bug369814.html \
 		bug369814.zip \
 		bug369814.jar \

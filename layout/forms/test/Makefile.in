@@ -38,16 +38,18 @@ MOCHITEST_FILES =	test_bug231389.html \
 		test_bug571352.html \
 		test_bug572406.html \
 		test_bug572649.html \
-		test_bug36619.html \
 		test_bug620936.html \
 		test_bug595310.html \
 		test_bug644542.html \
 		test_bug672810.html \
 		test_bug704049.html \
+		test_bug869314.html \
+		test_listcontrol_search.html \
 		$(NULL)
 
 MOCHITEST_CHROME_FILES = \
-		test_bug536567.html \
+		     bug536567_iframe.html \
+		test_bug536567_perwindowpb.html \
 		     bug536567_subframe.html \
 		test_bug665540.html \
 		     bug665540_window.xul \

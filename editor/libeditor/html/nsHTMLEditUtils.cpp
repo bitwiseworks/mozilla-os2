@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "./../../mozilla-config.h"     // for MOZ_MEDIA
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/Util.h"               // for ArrayLength
 #include "mozilla/dom/Element.h"        // for Element, nsINode
@@ -60,7 +59,6 @@ nsHTMLEditUtils::IsInlineStyle(nsINode* aNode)
       || (nodeAtom == nsEditProperty::strike)
       || (nodeAtom == nsEditProperty::big)
       || (nodeAtom == nsEditProperty::small)
-      || (nodeAtom == nsEditProperty::blink)
       || (nodeAtom == nsEditProperty::sub)
       || (nodeAtom == nsEditProperty::sup)
       || (nodeAtom == nsEditProperty::font);
@@ -534,7 +532,7 @@ nsHTMLEditUtils::SupportsAlignAttr(nsIDOMNode* aNode)
 
 // address, applet, article, aside, blockquote, button, center, del, dir, div,
 // dl, fieldset, figure, footer, form, h1, h2, h3, h4, h5, h6, header, hgroup,
-// hr, iframe, ins, map, menu, nav, noframes, noscript, object, ol, p,
+// hr, iframe, ins, main, map, menu, nav, noframes, noscript, object, ol, p,
 // pre, table, section, ul
 #define GROUP_BLOCK            (1 << 7)
 
@@ -623,16 +621,13 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(area, false, false, GROUP_MAP_CONTENT, GROUP_NONE),
   ELEM(article, true, true, GROUP_BLOCK, GROUP_FLOW_ELEMENT),
   ELEM(aside, true, true, GROUP_BLOCK, GROUP_FLOW_ELEMENT),
-#if defined(MOZ_MEDIA)
   ELEM(audio, false, false, GROUP_NONE, GROUP_NONE),
-#endif
   ELEM(b, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),
   ELEM(base, false, false, GROUP_HEAD_CONTENT, GROUP_NONE),
   ELEM(basefont, false, false, GROUP_SPECIAL, GROUP_NONE),
   ELEM(bdo, true, true, GROUP_SPECIAL, GROUP_INLINE_ELEMENT),
   ELEM(bgsound, false, false, GROUP_NONE, GROUP_NONE),
   ELEM(big, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),
-  ELEM(blink, false, false, GROUP_NONE, GROUP_NONE),
   ELEM(blockquote, true, true, GROUP_BLOCK, GROUP_FLOW_ELEMENT),
   ELEM(body, true, true, GROUP_TOPLEVEL, GROUP_FLOW_ELEMENT),
   ELEM(br, false, false, GROUP_SPECIAL, GROUP_NONE),
@@ -646,6 +641,7 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(col, false, false, GROUP_TABLE_CONTENT | GROUP_COLGROUP_CONTENT,
        GROUP_NONE),
   ELEM(colgroup, true, false, GROUP_NONE, GROUP_COLGROUP_CONTENT),
+  ELEM(data, true, false, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
   ELEM(datalist, true, false, GROUP_PHRASE,
        GROUP_OPTIONS | GROUP_INLINE_ELEMENT),
   ELEM(dd, true, false, GROUP_DL_CONTENT, GROUP_FLOW_ELEMENT),
@@ -697,6 +693,7 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(li, true, false, GROUP_LI, GROUP_FLOW_ELEMENT),
   ELEM(link, false, false, GROUP_HEAD_CONTENT, GROUP_NONE),
   ELEM(listing, false, false, GROUP_NONE, GROUP_NONE),
+  ELEM(main, true, true, GROUP_BLOCK, GROUP_FLOW_ELEMENT),
   ELEM(map, true, true, GROUP_SPECIAL, GROUP_BLOCK | GROUP_MAP_CONTENT),
   ELEM(mark, true, true, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
   ELEM(marquee, false, false, GROUP_NONE, GROUP_NONE),
@@ -733,9 +730,7 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(section, true, true, GROUP_BLOCK, GROUP_FLOW_ELEMENT),
   ELEM(select, true, false, GROUP_FORMCONTROL, GROUP_SELECT_CONTENT),
   ELEM(small, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),
-#if defined(MOZ_MEDIA)
   ELEM(source, false, false, GROUP_NONE, GROUP_NONE),
-#endif
   ELEM(span, true, true, GROUP_SPECIAL, GROUP_INLINE_ELEMENT),
   ELEM(strike, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),
   ELEM(strong, true, true, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
@@ -749,17 +744,18 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(tfoot, true, false, GROUP_NONE, GROUP_TBODY_CONTENT),
   ELEM(th, true, false, GROUP_TR_CONTENT, GROUP_FLOW_ELEMENT),
   ELEM(thead, true, false, GROUP_NONE, GROUP_TBODY_CONTENT),
+  ELEM(template, false, false, GROUP_NONE, GROUP_NONE),
+  ELEM(time, true, false, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
   ELEM(title, true, false, GROUP_HEAD_CONTENT, GROUP_LEAF),
   ELEM(tr, true, false, GROUP_TBODY_CONTENT, GROUP_TR_CONTENT),
+  ELEM(track, false, false, GROUP_NONE, GROUP_NONE),
   ELEM(tt, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),
   ELEM(u, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),
   // XXX Can contain self and ol because editor does sublists illegally.
   ELEM(ul, true, true, GROUP_BLOCK | GROUP_OL_UL,
        GROUP_LI | GROUP_OL_UL),
   ELEM(var, true, true, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
-#if defined(MOZ_MEDIA)
   ELEM(video, false, false, GROUP_NONE, GROUP_NONE),
-#endif
   ELEM(wbr, false, false, GROUP_NONE, GROUP_NONE),
   ELEM(xmp, false, false, GROUP_NONE, GROUP_NONE),
 

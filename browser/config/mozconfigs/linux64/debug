@@ -1,7 +1,6 @@
 ac_add_options --enable-debug
 ac_add_options --enable-trace-malloc
 ac_add_options --enable-signmar
-ENABLE_MARIONETTE=1
 
 . $topsrcdir/build/unix/mozconfig.linux
 
@@ -11,9 +10,6 @@ ac_add_options --enable-stdcxx-compat
 # Needed to enable breakpad in application.ini
 export MOZILLA_OFFICIAL=1
 
-# Enable parallel compiling
-mk_add_options MOZ_MAKE_FLAGS="-j4"
-
 # Use ccache
 ac_add_options --with-ccache=/usr/bin/ccache
 
@@ -22,3 +18,5 @@ ac_add_options --enable-warnings-as-errors
 
 # Package js shell.
 export MOZ_PACKAGE_JSSHELL=1
+
+. "$topsrcdir/build/mozconfig.common.override"

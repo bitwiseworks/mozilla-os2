@@ -1,13 +1,15 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsoptparse.h"
+
 #include <ctype.h>
 #include <stdarg.h>
+
+#include "jsutil.h"
 
 using namespace js;
 using namespace js::cli;
@@ -55,6 +57,14 @@ void
 OptionParser::setArgTerminatesOptions(const char *name, bool enabled)
 {
     findArgument(name)->setTerminatesOptions(enabled);
+}
+
+void
+OptionParser::setArgCapturesRest(const char *name)
+{
+    MOZ_ASSERT(restArgument == -1, "only one argument may be set to capture the rest");
+    restArgument = findArgumentIndex(name);
+    MOZ_ASSERT(restArgument != -1, "unknown argument name passed to setArgCapturesRest");
 }
 
 OptionParser::Result
@@ -133,10 +143,10 @@ PrintParagraph(const char *text, unsigned startColno, const unsigned limitColno,
 static const char *
 OptionFlagsToFormatInfo(char shortflag, bool isValued, size_t *length)
 {
-    static const char *fmt[4] = { "  -%c --%s ",
-                                  "  --%s ",
-                                  "  -%c --%s=%s ",
-                                  "  --%s=%s " };
+    static const char * const fmt[4] = { "  -%c --%s ",
+                                         "  --%s ",
+                                         "  -%c --%s=%s ",
+                                         "  --%s=%s " };
 
     /* How mny chars w/o longflag? */
     size_t lengths[4] = { strlen(fmt[0]) - 3,
@@ -348,10 +358,17 @@ OptionParser::parseArgs(int inputArgc, char **argv)
             /* Option. */
             Option *opt;
             if (arg[1] == '-') {
-                /* Long option. */
-                opt = findOption(arg + 2);
-                if (!opt)
-                    return error("Invalid long option: %s", arg);
+                if (arg[2] == '\0') {
+                    /* End of options */
+                    optionsAllowed = false;
+                    nextArgument = restArgument;
+                    continue;
+                } else {
+                    /* Long option. */
+                    opt = findOption(arg + 2);
+                    if (!opt)
+                        return error("Invalid long option: %s", arg);
+                }
             } else {
                 /* Short option */
                 if (arg[2] != '\0')
@@ -367,12 +384,8 @@ OptionParser::parseArgs(int inputArgc, char **argv)
             r = handleArg(argc, argv, &i, &optionsAllowed);
         }
 
-        switch (r) {
-          case Okay:
-            break;
-          default:
+        if (r != Okay)
             return r;
-        }
     }
     return Okay;
 }
@@ -442,9 +455,9 @@ OptionParser::getMultiStringOption(const char *longflag) const
 OptionParser::~OptionParser()
 {
     for (Option **it = options.begin(), **end = options.end(); it != end; ++it)
-        Foreground::delete_<Option>(*it);
+        js_delete<Option>(*it);
     for (Option **it = arguments.begin(), **end = arguments.end(); it != end; ++it)
-        Foreground::delete_<Option>(*it);
+        js_delete<Option>(*it);
 }
 
 Option *
@@ -496,21 +509,29 @@ OptionParser::findOption(const char *longflag) const
 
 /* Argument accessors */
 
+int
+OptionParser::findArgumentIndex(const char *name) const
+{
+    for (Option * const *it = arguments.begin(); it != arguments.end(); ++it) {
+        const char *target = (*it)->longflag;
+        if (strcmp(target, name) == 0)
+            return it - arguments.begin();
+    }
+    return -1;
+}
+
 Option *
 OptionParser::findArgument(const char *name)
 {
-    for (Option **it = arguments.begin(), **end = arguments.end(); it != end; ++it) {
-        const char *target = (*it)->longflag;
-        if (strcmp(target, name) == 0)
-            return *it;
-    }
-    return NULL;
+    int index = findArgumentIndex(name);
+    return (index == -1) ? NULL : arguments[index];
 }
 
 const Option *
 OptionParser::findArgument(const char *name) const
 {
-    return const_cast<OptionParser *>(this)->findArgument(name);
+    int index = findArgumentIndex(name);
+    return (index == -1) ? NULL : arguments[index];
 }
 
 const char *
@@ -534,8 +555,7 @@ OptionParser::addIntOption(char shortflag, const char *longflag, const char *met
 {
     if (!options.reserve(options.length() + 1))
         return false;
-    IntOption *io = OffTheBooks::new_<IntOption>(shortflag, longflag, help, metavar,
-                                                 defaultValue);
+    IntOption *io = js_new<IntOption>(shortflag, longflag, help, metavar, defaultValue);
     if (!io)
         return false;
     options.infallibleAppend(io);
@@ -547,7 +567,7 @@ OptionParser::addBoolOption(char shortflag, const char *longflag, const char *he
 {
     if (!options.reserve(options.length() + 1))
         return false;
-    BoolOption *bo = OffTheBooks::new_<BoolOption>(shortflag, longflag, help);
+    BoolOption *bo = js_new<BoolOption>(shortflag, longflag, help);
     if (!bo)
         return false;
     options.infallibleAppend(bo);
@@ -560,7 +580,7 @@ OptionParser::addStringOption(char shortflag, const char *longflag, const char *
 {
     if (!options.reserve(options.length() + 1))
         return false;
-    StringOption *so = OffTheBooks::new_<StringOption>(shortflag, longflag, help, metavar);
+    StringOption *so = js_new<StringOption>(shortflag, longflag, help, metavar);
     if (!so)
         return false;
     options.infallibleAppend(so);
@@ -573,8 +593,7 @@ OptionParser::addMultiStringOption(char shortflag, const char *longflag, const c
 {
     if (!options.reserve(options.length() + 1))
         return false;
-    MultiStringOption *mso = OffTheBooks::new_<MultiStringOption>(shortflag, longflag, help,
-                                                                  metavar);
+    MultiStringOption *mso = js_new<MultiStringOption>(shortflag, longflag, help, metavar);
     if (!mso)
         return false;
     options.infallibleAppend(mso);
@@ -588,7 +607,7 @@ OptionParser::addOptionalStringArg(const char *name, const char *help)
 {
     if (!arguments.reserve(arguments.length() + 1))
         return false;
-    StringOption *so = OffTheBooks::new_<StringOption>(1, name, help, (const char *) NULL);
+    StringOption *so = js_new<StringOption>(1, name, help, (const char *) NULL);
     if (!so)
         return false;
     arguments.infallibleAppend(so);
@@ -601,8 +620,7 @@ OptionParser::addOptionalMultiStringArg(const char *name, const char *help)
     JS_ASSERT_IF(!arguments.empty(), !arguments.back()->isVariadic());
     if (!arguments.reserve(arguments.length() + 1))
         return false;
-    MultiStringOption *mso = OffTheBooks::new_<MultiStringOption>(1, name, help,
-                                                                  (const char *) NULL);
+    MultiStringOption *mso = js_new<MultiStringOption>(1, name, help, (const char *) NULL);
     if (!mso)
         return false;
     arguments.infallibleAppend(mso);

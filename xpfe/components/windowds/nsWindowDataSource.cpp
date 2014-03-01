@@ -96,11 +96,10 @@ nsWindowDataSource::Observe(nsISupports *aSubject, const char* aTopic, const PRU
     return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsWindowDataSource)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(nsWindowDataSource)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsWindowDataSource)
     // XXX mContainer?
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mInner)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInner)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsWindowDataSource)
@@ -170,7 +169,7 @@ nsWindowDataSource::OnWindowTitleChange(nsIXULWindow *window,
 NS_IMETHODIMP
 nsWindowDataSource::OnOpenWindow(nsIXULWindow *window)
 {
-    nsCAutoString windowId(NS_LITERAL_CSTRING("window-"));
+    nsAutoCString windowId(NS_LITERAL_CSTRING("window-"));
     windowId.AppendInt(windowCount++, 10);
 
     nsCOMPtr<nsIRDFResource> windowResource;

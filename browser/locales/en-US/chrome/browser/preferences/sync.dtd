@@ -15,7 +15,7 @@
 
 <!-- Manage Account -->
 <!ENTITY manageAccount.label          "Manage Account">
-<!ENTITY manageAccount.accesskey      "A">
+<!ENTITY manageAccount.accesskey      "n">
 <!ENTITY viewQuota.label              "View Quota">
 <!ENTITY changePassword2.label        "Change Password…">
 <!ENTITY myRecoveryKey.label          "My Recovery Key">
@@ -38,8 +38,8 @@
 <!ENTITY engine.addons.accesskey    "A">
 
 <!-- Device Settings -->
-<!ENTITY syncComputerName.label       "Computer Name:">
-<!ENTITY syncComputerName.accesskey   "c">
+<!ENTITY syncDeviceName.label       "Device Name:">
+<!ENTITY syncDeviceName.accesskey   "c">
 <!ENTITY unlinkDevice.label           "Unlink This Device">
 
 <!-- Footer stuff -->

@@ -8,7 +8,11 @@
 #include "ArchiveZipFile.h"
 
 #include "nsContentUtils.h"
+#include "nsIPlatformCharset.h"
+#include "nsNativeCharsetUtils.h"
 #include "nsCExternalHandlerService.h"
+
+using namespace mozilla::dom;
 
 USING_FILE_NAMESPACE
 
@@ -16,11 +20,12 @@ USING_FILE_NAMESPACE
 #  define PATH_MAX 65536 // The filename length is stored in 2 bytes
 #endif
 
-// ArchiveZipItem
 ArchiveZipItem::ArchiveZipItem(const char* aFilename,
-                               ZipCentral& aCentralStruct)
+                               const ZipCentral& aCentralStruct,
+                               const nsAString& aEncoding)
 : mFilename(aFilename),
-  mCentralStruct(aCentralStruct)
+  mCentralStruct(aCentralStruct),
+  mEncoding(aEncoding)
 {
   MOZ_COUNT_CTOR(ArchiveZipItem);
 }
@@ -30,25 +35,58 @@ ArchiveZipItem::~ArchiveZipItem()
   MOZ_COUNT_DTOR(ArchiveZipItem);
 }
 
-// Getter/Setter for the filename
-nsCString
-ArchiveZipItem::GetFilename()
+nsresult
+ArchiveZipItem::ConvertFilename()
 {
-  return mFilename;
+  if (mEncoding.IsEmpty()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsString filenameU;
+  nsresult rv = nsContentUtils::ConvertStringFromCharset(
+                  NS_ConvertUTF16toUTF8(mEncoding),
+                  mFilename, filenameU);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (filenameU.IsEmpty()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mFilenameU = filenameU;
+  return NS_OK;
 }
 
-void
-ArchiveZipItem::SetFilename(const nsCString& aFilename)
+nsresult
+ArchiveZipItem::GetFilename(nsString& aFilename)
 {
-  mFilename = aFilename;
-}
+  if (mFilenameU.IsEmpty()) {
+    // Maybe this string is UTF-8:
+    if (IsUTF8(mFilename, false)) {
+      mFilenameU = NS_ConvertUTF8toUTF16(mFilename);
+    }
 
+    // Let's use the enconding value for the dictionary
+    else {
+      nsresult rv = ConvertFilename();
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+  }
+
+  aFilename = mFilenameU;
+  return NS_OK;
+}
 
 // From zipItem to DOMFile:
 nsIDOMFile*
 ArchiveZipItem::File(ArchiveReader* aArchiveReader)
 {
-  return new ArchiveZipFile(NS_ConvertUTF8toUTF16(mFilename),
+  nsString filename;
+
+  if (NS_FAILED(GetFilename(filename))) {
+    return nullptr;
+  }
+
+  return new ArchiveZipFile(filename,
                             NS_ConvertUTF8toUTF16(GetType()),
                             StrToInt32(mCentralStruct.orglen),
                             mCentralStruct,
@@ -72,8 +110,10 @@ ArchiveZipItem::StrToInt16(const uint8_t* aStr)
 
 // ArchiveReaderZipEvent
 
-ArchiveReaderZipEvent::ArchiveReaderZipEvent(ArchiveReader* aArchiveReader)
-: ArchiveReaderEvent(aArchiveReader)
+ArchiveReaderZipEvent::ArchiveReaderZipEvent(ArchiveReader* aArchiveReader,
+                                             const nsAString& aEncoding)
+: ArchiveReaderEvent(aArchiveReader),
+  mEncoding(aEncoding)
 {
 }
 
@@ -104,8 +144,7 @@ ArchiveReaderZipEvent::Exec()
   }
 
   // Reading backward.. looking for the ZipEnd signature
-  for (uint64_t curr = size - ZIPEND_SIZE; curr > 4; --curr)
-  {
+  for (uint64_t curr = size - ZIPEND_SIZE; curr > 4; --curr) {
     seekableStream->Seek(nsISeekableStream::NS_SEEK_SET, curr);
 
     uint8_t buffer[ZIPEND_SIZE];
@@ -152,7 +191,7 @@ ArchiveReaderZipEvent::Exec()
     }
 
     // Read the name:
-    char* filename = (char*)PR_Malloc(filenameLen + 1);
+    nsAutoArrayPtr<char> filename(new char[filenameLen + 1]);
     rv = inputStream->Read(filename, filenameLen, &ret);
     if (NS_FAILED(rv) || ret != filenameLen) {
       return RunShare(NS_ERROR_UNEXPECTED);
@@ -162,10 +201,8 @@ ArchiveReaderZipEvent::Exec()
 
     // We ignore the directories:
     if (filename[filenameLen - 1] != '/') {
-      mFileList.AppendElement(new ArchiveZipItem(filename, centralStruct));
+      mFileList.AppendElement(new ArchiveZipItem(filename, centralStruct, mEncoding));
     }
-
-    PR_Free(filename);
 
     // Ignore the rest
     seekableStream->Seek(nsISeekableStream::NS_SEEK_CUR, extraLen + commentLen);

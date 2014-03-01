@@ -8,6 +8,7 @@
 #include "nsIDOMDeviceMotionEvent.h"
 #include "nsDOMEvent.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/DeviceMotionEventBinding.h"
 
 class nsDOMDeviceRotationRate MOZ_FINAL : public nsIDOMDeviceRotationRate
 {
@@ -44,9 +45,11 @@ class nsDOMDeviceMotionEvent MOZ_FINAL : public nsDOMEvent,
 {
 public:
 
-  nsDOMDeviceMotionEvent(nsPresContext* aPresContext, nsEvent* aEvent)
-  : nsDOMEvent(aPresContext, aEvent)
-  {}
+  nsDOMDeviceMotionEvent(mozilla::dom::EventTarget* aOwner,
+                         nsPresContext* aPresContext, nsEvent* aEvent)
+  : nsDOMEvent(aOwner, aPresContext, aEvent)
+  {
+  }
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -57,6 +60,41 @@ public:
   NS_DECL_NSIDOMDEVICEMOTIONEVENT
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMDeviceMotionEvent, nsDOMEvent)
+
+  virtual JSObject* WrapObject(JSContext* aCx,
+			       JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  {
+    return mozilla::dom::DeviceMotionEventBinding::Wrap(aCx, aScope, this);
+  }
+
+  nsIDOMDeviceAcceleration* GetAcceleration()
+  {
+    return mAcceleration;
+  }
+
+  nsIDOMDeviceAcceleration* GetAccelerationIncludingGravity()
+  {
+    return mAccelerationIncludingGravity;
+  }
+
+  nsIDOMDeviceRotationRate* GetRotationRate()
+  {
+    return mRotationRate;
+  }
+
+  double Interval() const
+  {
+    return mInterval;
+  }
+
+  void InitDeviceMotionEvent(const nsAString& aType,
+                             bool aCanBubble,
+                             bool aCancelable,
+                             nsIDOMDeviceAcceleration* aAcceleration,
+                             nsIDOMDeviceAcceleration* aAccelerationIncludingGravity,
+                             nsIDOMDeviceRotationRate* aRotationRate,
+                             double aInterval,
+                             mozilla::ErrorResult& aRv);
 
   nsCOMPtr<nsIDOMDeviceAcceleration> mAcceleration;
   nsCOMPtr<nsIDOMDeviceAcceleration> mAccelerationIncludingGravity;

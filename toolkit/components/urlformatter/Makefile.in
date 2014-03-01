@@ -10,17 +10,8 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = urlformatter
-
-XPIDLSRCS = \
-  nsIURLFormatter.idl \
-  $(NULL)
-
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
   nsURLFormatter.manifest \
-  nsURLFormatter.js \
   $(NULL)
-
-TEST_DIRS += tests
 
 include $(topsrcdir)/config/rules.mk

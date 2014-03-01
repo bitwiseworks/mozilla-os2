@@ -13,9 +13,13 @@
 interface DOMTokenList {
   readonly attribute unsigned long length;
   getter DOMString? item(unsigned long index);
+  [Throws]
   boolean contains(DOMString token);
+  [Throws]
   void add(DOMString token);
+  [Throws]
   void remove(DOMString token);
-  boolean toggle(DOMString token);
+  [Throws]
+  boolean toggle(DOMString token, optional boolean force);
   stringifier DOMString ();
 };

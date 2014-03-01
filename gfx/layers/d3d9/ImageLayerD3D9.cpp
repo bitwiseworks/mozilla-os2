@@ -4,9 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ipc/AutoOpenSurface.h"
-#include "mozilla/layers/PLayers.h"
-#include "mozilla/layers/ShadowLayers.h"
-#include "ShadowBufferD3D9.h"
+#include "mozilla/layers/PLayerTransaction.h"
 #include "gfxSharedImageSurface.h"
 
 #include "ImageLayerD3D9.h"
@@ -14,9 +12,10 @@
 #include "gfxPlatform.h"
 #include "gfxImageSurface.h"
 #include "yuv_convert.h"
-#include "nsIServiceManager.h" 
-#include "nsIConsoleService.h" 
+#include "nsIServiceManager.h"
+#include "nsIConsoleService.h"
 #include "Nv3DVUtils.h"
+#include "D3D9SurfaceImage.h"
 
 namespace mozilla {
 namespace layers {
@@ -105,6 +104,30 @@ DataToTexture(IDirect3DDevice9 *aDevice,
 }
 
 static already_AddRefed<IDirect3DTexture9>
+OpenSharedTexture(const D3DSURFACE_DESC& aDesc,
+                  HANDLE aShareHandle,
+                  IDirect3DDevice9 *aDevice)
+{
+  MOZ_ASSERT(aDesc.Format == D3DFMT_X8R8G8B8);
+
+  // Open the frame from DXVA's device in our device using the resource
+  // sharing handle.
+  nsRefPtr<IDirect3DTexture9> sharedTexture;
+  HRESULT hr = aDevice->CreateTexture(aDesc.Width,
+                                      aDesc.Height,
+                                      1,
+                                      D3DUSAGE_RENDERTARGET,
+                                      D3DFMT_X8R8G8B8,
+                                      D3DPOOL_DEFAULT,
+                                      getter_AddRefs(sharedTexture),
+                                      &aShareHandle);
+  if (FAILED(hr)) {
+    NS_WARNING("Failed to open shared texture on our device");
+  }
+  return sharedTexture.forget();
+}
+
+static already_AddRefed<IDirect3DTexture9>
 SurfaceToTexture(IDirect3DDevice9 *aDevice,
                  gfxASurface *aSurface,
                  const gfxIntSize &aSize)
@@ -115,7 +138,7 @@ SurfaceToTexture(IDirect3DDevice9 *aDevice,
   if (!imageSurface) {
     imageSurface = new gfxImageSurface(aSize,
                                        gfxASurface::ImageFormatARGB32);
-    
+
     nsRefPtr<gfxContext> context = new gfxContext(imageSurface);
     context->SetSource(aSurface);
     context->SetOperator(gfxContext::OPERATOR_SOURCE);
@@ -303,7 +326,7 @@ ImageLayerD3D9::GetTexture(Image *aImage, bool& aHasAlpha)
   if (aImage->GetFormat() == REMOTE_IMAGE_BITMAP) {
     RemoteBitmapImage *remoteImage =
       static_cast<RemoteBitmapImage*>(aImage);
-      
+
     if (!aImage->GetBackendData(mozilla::layers::LAYERS_D3D9)) {
       nsAutoPtr<TextureD3D9BackendData> dat(new TextureD3D9BackendData());
       dat->mTexture = DataToTexture(device(), remoteImage->mData, remoteImage->mStride, remoteImage->mSize, D3DFMT_A8R8G8B8);
@@ -330,6 +353,18 @@ ImageLayerD3D9::GetTexture(Image *aImage, bool& aHasAlpha)
     }
 
     aHasAlpha = cairoImage->mSurface->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA;
+  } else if (aImage->GetFormat() == D3D9_RGB32_TEXTURE) {
+    if (!aImage->GetBackendData(mozilla::layers::LAYERS_D3D9)) {
+      // The texture in which the frame is stored belongs to DXVA's D3D9 device.
+      // We need to open it on our device before we can use it.
+      nsAutoPtr<TextureD3D9BackendData> backendData(new TextureD3D9BackendData());
+      D3D9SurfaceImage* image = static_cast<D3D9SurfaceImage*>(aImage);
+      backendData->mTexture = OpenSharedTexture(image->GetDesc(), image->GetShareHandle(), device());
+      if (backendData->mTexture) {
+        aImage->SetBackendData(mozilla::layers::LAYERS_D3D9, backendData.forget());
+      }
+    }
+    aHasAlpha = false;
   } else {
     NS_WARNING("Inappropriate image type.");
     return nullptr;
@@ -368,10 +403,11 @@ ImageLayerD3D9::RenderLayer()
 
   SetShaderTransformAndOpacity();
 
-  gfxIntSize size = mScaleMode == SCALE_NONE ? image->GetSize() : mScaleToSize;
+  gfxIntSize size = image->GetSize();
 
   if (image->GetFormat() == CAIRO_SURFACE ||
-      image->GetFormat() == REMOTE_IMAGE_BITMAP)
+      image->GetFormat() == REMOTE_IMAGE_BITMAP ||
+      image->GetFormat() == D3D9_RGB32_TEXTURE)
   {
     NS_ASSERTION(image->GetFormat() != CAIRO_SURFACE ||
                  !static_cast<CairoImage*>(image)->mSurface ||
@@ -526,156 +562,10 @@ ImageLayerD3D9::GetAsTexture(gfxIntSize* aSize)
       image->GetFormat() != REMOTE_IMAGE_BITMAP) {
     return nullptr;
   }
-  
+
   bool dontCare;
   *aSize = image->GetSize();
   nsRefPtr<IDirect3DTexture9> result = GetTexture(image, dontCare);
-  return result.forget();
-}
-
-
-ShadowImageLayerD3D9::ShadowImageLayerD3D9(LayerManagerD3D9* aManager)
-  : ShadowImageLayer(aManager, nullptr)
-  , LayerD3D9(aManager)
-{
-  mImplData = static_cast<LayerD3D9*>(this);
-}  
-
-ShadowImageLayerD3D9::~ShadowImageLayerD3D9()
-{}
-
-void
-ShadowImageLayerD3D9::Swap(const SharedImage& aNewFront,
-                           SharedImage* aNewBack)
-{
-  if (aNewFront.type() == SharedImage::TSurfaceDescriptor) {
-    if (!mBuffer) {
-      mBuffer = new ShadowBufferD3D9(this);
-    }
-    AutoOpenSurface surf(OPEN_READ_ONLY, aNewFront.get_SurfaceDescriptor());
-    mBuffer->Upload(surf.Get(), GetVisibleRegion().GetBounds());
-  } else {
-    const YUVImage& yuv = aNewFront.get_YUVImage();
-
-    AutoOpenSurface asurfY(OPEN_READ_ONLY, yuv.Ydata());
-    AutoOpenSurface asurfU(OPEN_READ_ONLY, yuv.Udata());
-    AutoOpenSurface asurfV(OPEN_READ_ONLY, yuv.Vdata());
-    gfxImageSurface* surfY = asurfY.GetAsImage();
-    gfxImageSurface* surfU = asurfU.GetAsImage();
-    gfxImageSurface* surfV = asurfV.GetAsImage();
-
-    PlanarYCbCrImage::Data data;
-    data.mYChannel = surfY->Data();
-    data.mYStride = surfY->Stride();
-    data.mYSize = surfY->GetSize();
-    data.mCbChannel = surfU->Data();
-    data.mCrChannel = surfV->Data();
-    data.mCbCrStride = surfU->Stride();
-    data.mCbCrSize = surfU->GetSize();
-    data.mPicSize = surfY->GetSize();
-    data.mPicX = 0;
-    data.mPicY = 0;
-
-    if (!mYCbCrImage) {
-      mYCbCrImage = new PlanarYCbCrImage(new BufferRecycleBin());
-    }
-
-    mYCbCrImage->SetData(data);
-
-  }
-  
-  *aNewBack = aNewFront;
-}
-
-void
-ShadowImageLayerD3D9::Disconnect()
-{
-  Destroy();
-}
-
-void
-ShadowImageLayerD3D9::Destroy()
-{
-  mBuffer = nullptr;
-  mYCbCrImage = nullptr;
-}
-
-Layer*
-ShadowImageLayerD3D9::GetLayer()
-{
-  return this;
-}
-
-void
-ShadowImageLayerD3D9::RenderLayer()
-{
-  if (mD3DManager->CompositingDisabled()) {
-    return;
-  }
-
-  if (mBuffer) {
-    mBuffer->RenderTo(mD3DManager, GetEffectiveVisibleRegion());
-  } else if (mYCbCrImage) {
-    if (!mYCbCrImage->IsValid()) {
-      return;
-    }
-
-    if (!mYCbCrImage->GetBackendData(mozilla::layers::LAYERS_D3D9)) {
-      AllocateTexturesYCbCr(mYCbCrImage, device(), mD3DManager);
-    }
-
-    PlanarYCbCrD3D9BackendData *data =
-      static_cast<PlanarYCbCrD3D9BackendData*>(mYCbCrImage->GetBackendData(mozilla::layers::LAYERS_D3D9));
-
-    if (!data) {
-      return;
-    }
-
-    if (!mYCbCrImage->IsValid()) {
-      return;
-    }
-
-    SetShaderTransformAndOpacity();
-
-    device()->SetVertexShaderConstantF(CBvLayerQuad,
-                                       ShaderConstantRect(0,
-                                                          0,
-                                                          mYCbCrImage->GetSize().width,
-                                                          mYCbCrImage->GetSize().height),
-                                       1);
-
-    mD3DManager->SetShaderMode(DeviceManagerD3D9::YCBCRLAYER, GetMaskLayer());
-
-    /*
-     * Send 3d control data and metadata
-     */
-    if (mD3DManager->GetNv3DVUtils()) {
-      // TODO Add 3D support
-    }
-
-    // Linear scaling is default here, adhering to mFilter is difficult since
-    // presumably even with point filtering we'll still want chroma upsampling
-    // to be linear. In the current approach we can't.
-    device()->SetTexture(0, data->mYTexture);
-    device()->SetTexture(1, data->mCbTexture);
-    device()->SetTexture(2, data->mCrTexture);
-
-    device()->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2);
-  } else {
-    NS_ERROR("Unexpected image format.");
-  }
-
-}
-
-already_AddRefed<IDirect3DTexture9>
-ShadowImageLayerD3D9::GetAsTexture(gfxIntSize* aSize)
-{
-  if (!mBuffer) {
-    return nullptr;
-  }
-  
-  *aSize = mBuffer->GetSize();
-  nsRefPtr<IDirect3DTexture9> result = mBuffer->GetTexture();
   return result.forget();
 }
 

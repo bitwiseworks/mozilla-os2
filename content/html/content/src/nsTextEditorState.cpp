@@ -8,7 +8,7 @@
 
 #include "nsCOMPtr.h"
 #include "nsIPresShell.h"
-#include "nsIView.h"
+#include "nsView.h"
 #include "nsCaret.h"
 #include "nsEditorCID.h"
 #include "nsLayoutCID.h"
@@ -24,6 +24,7 @@
 #include "nsITransactionManager.h"
 #include "nsIControllerContext.h"
 #include "nsAttrValue.h"
+#include "nsAttrValueInlines.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIDOMEventListener.h"
 #include "nsIEditorObserver.h"
@@ -37,6 +38,9 @@
 #include "mozilla/Selection.h"
 #include "nsEventListenerManager.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
+#include "mozilla/Preferences.h"
+#include "nsTextNode.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -940,7 +944,8 @@ nsTextEditorState::nsTextEditorState(nsITextControlElement* aOwningElement)
     mInitializing(false),
     mValueTransferInProgress(false),
     mSelectionCached(true),
-    mSelectionRestoreEagerInit(false)
+    mSelectionRestoreEagerInit(false),
+    mPlaceholderVisibility(false)
 {
   MOZ_COUNT_CTOR(nsTextEditorState);
 }
@@ -973,19 +978,19 @@ void nsTextEditorState::Unlink()
 {
   nsTextEditorState* tmp = this;
   tmp->Clear();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mSelCon)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mEditor)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRootNode)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mPlaceholderDiv)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelCon)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mEditor)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRootNode)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPlaceholderDiv)
 }
 
 void nsTextEditorState::Traverse(nsCycleCollectionTraversalCallback& cb)
 {
   nsTextEditorState* tmp = this;
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mSelCon, nsISelectionController)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mEditor)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRootNode)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mPlaceholderDiv)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelCon)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEditor)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRootNode)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlaceholderDiv)
 }
 
 nsFrameSelection*
@@ -1419,11 +1424,11 @@ nsTextEditorState::DestroyEditor()
 void
 nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
 {
-  NS_ENSURE_TRUE(mBoundFrame, );
+  NS_ENSURE_TRUE_VOID(mBoundFrame);
 
   // If it was, however, it should be unbounded from the same frame.
   NS_ASSERTION(!aFrame || aFrame == mBoundFrame, "Unbinding from the wrong frame");
-  NS_ENSURE_TRUE(!aFrame || aFrame == mBoundFrame, );
+  NS_ENSURE_TRUE_VOID(!aFrame || aFrame == mBoundFrame);
 
   // We need to start storing the value outside of the editor if we're not
   // going to use it anymore, so retrieve it for now.
@@ -1510,22 +1515,19 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
   {
     mTextListener->SetFrame(nullptr);
 
-    nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(mTextCtrlElement);
+    nsCOMPtr<EventTarget> target = do_QueryInterface(mTextCtrlElement);
     nsEventListenerManager* manager =
       target->GetListenerManager(false);
     if (manager) {
       manager->RemoveEventListenerByType(mTextListener,
-                                         NS_LITERAL_STRING("keydown"),
-                                         NS_EVENT_FLAG_BUBBLE |
-                                         NS_EVENT_FLAG_SYSTEM_EVENT);
+        NS_LITERAL_STRING("keydown"),
+        dom::TrustedEventsAtSystemGroupBubble());
       manager->RemoveEventListenerByType(mTextListener,
-                                         NS_LITERAL_STRING("keypress"),
-                                         NS_EVENT_FLAG_BUBBLE |
-                                         NS_EVENT_FLAG_SYSTEM_EVENT);
+        NS_LITERAL_STRING("keypress"),
+        dom::TrustedEventsAtSystemGroupBubble());
       manager->RemoveEventListenerByType(mTextListener,
-                                         NS_LITERAL_STRING("keyup"),
-                                         NS_EVENT_FLAG_BUBBLE |
-                                         NS_EVENT_FLAG_SYSTEM_EVENT);
+        NS_LITERAL_STRING("keyup"),
+        dom::TrustedEventsAtSystemGroupBubble());
     }
 
     NS_RELEASE(mTextListener);
@@ -1569,7 +1571,6 @@ nsTextEditorState::CreateRootNode()
   nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::div, nullptr,
                                                  kNameSpaceID_XHTML,
                                                  nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   nsresult rv = NS_NewHTMLElement(getter_AddRefs(mRootNode), nodeInfo.forget(),
                                   NOT_FROM_PARSER);
@@ -1603,7 +1604,7 @@ nsTextEditorState::InitializeRootNode()
     // crash when the number of lines exceeds the height of the textarea and
     // setting -moz-hidden-unscrollable overflow (NS_STYLE_OVERFLOW_CLIP)
     // doesn't paint the caret for some reason.
-    const nsStyleDisplay* disp = mBoundFrame->GetStyleDisplay();
+    const nsStyleDisplay* disp = mBoundFrame->StyleDisplay();
     if (disp->mOverflowX != NS_STYLE_OVERFLOW_VISIBLE &&
         disp->mOverflowX != NS_STYLE_OVERFLOW_CLIP) {
       classValue.AppendLiteral(" inherit-overflow");
@@ -1646,7 +1647,6 @@ be called if @placeholder is the empty string when trimmed from line breaks");
   NS_ENSURE_TRUE(pNodeInfoManager, NS_ERROR_OUT_OF_MEMORY);
 
   nsresult rv;
-  nsCOMPtr<nsIContent> placeholderText;
 
   // Create a DIV for the placeholder
   // and add it to the anonymous content child list
@@ -1654,15 +1654,13 @@ be called if @placeholder is the empty string when trimmed from line breaks");
   nodeInfo = pNodeInfoManager->GetNodeInfo(nsGkAtoms::div, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   rv = NS_NewHTMLElement(getter_AddRefs(mPlaceholderDiv), nodeInfo.forget(),
                          NOT_FROM_PARSER);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Create the text node for the placeholder text before doing anything else
-  rv = NS_NewTextNode(getter_AddRefs(placeholderText), pNodeInfoManager);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsRefPtr<nsTextNode> placeholderText = new nsTextNode(pNodeInfoManager);
 
   rv = mPlaceholderDiv->AppendChildTo(placeholderText, false);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1677,8 +1675,8 @@ bool
 nsTextEditorState::GetMaxLength(int32_t* aMaxLength)
 {
   nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
-  NS_ENSURE_TRUE(content, false);
-  nsGenericHTMLElement* element = nsGenericHTMLElement::FromContent(content);
+  nsGenericHTMLElement* element =
+    nsGenericHTMLElement::FromContentOrNull(content);
   NS_ENSURE_TRUE(element, false);
 
   const nsAttrValue* attr = element->GetParsedAttr(nsGkAtoms::maxlength);
@@ -1901,19 +1899,6 @@ nsTextEditorState::SetValue(const nsAString& aValue, bool aUserInput,
           selPriv->EndBatchChanges();
       }
     }
-
-    // This second check _shouldn't_ be necessary, but let's be safe.
-    if (!weakFrame.IsAlive()) {
-      return;
-    }
-    nsIScrollableFrame* scrollableFrame = do_QueryFrame(mBoundFrame->GetFirstPrincipalChild());
-    if (scrollableFrame)
-    {
-      // Scroll the upper left corner of the text control's
-      // content area back into view.
-      scrollableFrame->ScrollTo(nsPoint(0, 0), nsIScrollableFrame::INSTANT);
-    }
-
   } else {
     if (!mValue) {
       mValue = new nsCString;
@@ -1939,21 +1924,18 @@ void
 nsTextEditorState::InitializeKeyboardEventListeners()
 {
   //register key listeners
-  nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(mTextCtrlElement);
+  nsCOMPtr<EventTarget> target = do_QueryInterface(mTextCtrlElement);
   nsEventListenerManager* manager = target->GetListenerManager(true);
   if (manager) {
     manager->AddEventListenerByType(mTextListener,
                                     NS_LITERAL_STRING("keydown"),
-                                    NS_EVENT_FLAG_BUBBLE |
-                                    NS_EVENT_FLAG_SYSTEM_EVENT);
+                                    dom::TrustedEventsAtSystemGroupBubble());
     manager->AddEventListenerByType(mTextListener,
                                     NS_LITERAL_STRING("keypress"),
-                                    NS_EVENT_FLAG_BUBBLE |
-                                    NS_EVENT_FLAG_SYSTEM_EVENT);
+                                    dom::TrustedEventsAtSystemGroupBubble());
     manager->AddEventListenerByType(mTextListener,
                                     NS_LITERAL_STRING("keyup"),
-                                    NS_EVENT_FLAG_BUBBLE |
-                                    NS_EVENT_FLAG_SYSTEM_EVENT);
+                                    dom::TrustedEventsAtSystemGroupBubble());
   }
 
   mSelCon->SetScrollableFrame(do_QueryFrame(mBoundFrame->GetFirstPrincipalChild()));
@@ -1974,9 +1956,7 @@ nsTextEditorState::ValueWasChanged(bool aNotify)
     return;
   }
 
-  nsAutoString valueString;
-  GetValue(valueString, true);
-  SetPlaceholderClass(valueString.IsEmpty(), aNotify);
+  UpdatePlaceholderVisibility(aNotify);
 }
 
 void
@@ -2000,28 +1980,25 @@ nsTextEditorState::UpdatePlaceholderText(bool aNotify)
 }
 
 void
-nsTextEditorState::SetPlaceholderClass(bool aVisible,
-                                       bool aNotify)
+nsTextEditorState::UpdatePlaceholderVisibility(bool aNotify)
 {
   NS_ASSERTION(mPlaceholderDiv, "This function should not be called if "
                                 "mPlaceholderDiv isn't set");
 
-  // No need to do anything if we don't have a frame yet
-  if (!mBoundFrame)
-    return;
+  nsAutoString value;
+  GetValue(value, true);
 
-  nsAutoString classValue;
+  mPlaceholderVisibility = value.IsEmpty();
 
-  classValue.Assign(NS_LITERAL_STRING("anonymous-div placeholder"));
+  if (mPlaceholderVisibility &&
+      !Preferences::GetBool("dom.placeholder.show_on_focus", true)) {
+    nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
+    mPlaceholderVisibility = !nsContentUtils::IsFocusedContent(content);
+  }
 
-  if (!aVisible)
-    classValue.AppendLiteral(" hidden");
-
-  nsIContent* placeholderDiv = GetPlaceholderNode();
-  NS_ENSURE_TRUE(placeholderDiv, );
-
-  placeholderDiv->SetAttr(kNameSpaceID_None, nsGkAtoms::_class,
-                          classValue, aNotify);
+  if (mBoundFrame && aNotify) {
+    mBoundFrame->InvalidateFrame();
+  }
 }
 
 void

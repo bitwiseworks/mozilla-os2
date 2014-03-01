@@ -14,6 +14,7 @@ class nsIDOMEvent;
 class nsEventChainPreVisitor;
 class nsEventChainPostVisitor;
 
+#include "mozilla/Attributes.h"
 #include "nsIDOMEventTarget.h"
 #include "nsEventListenerManager.h"
 #include "nsPIWindowRoot.h"
@@ -27,39 +28,46 @@ public:
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIDOMEVENTTARGET
+  using mozilla::dom::EventTarget::RemoveEventListener;
+  virtual void AddEventListener(const nsAString& aType,
+                                nsIDOMEventListener* aListener,
+                                bool aUseCapture,
+                                const mozilla::dom::Nullable<bool>& aWantsUntrusted,
+                                mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
 
   // nsPIWindowRoot
 
-  virtual nsPIDOMWindow* GetWindow();
+  virtual nsPIDOMWindow* GetWindow() MOZ_OVERRIDE;
 
-  virtual nsresult GetControllers(nsIControllers** aResult);
+  virtual nsresult GetControllers(nsIControllers** aResult) MOZ_OVERRIDE;
   virtual nsresult GetControllerForCommand(const char * aCommand,
-                                           nsIController** _retval);
+                                           nsIController** _retval) MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* GetPopupNode();
-  virtual void SetPopupNode(nsIDOMNode* aNode);
+  virtual nsIDOMNode* GetPopupNode() MOZ_OVERRIDE;
+  virtual void SetPopupNode(nsIDOMNode* aNode) MOZ_OVERRIDE;
 
-  virtual void SetParentTarget(nsIDOMEventTarget* aTarget)
+  virtual void SetParentTarget(mozilla::dom::EventTarget* aTarget) MOZ_OVERRIDE
   {
     mParent = aTarget;
   }
-  virtual nsIDOMEventTarget* GetParentTarget() { return mParent; }
+  virtual mozilla::dom::EventTarget* GetParentTarget() MOZ_OVERRIDE { return mParent; }
+  virtual nsIDOMWindow* GetOwnerGlobal() MOZ_OVERRIDE;
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsWindowRoot, nsIDOMEventTarget)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsWindowRoot,
+                                                         nsIDOMEventTarget)
 
 protected:
   // Members
-  nsPIDOMWindow* mWindow; // [Weak]. The window will hold on to us and let go when it dies.
+  nsCOMPtr<nsPIDOMWindow> mWindow;
   nsRefPtr<nsEventListenerManager> mListenerManager; // [Strong]. We own the manager, which owns event listeners attached
                                                       // to us.
 
   nsCOMPtr<nsIDOMNode> mPopupNode; // [OWNER]
 
-  nsCOMPtr<nsIDOMEventTarget> mParent;
+  nsCOMPtr<mozilla::dom::EventTarget> mParent;
 };
 
-extern nsresult
-NS_NewWindowRoot(nsPIDOMWindow* aWindow,
-                 nsIDOMEventTarget** aResult);
+extern already_AddRefed<mozilla::dom::EventTarget>
+NS_NewWindowRoot(nsPIDOMWindow* aWindow);
 
 #endif

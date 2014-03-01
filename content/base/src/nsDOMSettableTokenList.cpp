@@ -3,54 +3,25 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /*
- * Implementation of nsIDOMDOMSettableTokenList specified by HTML5.
+ * Implementation of DOMSettableTokenList specified by HTML5.
  */
 
 #include "nsDOMSettableTokenList.h"
-#include "dombindings.h"
+#include "mozilla/dom/DOMSettableTokenListBinding.h"
+#include "mozilla/dom/Element.h"
 
-
-nsDOMSettableTokenList::nsDOMSettableTokenList(nsGenericElement *aElement, nsIAtom* aAttrAtom)
-  : nsDOMTokenList(aElement, aAttrAtom)
-{
-}
-
-nsDOMSettableTokenList::~nsDOMSettableTokenList()
-{
-}
-
-DOMCI_DATA(DOMSettableTokenList, nsDOMSettableTokenList)
-
-NS_INTERFACE_TABLE_HEAD(nsDOMSettableTokenList)
-  NS_INTERFACE_TABLE1(nsDOMSettableTokenList,
-                      nsIDOMDOMSettableTokenList)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DOMSettableTokenList)
-NS_INTERFACE_MAP_END_INHERITING(nsDOMTokenList)
-
-NS_IMPL_ADDREF_INHERITED(nsDOMSettableTokenList, nsDOMTokenList)
-NS_IMPL_RELEASE_INHERITED(nsDOMSettableTokenList, nsDOMTokenList)
-
-NS_IMETHODIMP
-nsDOMSettableTokenList::GetValue(nsAString& aResult)
-{
-  return ToString(aResult);
-}
-
-NS_IMETHODIMP
-nsDOMSettableTokenList::SetValue(const nsAString& aValue)
+void
+nsDOMSettableTokenList::SetValue(const nsAString& aValue, mozilla::ErrorResult& rv)
 {
   if (!mElement) {
-    return NS_OK;
+    return;
   }
 
-  return mElement->SetAttr(kNameSpaceID_None, mAttrAtom, aValue, true);
+  rv = mElement->SetAttr(kNameSpaceID_None, mAttrAtom, aValue, true);
 }
 
 JSObject*
-nsDOMSettableTokenList::WrapObject(JSContext *cx, JSObject *scope,
-                                   bool *triedToWrap)
+nsDOMSettableTokenList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-  return mozilla::dom::oldproxybindings::DOMSettableTokenList::create(cx, scope, this,
-                                                             triedToWrap);
+  return mozilla::dom::DOMSettableTokenListBinding::Wrap(cx, scope, this);
 }

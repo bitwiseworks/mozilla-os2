@@ -10,11 +10,8 @@ VPATH   = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = storage
-LIBRARY_NAME     = storage_s
 MODULE_NAME      = mozStorageModule
 FORCE_STATIC_LIB = 1
-GRE_MODULE       = 1
 LIBXUL_LIBRARY = 1
 
 # TODO: we do this in crashreporter and xpcom/base too, should be centralized
@@ -33,39 +30,6 @@ ifneq ($(OS_TARGET), Android)
 DEFINES += -DMOZ_STORAGE_MEMORY
 endif
 endif
-
-EXPORTS_NAMESPACES = mozilla/storage
-
-EXPORTS_mozilla/storage = \
-  Variant.h \
-  Variant_inl.h \
-  $(NULL)
-
-CPPSRCS = \
-  mozStorageService.cpp \
-  mozStorageConnection.cpp \
-  mozStorageStatement.cpp \
-  mozStorageStatementParams.cpp \
-  mozStorageStatementRow.cpp \
-  mozStorageArgValueArray.cpp \
-  mozStorageSQLFunctions.cpp \
-  mozStorageRow.cpp \
-  mozStorageResultSet.cpp \
-  mozStorageError.cpp \
-  mozStorageAsyncStatementExecution.cpp \
-  mozStorageStatementJSHelper.cpp \
-  mozStoragePrivateHelpers.cpp \
-  mozStorageBindingParamsArray.cpp \
-  mozStorageBindingParams.cpp \
-  mozStorageAsyncStatement.cpp \
-  mozStorageAsyncStatementJSHelper.cpp \
-  mozStorageAsyncStatementParams.cpp \
-  StorageBaseStatementInternal.cpp \
-  SQLCollations.cpp \
-  VacuumManager.cpp \
-  TelemetryVFS.cpp \
-  FileSystemModule.cpp \
-  $(NULL)
 
 # For nsDependentJSString
 LOCAL_INCLUDES = \

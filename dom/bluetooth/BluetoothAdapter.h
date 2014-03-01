@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_bluetooth_bluetoothadapter_h__
 #define mozilla_dom_bluetooth_bluetoothadapter_h__
 
+#include "mozilla/Attributes.h"
 #include "BluetoothCommon.h"
 #include "BluetoothPropertyContainer.h"
 #include "nsCOMPtr.h"
@@ -31,7 +32,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMBLUETOOTHADAPTER
 
-  NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
 
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(BluetoothAdapter,
                                                          nsDOMEventTargetHelper)
@@ -41,23 +42,16 @@ public:
 
   void Notify(const BluetoothSignal& aParam);
 
-  nsIDOMEventTarget*
-  ToIDOMEventTarget() const
-  {
-    return static_cast<nsDOMEventTargetHelper*>(
-      const_cast<BluetoothAdapter*>(this));
-  }
-
   nsISupports*
-  ToISupports() const
+  ToISupports()
   {
-    return ToIDOMEventTarget();
+    return static_cast<EventTarget*>(this);
   }
 
   void Unroot();
-  virtual void SetPropertyByValue(const BluetoothNamedValue& aValue);  
+  virtual void SetPropertyByValue(const BluetoothNamedValue& aValue) MOZ_OVERRIDE;  
 private:
-  
+
   BluetoothAdapter(nsPIDOMWindow* aOwner, const BluetoothValue& aValue);
   ~BluetoothAdapter();
 
@@ -69,7 +63,6 @@ private:
   
   nsString mAddress;
   nsString mName;
-  bool mEnabled;
   bool mDiscoverable;
   bool mDiscovering;
   bool mPairable;
@@ -79,18 +72,9 @@ private:
   uint32_t mClass;
   nsTArray<nsString> mDeviceAddresses;
   nsTArray<nsString> mUuids;
-  JSObject* mJsUuids;
-  JSObject* mJsDeviceAddresses;
+  JS::Heap<JSObject*> mJsUuids;
+  JS::Heap<JSObject*> mJsDeviceAddresses;
   bool mIsRooted;
-  
-  NS_DECL_EVENT_HANDLER(propertychanged)
-  NS_DECL_EVENT_HANDLER(devicefound)
-  NS_DECL_EVENT_HANDLER(devicedisappeared)
-  NS_DECL_EVENT_HANDLER(requestconfirmation)
-  NS_DECL_EVENT_HANDLER(requestpincode)
-  NS_DECL_EVENT_HANDLER(requestpasskey)
-  NS_DECL_EVENT_HANDLER(authorize)
-  NS_DECL_EVENT_HANDLER(cancel)
 };
 
 END_BLUETOOTH_NAMESPACE

@@ -2,22 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const EXPORTED_SYMBOLS = ["SyncScheduler",
-                          "ErrorHandler",
-                          "SendCredentialsController"];
+this.EXPORTED_SYMBOLS = [
+  "ErrorHandler",
+  "SyncScheduler",
+];
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-common/log4moz.js");
-Cu.import("resource://services-sync/util.js");
+Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/engines.js");
-Cu.import("resource://services-sync/engines/clients.js");
 Cu.import("resource://services-sync/status.js");
+Cu.import("resource://services-sync/util.js");
 
-Cu.import("resource://services-sync/main.js");    // So we can get to Service for callbacks.
-
-let SyncScheduler = {
+this.SyncScheduler = function SyncScheduler(service) {
+  this.service = service;
+  this.init();
+}
+SyncScheduler.prototype = {
   _log: Log4Moz.repository.getLogger("Sync.SyncScheduler"),
 
   _fatalLoginStatus: [LOGIN_FAILED_NO_USERNAME,
@@ -171,10 +173,12 @@ let SyncScheduler = {
         break;
       case "weave:service:backoff:interval":
         let requested_interval = subject * 1000;
+        this._log.debug("Got backoff notification: " + requested_interval + "ms");
         // Leave up to 25% more time for the back off.
         let interval = requested_interval * (1 + Math.random() * 0.25);
         Status.backoffInterval = interval;
         Status.minimumNextSync = Date.now() + requested_interval;
+        this._log.debug("Fuzzed minimum next sync: " + Status.minimumNextSync);
         break;
       case "weave:service:ready":
         // Applications can specify this preference if they want autoconnect
@@ -197,7 +201,7 @@ let SyncScheduler = {
          Svc.Idle.addIdleObserver(this, Svc.Prefs.get("scheduler.idleTime"));
          break;
       case "weave:service:start-over":
-         SyncScheduler.setDefaults();
+         this.setDefaults();
          try {
            Svc.Idle.removeIdleObserver(this, Svc.Prefs.get("scheduler.idleTime"));
          } catch (ex if (ex.result == Cr.NS_ERROR_FAILURE)) {
@@ -258,7 +262,7 @@ let SyncScheduler = {
   },
 
   calculateScore: function calculateScore() {
-    let engines = [Clients].concat(Engines.getEnabled());
+    let engines = [this.service.clientsEngine].concat(this.service.engineManager.getEnabled());
     for (let i = 0;i < engines.length;i++) {
       this._log.trace(engines[i].name + ": score: " + engines[i].score);
       this.globalScore += engines[i].score;
@@ -274,7 +278,7 @@ let SyncScheduler = {
    */
   updateClientMode: function updateClientMode() {
     // Nothing to do if it's the same amount
-    let numClients = Clients.stats.numClients;
+    let numClients = this.service.clientsEngine.stats.numClients;
     if (this.numClients == numClients)
       return;
 
@@ -298,7 +302,7 @@ let SyncScheduler = {
     // Should we be syncing now, if not, cancel any sync timers and return
     // if we're in backoff, we'll schedule the next sync.
     let ignore = [kSyncBackoffNotMet, kSyncMasterPasswordLocked];
-    let skip = Weave.Service._checkSync(ignore);
+    let skip = this.service._checkSync(ignore);
     this._log.trace("_checkSync returned \"" + skip + "\".");
     if (skip) {
       this.clearSyncTriggers();
@@ -331,7 +335,7 @@ let SyncScheduler = {
       return;
     }
 
-    Utils.nextTick(Weave.Service.sync, Weave.Service);
+    Utils.nextTick(this.service.sync, this.service);
   },
 
   /**
@@ -346,7 +350,7 @@ let SyncScheduler = {
     // Ensure the interval is set to no less than the backoff.
     if (Status.backoffInterval && interval < Status.backoffInterval) {
       this._log.trace("Requested interval " + interval +
-                      " ms is smaller than the backoff interval. " + 
+                      " ms is smaller than the backoff interval. " +
                       "Using backoff interval " +
                       Status.backoffInterval + " ms instead.");
       interval = Status.backoffInterval;
@@ -406,13 +410,13 @@ let SyncScheduler = {
   * Sync should first start to sync.
   */
   delayedAutoConnect: function delayedAutoConnect(delay) {
-    if (Weave.Service._checkSetup() == STATUS_OK) {
+    if (this.service._checkSetup() == STATUS_OK) {
       Utils.namedTimer(this.autoConnect, delay * 1000, this, "_autoTimer");
     }
   },
 
   autoConnect: function autoConnect() {
-    if (Weave.Service._checkSetup() == STATUS_OK && !Weave.Service._checkSync()) {
+    if (this.service._checkSetup() == STATUS_OK && !this.service._checkSync()) {
       // Schedule a sync based on when a previous sync was scheduled.
       // scheduleNextSync() will do the right thing if that time lies in
       // the past.
@@ -459,14 +463,17 @@ let SyncScheduler = {
     // Clear out any scheduled syncs
     if (this.syncTimer)
       this.syncTimer.clear();
-  }
-
+  },
 };
 
 const LOG_PREFIX_SUCCESS = "success-";
 const LOG_PREFIX_ERROR   = "error-";
 
-let ErrorHandler = {
+this.ErrorHandler = function ErrorHandler(service) {
+  this.service = service;
+  this.init();
+}
+ErrorHandler.prototype = {
 
   /**
    * Flag that turns on error reporting for all errors, incl. network errors.
@@ -540,7 +547,7 @@ let ErrorHandler = {
         break;
       case "weave:service:sync:error":
         if (Status.sync == CREDENTIALS_CHANGED) {
-          Weave.Service.logout();
+          this.service.logout();
         }
 
         this.resetFileLog(Svc.Prefs.get("log.appender.file.logOnError"),
@@ -604,7 +611,7 @@ let ErrorHandler = {
     this._log.debug("Beginning user-triggered sync.");
 
     this.dontIgnoreErrors = true;
-    Utils.nextTick(Weave.Service.sync, Weave.Service);
+    Utils.nextTick(this.service.sync, this.service);
   },
 
   /**
@@ -616,24 +623,31 @@ let ErrorHandler = {
     let index = 0;
     let threshold = Date.now() - 1000 * Svc.Prefs.get("log.appender.file.maxErrorAge");
 
+    this._log.debug("Log cleanup threshold time: " + threshold);
     while (direntries.hasMoreElements()) {
       let logFile = direntries.getNext().QueryInterface(Ci.nsIFile);
       if (logFile.lastModifiedTime < threshold) {
+        this._log.trace(" > Noting " + logFile.leafName +
+                        " for cleanup (" + logFile.lastModifiedTime + ")");
         oldLogs.push(logFile);
       }
     }
 
     // Deletes a file from oldLogs each tick until there are none left.
+    let errorHandler = this;
     function deleteFile() {
       if (index >= oldLogs.length) {
-        ErrorHandler._cleaningUpFileLogs = false;
+        errorHandler._log.debug("Done deleting files.");
+        errorHandler._cleaningUpFileLogs = false;
         Svc.Obs.notify("weave:service:cleanup-logs");
         return;
       }
       try {
-        oldLogs[index].remove(false);
+        let file = oldLogs[index];
+        file.remove(false);
+        errorHandler._log.trace("Deleted " + file.leafName + ".");
       } catch (ex) {
-        ErrorHandler._log._debug("Encountered error trying to clean up old log file '"
+        errorHandler._log._debug("Encountered error trying to clean up old log file '"
                                  + oldLogs[index].leafName + "':"
                                  + Utils.exceptionStr(ex));
       }
@@ -642,8 +656,10 @@ let ErrorHandler = {
     }
 
     if (oldLogs.length > 0) {
-      ErrorHandler._cleaningUpFileLogs = true;
+      this._cleaningUpFileLogs = true;
       Utils.nextTick(deleteFile);
+    } else {
+      this._log.debug("No logs to clean up.");
     }
   },
 
@@ -662,17 +678,25 @@ let ErrorHandler = {
     let inStream = this._logAppender.getInputStream();
     this._logAppender.reset();
     if (flushToFile && inStream) {
+      this._log.debug("Flushing file log.");
       try {
         let filename = filenamePrefix + Date.now() + ".txt";
         let file = FileUtils.getFile("ProfD", ["weave", "logs", filename]);
         let outStream = FileUtils.openFileOutputStream(file);
-        NetUtil.asyncCopy(inStream, outStream, function () {
+
+        this._log.trace("Beginning stream copy to " + file.leafName + ": " +
+                        Date.now());
+        NetUtil.asyncCopy(inStream, outStream, function onCopyComplete() {
+          this._log.trace("onCopyComplete: " + Date.now());
+          this._log.trace("Output file timestamp: " + file.lastModifiedTime);
           Svc.Obs.notify("weave:service:reset-file-log");
-          if (filenamePrefix == LOG_PREFIX_ERROR
-              && !ErrorHandler._cleaningUpFileLogs) {
-            Utils.nextTick(ErrorHandler.cleanupLogs, ErrorHandler);
+          this._log.trace("Notified: " + Date.now());
+          if (filenamePrefix == LOG_PREFIX_ERROR &&
+              !this._cleaningUpFileLogs) {
+            this._log.trace("Scheduling cleanup.");
+            Utils.nextTick(this.cleanupLogs, this);
           }
-        });
+        }.bind(this));
       } catch (ex) {
         Svc.Obs.notify("weave:service:reset-file-log");
       }
@@ -729,11 +753,11 @@ let ErrorHandler = {
       this._log.trace("shouldReportError: true (prolonged sync failure).");
       return true;
     }
- 
+
     // We got a 401 mid-sync. Wait for the next sync before actually handling
     // an error. This assumes that we'll get a 401 again on a login fetch in
     // order to report the error.
-    if (!Weave.Service.clusterURL) {
+    if (!this.service.clusterURL) {
       this._log.trace("shouldReportError: false (no cluster URL; " +
                       "possible node reassignment).");
       return false;
@@ -756,7 +780,7 @@ let ErrorHandler = {
         break;
 
       case 401:
-        Weave.Service.logout();
+        this.service.logout();
         this._log.info("Got 401 response; resetting clusterURL.");
         Svc.Prefs.reset("clusterURL");
 
@@ -774,7 +798,7 @@ let ErrorHandler = {
           Svc.Prefs.set("lastSyncReassigned", true);
         }
         this._log.info("Attempting to schedule another sync.");
-        SyncScheduler.scheduleNextSync(delay);
+        this.service.scheduler.scheduleNextSync(delay);
         break;
 
       case 500:
@@ -783,13 +807,15 @@ let ErrorHandler = {
       case 504:
         Status.enforceBackoff = true;
         if (resp.status == 503 && resp.headers["retry-after"]) {
-          if (Weave.Service.isLoggedIn) {
+          let retryAfter = resp.headers["retry-after"];
+          this._log.debug("Got Retry-After: " + retryAfter);
+          if (this.service.isLoggedIn) {
             Status.sync = SERVER_MAINTENANCE;
           } else {
             Status.login = SERVER_MAINTENANCE;
           }
           Svc.Obs.notify("weave:service:backoff:interval",
-                         parseInt(resp.headers["retry-after"], 10));
+                         parseInt(retryAfter, 10));
         }
         break;
     }
@@ -803,7 +829,7 @@ let ErrorHandler = {
       case Cr.NS_ERROR_PROXY_CONNECTION_REFUSED:
         // The constant says it's about login, but in fact it just
         // indicates general network error.
-        if (Weave.Service.isLoggedIn) {
+        if (this.service.isLoggedIn) {
           Status.sync = LOGIN_FAILED_NETWORK_ERROR;
         } else {
           Status.login = LOGIN_FAILED_NETWORK_ERROR;
@@ -811,96 +837,4 @@ let ErrorHandler = {
         break;
     }
   },
-};
-
-
-/**
- * Send credentials over an active J-PAKE channel.
- * 
- * This object is designed to take over as the JPAKEClient controller,
- * presumably replacing one that is UI-based which would either cause
- * DOM objects to leak or the JPAKEClient to be GC'ed when the DOM
- * context disappears. This object stays alive for the duration of the
- * transfer by being strong-ref'ed as an nsIObserver.
- * 
- * Credentials are sent after the first sync has been completed
- * (successfully or not.)
- * 
- * Usage:
- * 
- *   jpakeclient.controller = new SendCredentialsController(jpakeclient);
- * 
- */
-function SendCredentialsController(jpakeclient) {
-  this._log = Log4Moz.repository.getLogger("Sync.SendCredentialsController");
-  this._log.level = Log4Moz.Level[Svc.Prefs.get("log.logger.service.main")];
-
-  this._log.trace("Loading.");
-  this.jpakeclient = jpakeclient;
-
-  // Register ourselves as observers the first Sync finishing (either
-  // successfully or unsuccessfully, we don't care) or for removing
-  // this device's sync configuration, in case that happens while we
-  // haven't finished the first sync yet.
-  Services.obs.addObserver(this, "weave:service:sync:finish", false);
-  Services.obs.addObserver(this, "weave:service:sync:error",  false);
-  Services.obs.addObserver(this, "weave:service:start-over",  false);
-}
-SendCredentialsController.prototype = {
-
-  unload: function unload() {
-    this._log.trace("Unloading.");
-    try {
-      Services.obs.removeObserver(this, "weave:service:sync:finish");
-      Services.obs.removeObserver(this, "weave:service:sync:error");
-      Services.obs.removeObserver(this, "weave:service:start-over");
-    } catch (ex) {
-      // Ignore.
-    }
-  },
-
-  observe: function observe(subject, topic, data) {
-    switch (topic) {
-      case "weave:service:sync:finish":
-      case "weave:service:sync:error":
-        Utils.nextTick(this.sendCredentials, this);
-        break;
-      case "weave:service:start-over":
-        // This will call onAbort which will call unload().
-        this.jpakeclient.abort();
-        break;
-    }
-  },
-
-  sendCredentials: function sendCredentials() {
-    this._log.trace("Sending credentials.");
-    let credentials = {account:   Weave.Identity.account,
-                       password:  Weave.Identity.basicPassword,
-                       synckey:   Weave.Identity.syncKey,
-                       serverURL: Weave.Service.serverURL};
-    this.jpakeclient.sendAndComplete(credentials);
-  },
-
-  // JPAKEClient controller API
-
-  onComplete: function onComplete() {
-    this._log.debug("Exchange was completed successfully!");
-    this.unload();
-
-    // Schedule a Sync for soonish to fetch the data uploaded by the
-    // device with which we just paired.
-    SyncScheduler.scheduleNextSync(SyncScheduler.activeInterval);
-  },
-
-  onAbort: function onAbort(error) {
-    // It doesn't really matter why we aborted, but the channel is closed
-    // for sure, so we won't be able to do anything with it.
-    this._log.debug("Exchange was aborted with error: " + error);
-    this.unload();
-  },
-
-  // Irrelevant methods for this controller:
-  displayPIN: function displayPIN() {},
-  onPairingStart: function onPairingStart() {},
-  onPaired: function onPaired() {}
 };

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "filters.h"
+#include "Filters.h"
 
 #include "Accessible-inl.h"
 #include "nsAccUtils.h"
@@ -10,35 +10,51 @@
 #include "States.h"
 
 using namespace mozilla::a11y;
+using namespace mozilla::a11y::filters;
 
-bool
+uint32_t
 filters::GetSelected(Accessible* aAccessible)
 {
-  return aAccessible->State() & states::SELECTED;
+  if (aAccessible->State() & states::SELECTED)
+    return eMatch | eSkipSubtree;
+
+  return eSkip;
 }
 
-bool
+uint32_t
 filters::GetSelectable(Accessible* aAccessible)
 {
-  return aAccessible->InteractiveState() & states::SELECTABLE;
+  if (aAccessible->InteractiveState() & states::SELECTABLE)
+    return eMatch | eSkipSubtree;
+
+  return eSkip;
 }
 
-bool
+uint32_t
 filters::GetRow(Accessible* aAccessible)
 {
-  return aAccessible->Role() == roles::ROW;
+  a11y::role role = aAccessible->Role();
+  if (role == roles::ROW)
+    return eMatch | eSkipSubtree;
+
+  // Look for rows inside rowgroup.
+  if (role == roles::GROUPING)
+    return eSkip;
+
+  return eSkipSubtree;
 }
 
-bool
+uint32_t
 filters::GetCell(Accessible* aAccessible)
 {
-  roles::Role role = aAccessible->Role();
+  a11y::role role = aAccessible->Role();
   return role == roles::GRID_CELL || role == roles::ROWHEADER ||
-      role == roles::COLUMNHEADER;
+    role == roles::COLUMNHEADER ? eMatch : eSkipSubtree;
 }
 
-bool
+uint32_t
 filters::GetEmbeddedObject(Accessible* aAccessible)
 {
-  return nsAccUtils::IsEmbeddedObject(aAccessible);
+  return nsAccUtils::IsEmbeddedObject(aAccessible) ?
+    eMatch | eSkipSubtree : eSkipSubtree;
 }

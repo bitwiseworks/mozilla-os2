@@ -132,12 +132,12 @@ STARTOP(div_)
     binop(/);
 ENDOP
 
-STARTOP(min)
+STARTOP(min_)
     const int32 a = pop(), b = *sp;
     if (a < b) *sp = a;
 ENDOP
 
-STARTOP(max)
+STARTOP(max_)
     const int32 a = pop(), b = *sp;
     if (a > b) *sp = a;
 ENDOP
@@ -407,8 +407,9 @@ ENDOP
 STARTOP(attr_set_slot)
     declare_params(1);
     const attrCode  	slat = attrCode(uint8(*param));
-    const          int  val  = int(pop())  + (map - smap.begin())*int(slat == gr_slatAttTo);
-    is->setAttr(&seg, slat, 0, val, smap);
+    const int offset = (map - smap.begin())*int(slat == gr_slatAttTo);
+    const          int  val  = int(pop())  + offset;
+    is->setAttr(&seg, slat, offset, val, smap);
 ENDOP
 
 STARTOP(iattr_set_slot)
@@ -442,7 +443,7 @@ STARTOP(push_glyph_attr_obs)
     const int           slot_ref   = int8(param[1]);
     slotref slot = slotat(slot_ref);
     if (slot)
-        push(seg.glyphAttr(slot->gid(), glyph_attr));
+        push(int32(seg.glyphAttr(slot->gid(), glyph_attr)));
 ENDOP
 
 STARTOP(push_glyph_metric)
@@ -476,7 +477,7 @@ STARTOP(push_att_to_gattr_obs)
     {
         slotref att = slot->attachedTo();
         if (att) slot = att;
-        push(seg.glyphAttr(slot->gid(), glyph_attr));
+        push(int32(seg.glyphAttr(slot->gid(), glyph_attr)));
     }
 ENDOP
 
@@ -490,7 +491,7 @@ STARTOP(push_att_to_glyph_metric)
     {
         slotref att = slot->attachedTo();
         if (att) slot = att;
-        push(seg.getGlyphMetric(slot, glyph_attr, attr_level));
+        push(int32(seg.getGlyphMetric(slot, glyph_attr, attr_level)));
     }
 ENDOP
 
@@ -568,11 +569,6 @@ STARTOP(iattr_sub)
 ENDOP
 
 STARTOP(push_proc_state)
-//    declare_params(1);
-//    unsigned int  pstate = uint8(*param);
-//    pstate = 0;     // This is here to stop the compiler bleating about unused 
-                    // variables.
-    // TODO; Implement body
     use_params(1);
     push(1);
 ENDOP
@@ -620,7 +616,7 @@ STARTOP(push_glyph_attr)
     const int           slot_ref    = int8(param[2]);
     slotref slot = slotat(slot_ref);
     if (slot)
-        push(seg.glyphAttr(slot->gid(), glyph_attr));
+        push(int32(seg.glyphAttr(slot->gid(), glyph_attr)));
 ENDOP
 
 STARTOP(push_att_to_glyph_attr)
@@ -633,7 +629,7 @@ STARTOP(push_att_to_glyph_attr)
     {
         slotref att = slot->attachedTo();
         if (att) slot = att;
-        push(seg.glyphAttr(slot->gid(), glyph_attr));
+        push(int32(seg.glyphAttr(slot->gid(), glyph_attr)));
     }
 ENDOP
 

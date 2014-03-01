@@ -18,15 +18,36 @@ SerializedLoadContext::SerializedLoadContext(nsILoadContext* aLoadContext)
 
 SerializedLoadContext::SerializedLoadContext(nsIChannel* aChannel)
 {
+  if (!aChannel) {
+    Init(nullptr);
+    return;
+  }
+
   nsCOMPtr<nsILoadContext> loadContext;
   NS_QueryNotificationCallbacks(aChannel, loadContext);
   Init(loadContext);
+
+  if (!loadContext) {
+    // Attempt to retrieve the private bit from the channel if it has been
+    // overriden.
+    bool isPrivate = false;
+    bool isOverriden = false;
+    nsCOMPtr<nsIPrivateBrowsingChannel> pbChannel = do_QueryInterface(aChannel);
+    if (pbChannel &&
+        NS_SUCCEEDED(pbChannel->IsPrivateModeOverriden(&isPrivate, &isOverriden)) &&
+        isOverriden) {
+      mUsePrivateBrowsing = isPrivate;
+      mIsPrivateBitValid = true;
+    }
+  }
 }
 
 SerializedLoadContext::SerializedLoadContext(nsIWebSocketChannel* aChannel)
 {
   nsCOMPtr<nsILoadContext> loadContext;
-  NS_QueryNotificationCallbacks(aChannel, loadContext);
+  if (aChannel) {
+    NS_QueryNotificationCallbacks(aChannel, loadContext);
+  }
   Init(loadContext);
 }
 
@@ -35,12 +56,14 @@ SerializedLoadContext::Init(nsILoadContext* aLoadContext)
 {
   if (aLoadContext) {
     mIsNotNull = true;
+    mIsPrivateBitValid = true;
     aLoadContext->GetIsContent(&mIsContent);
     aLoadContext->GetUsePrivateBrowsing(&mUsePrivateBrowsing);
     aLoadContext->GetAppId(&mAppId);
     aLoadContext->GetIsInBrowserElement(&mIsInBrowserElement);
   } else {
     mIsNotNull = false;
+    mIsPrivateBitValid = false;
     // none of below values really matter when mIsNotNull == false:
     // we won't be GetInterfaced to nsILoadContext
     mIsContent = true;

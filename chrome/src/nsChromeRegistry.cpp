@@ -86,9 +86,9 @@ nsChromeRegistry::LogMessageWithContext(nsIURI* aURL, uint32_t aLineNumber, uint
   if (aURL)
     aURL->GetSpec(spec);
 
-  rv = error->Init(NS_ConvertUTF8toUTF16(formatted).get(),
-                   NS_ConvertUTF8toUTF16(spec).get(),
-                   nullptr,
+  rv = error->Init(NS_ConvertUTF8toUTF16(formatted),
+                   NS_ConvertUTF8toUTF16(spec),
+                   EmptyString(),
                    aLineNumber, 0, flags, "chrome registration");
   PR_smprintf_free(formatted);
 
@@ -131,10 +131,10 @@ nsChromeRegistry::GetService()
     nsCOMPtr<nsIChromeRegistry> reg(
         do_GetService(NS_CHROMEREGISTRY_CONTRACTID));
     if (!gChromeRegistry)
-      return NULL;
+      return nullptr;
   }
-  NS_ADDREF(gChromeRegistry);
-  return gChromeRegistry;
+  nsCOMPtr<nsIChromeRegistry> registry = gChromeRegistry;
+  return registry.forget();
 }
 
 nsresult
@@ -165,7 +165,7 @@ nsChromeRegistry::GetProviderAndPath(nsIURL* aChromeURL,
   NS_ASSERTION(isChrome, "Non-chrome URI?");
 #endif
 
-  nsCAutoString path;
+  nsAutoCString path;
   rv = aChromeURL->GetPath(path);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -207,12 +207,12 @@ nsChromeRegistry::Canonify(nsIURL* aChromeURL)
 
   nsresult rv;
 
-  nsCAutoString provider, path;
+  nsAutoCString provider, path;
   rv = GetProviderAndPath(aChromeURL, provider, path);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (path.IsEmpty()) {
-    nsCAutoString package;
+    nsAutoCString package;
     rv = aChromeURL->GetHost(package);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -277,7 +277,7 @@ nsChromeRegistry::ConvertChromeURL(nsIURI* aChromeURI, nsIURI* *aResult)
   nsCOMPtr<nsIURL> chromeURL (do_QueryInterface(aChromeURI));
   NS_ENSURE_TRUE(chromeURL, NS_NOINTERFACE);
 
-  nsCAutoString package, provider, path;
+  nsAutoCString package, provider, path;
   rv = chromeURL->GetHostPort(package);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -564,7 +564,7 @@ nsChromeRegistry::AllowScriptsForPackage(nsIURI* aChromeURI, bool *aResult)
   nsCOMPtr<nsIURL> url (do_QueryInterface(aChromeURI));
   NS_ENSURE_TRUE(url, NS_NOINTERFACE);
 
-  nsCAutoString provider, file;
+  nsAutoCString provider, file;
   rv = GetProviderAndPath(url, provider, file);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -593,7 +593,7 @@ nsChromeRegistry::AllowContentToAccess(nsIURI *aURI, bool *aResult)
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsCAutoString package;
+  nsAutoCString package;
   rv = url->GetHostPort(package);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -618,7 +618,7 @@ nsChromeRegistry::WrappersEnabled(nsIURI *aURI)
   if (NS_FAILED(rv) || !isChrome)
     return false;
 
-  nsCAutoString package;
+  nsAutoCString package;
   rv = chromeURL->GetHostPort(package);
   if (NS_FAILED(rv))
     return false;
@@ -632,8 +632,8 @@ already_AddRefed<nsChromeRegistry>
 nsChromeRegistry::GetSingleton()
 {
   if (gChromeRegistry) {
-    NS_ADDREF(gChromeRegistry);
-    return gChromeRegistry;
+    nsRefPtr<nsChromeRegistry> registry = gChromeRegistry;
+    return registry.forget();
   }
 
   nsRefPtr<nsChromeRegistry> cr;
@@ -643,7 +643,7 @@ nsChromeRegistry::GetSingleton()
     cr = new nsChromeRegistryChrome();
 
   if (NS_FAILED(cr->Init()))
-    return NULL;
+    return nullptr;
 
   return cr.forget();
 }

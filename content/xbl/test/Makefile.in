@@ -16,9 +16,11 @@ MOCHITEST_FILES =	\
 		bug310107-resource.xhtml \
 		test_bug366770.html \
 		test_bug371724.xhtml \
-		test_bug372769.xhtml \
+		test_bug372769.html \
+		file_bug372769.xhtml \
 		test_bug378866.xhtml \
-		test_bug397934.xhtml \
+		test_bug397934.html \
+		file_bug397934.xhtml \
 		test_bug389322.xhtml \
 		test_bug400705.xhtml \
 		test_bug401907.xhtml \
@@ -38,10 +40,13 @@ MOCHITEST_FILES =	\
 		file_bug591198_inner.html \
 		test_bug639338.xhtml \
 		test_bug790265.xhtml \
+		test_bug821850.html \
+		file_bug821850.xhtml \
+		test_bug844783.html \
+		file_bug844783.xhtml \
 		$(NULL)
 
 MOCHITEST_CHROME_FILES = \
-		test_bug296375.xul \
 		test_bug378518.xul \
 		test_bug398135.xul \
 		test_bug398492.xul \

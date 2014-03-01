@@ -31,11 +31,22 @@
 
 // dwarf_cfi_to_module_unittest.cc: Tests for google_breakpad::DwarfCFIToModule.
 
+#include <string>
+#include <vector>
+
 #include "breakpad_googletest_includes.h"
 #include "common/dwarf_cfi_to_module.h"
+#include "common/using_std_string.h"
+
+using std::vector;
 
 using google_breakpad::Module;
 using google_breakpad::DwarfCFIToModule;
+using google_breakpad::ToUniqueString;
+using google_breakpad::UniqueString;
+using google_breakpad::ustr__ZDcfa;
+using google_breakpad::ustr__ZDra;
+using google_breakpad::ustr__empty;
 using testing::ContainerEq;
 using testing::Test;
 using testing::_;
@@ -44,8 +55,10 @@ struct MockCFIReporter: public DwarfCFIToModule::Reporter {
   MockCFIReporter(const string &file, const string &section)
       : Reporter(file, section) { }
   MOCK_METHOD2(UnnamedRegister, void(size_t offset, int reg));
-  MOCK_METHOD2(UndefinedNotSupported, void(size_t offset, const string &reg));
-  MOCK_METHOD2(ExpressionsNotSupported, void(size_t offset, const string &reg));
+  MOCK_METHOD2(UndefinedNotSupported, void(size_t offset,
+                                           const UniqueString* reg));
+  MOCK_METHOD2(ExpressionsNotSupported, void(size_t offset,
+                                             const UniqueString* reg));
 };
 
 struct DwarfCFIToModuleFixture {
@@ -53,16 +66,17 @@ struct DwarfCFIToModuleFixture {
       : module("module name", "module os", "module arch", "module id"),
         reporter("reporter file", "reporter section"),
         handler(&module, register_names, &reporter) {
-    register_names.push_back("reg0");
-    register_names.push_back("reg1");
-    register_names.push_back("reg2");
-    register_names.push_back("reg3");
-    register_names.push_back("reg4");
-    register_names.push_back("reg5");
-    register_names.push_back("reg6");
-    register_names.push_back("reg7");
-    register_names.push_back("sp");
-    register_names.push_back("pc");
+    register_names.push_back(ToUniqueString("reg0"));
+    register_names.push_back(ToUniqueString("reg1"));
+    register_names.push_back(ToUniqueString("reg2"));
+    register_names.push_back(ToUniqueString("reg3"));
+    register_names.push_back(ToUniqueString("reg4"));
+    register_names.push_back(ToUniqueString("reg5"));
+    register_names.push_back(ToUniqueString("reg6"));
+    register_names.push_back(ToUniqueString("reg7"));
+    register_names.push_back(ToUniqueString("sp"));
+    register_names.push_back(ToUniqueString("pc"));
+    register_names.push_back(ustr__empty());
 
     EXPECT_CALL(reporter, UnnamedRegister(_, _)).Times(0);
     EXPECT_CALL(reporter, UndefinedNotSupported(_, _)).Times(0);
@@ -70,7 +84,7 @@ struct DwarfCFIToModuleFixture {
   }
 
   Module module;
-  vector<string> register_names;
+  vector<const UniqueString*> register_names;
   MockCFIReporter reporter;
   DwarfCFIToModule handler;
   vector<Module::StackFrameEntry *> entries;
@@ -125,9 +139,21 @@ struct RuleFixture: public DwarfCFIToModuleFixture {
 class Rule: public RuleFixture, public Test { };
 
 TEST_F(Rule, UndefinedRule) {
-  EXPECT_CALL(reporter, UndefinedNotSupported(_, "reg7"));
+  EXPECT_CALL(reporter, UndefinedNotSupported(_, ToUniqueString("reg7")));
   StartEntry();
   ASSERT_TRUE(handler.UndefinedRule(entry_address, 7));
+  ASSERT_TRUE(handler.End());
+  CheckEntry();
+  EXPECT_EQ(0U, entries[0]->initial_rules.size());
+  EXPECT_EQ(0U, entries[0]->rule_changes.size());
+}
+
+TEST_F(Rule, RegisterWithEmptyName) {
+  EXPECT_CALL(reporter, UnnamedRegister(_, 10));
+  EXPECT_CALL(reporter,
+              UndefinedNotSupported(_, ToUniqueString("unnamed_register10")));
+  StartEntry();
+  ASSERT_TRUE(handler.UndefinedRule(entry_address, 10));
   ASSERT_TRUE(handler.End());
   CheckEntry();
   EXPECT_EQ(0U, entries[0]->initial_rules.size());
@@ -140,7 +166,8 @@ TEST_F(Rule, SameValueRule) {
   ASSERT_TRUE(handler.End());
   CheckEntry();
   Module::RuleMap expected_initial;
-  expected_initial["reg6"] = "reg6";
+  const UniqueString* reg6 = ToUniqueString("reg6");
+  expected_initial[reg6] = Module::Expr(reg6, 0, false);
   EXPECT_THAT(entries[0]->initial_rules, ContainerEq(expected_initial));
   EXPECT_EQ(0U, entries[0]->rule_changes.size());
 }
@@ -154,7 +181,8 @@ TEST_F(Rule, OffsetRule) {
   CheckEntry();
   EXPECT_EQ(0U, entries[0]->initial_rules.size());
   Module::RuleChangeMap expected_changes;
-  expected_changes[entry_address + 1][".ra"] = ".cfa 16927065 + ^";
+  expected_changes[entry_address + 1][ustr__ZDra()] =
+      Module::Expr(ustr__ZDcfa(), 16927065, true);
   EXPECT_THAT(entries[0]->rule_changes, ContainerEq(expected_changes));
 }
 
@@ -166,23 +194,24 @@ TEST_F(Rule, OffsetRuleNegative) {
   CheckEntry();
   EXPECT_EQ(0U, entries[0]->initial_rules.size());
   Module::RuleChangeMap expected_changes;
-  expected_changes[entry_address + 1][".cfa"] = "reg4 -34530721 + ^";
+  expected_changes[entry_address + 1][ustr__ZDcfa()] =
+      Module::Expr(ToUniqueString("reg4"), -34530721, true);
   EXPECT_THAT(entries[0]->rule_changes, ContainerEq(expected_changes));
 }
 
 TEST_F(Rule, ValOffsetRule) {
   // Use an unnamed register number, to exercise that branch of RegisterName.
-  EXPECT_CALL(reporter, UnnamedRegister(_, 10));
+  EXPECT_CALL(reporter, UnnamedRegister(_, 11));
   StartEntry();
   ASSERT_TRUE(handler.ValOffsetRule(entry_address + 0x5ab7,
                                     DwarfCFIToModule::kCFARegister,
-                                    10, 61812979));
+                                    11, 61812979));
   ASSERT_TRUE(handler.End());
   CheckEntry();
   EXPECT_EQ(0U, entries[0]->initial_rules.size());
   Module::RuleChangeMap expected_changes;
-  expected_changes[entry_address + 0x5ab7][".cfa"] =
-      "unnamed_register10 61812979 +";
+  expected_changes[entry_address + 0x5ab7][ustr__ZDcfa()] =
+      Module::Expr(ToUniqueString("unnamed_register11"), 61812979, false);
   EXPECT_THAT(entries[0]->rule_changes, ContainerEq(expected_changes));
 }
 
@@ -192,13 +221,14 @@ TEST_F(Rule, RegisterRule) {
   ASSERT_TRUE(handler.End());
   CheckEntry();
   Module::RuleMap expected_initial;
-  expected_initial[".ra"] = "reg3";
+  expected_initial[ustr__ZDra()] =
+      Module::Expr(ToUniqueString("reg3"), 0, false);
   EXPECT_THAT(entries[0]->initial_rules, ContainerEq(expected_initial));
   EXPECT_EQ(0U, entries[0]->rule_changes.size());
 }
 
 TEST_F(Rule, ExpressionRule) {
-  EXPECT_CALL(reporter, ExpressionsNotSupported(_, "reg2"));
+  EXPECT_CALL(reporter, ExpressionsNotSupported(_, ToUniqueString("reg2")));
   StartEntry();
   ASSERT_TRUE(handler.ExpressionRule(entry_address + 0xf326, 2,
                                      "it takes two to tango"));
@@ -209,7 +239,7 @@ TEST_F(Rule, ExpressionRule) {
 }
 
 TEST_F(Rule, ValExpressionRule) {
-  EXPECT_CALL(reporter, ExpressionsNotSupported(_, "reg0"));
+  EXPECT_CALL(reporter, ExpressionsNotSupported(_, ToUniqueString("reg0")));
   StartEntry();
   ASSERT_TRUE(handler.ValExpressionRule(entry_address + 0x6367, 0,
                                         "bit off more than he could chew"));
@@ -226,8 +256,10 @@ TEST_F(Rule, DefaultReturnAddressRule) {
   ASSERT_TRUE(handler.End());
   CheckEntry();
   Module::RuleMap expected_initial;
-  expected_initial[".ra"] = "reg2";
-  expected_initial["reg0"] = "reg1";
+  expected_initial[ustr__ZDra()] =
+      Module::Expr(ToUniqueString("reg2"), 0, false);
+  expected_initial[ToUniqueString("reg0")] =
+      Module::Expr(ToUniqueString("reg1"), 0, false);
   EXPECT_THAT(entries[0]->initial_rules, ContainerEq(expected_initial));
   EXPECT_EQ(0U, entries[0]->rule_changes.size());
 }
@@ -239,7 +271,8 @@ TEST_F(Rule, DefaultReturnAddressRuleOverride) {
   ASSERT_TRUE(handler.End());
   CheckEntry();
   Module::RuleMap expected_initial;
-  expected_initial[".ra"] = "reg1";
+  expected_initial[ustr__ZDra()] =
+      Module::Expr(ToUniqueString("reg1"), 0, false);
   EXPECT_THAT(entries[0]->initial_rules, ContainerEq(expected_initial));
   EXPECT_EQ(0U, entries[0]->rule_changes.size());
 }
@@ -251,38 +284,40 @@ TEST_F(Rule, DefaultReturnAddressRuleLater) {
   ASSERT_TRUE(handler.End());
   CheckEntry();
   Module::RuleMap expected_initial;
-  expected_initial[".ra"] = "reg2";
+  expected_initial[ustr__ZDra()] =
+      Module::Expr(ToUniqueString("reg2"), 0, false);
   EXPECT_THAT(entries[0]->initial_rules, ContainerEq(expected_initial));
   Module::RuleChangeMap expected_changes;
-  expected_changes[entry_address + 1][".ra"] = "reg1";
+  expected_changes[entry_address + 1][ustr__ZDra()] =
+      Module::Expr(ToUniqueString("reg1"), 0, false);
   EXPECT_THAT(entries[0]->rule_changes, ContainerEq(expected_changes));
 }
 
 TEST(RegisterNames, I386) {
-  vector<string> names = DwarfCFIToModule::RegisterNames::I386();
+  vector<const UniqueString*> names = DwarfCFIToModule::RegisterNames::I386();
 
-  EXPECT_EQ("$eax", names[0]);
-  EXPECT_EQ("$ecx", names[1]);
-  EXPECT_EQ("$esp", names[4]);
-  EXPECT_EQ("$eip", names[8]);
+  EXPECT_EQ(ToUniqueString("$eax"), names[0]);
+  EXPECT_EQ(ToUniqueString("$ecx"), names[1]);
+  EXPECT_EQ(ToUniqueString("$esp"), names[4]);
+  EXPECT_EQ(ToUniqueString("$eip"), names[8]);
 }
 
 TEST(RegisterNames, ARM) {
-  vector<string> names = DwarfCFIToModule::RegisterNames::ARM();
+  vector<const UniqueString*> names = DwarfCFIToModule::RegisterNames::ARM();
 
-  EXPECT_EQ("r0", names[0]);
-  EXPECT_EQ("r10", names[10]);
-  EXPECT_EQ("sp", names[13]);
-  EXPECT_EQ("lr", names[14]);
-  EXPECT_EQ("pc", names[15]);
+  EXPECT_EQ(ToUniqueString("r0"), names[0]);
+  EXPECT_EQ(ToUniqueString("r10"), names[10]);
+  EXPECT_EQ(ToUniqueString("sp"), names[13]);
+  EXPECT_EQ(ToUniqueString("lr"), names[14]);
+  EXPECT_EQ(ToUniqueString("pc"), names[15]);
 }
 
 TEST(RegisterNames, X86_64) {
-  vector<string> names = DwarfCFIToModule::RegisterNames::X86_64();
+  vector<const UniqueString*> names = DwarfCFIToModule::RegisterNames::X86_64();
 
-  EXPECT_EQ("$rax", names[0]);
-  EXPECT_EQ("$rdx", names[1]);
-  EXPECT_EQ("$rbp", names[6]);
-  EXPECT_EQ("$rsp", names[7]);
-  EXPECT_EQ("$rip", names[16]);
+  EXPECT_EQ(ToUniqueString("$rax"), names[0]);
+  EXPECT_EQ(ToUniqueString("$rdx"), names[1]);
+  EXPECT_EQ(ToUniqueString("$rbp"), names[6]);
+  EXPECT_EQ(ToUniqueString("$rsp"), names[7]);
+  EXPECT_EQ(ToUniqueString("$rip"), names[16]);
 }

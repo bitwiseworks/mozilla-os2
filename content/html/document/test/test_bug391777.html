@@ -19,6 +19,7 @@ arg.testVal = "foo";
 var result = window.showModalDialog("javascript:window.returnValue = window.dialogArguments.testVal; window.close(); 'This window should close on its own.';", arg);
 ok(true, "We should get here without user interaction");
 is(result, "foo", "Unexpected result from showModalDialog");
+
 </script>
 </body>
 </html>

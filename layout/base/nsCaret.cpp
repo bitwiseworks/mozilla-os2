@@ -32,9 +32,10 @@
 #include "nsXULPopupManager.h"
 #include "nsMenuPopupFrame.h"
 #include "nsTextFragment.h"
-#include "nsThemeConstants.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
+#include "mozilla/Selection.h"
+#include <algorithm>
 
 // The bidi indicator hangs off the caret to one side, to show which
 // direction the typing is in. It needs to be at least 2x2 to avoid looking like 
@@ -214,11 +215,11 @@ nsCaret::Metrics nsCaret::ComputeMetrics(nsIFrame* aFrame, int32_t aOffset, nsco
     caretWidth += nsPresContext::CSSPixelsToAppUnits(1);
   }
   nscoord bidiIndicatorSize = nsPresContext::CSSPixelsToAppUnits(kMinBidiIndicatorPixels);
-  bidiIndicatorSize = NS_MAX(caretWidth, bidiIndicatorSize);
+  bidiIndicatorSize = std::max(caretWidth, bidiIndicatorSize);
 
   // Round them to device pixels. Always round down, except that anything
   // between 0 and 1 goes up to 1 so we don't let the caret disappear.
-  uint32_t tpp = aFrame->PresContext()->AppUnitsPerDevPixel();
+  int32_t tpp = aFrame->PresContext()->AppUnitsPerDevPixel();
   Metrics result;
   result.mCaretWidth = NS_ROUND_BORDER_TO_PIXELS(caretWidth, tpp);
   result.mBidiIndicatorSize = NS_ROUND_BORDER_TO_PIXELS(bidiIndicatorSize, tpp);
@@ -483,8 +484,9 @@ void nsCaret::InvalidateOutsideCaret()
   nsIFrame *frame = GetCaretFrame();
 
   // Only invalidate if we are not fully contained by our frame's rect.
-  if (frame && !frame->GetVisualOverflowRect().Contains(GetCaretRect()))
-    InvalidateRects(mCaretRect, GetHookRect(), frame);
+  if (frame && !frame->GetVisualOverflowRect().Contains(GetCaretRect())) {
+    frame->SchedulePaint();
+  }
 }
 
 void nsCaret::UpdateCaretPosition()
@@ -523,26 +525,6 @@ void nsCaret::PaintCaret(nsDisplayListBuilder *aBuilder,
     return;
   }
   nscolor foregroundColor = aForFrame->GetCaretColorAt(contentOffset);
-
-  // Only draw the native caret if the foreground color matches that of
-  // -moz-fieldtext (the color of the text in a textbox). If it doesn't match
-  // we are likely in contenteditable or a custom widget and we risk being hard to see
-  // against the background. In that case, fall back to the CSS color.
-  nsPresContext* presContext = aForFrame->PresContext();
-
-  if (GetHookRect().IsEmpty() && presContext) {
-    nsITheme *theme = presContext->GetTheme();
-    if (theme && theme->ThemeSupportsWidget(presContext, aForFrame, NS_THEME_TEXTFIELD_CARET)) {
-      nscolor fieldText;
-      nsresult rv = LookAndFeel::GetColor(LookAndFeel::eColorID__moz_fieldtext,
-                                          &fieldText);
-      if (NS_SUCCEEDED(rv) && fieldText == foregroundColor) {
-        theme->DrawWidgetBackground(aCtx, aForFrame, NS_THEME_TEXTFIELD_CARET,
-                                    drawCaretRect, drawCaretRect);
-        return;
-      }
-    }
-  }
 
   aCtx->SetColor(foregroundColor);
   aCtx->FillRect(drawCaretRect);
@@ -613,31 +595,9 @@ nsresult nsCaret::PrimeTimer()
   return NS_OK;
 }
 
-void nsCaret::InvalidateTextOverflowBlock()
-{
-  // If the nearest block has a potential 'text-overflow' marker then
-  // invalidate it.
-  if (mLastContent) {
-    nsIFrame* caretFrame = mLastContent->GetPrimaryFrame();
-    if (caretFrame) {
-      nsIFrame* block = nsLayoutUtils::GetAsBlock(caretFrame) ? caretFrame :
-        nsLayoutUtils::FindNearestBlockAncestor(caretFrame);
-      if (block) {
-        const nsStyleTextReset* style = block->GetStyleTextReset();
-        if (style->mTextOverflow.mLeft.mType != NS_STYLE_TEXT_OVERFLOW_CLIP ||
-            style->mTextOverflow.mRight.mType != NS_STYLE_TEXT_OVERFLOW_CLIP) {
-          block->InvalidateOverflowRect();
-        }
-      }
-    }
-  }
-}
-
 //-----------------------------------------------------------------------------
 void nsCaret::StartBlinking()
 {
-  InvalidateTextOverflowBlock();
-
   if (mReadOnly) {
     // Make sure the one draw command we use for a readonly caret isn't
     // done until the selection is set
@@ -661,8 +621,6 @@ void nsCaret::StartBlinking()
 //-----------------------------------------------------------------------------
 void nsCaret::StopBlinking()
 {
-  InvalidateTextOverflowBlock();
-
   if (mDrawn)     // erase the caret if necessary
     DrawCaret(true);
 
@@ -690,7 +648,7 @@ nsCaret::DrawAtPositionWithHint(nsIDOMNode*             aNode,
     return false;
 
   // now we have a frame, check whether it's appropriate to show the caret here
-  const nsStyleUserInterface* userinterface = theFrame->GetStyleUserInterface();
+  const nsStyleUserInterface* userinterface = theFrame->StyleUserInterface();
   if ((!mIgnoreUserModify &&
        userinterface->mUserModify == NS_STYLE_USER_MODIFY_READ_ONLY) ||
       (userinterface->mUserInput == NS_STYLE_USER_INPUT_NONE) ||
@@ -721,7 +679,7 @@ nsCaret::DrawAtPositionWithHint(nsIDOMNode*             aNode,
   }
 
   if (aInvalidate)
-    InvalidateRects(mCaretRect, mHookRect, theFrame);
+    theFrame->SchedulePaint();
 
   return true;
 }
@@ -764,8 +722,7 @@ nsCaret::GetCaretFrameForNodeOffset(nsIContent*             aContentNode,
   
   // Mamdouh : modification of the caret to work at rtl and ltr with Bidi
   //
-  // Direction Style from this->GetStyleData()
-  // now in (visibility->mDirection)
+  // Direction Style from visibility->mDirection
   // ------------------
   // NS_STYLE_DIRECTION_LTR : LTR or Default
   // NS_STYLE_DIRECTION_RTL
@@ -799,8 +756,8 @@ nsCaret::GetCaretFrameForNodeOffset(nsIContent*             aContentNode,
 
         if ((levelBefore != levelAfter) || (aBidiLevel != levelBefore))
         {
-          aBidiLevel = NS_MAX(aBidiLevel, NS_MIN(levelBefore, levelAfter));                                  // rule c3
-          aBidiLevel = NS_MIN(aBidiLevel, NS_MAX(levelBefore, levelAfter));                                  // rule c4
+          aBidiLevel = std::max(aBidiLevel, std::min(levelBefore, levelAfter));                                  // rule c3
+          aBidiLevel = std::min(aBidiLevel, std::max(levelBefore, levelAfter));                                  // rule c4
           if (aBidiLevel == levelBefore                                                                      // rule c1
               || (aBidiLevel > levelBefore && aBidiLevel < levelAfter && !((aBidiLevel ^ levelBefore) & 1))    // rule c5
               || (aBidiLevel < levelBefore && aBidiLevel > levelAfter && !((aBidiLevel ^ levelBefore) & 1)))  // rule c9
@@ -957,7 +914,8 @@ bool nsCaret::IsMenuPopupHidingCaret()
 #ifdef MOZ_XUL
   // Check if there are open popups.
   nsXULPopupManager *popMgr = nsXULPopupManager::GetInstance();
-  nsTArray<nsIFrame*> popups = popMgr->GetVisiblePopups();
+  nsTArray<nsIFrame*> popups;
+  popMgr->GetVisiblePopups(popups);
 
   if (popups.Length() == 0)
     return false; // No popups, so caret can't be hidden by them.
@@ -1008,7 +966,7 @@ void nsCaret::DrawCaret(bool aInvalidate)
   
   // Can we draw the caret now?
   nsCOMPtr<nsIPresShell> presShell = do_QueryReferent(mPresShell);
-  NS_ENSURE_TRUE(presShell, /**/);
+  NS_ENSURE_TRUE_VOID(presShell);
   {
     if (presShell->IsPaintingSuppressed())
     {
@@ -1093,7 +1051,7 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
   }
 
   // on RTL frames the right edge of mCaretRect must be equal to framePos
-  const nsStyleVisibility* vis = aFrame->GetStyleVisibility();
+  const nsStyleVisibility* vis = aFrame->StyleVisibility();
   if (NS_STYLE_DIRECTION_RTL == vis->mDirection)
     mCaretRect.x -= mCaretRect.width;
 
@@ -1137,16 +1095,6 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
   return true;
 }
 
-// static
-void nsCaret::InvalidateRects(const nsRect &aRect, const nsRect &aHook,
-                              nsIFrame *aFrame)
-{
-  NS_ASSERTION(aFrame, "Must have a frame to invalidate");
-  nsRect rect;
-  rect.UnionRect(aRect, aHook);
-  aFrame->Invalidate(rect);
-}
-
 //-----------------------------------------------------------------------------
 /* static */
 void nsCaret::CaretBlinkCallback(nsITimer *aTimer, void *aClosure)
@@ -1159,15 +1107,14 @@ void nsCaret::CaretBlinkCallback(nsITimer *aTimer, void *aClosure)
 
 
 //-----------------------------------------------------------------------------
-already_AddRefed<nsFrameSelection>
+nsFrameSelection*
 nsCaret::GetFrameSelection()
 {
-  nsCOMPtr<nsISelectionPrivate> privateSelection(do_QueryReferent(mDomSelectionWeak));
-  if (!privateSelection)
+  nsCOMPtr<nsISelection> sel = do_QueryReferent(mDomSelectionWeak);
+  if (!sel)
     return nullptr;
-  nsFrameSelection* frameSelection = nullptr;
-  privateSelection->GetFrameSelection(&frameSelection);
-  return frameSelection;
+
+  return static_cast<Selection*>(sel.get())->GetFrameSelection();
 }
 
 void
@@ -1180,7 +1127,7 @@ nsCaret::SetIgnoreUserModify(bool aIgnoreUserModify)
     // mIgnoreUserModify value.
     nsIFrame *frame = GetCaretFrame();
     if (frame) {
-      const nsStyleUserInterface* userinterface = frame->GetStyleUserInterface();
+      const nsStyleUserInterface* userinterface = frame->StyleUserInterface();
       if (userinterface->mUserModify == NS_STYLE_USER_MODIFY_READ_ONLY) {
         StopBlinking();
       }

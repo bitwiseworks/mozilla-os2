@@ -6,8 +6,8 @@
 #include "nsAccUtils.h"
 
 #include "Accessible-inl.h"
+#include "ARIAMap.h"
 #include "nsAccessibilityService.h"
-#include "nsARIAMap.h"
 #include "nsCoreUtils.h"
 #include "DocAccessible.h"
 #include "HyperTextAccessible.h"
@@ -23,7 +23,7 @@
 #include "nsWhitespaceTokenizer.h"
 #include "nsComponentManagerUtils.h"
 
-namespace dom = mozilla::dom;
+using namespace mozilla;
 using namespace mozilla::a11y;
 
 void
@@ -40,7 +40,7 @@ nsAccUtils::SetAccAttr(nsIPersistentProperties *aAttributes,
                        nsIAtom *aAttrName, const nsAString& aAttrValue)
 {
   nsAutoString oldValue;
-  nsCAutoString attrName;
+  nsAutoCString attrName;
 
   aAttributes->SetStringProperty(nsAtomCString(aAttrName), aAttrValue, oldValue);
 }
@@ -136,15 +136,14 @@ nsAccUtils::SetLiveContainerAttributes(nsIPersistentProperties *aAttributes,
 
     // container-relevant attribute
     if (relevant.IsEmpty() &&
-        nsAccUtils::HasDefinedARIAToken(ancestor, nsGkAtoms::aria_relevant) &&
+        HasDefinedARIAToken(ancestor, nsGkAtoms::aria_relevant) &&
         ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_relevant, relevant))
       SetAccAttr(aAttributes, nsGkAtoms::containerRelevant, relevant);
 
     // container-live, and container-live-role attributes
     if (live.IsEmpty()) {
       nsRoleMapEntry* role = aria::GetRoleMap(ancestor);
-      if (nsAccUtils::HasDefinedARIAToken(ancestor,
-                                          nsGkAtoms::aria_live)) {
+      if (HasDefinedARIAToken(ancestor, nsGkAtoms::aria_live)) {
         ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_live,
                           live);
       } else if (role) {
@@ -153,21 +152,21 @@ nsAccUtils::SetLiveContainerAttributes(nsIPersistentProperties *aAttributes,
       if (!live.IsEmpty()) {
         SetAccAttr(aAttributes, nsGkAtoms::containerLive, live);
         if (role) {
-          nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::containerLiveRole,
-                                 role->ARIARoleString());
+          SetAccAttr(aAttributes, nsGkAtoms::containerLiveRole,
+                     role->ARIARoleString());
         }
       }
     }
 
     // container-atomic attribute
     if (atomic.IsEmpty() &&
-        nsAccUtils::HasDefinedARIAToken(ancestor, nsGkAtoms::aria_atomic) &&
+        HasDefinedARIAToken(ancestor, nsGkAtoms::aria_atomic) &&
         ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_atomic, atomic))
       SetAccAttr(aAttributes, nsGkAtoms::containerAtomic, atomic);
 
     // container-busy attribute
     if (busy.IsEmpty() &&
-        nsAccUtils::HasDefinedARIAToken(ancestor, nsGkAtoms::aria_busy) &&
+        HasDefinedARIAToken(ancestor, nsGkAtoms::aria_busy) &&
         ancestor->GetAttr(kNameSpaceID_None, nsGkAtoms::aria_busy, busy))
       SetAccAttr(aAttributes, nsGkAtoms::containerBusy, busy);
 
@@ -198,7 +197,7 @@ nsAccUtils::HasDefinedARIAToken(nsIContent *aContent, nsIAtom *aAtom)
 nsIAtom*
 nsAccUtils::GetARIAToken(dom::Element* aElement, nsIAtom* aAttr)
 {
-  if (!nsAccUtils::HasDefinedARIAToken(aElement, aAttr))
+  if (!HasDefinedARIAToken(aElement, aAttr))
     return nsGkAtoms::_empty;
 
   static nsIContent::AttrValuesArray tokens[] =
@@ -240,7 +239,7 @@ nsAccUtils::GetSelectableContainer(Accessible* aAccessible, uint64_t aState)
 
   Accessible* parent = aAccessible;
   while ((parent = parent->Parent()) && !parent->IsSelect()) {
-    if (Role(parent) == nsIAccessibleRole::ROLE_PANE)
+    if (parent->Role() == roles::PANE)
       return nullptr;
   }
   return parent;
@@ -294,15 +293,12 @@ nsAccUtils::GetTextAccessibleFromSelection(nsISelection* aSelection)
   return nullptr;
 }
 
-nsresult
+nsIntPoint
 nsAccUtils::ConvertToScreenCoords(int32_t aX, int32_t aY,
                                   uint32_t aCoordinateType,
-                                  nsAccessNode *aAccessNode,
-                                  nsIntPoint *aCoords)
+                                  Accessible* aAccessible)
 {
-  NS_ENSURE_ARG_POINTER(aCoords);
-
-  aCoords->MoveTo(aX, aY);
+  nsIntPoint coords(aX, aY);
 
   switch (aCoordinateType) {
     case nsIAccessibleCoordinateType::COORDTYPE_SCREEN_RELATIVE:
@@ -310,29 +306,27 @@ nsAccUtils::ConvertToScreenCoords(int32_t aX, int32_t aY,
 
     case nsIAccessibleCoordinateType::COORDTYPE_WINDOW_RELATIVE:
     {
-      NS_ENSURE_ARG(aAccessNode);
-      *aCoords += GetScreenCoordsForWindow(aAccessNode);
+      coords += nsCoreUtils::GetScreenCoordsForWindow(aAccessible->GetNode());
       break;
     }
 
     case nsIAccessibleCoordinateType::COORDTYPE_PARENT_RELATIVE:
     {
-      NS_ENSURE_ARG(aAccessNode);
-      *aCoords += GetScreenCoordsForParent(aAccessNode);
+      coords += GetScreenCoordsForParent(aAccessible);
       break;
     }
 
     default:
-      return NS_ERROR_INVALID_ARG;
+      NS_NOTREACHED("invalid coord type!");
   }
 
-  return NS_OK;
+  return coords;
 }
 
-nsresult
+void
 nsAccUtils::ConvertScreenCoordsTo(int32_t *aX, int32_t *aY,
                                   uint32_t aCoordinateType,
-                                  nsAccessNode *aAccessNode)
+                                  Accessible* aAccessible)
 {
   switch (aCoordinateType) {
     case nsIAccessibleCoordinateType::COORDTYPE_SCREEN_RELATIVE:
@@ -340,8 +334,7 @@ nsAccUtils::ConvertScreenCoordsTo(int32_t *aX, int32_t *aY,
 
     case nsIAccessibleCoordinateType::COORDTYPE_WINDOW_RELATIVE:
     {
-      NS_ENSURE_ARG(aAccessNode);
-      nsIntPoint coords = nsAccUtils::GetScreenCoordsForWindow(aAccessNode);
+      nsIntPoint coords = nsCoreUtils::GetScreenCoordsForWindow(aAccessible->GetNode());
       *aX -= coords.x;
       *aY -= coords.y;
       break;
@@ -349,31 +342,21 @@ nsAccUtils::ConvertScreenCoordsTo(int32_t *aX, int32_t *aY,
 
     case nsIAccessibleCoordinateType::COORDTYPE_PARENT_RELATIVE:
     {
-      NS_ENSURE_ARG(aAccessNode);
-      nsIntPoint coords = nsAccUtils::GetScreenCoordsForParent(aAccessNode);
+      nsIntPoint coords = GetScreenCoordsForParent(aAccessible);
       *aX -= coords.x;
       *aY -= coords.y;
       break;
     }
 
     default:
-      return NS_ERROR_INVALID_ARG;
+    NS_NOTREACHED("invalid coord type!");
   }
-
-  return NS_OK;
 }
 
 nsIntPoint
-nsAccUtils::GetScreenCoordsForWindow(nsAccessNode *aAccessNode)
+nsAccUtils::GetScreenCoordsForParent(Accessible* aAccessible)
 {
-  return nsCoreUtils::GetScreenCoordsForWindow(aAccessNode->GetNode());
-}
-
-nsIntPoint
-nsAccUtils::GetScreenCoordsForParent(nsAccessNode *aAccessNode)
-{
-  DocAccessible* document = aAccessNode->Document();
-  Accessible* parent = document->GetContainerAccessible(aAccessNode->GetNode());
+  Accessible* parent = aAccessible->Parent();
   if (!parent)
     return nsIntPoint(0, 0);
 
@@ -381,18 +364,9 @@ nsAccUtils::GetScreenCoordsForParent(nsAccessNode *aAccessNode)
   if (!parentFrame)
     return nsIntPoint(0, 0);
 
-  nsIntRect parentRect = parentFrame->GetScreenRectExternal();
-  return nsIntPoint(parentRect.x, parentRect.y);
-}
-
-uint8_t
-nsAccUtils::GetAttributeCharacteristics(nsIAtom* aAtom)
-{
-    for (uint32_t i = 0; i < nsARIAMap::gWAIUnivAttrMapLength; i++)
-      if (*nsARIAMap::gWAIUnivAttrMap[i].attributeName == aAtom)
-        return nsARIAMap::gWAIUnivAttrMap[i].characteristics;
-
-    return 0;
+  nsRect rect = parentFrame->GetScreenRectInAppUnits();
+  return nsPoint(rect.x, rect.y).
+    ToNearestPixels(parentFrame->PresContext()->AppUnitsPerDevPixel());
 }
 
 bool
@@ -424,7 +398,7 @@ nsAccUtils::IsTextInterfaceSupportCorrect(Accessible* aAccessible)
   uint32_t childCount = aAccessible->ChildCount();
   for (uint32_t childIdx = 0; childIdx < childCount; childIdx++) {
     Accessible* child = aAccessible->GetChildAt(childIdx);
-    if (IsText(child)) {
+    if (!IsEmbeddedObject(child)) {
       foundText = true;
       break;
     }
@@ -444,7 +418,7 @@ nsAccUtils::IsTextInterfaceSupportCorrect(Accessible* aAccessible)
 uint32_t
 nsAccUtils::TextLength(Accessible* aAccessible)
 {
-  if (!IsText(aAccessible))
+  if (IsEmbeddedObject(aAccessible))
     return 1;
 
   TextLeafAccessible* textLeaf = aAccessible->AsTextLeaf();
@@ -465,76 +439,21 @@ nsAccUtils::MustPrune(Accessible* aAccessible)
 { 
   roles::Role role = aAccessible->Role();
 
-  // We don't prune buttons any more however AT don't expect children inside of
-  // button in general, we allow menu buttons to have children to make them
-  // accessible.
-  return role == roles::MENUITEM || 
-    role == roles::COMBOBOX_OPTION ||
-    role == roles::OPTION ||
-    role == roles::ENTRY ||
-    role == roles::FLAT_EQUATION ||
-    role == roles::PASSWORD_TEXT ||
-    role == roles::TOGGLE_BUTTON ||
-    role == roles::GRAPHIC ||
-    role == roles::SLIDER ||
-    role == roles::PROGRESSBAR ||
-    role == roles::SEPARATOR;
-}
-
-nsresult
-nsAccUtils::GetHeaderCellsFor(nsIAccessibleTable *aTable,
-                              nsIAccessibleTableCell *aCell,
-                              int32_t aRowOrColHeaderCells, nsIArray **aCells)
-{
-  nsresult rv = NS_OK;
-  nsCOMPtr<nsIMutableArray> cells = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  int32_t rowIdx = -1;
-  rv = aCell->GetRowIndex(&rowIdx);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  int32_t colIdx = -1;
-  rv = aCell->GetColumnIndex(&colIdx);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool moveToLeft = aRowOrColHeaderCells == eRowHeaderCells;
-
-  // Move to the left or top to find row header cells or column header cells.
-  int32_t index = (moveToLeft ? colIdx : rowIdx) - 1;
-  for (; index >= 0; index--) {
-    int32_t curRowIdx = moveToLeft ? rowIdx : index;
-    int32_t curColIdx = moveToLeft ? index : colIdx;
-
-    nsCOMPtr<nsIAccessible> cell;
-    rv = aTable->GetCellAt(curRowIdx, curColIdx, getter_AddRefs(cell));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsCOMPtr<nsIAccessibleTableCell> tableCellAcc =
-      do_QueryInterface(cell);
-
-    // GetCellAt should always return an nsIAccessibleTableCell (XXX Bug 587529)
-    NS_ENSURE_STATE(tableCellAcc);
-
-    int32_t origIdx = 1;
-    if (moveToLeft)
-      rv = tableCellAcc->GetColumnIndex(&origIdx);
-    else
-      rv = tableCellAcc->GetRowIndex(&origIdx);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (origIdx == index) {
-      // Append original header cells only.
-      uint32_t role = Role(cell);
-      bool isHeader = moveToLeft ?
-        role == nsIAccessibleRole::ROLE_ROWHEADER :
-        role == nsIAccessibleRole::ROLE_COLUMNHEADER;
-
-      if (isHeader)
-        cells->AppendElement(cell, false);
-    }
-  }
-
-  NS_ADDREF(*aCells = cells);
-  return NS_OK;
+  // Don't prune the tree for certain roles if the tree is more complex than
+  // a single text leaf.
+  return
+    (role == roles::MENUITEM ||
+     role == roles::COMBOBOX_OPTION ||
+     role == roles::OPTION ||
+     role == roles::ENTRY ||
+     role == roles::FLAT_EQUATION ||
+     role == roles::PASSWORD_TEXT ||
+     role == roles::PUSHBUTTON ||
+     role == roles::TOGGLE_BUTTON ||
+     role == roles::GRAPHIC ||
+     role == roles::SLIDER ||
+     role == roles::PROGRESSBAR ||
+     role == roles::SEPARATOR) &&
+    aAccessible->ContentChildCount() == 1 &&
+    aAccessible->ContentChildAt(0)->IsTextLeaf();
 }

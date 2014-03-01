@@ -7,7 +7,6 @@
 #define nsJSON_h__
 
 #include "jsapi.h"
-#include "json.h"
 #include "nsIJSON.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
@@ -20,7 +19,7 @@
 
 class nsIURI;
 
-class NS_STACK_CLASS nsJSONWriter
+class MOZ_STACK_CLASS nsJSONWriter
 {
 public:
   nsJSONWriter();
@@ -61,8 +60,7 @@ protected:
                           nsIInputStream* aStream,
                           int32_t aContentLength,
                           bool aNeedsConverter,
-                          JS::Value* aRetVal,
-                          DecodingMode mode = STRICT);
+                          JS::Value* aRetVal);
   nsCOMPtr<nsIURI> mURI;
 };
 
@@ -72,8 +70,7 @@ NS_NewJSON(nsISupports* aOuter, REFNSIID aIID, void** aResult);
 class nsJSONListener : public nsIStreamListener
 {
 public:
-  nsJSONListener(JSContext *cx, jsval *rootVal, bool needsConverter,
-                 DecodingMode mode);
+  nsJSONListener(JSContext *cx, JS::Value *rootVal, bool needsConverter);
   virtual ~nsJSONListener();
 
   NS_DECL_ISUPPORTS
@@ -83,11 +80,10 @@ public:
 protected:
   bool mNeedsConverter;
   JSContext *mCx;
-  jsval *mRootVal;
+  JS::Value *mRootVal;
   nsCOMPtr<nsIUnicodeDecoder> mDecoder;
   nsCString mSniffBuffer;
   nsTArray<PRUnichar> mBufferedChars;
-  DecodingMode mDecodingMode;
   nsresult ProcessBytes(const char* aBuffer, uint32_t aByteLength);
   nsresult ConsumeConverted(const char* aBuffer, uint32_t aByteLength);
   nsresult Consume(const PRUnichar *data, uint32_t len);

@@ -33,11 +33,6 @@ public:
    */
   virtual void SetCompatibilityMode(nsCompatibility aMode) = 0;
 
-  virtual nsresult ResolveName(const nsAString& aName,
-                               nsIContent *aForm,
-                               nsISupports **aResult,
-                               nsWrapperCache **aCache) = 0;
-
   /**
    * Called when form->BindToTree() is called so that document knows
    * immediately when a form is added

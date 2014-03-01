@@ -14,6 +14,9 @@ do_get_profile();
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://testing-common/httpd.js");
+Cu.import("resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
 
 var downloadUtils = { };
 XPCOMUtils.defineLazyServiceGetter(downloadUtils,
@@ -82,6 +85,7 @@ var gDownloadCount = 0;
  *                              sourceURI: the download source URI
  *                              downloadName: the display name of the download
  *                              runBeforeStart: a function to run before starting the download
+ *                              isPrivate: whether the download is private or not
  */
 function addDownload(aParams)
 {
@@ -110,19 +114,22 @@ function addDownload(aParams)
   // it is part of the active downloads the moment addDownload is called
   gDownloadCount++;
 
+  let dm = downloadUtils.downloadManager;
   var dl = dm.addDownload(Ci.nsIDownloadManager.DOWNLOAD_TYPE_DOWNLOAD,
                           createURI(aParams.sourceURI),
                           createURI(aParams.targetFile), aParams.downloadName, null,
-                          Math.round(Date.now() * 1000), null, persist);
+                          Math.round(Date.now() * 1000), null, persist, aParams.isPrivate);
 
   // This will throw if it isn't found, and that would mean test failure, so no
   // try catch block
-  var test = dm.getDownload(dl.id);
+  if (!aParams.isPrivate)
+    var test = dm.getDownload(dl.id);
 
   aParams.runBeforeStart.call(undefined, dl);
 
   persist.progressListener = dl.QueryInterface(Ci.nsIWebProgressListener);
-  persist.saveURI(dl.source, null, null, null, null, dl.targetFile);
+  persist.savePrivacyAwareURI(dl.source, null, null, null, null, dl.targetFile,
+                              aParams.isPrivate);
 
   return dl;
 }
@@ -153,6 +160,70 @@ function getDownloadListener()
     onSecurityChange: function(a, b, c, d) { }
   };
 }
+
+/**
+ * Asynchronously adds visits to a page.
+ *
+ * @param aPlaceInfo
+ *        Can be an nsIURI, in such a case a single LINK visit will be added.
+ *        Otherwise can be an object describing the visit to add, or an array
+ *        of these objects:
+ *          { uri: nsIURI of the page,
+ *            transition: one of the TRANSITION_* from nsINavHistoryService,
+ *            [optional] title: title of the page,
+ *            [optional] visitDate: visit date in microseconds from the epoch
+ *            [optional] referrer: nsIURI of the referrer for this visit
+ *          }
+ *
+ * @return {Promise}
+ * @resolves When all visits have been added successfully.
+ * @rejects JavaScript exception.
+ */
+function promiseAddVisits(aPlaceInfo)
+{
+  let deferred = Promise.defer();
+  let places = [];
+  if (aPlaceInfo instanceof Ci.nsIURI) {
+    places.push({ uri: aPlaceInfo });
+  }
+  else if (Array.isArray(aPlaceInfo)) {
+    places = places.concat(aPlaceInfo);
+  } else {
+    places.push(aPlaceInfo)
+  }
+
+  // Create mozIVisitInfo for each entry.
+  let now = Date.now();
+  for (let i = 0; i < places.length; i++) {
+    if (!places[i].title) {
+      places[i].title = "test visit for " + places[i].uri.spec;
+    }
+    places[i].visits = [{
+      transitionType: places[i].transition === undefined ? Ci.nsINavHistoryService.TRANSITION_LINK
+                                                         : places[i].transition,
+      visitDate: places[i].visitDate || (now++) * 1000,
+      referrerURI: places[i].referrer
+    }];
+  }
+
+  PlacesUtils.asyncHistory.updatePlaces(
+    places,
+    {
+      handleError: function handleError(aResultCode, aPlaceInfo) {
+        let ex = new Components.Exception("Unexpected error in adding visits.",
+                                          aResultCode);
+        deferred.reject(ex);
+      },
+      handleResult: function () {},
+      handleCompletion: function handleCompletion() {
+        deferred.resolve();
+      }
+    }
+  );
+
+  return deferred.promise;
+}
+
 
 XPCOMUtils.defineLazyGetter(this, "Services", function() {
   Cu.import("resource://gre/modules/Services.jsm");

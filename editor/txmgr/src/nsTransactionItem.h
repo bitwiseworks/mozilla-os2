@@ -7,10 +7,10 @@
 #define nsTransactionItem_h__
 
 #include "nsCOMPtr.h"
+#include "nsCOMArray.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupportsImpl.h"
 #include "nscore.h"
-#include "prtypes.h"
 
 class nsITransaction;
 class nsTransactionManager;
@@ -18,6 +18,7 @@ class nsTransactionStack;
 
 class nsTransactionItem
 {
+  nsCOMArray<nsISupports>  mData;
   nsCOMPtr<nsITransaction> mTransaction;
   nsTransactionStack      *mUndoStack;
   nsTransactionStack      *mRedoStack;
@@ -40,6 +41,11 @@ public:
   virtual nsresult DoTransaction(void);
   virtual nsresult UndoTransaction(nsTransactionManager *aTxMgr);
   virtual nsresult RedoTransaction(nsTransactionManager *aTxMgr);
+
+  nsCOMArray<nsISupports>& GetData()
+  {
+    return mData;
+  }
 
 private:
 

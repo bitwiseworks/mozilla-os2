@@ -14,7 +14,7 @@ function test() {
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
 
     testEvalCallResume();
   });
@@ -24,7 +24,7 @@ function testEvalCallResume() {
   gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
     Services.tm.currentThread.dispatch({ run: function() {
 
-      let frames = gDebugger.DebuggerView.StackFrames._frames;
+      let frames = gDebugger.DebuggerView.StackFrames.widget._list;
       let childNodes = frames.childNodes;
 
       is(gDebugger.DebuggerController.activeThread.state, "paused",
@@ -43,11 +43,8 @@ function testEvalCallResume() {
         is(frames.querySelectorAll(".dbg-stackframe").length, 0,
           "Should have no frames after resume");
 
-        is(childNodes.length, 1,
-          "Should only have one child.");
-
-        is(frames.querySelectorAll(".empty").length, 1,
-           "Should have the empty list explanation.");
+        is(childNodes.length, 0,
+          "Should only have no children.");
 
         closeDebuggerAndFinish();
       }, true);

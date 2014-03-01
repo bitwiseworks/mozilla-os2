@@ -13,13 +13,13 @@
  * limitations under the License.
  */
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
+#include "mozilla/DebugOnly.h"
+
 #include <fcntl.h>
 
 #include "android/log.h"
-#include "ui/FramebufferNativeWindow.h"
 
+#include "mozilla/dom/TabParent.h"
 #include "mozilla/Hal.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/FileUtils.h"
@@ -37,7 +37,14 @@
 #include "nsWindow.h"
 #include "nsIWidgetListener.h"
 #include "cutils/properties.h"
+#include "ClientLayerManager.h"
 #include "BasicLayers.h"
+#include "libdisplay/GonkDisplay.h"
+#include "pixelflinger/format.h"
+
+#if ANDROID_VERSION == 15
+#include "HwcComposer2D.h"
+#endif
 
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk" , ## args)
 #define LOGW(args...) __android_log_print(ANDROID_LOG_WARN, "Gonk", ## args)
@@ -62,37 +69,14 @@ static nsRefPtr<GLContext> sGLContext;
 static nsTArray<nsWindow *> sTopWindows;
 static nsWindow *gWindowToRedraw = nullptr;
 static nsWindow *gFocusedWindow = nullptr;
-static android::FramebufferNativeWindow *gNativeWindow = nullptr;
 static bool sFramebufferOpen;
 static bool sUsingOMTC;
+static bool sUsingHwc;
 static bool sScreenInitialized;
 static nsRefPtr<gfxASurface> sOMTCSurface;
 static pthread_t sFramebufferWatchThread;
 
 namespace {
-
-static int
-CancelBufferNoop(ANativeWindow* aWindow, android_native_buffer_t* aBuffer)
-{
-    return 0;
-}
-
-android::FramebufferNativeWindow*
-NativeWindow()
-{
-    if (!gNativeWindow) {
-        // We (apparently) don't have a way to tell if allocating the
-        // fbs succeeded or failed.
-        gNativeWindow = new android::FramebufferNativeWindow();
-
-        // Bug 776742: FrambufferNativeWindow doesn't set the cancelBuffer
-        // function pointer, causing EGL to segfault when the window surface
-        // is destroyed (i.e. on process exit). This workaround stops us
-        // from hard crashing in that situation.
-        gNativeWindow->cancelBuffer = CancelBufferNoop;
-    }
-    return gNativeWindow;
-}
 
 static uint32_t
 EffectiveScreenRotation()
@@ -115,6 +99,15 @@ public:
             }
         }
 
+        // Notify observers that the screen state has just changed.
+        nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+        if (observerService) {
+          observerService->NotifyObservers(
+            nullptr, "screen-state-changed",
+            mIsOn ? NS_LITERAL_STRING("on").get() : NS_LITERAL_STRING("off").get()
+          );
+        }
+
         return NS_OK;
     }
 
@@ -127,8 +120,8 @@ static const char* kWakeFile = "/sys/power/wait_for_fb_wake";
 
 static void *frameBufferWatcher(void *) {
 
-    int len = 0;
     char buf;
+    bool ret;
 
     nsRefPtr<ScreenOnOffEvent> mScreenOnEvent = new ScreenOnOffEvent(true);
     nsRefPtr<ScreenOnOffEvent> mScreenOffEvent = new ScreenOnOffEvent(false);
@@ -136,23 +129,13 @@ static void *frameBufferWatcher(void *) {
     while (true) {
         // Cannot use epoll here because kSleepFile and kWakeFile are
         // always ready to read and blocking.
-        {
-            ScopedClose fd(open(kSleepFile, O_RDONLY, 0));
-            do {
-                len = read(fd.get(), &buf, 1);
-            } while (len < 0 && errno == EINTR);
-            NS_WARN_IF_FALSE(len >= 0, "WAIT_FOR_FB_SLEEP failed");
-            NS_DispatchToMainThread(mScreenOffEvent);
-        }
+        ret = ReadSysFile(kSleepFile, &buf, sizeof(buf));
+        NS_WARN_IF_FALSE(ret, "WAIT_FOR_FB_SLEEP failed");
+        NS_DispatchToMainThread(mScreenOffEvent);
 
-        {
-            ScopedClose fd(open(kWakeFile, O_RDONLY, 0));
-            do {
-                len = read(fd.get(), &buf, 1);
-            } while (len < 0 && errno == EINTR);
-            NS_WARN_IF_FALSE(len >= 0, "WAIT_FOR_FB_WAKE failed");
-            NS_DispatchToMainThread(mScreenOnEvent);
-        }
+        ret = ReadSysFile(kWakeFile, &buf, sizeof(buf));
+        NS_WARN_IF_FALSE(ret, "WAIT_FOR_FB_WAKE failed");
+        NS_DispatchToMainThread(mScreenOnEvent);
     }
 
     return NULL;
@@ -163,9 +146,6 @@ static void *frameBufferWatcher(void *) {
 nsWindow::nsWindow()
 {
     if (!sScreenInitialized) {
-        // workaround Bug 725143
-        hal::SetScreenEnabled(true);
-
         // Watching screen on/off state by using a pthread
         // which implicitly calls exit() when the main thread ends
         if (pthread_create(&sFramebufferWatchThread, NULL, frameBufferWatcher, NULL)) {
@@ -173,8 +153,10 @@ nsWindow::nsWindow()
         }
 
         nsIntSize screenSize;
-        mozilla::DebugOnly<bool> gotFB = Framebuffer::GetSize(&screenSize);
-        MOZ_ASSERT(gotFB);
+        bool gotFB = Framebuffer::GetSize(&screenSize);
+        if (!gotFB) {
+            NS_RUNTIMEABORT("Failed to get size from framebuffer, aborting...");
+        }
         gScreenBounds = nsIntRect(nsIntPoint(0, 0), screenSize);
 
         char propValue[PROPERTY_VALUE_MAX];
@@ -208,7 +190,11 @@ nsWindow::nsWindow()
         // to know the color depth, which asks our native window.
         // This has to happen after other init has finished.
         gfxPlatform::GetPlatform();
-        sUsingOMTC = UseOffMainThreadCompositing();
+        sUsingOMTC = ShouldUseOffMainThreadCompositing();
+
+        property_get("ro.display.colorfill", propValue, "0");
+        sUsingHwc = Preferences::GetBool("layers.composer2d.enabled",
+                                         atoi(propValue) == 1);
 
         if (sUsingOMTC) {
           sOMTCSurface = new gfxImageSurface(gfxIntSize(1, 1),
@@ -237,14 +223,23 @@ nsWindow::DoDraw(void)
     nsIntRegion region = gWindowToRedraw->mDirtyRegion;
     gWindowToRedraw->mDirtyRegion.SetEmpty();
 
+    nsIWidgetListener* listener = gWindowToRedraw->GetWidgetListener();
+    if (listener) {
+        listener->WillPaintWindow(gWindowToRedraw);
+    }
+
     LayerManager* lm = gWindowToRedraw->GetLayerManager();
     if (mozilla::layers::LAYERS_OPENGL == lm->GetBackendType()) {
         LayerManagerOGL* oglm = static_cast<LayerManagerOGL*>(lm);
         oglm->SetClippingRegion(region);
         oglm->SetWorldTransform(sRotationMatrix);
 
-        if (nsIWidgetListener* listener = gWindowToRedraw->GetWidgetListener())
-          listener->PaintWindow(gWindowToRedraw, region, false, false);
+        listener = gWindowToRedraw->GetWidgetListener();
+        if (listener) {
+            listener->PaintWindow(gWindowToRedraw, region);
+        }
+    } else if (mozilla::layers::LAYERS_CLIENT == lm->GetBackendType()) {
+      // No need to do anything, the compositor will handle drawing
     } else if (mozilla::layers::LAYERS_BASIC == lm->GetBackendType()) {
         MOZ_ASSERT(sFramebufferOpen || sUsingOMTC);
         nsRefPtr<gfxASurface> targetSurface;
@@ -264,8 +259,10 @@ nsWindow::DoDraw(void)
                 gWindowToRedraw, ctx, mozilla::layers::BUFFER_NONE,
                 ScreenRotation(EffectiveScreenRotation()));
 
-            if (nsIWidgetListener* listener = gWindowToRedraw->GetWidgetListener())
-              listener->PaintWindow(gWindowToRedraw, region, false, false);
+            listener = gWindowToRedraw->GetWidgetListener();
+            if (listener) {
+                listener->PaintWindow(gWindowToRedraw, region);
+            }
         }
 
         if (!sUsingOMTC) {
@@ -275,18 +272,38 @@ nsWindow::DoDraw(void)
     } else {
         NS_RUNTIMEABORT("Unexpected layer manager type");
     }
+
+    listener = gWindowToRedraw->GetWidgetListener();
+    if (listener) {
+        listener->DidPaintWindow();
+    }
 }
 
 nsEventStatus
-nsWindow::DispatchInputEvent(nsGUIEvent &aEvent)
+nsWindow::DispatchInputEvent(nsGUIEvent &aEvent, bool* aWasCaptured)
 {
-    if (!gFocusedWindow)
+    if (aWasCaptured) {
+        *aWasCaptured = false;
+    }
+    if (!gFocusedWindow) {
         return nsEventStatus_eIgnore;
+    }
 
     gFocusedWindow->UserActivity();
 
-    nsEventStatus status;
     aEvent.widget = gFocusedWindow;
+
+    if (TabParent* capturer = TabParent::GetEventCapturer()) {
+        bool captured = capturer->TryCapture(aEvent);
+        if (aWasCaptured) {
+            *aWasCaptured = captured;
+        }
+        if (captured) {
+            return nsEventStatus_eConsumeNoDefault;
+        }
+    }
+
+    nsEventStatus status;
     gFocusedWindow->DispatchEvent(&aEvent, status);
     return status;
 }
@@ -375,30 +392,31 @@ nsWindow::ConstrainPosition(bool aAllowSlop,
 }
 
 NS_IMETHODIMP
-nsWindow::Move(int32_t aX,
-               int32_t aY)
+nsWindow::Move(double aX,
+               double aY)
 {
     return NS_OK;
 }
 
 NS_IMETHODIMP
-nsWindow::Resize(int32_t aWidth,
-                 int32_t aHeight,
-                 bool    aRepaint)
+nsWindow::Resize(double aWidth,
+                 double aHeight,
+                 bool   aRepaint)
 {
     return Resize(0, 0, aWidth, aHeight, aRepaint);
 }
 
 NS_IMETHODIMP
-nsWindow::Resize(int32_t aX,
-                 int32_t aY,
-                 int32_t aWidth,
-                 int32_t aHeight,
-                 bool    aRepaint)
+nsWindow::Resize(double aX,
+                 double aY,
+                 double aWidth,
+                 double aHeight,
+                 bool   aRepaint)
 {
-    mBounds = nsIntRect(aX, aY, aWidth, aHeight);
+    mBounds = nsIntRect(NSToIntRound(aX), NSToIntRound(aY),
+                        NSToIntRound(aWidth), NSToIntRound(aHeight));
     if (mWidgetListener)
-        mWidgetListener->WindowResized(this, aWidth, aHeight);
+        mWidgetListener->WindowResized(this, mBounds.width, mBounds.height);
 
     if (aRepaint && gWindowToRedraw)
         gWindowToRedraw->Invalidate(sVirtualBounds);
@@ -471,7 +489,7 @@ nsWindow::GetNativeData(uint32_t aDataType)
 {
     switch (aDataType) {
     case NS_NATIVE_WINDOW:
-        return NativeWindow();
+        return GetGonkDisplay()->GetNativeWindow();
     case NS_NATIVE_WIDGET:
         return this;
     }
@@ -496,6 +514,8 @@ nsWindow::SetInputContext(const InputContext& aContext,
 NS_IMETHODIMP_(InputContext)
 nsWindow::GetInputContext()
 {
+    // There is only one IME context on Gonk.
+    mInputContext.mNativeIMEContext = nullptr;
     return mInputContext;
 }
 
@@ -530,11 +550,27 @@ nsWindow::MakeFullScreen(bool aFullScreen)
 float
 nsWindow::GetDPI()
 {
-    return NativeWindow()->xdpi;
+    return GetGonkDisplay()->xdpi;
+}
+
+double
+nsWindow::GetDefaultScaleInternal()
+{
+    float dpi = GetDPI();
+    // The mean pixel density for mdpi devices is 160dpi, 240dpi for hdpi,
+    // and 320dpi for xhdpi, respectively.
+    // We'll take the mid-value between these three numbers as the boundary.
+    if (dpi < 200.0) {
+        return 1.0; // mdpi devices.
+    }
+    if (dpi < 280.0) {
+        return 1.5; // hdpi devices.
+    }
+    return 2.0; // xhdpi devices.
 }
 
 LayerManager *
-nsWindow::GetLayerManager(PLayersChild* aShadowManager,
+nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
                           LayersBackend aBackendHint,
                           LayerManagerPersistence aPersistence,
                           bool* aAllowRetaining)
@@ -547,15 +583,20 @@ nsWindow::GetLayerManager(PLayersChild* aShadowManager,
         if (mLayerManager->GetBackendType() == LAYERS_BASIC) {
             BasicLayerManager* manager =
                 static_cast<BasicLayerManager*>(mLayerManager.get());
-            manager->SetDefaultTargetConfiguration(mozilla::layers::BUFFER_NONE, 
+            manager->SetDefaultTargetConfiguration(mozilla::layers::BUFFER_NONE,
+                                                   ScreenRotation(EffectiveScreenRotation()));
+        } else if (mLayerManager->GetBackendType() == LAYERS_CLIENT) {
+            ClientLayerManager* manager =
+                static_cast<ClientLayerManager*>(mLayerManager.get());
+            manager->SetDefaultTargetConfiguration(mozilla::layers::BUFFER_NONE,
                                                    ScreenRotation(EffectiveScreenRotation()));
         }
         return mLayerManager;
     }
 
-    // Set mUseAcceleratedRendering here to make it consistent with
+    // Set mUseLayersAcceleration here to make it consistent with
     // nsBaseWidget::GetLayerManager
-    mUseAcceleratedRendering = GetShouldAccelerate();
+    mUseLayersAcceleration = ComputeShouldAccelerate(mUseLayersAcceleration);
     nsWindow *topWindow = sTopWindows[0];
 
     if (!topWindow) {
@@ -569,7 +610,7 @@ nsWindow::GetLayerManager(PLayersChild* aShadowManager,
             return mLayerManager;
     }
 
-    if (mUseAcceleratedRendering) {
+    if (mUseLayersAcceleration) {
         DebugOnly<nsIntRect> fbBounds = gScreenBounds;
         if (!sGLContext) {
             sGLContext = GLContextProvider::CreateForWindow(this);
@@ -599,8 +640,8 @@ nsWindow::GetLayerManager(PLayersChild* aShadowManager,
         NS_RUNTIMEABORT("Can't open GL context and can't fall back on /dev/graphics/fb0 ...");
     }
 
-    mLayerManager = new BasicShadowLayerManager(this);
-    mUseAcceleratedRendering = false;
+    mLayerManager = new ClientLayerManager(this);
+    mUseLayersAcceleration = false;
 
     return mLayerManager;
 }
@@ -672,6 +713,22 @@ nsWindow::NeedsPaint()
   return nsIWidget::NeedsPaint();
 }
 
+Composer2D*
+nsWindow::GetComposer2D()
+{
+    if (!sUsingHwc) {
+        return nullptr;
+    }
+
+#if ANDROID_VERSION == 15
+    if (HwcComposer2D* hwc = HwcComposer2D::GetInstance()) {
+        return hwc->Initialized() ? hwc : nullptr;
+    }
+#endif
+
+    return nullptr;
+}
+
 // nsScreenGonk.cpp
 
 nsScreenGonk::nsScreenGonk(void *nativeScreen)
@@ -705,7 +762,7 @@ nsScreenGonk::GetAvailRect(int32_t *outLeft,  int32_t *outTop,
 static uint32_t
 ColorDepth()
 {
-    switch (NativeWindow()->getDevice()->format) {
+    switch (GetGonkDisplay()->surfaceformat) {
     case GGL_PIXEL_FORMAT_RGB_565:
         return 16;
     case GGL_PIXEL_FORMAT_RGBA_8888:
@@ -747,8 +804,8 @@ nsScreenGonk::SetRotation(uint32_t aRotation)
 
     sScreenRotation = aRotation;
     sRotationMatrix =
-        ComputeGLTransformForRotation(gScreenBounds,
-                                      ScreenRotation(EffectiveScreenRotation()));
+        ComputeTransformForRotation(gScreenBounds,
+                                    ScreenRotation(EffectiveScreenRotation()));
     uint32_t rotation = EffectiveScreenRotation();
     if (rotation == nsIScreen::ROTATION_90_DEG ||
         rotation == nsIScreen::ROTATION_270_DEG) {
@@ -851,5 +908,12 @@ NS_IMETHODIMP
 nsScreenManagerGonk::GetNumberOfScreens(uint32_t *aNumberOfScreens)
 {
     *aNumberOfScreens = 1;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScreenManagerGonk::GetSystemDefaultScale(float *aDefaultScale)
+{
+    *aDefaultScale = 1.0f;
     return NS_OK;
 }

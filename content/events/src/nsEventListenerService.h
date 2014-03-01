@@ -18,7 +18,8 @@
 class nsEventListenerInfo : public nsIEventListenerInfo
 {
 public:
-  nsEventListenerInfo(const nsAString& aType, nsIDOMEventListener* aListener,
+  nsEventListenerInfo(const nsAString& aType,
+                      already_AddRefed<nsIDOMEventListener> aListener,
                       bool aCapturing, bool aAllowsUntrusted,
                       bool aInSystemEventGroup)
   : mType(aType), mListener(aListener), mCapturing(aCapturing),
@@ -29,7 +30,8 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS(nsEventListenerInfo)
   NS_DECL_NSIEVENTLISTENERINFO
 protected:
-  bool GetJSVal(JSContext* aCx, mozilla::Maybe<JSAutoCompartment>& aAc, jsval* aJSVal);
+  bool GetJSVal(JSContext* aCx, mozilla::Maybe<JSAutoCompartment>& aAc,
+                JS::Value* aJSVal);
 
   nsString                      mType;
   // nsReftPtr because that is what nsListenerStruct uses too.

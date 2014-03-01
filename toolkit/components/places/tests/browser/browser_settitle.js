@@ -8,7 +8,7 @@ gBrowser.selectedTab = gBrowser.addTab();
 function finishAndCleanUp()
 {
   gBrowser.removeCurrentTab();
-  waitForClearHistory(finish);
+  promiseClearHistory().then(finish);
 }
 
 /**
@@ -73,7 +73,6 @@ function test()
       PlacesUtils.history.removeObserver(this);
       confirmResults(this.data);
     },
-    onBeforeDeleteURI: function() {},
     onDeleteURI: function() {},
     onClearHistory: function() {},
     onPageChanged: function() {},

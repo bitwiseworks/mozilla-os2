@@ -7,9 +7,8 @@
 
 // lwbrk
 #include "nsLWBrkCIID.h"
-#include "nsJISx4501LineBreaker.h"
+#include "nsJISx4051LineBreaker.h"
 #include "nsSampleWordBreaker.h"
-#include "nsLWBRKDll.h"
 
 #include "nsSemanticUnitScanner.h"
 

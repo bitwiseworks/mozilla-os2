@@ -395,7 +395,7 @@ bool mozTXTToHTMLConv::ShouldLinkify(const nsCString& aURL)
   if (!mIOService)
     return false;
 
-  nsCAutoString scheme;
+  nsAutoCString scheme;
   nsresult rv = mIOService->ExtractScheme(aURL, scheme);
   if(NS_FAILED(rv))
     return false;
@@ -1304,7 +1304,7 @@ mozTXTToHTMLConv::AsyncConvertData(const char *aFromType,
 
 NS_IMETHODIMP
 mozTXTToHTMLConv::OnDataAvailable(nsIRequest* request, nsISupports *ctxt,
-                                 nsIInputStream *inStr, uint32_t sourceOffset,
+                                 nsIInputStream *inStr, uint64_t sourceOffset,
                                  uint32_t count)
 {
   return NS_ERROR_NOT_IMPLEMENTED;

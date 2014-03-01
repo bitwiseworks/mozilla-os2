@@ -8,10 +8,11 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "SocialService", "resource://gre/modules/SocialService.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils", "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-const EXPORTED_SYMBOLS = ["MozSocialAPI", "openChatWindow"];
+this.EXPORTED_SYMBOLS = ["MozSocialAPI", "openChatWindow", "findChromeWindowForChats"];
 
-var MozSocialAPI = {
+this.MozSocialAPI = {
   _enabled: false,
   _everEnabled: false,
   set enabled(val) {
@@ -30,7 +31,7 @@ var MozSocialAPI = {
       }
 
     } else {
-      Services.obs.removeObserver(injectController, "document-element-inserted", false);
+      Services.obs.removeObserver(injectController, "document-element-inserted");
     }
   }
 };
@@ -40,7 +41,7 @@ var MozSocialAPI = {
 function injectController(doc, topic, data) {
   try {
     let window = doc.defaultView;
-    if (!window)
+    if (!window || PrivateBrowsingUtils.isWindowPrivate(window))
       return;
 
     // Do not attempt to load the API into about: error pages
@@ -52,14 +53,21 @@ function injectController(doc, topic, data) {
                                   .getInterface(Ci.nsIWebNavigation)
                                   .QueryInterface(Ci.nsIDocShell)
                                   .chromeEventHandler;
+    // limit injecting into social panels or same-origin browser tabs if
+    // social.debug.injectIntoTabs is enabled
+    let allowTabs = false;
+    try {
+      allowTabs = containingBrowser.contentWindow == window &&
+                  Services.prefs.getBoolPref("social.debug.injectIntoTabs");
+    } catch(e) {}
 
     let origin = containingBrowser.getAttribute("origin");
-    if (!origin) {
+    if (!allowTabs && !origin) {
       return;
     }
 
-    SocialService.getProvider(origin, function(provider) {
-      if (provider && provider.workerURL) {
+    SocialService.getProvider(doc.nodePrincipal.origin, function(provider) {
+      if (provider && provider.workerURL && provider.enabled) {
         attachToWindow(provider, window);
       }
     });
@@ -70,14 +78,14 @@ function injectController(doc, topic, data) {
 
 // Loads mozSocial support functions associated with provider into targetWindow
 function attachToWindow(provider, targetWindow) {
-  let origin = provider.origin;
-  if (!provider.enabled) {
-    throw new Error("MozSocialAPI: cannot attach disabled provider " + origin);
-  }
-
+  // If the loaded document isn't from the provider's origin (or a protocol
+  // that inherits the principal), don't attach the mozSocial API.
   let targetDocURI = targetWindow.document.documentURIObject;
-  if (provider.origin != targetDocURI.prePath) {
-    throw new Error("MozSocialAPI: cannot attach " + origin + " to " + targetDocURI.spec);
+  if (!provider.isSameOrigin(targetDocURI)) {
+    let msg = "MozSocialAPI: not attaching mozSocial API for " + provider.origin +
+              " to " + targetDocURI.spec + " since origins differ."
+    Services.console.logStringMessage(msg);
+    return;
   }
 
   var port = provider.getWorkerPort(targetWindow);
@@ -124,10 +132,9 @@ function attachToWindow(provider, targetWindow) {
         if (!chromeWindow.SocialFlyout)
           return;
         let url = targetWindow.document.documentURIObject.resolve(toURL);
-        let fullURL = ensureProviderOrigin(provider, url);
-        if (!fullURL)
+        if (!provider.isSameOrigin(url))
           return;
-        chromeWindow.SocialFlyout.open(fullURL, offset, callback);
+        chromeWindow.SocialFlyout.open(url, offset, callback);
       }
     },
     closePanel: {
@@ -139,6 +146,32 @@ function attachToWindow(provider, targetWindow) {
         if (!chromeWindow.SocialFlyout || !chromeWindow.SocialFlyout.panel)
           return;
         chromeWindow.SocialFlyout.panel.hidePopup();
+      }
+    },
+    // allow a provider to share to other providers through the browser
+    share: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: function(data) {
+        let chromeWindow = getChromeWindow(targetWindow);
+        if (!chromeWindow.SocialShare || chromeWindow.SocialShare.shareButton.hidden)
+          throw new Error("Share is unavailable");
+        // ensure user action initates the share
+        let dwu = chromeWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                              .getInterface(Ci.nsIDOMWindowUtils);
+        if (!dwu.isHandlingUserInput)
+          throw new Error("Attempt to share without user input");
+
+        // limit to a few params we want to support for now
+        let dataOut = {};
+        for (let sub of ["url", "title", "description", "source"]) {
+          dataOut[sub] = data[sub];
+        }
+        if (data.image)
+          dataOut.previews = [data.image];
+
+        chromeWindow.SocialShare.sharePage(null, dataOut);
       }
     },
     getAttention: {
@@ -179,6 +212,7 @@ function attachToWindow(provider, targetWindow) {
     // set a timer which will fire after the unload events have all fired.
     schedule(function () { port.close(); });
   });
+
   // We allow window.close() to close the panel, so add an event handler for
   // this, then cancel the event (so the window itself doesn't die) and
   // close the panel instead.
@@ -227,31 +261,57 @@ function getChromeWindow(contentWin) {
                    .getInterface(Ci.nsIDOMWindow);
 }
 
-function ensureProviderOrigin(provider, url) {
-  // resolve partial URLs and check prePath matches
-  let uri;
-  let fullURL;
-  try {
-    fullURL = Services.io.newURI(provider.origin, null, null).resolve(url);
-    uri = Services.io.newURI(fullURL, null, null);
-  } catch (ex) {
-    Cu.reportError("mozSocial: failed to resolve window URL: " + url + "; " + ex);
-    return null;
-  }
-
-  if (provider.origin != uri.prePath) {
-    Cu.reportError("mozSocial: unable to load new location, " +
-                   provider.origin + " != " + uri.prePath);
-    return null;
-  }
-  return fullURL;
+function isWindowGoodForChats(win) {
+  return win.SocialChatBar
+         && win.SocialChatBar.isAvailable
+         && !PrivateBrowsingUtils.isWindowPrivate(win);
 }
 
-function openChatWindow(chromeWindow, provider, url, callback, mode) {
-  if (!chromeWindow.SocialChatBar)
+function findChromeWindowForChats(preferredWindow) {
+  if (preferredWindow && isWindowGoodForChats(preferredWindow))
+    return preferredWindow;
+  // no good - we just use the "most recent" browser window which can host
+  // chats (we used to try and "group" all chats in the same browser window,
+  // but that didn't work out so well - see bug 835111
+  let topMost, enumerator;
+  // *sigh* - getZOrderDOMWindowEnumerator is broken everywhere other than
+  // Windows.  We use BROKEN_WM_Z_ORDER as that is what the c++ code uses
+  // and a few bugs recommend searching mxr for this symbol to identify the
+  // workarounds - we want this code to be hit in such searches.
+  const BROKEN_WM_Z_ORDER = Services.appinfo.OS != "WINNT";
+  if (BROKEN_WM_Z_ORDER) {
+    // this is oldest to newest and no way to change the order.
+    enumerator = Services.wm.getEnumerator("navigator:browser");
+  } else {
+    // here we explicitly ask for bottom-to-top so we can use the same logic
+    // where BROKEN_WM_Z_ORDER is true.
+    enumerator = Services.wm.getZOrderDOMWindowEnumerator("navigator:browser", false);
+  }
+  while (enumerator.hasMoreElements()) {
+    let win = enumerator.getNext();
+    if (win && isWindowGoodForChats(win))
+      topMost = win;
+  }
+  return topMost;
+}
+
+this.openChatWindow =
+ function openChatWindow(chromeWindow, provider, url, callback, mode) {
+  chromeWindow = findChromeWindowForChats(chromeWindow);
+  if (!chromeWindow) {
+    Cu.reportError("Failed to open a social chat window - no host window could be found.");
     return;
-  let fullURL = ensureProviderOrigin(provider, url);
-  if (!fullURL)
+  }
+  let fullURI = provider.resolveUri(url);
+  if (!provider.isSameOrigin(fullURI)) {
+    Cu.reportError("Failed to open a social chat window - the requested URL is not the same origin as the provider.");
     return;
-  chromeWindow.SocialChatBar.openChat(provider, fullURL, callback, mode);
+  }
+  if (!chromeWindow.SocialChatBar.openChat(provider, fullURI.spec, callback, mode)) {
+    Cu.reportError("Failed to open a social chat window - the chatbar is not available in the target window.");
+    return;
+  }
+  // getAttention is ignored if the target window is already foreground, so
+  // we can call it unconditionally.
+  chromeWindow.getAttention();
 }

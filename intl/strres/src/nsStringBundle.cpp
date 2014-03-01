@@ -24,8 +24,6 @@
 #include "nsIComponentManager.h"
 #include "nsIMemory.h"
 #include "nsIObserverService.h"
-#include "pratom.h"
-#include "prmem.h"
 #include "nsCOMArray.h"
 #include "nsTextFormatter.h"
 #include "nsIErrorService.h"
@@ -114,7 +112,7 @@ nsresult
 nsStringBundle::GetStringFromID(int32_t aID, nsAString& aResult)
 {  
   ReentrantMonitorAutoEnter automon(mReentrantMonitor);
-  nsCAutoString name;
+  nsAutoCString name;
   name.AppendInt(aID, 10);
 
   nsresult rv;
@@ -301,7 +299,7 @@ nsStringBundle::GetCombinedEnumeration(nsIStringBundleOverride* aOverrideStrings
         (propElement = do_QueryInterface(supports, &rv))) {
 
       // now check if its in the override bundle
-      nsCAutoString key;
+      nsAutoCString key;
       propElement->GetKey(key);
 
       nsAutoString value;
@@ -411,7 +409,7 @@ nsExtensibleStringBundle::Init(const char * aCategory,
     if (NS_FAILED(rv))
       continue;
 
-    nsCAutoString name;
+    nsAutoCString name;
     rv = supStr->GetData(name);
     if (NS_FAILED(rv))
       continue;
@@ -501,8 +499,7 @@ nsresult nsExtensibleStringBundle::GetSimpleEnumeration(nsISimpleEnumerator ** a
 
 #define MAX_CACHED_BUNDLES 16
 
-struct bundleCacheEntry_t {
-  PRCList list;
+struct bundleCacheEntry_t : public LinkedListElement<bundleCacheEntry_t> {
   nsCStringKey *mHashKey;
   // do not use a nsCOMPtr - this is a struct not a class!
   nsIStringBundle* mBundle;
@@ -516,7 +513,6 @@ nsStringBundleService::nsStringBundleService() :
   printf("\n++ nsStringBundleService::nsStringBundleService ++\n");
 #endif
 
-  PR_INIT_CLIST(&mBundleCache);
   PL_InitArenaPool(&mCacheEntryPool, "srEntries",
                    sizeof(bundleCacheEntry_t)*MAX_CACHED_BUNDLES,
                    sizeof(bundleCacheEntry_t));
@@ -582,16 +578,10 @@ nsStringBundleService::flushBundleCache()
   // release all bundles in the cache
   mBundleMap.Reset();
   
-  PRCList *current = PR_LIST_HEAD(&mBundleCache);
-  while (current != &mBundleCache) {
-    bundleCacheEntry_t *cacheEntry = (bundleCacheEntry_t*)current;
+  while (!mBundleCache.isEmpty()) {
+    bundleCacheEntry_t *cacheEntry = mBundleCache.popFirst();
 
     recycleEntry(cacheEntry);
-    PRCList *oldItem = current;
-    current = PR_NEXT_LINK(current);
-    
-    // will be freed in PL_FreeArenaPool
-    PR_REMOVE_LINK(oldItem);
   }
   PL_FreeArenaPool(&mCacheEntryPool);
 }
@@ -616,7 +606,7 @@ nsStringBundleService::getStringBundle(const char *aURLSpec,
     // cache hit!
     // remove it from the list, it will later be reinserted
     // at the head of the list
-    PR_REMOVE_LINK((PRCList*)cacheEntry);
+    cacheEntry->remove();
     
   } else {
 
@@ -633,8 +623,7 @@ nsStringBundleService::getStringBundle(const char *aURLSpec,
   // at this point the cacheEntry should exist in the hashtable,
   // but is not in the LRU cache.
   // put the cache entry at the front of the list
-  
-  PR_INSERT_LINK((PRCList *)cacheEntry, &mBundleCache);
+  mBundleCache.insertFront(cacheEntry);
 
   // finally, return the value
   *aResult = cacheEntry->mBundle;
@@ -654,12 +643,12 @@ nsStringBundleService::insertIntoCache(nsIStringBundle* aBundle,
     
     void *cacheEntryArena;
     PL_ARENA_ALLOCATE(cacheEntryArena, &mCacheEntryPool, sizeof(bundleCacheEntry_t));
-    cacheEntry = (bundleCacheEntry_t*)cacheEntryArena;
+    cacheEntry = new (cacheEntryArena) bundleCacheEntry_t();
       
   } else {
     // cache is full
     // take the last entry in the list, and recycle it.
-    cacheEntry = (bundleCacheEntry_t*)PR_LIST_TAIL(&mBundleCache);
+    cacheEntry = mBundleCache.getLast();
       
     // remove it from the hash table and linked list
     NS_ASSERTION(mBundleMap.Exists(cacheEntry->mHashKey),
@@ -670,7 +659,7 @@ nsStringBundleService::insertIntoCache(nsIStringBundle* aBundle,
                                aHashKey->GetString()).get());
 #endif
     mBundleMap.Remove(cacheEntry->mHashKey);
-    PR_REMOVE_LINK((PRCList*)cacheEntry);
+    cacheEntry->remove();
 
     // free up excess memory
     recycleEntry(cacheEntry);

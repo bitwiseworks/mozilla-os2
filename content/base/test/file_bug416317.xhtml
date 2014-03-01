@@ -100,6 +100,9 @@
     /* :root tests */
     :root { background-color: green; }
 
+    /* :scope tests */
+    :scope { background-color: green; }
+
     /* :nth-child(n) tests */
     .nthchild1 > :nth-last-child(odd) { background-color: lime; }
     .nthchild1 > :nth-child(odd) { background-color: lime; }
@@ -223,7 +226,17 @@
     .bar. { background: red; color: yellow; }
   </span>
   <script><![CDATA[
-  window.onload = function(){
+  window.onload = function() {
+    if (window.parent && window.parent.SpecialPowers) {
+      window.parent.SpecialPowers.pushPrefEnv(
+        { 'set': [[ "layout.css.scope-pseudo.enabled", true]] },
+        doTest);
+    } else {
+      doTest();
+    }
+  }
+
+  function doTest(){
     if ( window.location.hash.indexOf("target") == -1 )
       window.location.hash = "#target";
 
@@ -269,6 +282,9 @@
     cacheCheck( "Disconnected Element", root4 );
     runTest( ecss, "SyntaxError: Disconnected Element", root4, false );
     jqTests("Disconnected Element", root3.cloneNode(true), "querySelectorAll");
+    var newRoot = document.createElement("nosuchtag");
+    newRoot.appendChild(root3.cloneNode(true));
+    jqTests("Disconnected Element scoping", newRoot, "querySelectorAll");
 
     var fragment = document.createDocumentFragment();
     fragment.appendChild( root2.cloneNode(true) );
@@ -441,7 +457,7 @@
     }
 
     function check( type, root, expect, fragment ){
-      var walker = document.createTreeWalker( root, NodeFilter.SHOW_ELEMENT, { acceptNode: function(){ return 1; } }, false );
+      var walker = document.createTreeWalker( root, NodeFilter.SHOW_ELEMENT, { acceptNode: function(){ return 1; } } );
 
       while ( walker.nextNode() ) {
         var div = walker.currentNode;
@@ -537,7 +553,9 @@
 
         var namespaced = /\|[^=]/.test( q );
         var prepend = namespaced ? "xHTML|*#root3 " : "#root3 ";
-        q = (restrict === false || restrict === ":root" ? "" : prepend) + q.replace(/,/g, ", " + prepend);
+        q = (restrict === false || restrict === ":root" ||
+             restrict === ":scope" ? "" : prepend) +
+            q.replace(/,/g, ", " + prepend);
         var nq = q.replace(/>/g, "&gt;").replace(/</g, "&lt;");
 
         if ( namespaced ) {
@@ -567,7 +585,10 @@
           assert( pass, type + ": " + name + " (" + nq + ")" +
             (pass ? "" : " Expected: " + extra(ids) + " Received: " + extra(results)) );
 
-          if (results)
+          // For now, don't use checkMatchesSelector when
+          // restrict === ":scope" because we have no way to hand the
+          // right scope to it yet.
+          if (results && restrict !== ":scope")
             checkMatchesSelector( results, q );
         }
 
@@ -630,8 +651,15 @@
 
       if ( root == document ) {
         t( ":root Selector", ":root", ["html"], false );
+        t( ":scope Selector", ":scope", ["html"], ":scope" );
       } else {
         t( ":root Selector", ":root", [], ":root" );
+        if (root.localName != "nosuchtag") {
+          t( ":scope Selector", ":scope > nosuchtag",
+             [ "outerbogustag" ], ":scope");
+        }
+        t( ":scope Selector", ":scope nosuchtag nosuchtag",
+           [ "innerbogustag" ], ":scope");
 
         if ( !root.parentNode ) {
           t( ":root All Selector", ":root *", [], ":root" );
@@ -641,6 +669,7 @@
       if ( root.parentNode || root == document ) {
         assert( query(":root *").length == query("*").length - (root == document ? 1 : 0), type + ": :root All Selector" );
       }
+      assert( query(":scope *").length == query("*").length - (root == document ? 1 : 0), type + ": :scope All Selector" );
 
       t( "Element Selector", "p", ["firstp","ap","sndp","en","sap","first"] );
       t( "Element Selector", "body", ["body"], false );
@@ -1259,6 +1288,10 @@
 
     <div id="nothiddendivchild"></div>
   </div>
+  <!-- Test for scoping -->
+  <nosuchtag id="outerbogustag">
+    <nosuchtag id="innerbogustag"></nosuchtag>
+  </nosuchtag>
   <!-- this iframe is outside the #main so it won't reload constantly wasting time, but it means the tests must be "safe" and clean up after themselves -->
   <iframe id="loadediframe" name="loadediframe" style="display:none;" src="data/iframe.html"></iframe>
   <dl id="dl" style="display:none;">

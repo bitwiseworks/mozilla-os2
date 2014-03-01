@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttpActivityDistributor.h"
 #include "nsIChannel.h"
 #include "nsCOMPtr.h"
@@ -10,6 +13,9 @@
 #include "nsThreadUtils.h"
 
 using namespace mozilla;
+typedef nsMainThreadPtrHolder<nsIHttpActivityObserver> ObserverHolder;
+typedef nsMainThreadPtrHandle<nsIHttpActivityObserver> ObserverHandle;
+typedef nsTArray<ObserverHandle> ObserverArray;
 
 class nsHttpActivityEvent : public nsRunnable
 {
@@ -20,7 +26,7 @@ public:
                         PRTime aTimestamp,
                         uint64_t aExtraSizeData,
                         const nsACString & aExtraStringData,
-                        nsCOMArray<nsIHttpActivityObserver> *aObservers)
+                        ObserverArray *aObservers)
         : mHttpChannel(aHttpChannel)
         , mActivityType(aActivityType)
         , mActivitySubtype(aActivitySubtype)
@@ -33,7 +39,7 @@ public:
 
     NS_IMETHOD Run()
     {
-        for (int32_t i = 0 ; i < mObservers.Count() ; i++)
+        for (size_t i = 0 ; i < mObservers.Length() ; i++)
             mObservers[i]->ObserveActivity(mHttpChannel, mActivityType,
                                            mActivitySubtype, mTimestamp,
                                            mExtraSizeData, mExtraStringData);
@@ -52,7 +58,7 @@ private:
     uint64_t mExtraSizeData;
     nsCString mExtraStringData;
 
-    nsCOMArray<nsIHttpActivityObserver> mObservers;
+    ObserverArray mObservers;
 };
 
 NS_IMPL_THREADSAFE_ISUPPORTS2(nsHttpActivityDistributor,
@@ -80,7 +86,7 @@ nsHttpActivityDistributor::ObserveActivity(nsISupports *aHttpChannel,
     {
         MutexAutoLock lock(mLock);
 
-        if (!mObservers.Count())
+        if (!mObservers.Length())
             return NS_OK;
 
         event = new nsHttpActivityEvent(aHttpChannel, aActivityType,
@@ -97,7 +103,7 @@ nsHttpActivityDistributor::GetIsActive(bool *isActive)
 {
     NS_ENSURE_ARG_POINTER(isActive);
     MutexAutoLock lock(mLock);
-    *isActive = !!mObservers.Count();
+    *isActive = !!mObservers.Length();
     return NS_OK;
 }
 
@@ -106,7 +112,8 @@ nsHttpActivityDistributor::AddObserver(nsIHttpActivityObserver *aObserver)
 {
     MutexAutoLock lock(mLock);
 
-    if (!mObservers.AppendObject(aObserver))
+    ObserverHandle observer(new ObserverHolder(aObserver));
+    if (!mObservers.AppendElement(observer))
         return NS_ERROR_OUT_OF_MEMORY;
 
     return NS_OK;
@@ -117,7 +124,8 @@ nsHttpActivityDistributor::RemoveObserver(nsIHttpActivityObserver *aObserver)
 {
     MutexAutoLock lock(mLock);
 
-    if (!mObservers.RemoveObject(aObserver))
+    ObserverHandle observer(new ObserverHolder(aObserver));
+    if (!mObservers.RemoveElement(observer))
         return NS_ERROR_FAILURE;
 
     return NS_OK;

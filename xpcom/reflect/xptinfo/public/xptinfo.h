@@ -8,7 +8,6 @@
 #ifndef xptiinfo_h___
 #define xptiinfo_h___
 
-#include "prtypes.h"
 #include "nscore.h"
 #include "xpt_struct.h"
 
@@ -173,7 +172,7 @@ public:
             return params[idx];
         }
     const nsXPTParamInfo GetResult() const
-        {return *result;}
+        {return result;}
 private:
     nsXPTMethodInfo();  // no implementation
 // NO DATA - this a flyweight wrapper

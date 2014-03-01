@@ -25,7 +25,7 @@ public:
   {
     return mScriptOwner;
   }
-  bool SetScriptOwner(JSObject* aScriptOwner);
+  void SetScriptOwner(JSObject* aScriptOwner);
 
   JSObject* GetParentObject()
   {
@@ -62,7 +62,7 @@ protected:
   virtual ~IDBWrapperCache();
 
 private:
-  JSObject* mScriptOwner;
+  JS::Heap<JSObject*> mScriptOwner;
 };
 
 END_INDEXEDDB_NAMESPACE

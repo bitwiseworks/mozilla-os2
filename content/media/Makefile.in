@@ -6,89 +6,15 @@ DEPTH     = @DEPTH@
 topsrcdir = @top_srcdir@
 srcdir    = @srcdir@
 VPATH     = @srcdir@
-FAIL_ON_WARNINGS := 1
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = content
 LIBRARY_NAME = gkconmedia_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
-
-EXPORTS = \
-  AudioSegment.h \
-  FileBlockCache.h \
-  MediaResource.h \
-  MediaSegment.h \
-  MediaStreamGraph.h \
-  nsAudioAvailableEventManager.h \
-  nsBuiltinDecoder.h \
-  nsBuiltinDecoderStateMachine.h \
-  nsBuiltinDecoderReader.h \
-  nsDOMMediaStream.h \
-  nsMediaCache.h \
-  nsMediaDecoder.h \
-  SharedBuffer.h \
-  StreamBuffer.h \
-  TimeVarying.h \
-  VideoFrameContainer.h \
-  VideoUtils.h \
-  VideoSegment.h \
-  $(NULL)
-
-CPPSRCS = \
-  AudioSegment.cpp \
-  FileBlockCache.cpp \
-  MediaResource.cpp \
-  MediaStreamGraph.cpp \
-  nsAudioAvailableEventManager.cpp \
-  nsBuiltinDecoder.cpp \
-  nsBuiltinDecoderStateMachine.cpp \
-  nsBuiltinDecoderReader.cpp \
-  nsDOMMediaStream.cpp \
-  nsMediaCache.cpp \
-  nsMediaDecoder.cpp \
-  StreamBuffer.cpp \
-  VideoFrameContainer.cpp \
-  VideoSegment.cpp \
-  VideoUtils.cpp \
-  $(NULL)
-
-ifdef MOZ_SYDNEYAUDIO
-EXPORTS += \
-  nsAudioStream.h \
-  $(NULL)
-CPPSRCS += \
-  nsAudioStream.cpp \
-  $(NULL)
-endif
-
-ifdef MOZ_RAW
-PARALLEL_DIRS += raw
-endif
-
-ifdef MOZ_OGG
-PARALLEL_DIRS += ogg
-endif
-
-ifdef MOZ_WAVE
-PARALLEL_DIRS += wave
-endif
-
-ifdef MOZ_WEBM
-PARALLEL_DIRS += webm
-endif
-
-ifdef MOZ_GSTREAMER
-PARALLEL_DIRS += gstreamer
-endif
-
-ifdef MOZ_MEDIA_PLUGINS
-PARALLEL_DIRS += plugins
-endif
-
-PARALLEL_DIRS += webrtc
-
-TEST_DIRS += test
+ifndef _MSC_VER
+FAIL_ON_WARNINGS := 1
+endif # !_MSC_VER
 
 FORCE_STATIC_LIB = 1
 
@@ -96,4 +22,12 @@ include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
-DEFINES += -D_IMPL_NS_LAYOUT
+INCLUDES  += \
+  -I$(topsrcdir)/content/base/src \
+  -I$(topsrcdir)/layout/generic \
+  -I$(topsrcdir)/layout/xul/base/src \
+  $(NULL)
+
+DEFINES  += -D_IMPL_NS_LAYOUT
+CFLAGS   += $(GSTREAMER_CFLAGS)
+CXXFLAGS += $(GSTREAMER_CFLAGS)

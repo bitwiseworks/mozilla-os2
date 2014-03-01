@@ -2,26 +2,55 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef a11yFilters_h_
-#define a11yFilters_h_
+#ifndef mozilla_a11y_Filters_h__
+#define mozilla_a11y_Filters_h__
 
-class Accessible;
+#include "mozilla/StandardInteger.h"
 
 /**
  * Predefined filters used for nsAccIterator and nsAccCollector.
  */
+namespace mozilla {
+namespace a11y {
+
+class Accessible;
+
 namespace filters {
 
-  /**
-   * Return true if the traversed accessible complies with filter.
-   */
-  typedef bool (*FilterFuncPtr) (Accessible*);
+enum EResult {
+  eSkip = 0,
+  eMatch = 1,
+  eSkipSubtree = 2
+};
 
-  bool GetSelected(Accessible* aAccessible);
-  bool GetSelectable(Accessible* aAccessible);
-  bool GetRow(Accessible* aAccessible);
-  bool GetCell(Accessible* aAccessible);
-  bool GetEmbeddedObject(Accessible* aAccessible);
-}
+/**
+ * Return true if the traversed accessible complies with filter.
+ */
+typedef uint32_t (*FilterFuncPtr) (Accessible*);
+
+/**
+ * Matches selected/selectable accessibles in subtree.
+ */
+uint32_t GetSelected(Accessible* aAccessible);
+uint32_t GetSelectable(Accessible* aAccessible);
+
+/**
+ * Matches row accessibles in subtree.
+ */
+uint32_t GetRow(Accessible* aAccessible);
+
+/**
+ * Matches cell accessibles in children.
+ */
+uint32_t GetCell(Accessible* aAccessible);
+
+/**
+ * Matches embedded objects in children.
+ */
+uint32_t GetEmbeddedObject(Accessible* aAccessible);
+
+} // namespace filters
+} // namespace a11y
+} // namespace mozilla
 
 #endif

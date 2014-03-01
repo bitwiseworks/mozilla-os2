@@ -10,24 +10,30 @@ VPATH     = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 modules := \
-  async.js \
   log4moz.js \
-  observers.js \
-  preferences.js \
-  rest.js \
   storageservice.js \
   stringbundle.js \
   tokenserverclient.js \
   utils.js \
   $(NULL)
 
+pp_modules := \
+  async.js \
+  bagheeraclient.js \
+  observers.js \
+  rest.js \
+  $(NULL)
+
 testing_modules := \
-  aitcserver.js \
+  bagheeraserver.js \
+  logging.js \
   storageserver.js \
   utils.js \
   $(NULL)
 
-TEST_DIRS += tests
+EXTRA_COMPONENTS := \
+  servicesComponents.manifest \
+  $(NULL)
 
 PREF_JS_EXPORTS = $(srcdir)/services-common.js
 
@@ -38,6 +44,10 @@ INSTALL_TARGETS += MODULES
 TESTING_JS_MODULES := $(addprefix modules-testing/,$(testing_modules))
 TESTING_JS_MODULE_DIR := services-common
 
+PP_JS_MODULES := $(pp_modules)
+PP_JS_MODULES_PATH = $(FINAL_TARGET)/modules/services-common
+PP_TARGETS += PP_JS_MODULES
+
 include $(topsrcdir)/config/rules.mk
 
 # What follows is a helper to launch a standalone storage server instance.
@@ -45,20 +55,12 @@ include $(topsrcdir)/config/rules.mk
 # ever consolidate our Python code, and/or have a supplemental driver for the
 # build system, this can go away.
 
-storage_server_hostname := localhost
-storage_server_port := 8080
-
-head_path = $(srcdir)/tests/unit
+server_port := 8080
 
 storage-server:
 	$(PYTHON) $(srcdir)/tests/run_server.py $(topsrcdir) \
-	  $(MOZ_BUILD_ROOT) run_storage_server.js --port $(storage_server_port)
+	  $(MOZ_BUILD_ROOT) run_storage_server.js --port $(server_port)
 
-# And the same thing for an AITC server.
-aitc_server_hostname := localhost
-aitc_server_port := 8080
-
-aitc-server:
+bagheera-server:
 	$(PYTHON) $(srcdir)/tests/run_server.py $(topsrcdir) \
-		$(MOZ_BUILD_ROOT) run_aitc_server.js --port $(aitc_server_port)
-
+		$(MOZ_BUILD_ROOT) run_bagheera_server.js --port $(server_port)

@@ -10,6 +10,8 @@
 #include "xpcprivate.h"
 #include "xpcpublic.h"
 
+class nsIScriptSecurityManager;
+
 namespace XPCNativeWrapper {
 
 // Given an XPCWrappedNative pointer and the name of the function on
@@ -21,7 +23,7 @@ namespace XPCNativeWrapper {
    (_wn)->GetScriptableInfo()->GetFlags()._flag())
 
 bool
-AttachNewConstructorObject(XPCCallContext &ccx, JSObject *aGlobalObject);
+AttachNewConstructorObject(JSContext *aCx, JSObject *aGlobalObject);
 
 } // namespace XPCNativeWrapper
 
@@ -45,12 +47,6 @@ inline JSBool
 IsSecurityWrapper(JSObject *wrapper)
 {
   return js::IsWrapper(wrapper);
-}
-
-inline JSObject *
-Unwrap(JSContext *cx, JSObject *wrapper, bool stopAtOuter = true)
-{
-  return xpc::Unwrap(cx, wrapper, stopAtOuter);
 }
 
 JSObject *

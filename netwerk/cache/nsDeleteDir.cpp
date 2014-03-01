@@ -13,6 +13,7 @@
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
 #include "nsISupportsPriority.h"
+#include "nsCacheUtils.h"
 #include <time.h>
 
 using namespace mozilla;
@@ -26,20 +27,6 @@ public:
     nsDeleteDir::gInstance->mCondVar.Notify();
     return NS_OK;
   }
-};
-
-class nsDestroyThreadEvent : public nsRunnable {
-public:
-  nsDestroyThreadEvent(nsIThread *thread)
-    : mThread(thread)
-  {}
-  NS_IMETHOD Run()
-  {
-    mThread->Shutdown();
-    return NS_OK;
-  }
-private:
-  nsCOMPtr<nsIThread> mThread;
 };
 
 
@@ -155,7 +142,7 @@ nsDeleteDir::DestroyThread()
     // more work to do, so don't delete thread.
     return;
 
-  NS_DispatchToMainThread(new nsDestroyThreadEvent(mThread));
+  nsShutdownThread::Shutdown(mThread);
   mThread = nullptr;
 }
 
@@ -218,14 +205,14 @@ nsDeleteDir::DeleteDir(nsIFile *dirIn, bool moveToTrash, uint32_t delay)
     rv = GetTrashDir(dir, &trash);
     if (NS_FAILED(rv))
       return rv;
-    nsCAutoString origLeaf;
+    nsAutoCString origLeaf;
     rv = trash->GetNativeLeafName(origLeaf);
     if (NS_FAILED(rv))
       return rv;
 
     // Append random number to the trash directory and check if it exists.
-    srand(PR_Now());
-    nsCAutoString leaf;
+    srand(static_cast<unsigned>(PR_Now()));
+    nsAutoCString leaf;
     for (int32_t i = 0; i < 10; i++) {
       leaf = origLeaf;
       leaf.AppendInt(rand());
@@ -289,7 +276,7 @@ nsDeleteDir::GetTrashDir(nsIFile *target, nsCOMPtr<nsIFile> *result)
       return rv;
 
     // Add a sub folder with the cache folder name
-    nsCAutoString leaf;
+    nsAutoCString leaf;
     rv = target->GetNativeLeafName(leaf);
     (*result)->AppendNative(leaf);
   } else
@@ -300,7 +287,7 @@ nsDeleteDir::GetTrashDir(nsIFile *target, nsCOMPtr<nsIFile> *result)
   if (NS_FAILED(rv))
     return rv;
 
-  nsCAutoString leaf;
+  nsAutoCString leaf;
   rv = (*result)->GetNativeLeafName(leaf);
   if (NS_FAILED(rv))
     return rv;

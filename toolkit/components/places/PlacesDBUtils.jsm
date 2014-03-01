@@ -13,7 +13,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
 
-let EXPORTED_SYMBOLS = [ "PlacesDBUtils" ];
+this.EXPORTED_SYMBOLS = [ "PlacesDBUtils" ];
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Constants
@@ -32,11 +32,10 @@ XPCOMUtils.defineLazyGetter(this, "DBConn", function() {
 ////////////////////////////////////////////////////////////////////////////////
 //// PlacesDBUtils
 
-let PlacesDBUtils = {
+this.PlacesDBUtils = {
   /**
    * Executes a list of maintenance tasks.
-   * Once finished it will pass a array log to the callback attached to tasks,
-   * or print out to the error console if no callback is defined.
+   * Once finished it will pass a array log to the callback attached to tasks.
    * FINISHED_MAINTENANCE_TOPIC is notified through observer service on finish.
    *
    * @param aTasks
@@ -65,14 +64,6 @@ let PlacesDBUtils = {
       if (aTasks.callback) {
         let scope = aTasks.scope || Cu.getGlobalForObject(aTasks.callback);
         aTasks.callback.call(scope, aTasks.messages);
-      }
-      else {
-        // Output to the error console.
-        let messages = aTasks.messages;
-        messages.unshift("[ Places Maintenance ]");
-        try {
-          Services.console.logStringMessage(messages.join("\n"));
-        } catch(ex) {}
       }
 
       // Notify observers that maintenance finished.
@@ -826,12 +817,24 @@ let PlacesDBUtils = {
   /**
    * Collects telemetry data.
    *
+   * There are essentially two modes of collection and the mode is
+   * determined by the presence of aHealthReportCallback. If
+   * aHealthReportCallback is not defined (the default) then we are in
+   * "Telemetry" mode. Results will be reported to Telemetry. If we are
+   * in "Health Report" mode only the probes with a true healthreport
+   * flag will be collected and the results will be reported to the
+   * aHealthReportCallback.
+   *
    * @param [optional] aTasks
    *        Tasks object to execute.
+   * @param [optional] aHealthReportCallback
+   *        Function to receive data relevant for Firefox Health Report.
    */
-  telemetry: function PDBU_telemetry(aTasks)
+  telemetry: function PDBU_telemetry(aTasks, aHealthReportCallback=null)
   {
     let tasks = new Tasks(aTasks);
+
+    let isTelemetry = !aHealthReportCallback;
 
     // This will be populated with one integer property for each probe result,
     // using the histogram name as key.
@@ -849,15 +852,19 @@ let PlacesDBUtils = {
     //             histogram. If a query is also present, its result is passed
     //             as the first argument of the function.  If the function
     //             raises an exception, no data is added to the histogram.
+    //  healthreport: Boolean indicating whether this probe is relevant
+    //                to Firefox Health Report.
     //
     // Since all queries are executed in order by the database backend, the
     // callbacks can also use the result of previous queries stored in the
     // probeValues object.
     let probes = [
       { histogram: "PLACES_PAGES_COUNT",
+        healthreport: true,
         query:     "SELECT count(*) FROM moz_places" },
 
       { histogram: "PLACES_BOOKMARKS_COUNT",
+        healthreport: true,
         query:     "SELECT count(*) FROM moz_bookmarks b "
                  + "JOIN moz_bookmarks t ON t.id = b.parent "
                  + "AND t.parent <> :tags_folder "
@@ -953,25 +960,45 @@ let PlacesDBUtils = {
       places_root: PlacesUtils.placesRootId
     };
 
-    function reportTelemetry(aProbe, aValue) {
+    let outstandingProbes = 0;
+
+    function reportResult(aProbe, aValue) {
+      outstandingProbes--;
+
+      let value = aValue;
       try {
-        let value = aValue;
         if ("callback" in aProbe) {
           value = aProbe.callback(value);
         }
-        probeValues[aProbe.histogram] = value;
-        Services.telemetry.getHistogramById(aProbe.histogram)
-                          .add(value);
+        if (isFinite(value)) {
+          probeValues[aProbe.histogram] = value;
+          Services.telemetry.getHistogramById(aProbe.histogram)
+                            .add(value);
+        }
       } catch (ex) {
         Components.utils.reportError(ex);
+      }
+
+      if (!outstandingProbes && aHealthReportCallback) {
+        try {
+          aHealthReportCallback(probeValues);
+        } catch (ex) {
+          Components.utils.reportError(ex);
+        }
       }
     }
 
     for (let i = 0; i < probes.length; i++) {
       let probe = probes[i];
- 
+
+      if (!isTelemetry && !probe.healthreport) {
+        continue;
+      }
+
+      outstandingProbes++;
+
       if (!("query" in probe)) {
-        reportTelemetry(probe);
+        reportResult(probe);
         continue;
       }
 
@@ -987,7 +1014,7 @@ let PlacesDBUtils = {
           handleError: PlacesDBUtils._handleError,
           handleResult: function (aResultSet) {
             let row = aResultSet.getNextRow();
-            reportTelemetry(probe, row.getResultByIndex(0));
+            reportResult(probe, row.getResultByIndex(0));
           },
           handleCompletion: function () {}
         });
@@ -1007,8 +1034,7 @@ let PlacesDBUtils = {
    *        this module.
    * @param [optional] aCallback
    *        Callback to be invoked when done.  It will receive an array of
-   *        log messages.  If not specified the log will be printed to the
-   *        Error Console.
+   *        log messages.
    */
   runTasks: function PDBU_runTasks(aTasks, aCallback) {
     let tasks = new Tasks(aTasks);

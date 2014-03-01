@@ -10,18 +10,12 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = accessibility
-LIBRARY_NAME = accessibility_xpcom_s
 LIBXUL_LIBRARY = 1
-
-CPPSRCS = \
-  nsAccEvent.cpp \
-  nsAccessibleRelation.cpp \
-  xpcAccessibleTable.cpp \
-  $(NULL)
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
+
+EXTRA_MDDEPEND_FILES = xpcAccEvents.pp
 
 include $(topsrcdir)/config/rules.mk
 
@@ -30,14 +24,14 @@ LOCAL_INCLUDES = \
   -I$(srcdir)/../generic \
   $(NULL)
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+ifdef MOZ_ENABLE_GTK
 LOCAL_INCLUDES += \
   -I$(srcdir)/../atk \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 LOCAL_INCLUDES += \
-  -I$(srcdir)/../msaa \
+  -I$(srcdir)/../windows/msaa \
   $(NULL)
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
@@ -51,3 +45,38 @@ LOCAL_INCLUDES += \
 endif
 endif
 endif
+
+ifneq ($(A11Y_LOG),0)
+  DEFINES += -DA11Y_LOG
+endif
+
+xpcAccEvents.h: $(srcdir)/AccEvents.conf \
+                   $(srcdir)/AccEventGen.py \
+                   $(LIBXUL_DIST)/sdk/bin/header.py \
+                   $(LIBXUL_DIST)/sdk/bin/xpidl.py \
+                   $(DEPTH)/js/src/js-confdefs.h
+	$(PYTHON) $(topsrcdir)/config/pythonpath.py \
+	  -I$(LIBXUL_DIST)/sdk/bin \
+	  $(srcdir)/AccEventGen.py \
+	  -I $(DEPTH)/dist/idl \
+	  --header-output xpcAccEvents.h \
+	  $(srcdir)/AccEvents.conf
+
+xpcAccEvents.cpp: $(srcdir)/AccEvents.conf \
+                     $(srcdir)/AccEventGen.py \
+                     $(LIBXUL_DIST)/sdk/bin/header.py \
+                     $(LIBXUL_DIST)/sdk/bin/xpidl.py \
+                     $(DEPTH)/js/src/js-confdefs.h
+	$(PYTHON) $(topsrcdir)/config/pythonpath.py \
+	  -I$(LIBXUL_DIST)/sdk/bin \
+	  $(srcdir)/AccEventGen.py \
+	  -I $(DEPTH)/dist/idl \
+	  --header-output xpcAccEvents.h \
+	  --stub-output xpcAccEvents.cpp \
+	  --makedepend-output $(MDDEPDIR)/xpcAccEvents.pp \
+	  $(srcdir)/AccEvents.conf
+
+GARBAGE += \
+  xpcAccEvents.cpp \
+  xpcAccEvents.h \
+  $(null)

@@ -1,0 +1,94 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: sw=2 ts=8 et :
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include LayersSurfaces;
+include LayerTransaction;
+include protocol PCompositable;
+include protocol PCompositor;
+include protocol PGrallocBuffer;
+include protocol PLayer;
+include protocol PRenderFrame;
+
+include "mozilla/WidgetUtils.h";
+include "mozilla/TimeStamp.h";
+include "mozilla/dom/ScreenOrientation.h";
+include "nsCSSProperty.h";
+include "gfxipc/ShadowLayerUtils.h";
+
+using mozilla::layers::TextureInfo;
+
+/**
+ * The layers protocol is spoken between thread contexts that manage
+ * layer (sub)trees.  The protocol comprises atomically publishing
+ * layer subtrees to a "shadow" thread context (which grafts the
+ * subtree into its own tree), and atomically updating a published
+ * subtree.  ("Atomic" in this sense is wrt painting.)
+ */
+
+namespace mozilla {
+namespace layers {
+
+sync protocol PLayerTransaction {
+  manager PRenderFrame or PCompositor;
+  manages PLayer;
+  manages PCompositable;
+  manages PGrallocBuffer;
+
+parent:
+  /**
+   * Only the parent side has privileges to allocate the buffer.
+   * Allocation may fail (pmem is a scarce resource), and if so null_t
+   * is returned.
+   *
+   * |format| is an Android PixelFormat (see PixelFormat.h)
+   *
+   * commonly used PixelFormats are:
+   *   PIXEL_FORMAT_RGBA_8888
+   *   PIXEL_FORMAT_RGBX_8888
+   *   PIXEL_FORMAT_BGRA_8888
+   *
+   * Note that SurfaceDescriptorGralloc has a "isRBSwapped" boolean
+   * that can treat the R/B bytes as swapped when they are rendered
+   * to the screen, to help with matching the native pixel format
+   * of other rendering engines.
+   *
+   * |usage| is a USAGE_* mask (see GraphicBuffer.h)
+   *
+   * commonly used USAGE flags are:
+   *   USAGE_SW_READ_OFTEN | USAGE_SW_WRITE_OFTEN | USAGE_HW_TEXTURE
+   *     - used for software rendering to a buffer which the compositor
+   *       treats as a texture
+   *   USAGE_HW_RENDER | USAGE_HW_TEXTURE
+   *     - used for GL rendering to a buffer which the compositor
+   *       treats as a texture
+   */
+  sync PGrallocBuffer(gfxIntSize size, uint32_t format, uint32_t usage)
+    returns (MaybeMagicGrallocBufferHandle handle);
+  async PLayer();
+  async PCompositable(TextureInfo aTextureInfo);
+
+  // The isFirstPaint flag can be used to indicate that this is the first update
+  // for a particular document.
+  sync Update(Edit[] cset, TargetConfig targetConfig, bool isFirstPaint)
+    returns (EditReply[] reply);
+
+  sync GetOpacity(PLayer layer) returns (float opacity);
+  sync GetTransform(PLayer layer) returns (gfx3DMatrix transform);
+
+  // We don't need to send a sync transaction if
+  // no transaction operate require a swap.
+  async UpdateNoSwap(Edit[] cset, TargetConfig targetConfig, bool isFirstPaint);
+
+  // Drop any front buffers that might be retained on the compositor
+  // side.
+  async ClearCachedResources();
+
+  async __delete__();
+};
+
+} // namespace layers
+} // namespace mozilla

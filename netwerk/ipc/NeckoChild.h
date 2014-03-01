@@ -26,16 +26,30 @@ public:
   static void DestroyNeckoChild();
 
 protected:
-  virtual PHttpChannelChild* AllocPHttpChannel(PBrowserChild* iframeEmbedding);
+  virtual PHttpChannelChild*
+    AllocPHttpChannel(PBrowserChild*, const SerializedLoadContext&,
+                      const HttpChannelCreationArgs& aOpenArgs);
   virtual bool DeallocPHttpChannel(PHttpChannelChild*);
   virtual PCookieServiceChild* AllocPCookieService();
   virtual bool DeallocPCookieService(PCookieServiceChild*);
   virtual PWyciwygChannelChild* AllocPWyciwygChannel();
   virtual bool DeallocPWyciwygChannel(PWyciwygChannelChild*);
-  virtual PFTPChannelChild* AllocPFTPChannel();
+  virtual PFTPChannelChild*
+    AllocPFTPChannel(PBrowserChild* aBrowser,
+                     const SerializedLoadContext& aSerialized,
+                     const FTPChannelCreationArgs& aOpenArgs);
   virtual bool DeallocPFTPChannel(PFTPChannelChild*);
-  virtual PWebSocketChild* AllocPWebSocket(PBrowserChild*);
+  virtual PWebSocketChild* AllocPWebSocket(PBrowserChild*, const SerializedLoadContext&);
   virtual bool DeallocPWebSocket(PWebSocketChild*);
+  virtual PTCPSocketChild* AllocPTCPSocket(const nsString& aHost,
+                                           const uint16_t& aPort,
+                                           const bool& useSSL,
+                                           const nsString& aBinaryType,
+                                           PBrowserChild* aBrowser);
+  virtual bool DeallocPTCPSocket(PTCPSocketChild*);
+  virtual PRemoteOpenFileChild* AllocPRemoteOpenFile(const URIParams&,
+                                                     PBrowserChild*);
+  virtual bool DeallocPRemoteOpenFile(PRemoteOpenFileChild*);
 };
 
 /**

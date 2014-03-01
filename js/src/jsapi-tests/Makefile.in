@@ -11,75 +11,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-PROGRAM         = jsapi-tests$(BIN_SUFFIX)
-
-CPPSRCS = \
-  tests.cpp \
-  selfTest.cpp \
-  testAddPropertyPropcache.cpp \
-  testArgumentsObject.cpp \
-  testBindCallable.cpp \
-  testBug604087.cpp \
-  testCallNonGenericMethodOnProxy.cpp \
-  testChromeBuffer.cpp \
-  testClassGetter.cpp \
-  testCloneScript.cpp \
-  testConservativeGC.cpp \
-  testContexts.cpp \
-  testCustomIterator.cpp \
-  testDebugger.cpp \
-  testDeepFreeze.cpp \
-  testDefineGetterSetterNonEnumerable.cpp \
-  testDefineProperty.cpp \
-  testExtendedEq.cpp \
-  testExternalStrings.cpp \
-  testFuncCallback.cpp \
-  testFunctionProperties.cpp \
-  testGCOutOfMemory.cpp \
-  testOOM.cpp \
-  testGetPropertyDefault.cpp \
-  testHashTable.cpp \
-  testIndexToString.cpp \
-  testIntString.cpp \
-  testIntTypesABI.cpp \
-  testIntern.cpp \
-  testLookup.cpp \
-  testLooselyEqual.cpp \
-  testNewObject.cpp \
-  testOps.cpp \
-  testOriginPrincipals.cpp \
-  testParseJSON.cpp \
-  testPropCache.cpp \
-  testRegExp.cpp \
-  testResolveRecursion.cpp \
-  testSameValue.cpp \
-  testScriptInfo.cpp \
-  testScriptObject.cpp \
-  testSetProperty.cpp \
-  testSourcePolicy.cpp \
-  testStringBuffer.cpp \
-  testTrap.cpp \
-  testTypedArrays.cpp \
-  testUTF8.cpp \
-  testValueABI.cpp \
-  testVersion.cpp \
-  testXDR.cpp \
-  testProfileStrings.cpp \
-  testJSEvaluateScript.cpp \
-  testErrorCopying.cpp \
-  $(NULL)
-
-CSRCS = \
-  valueABI.c
-
-# Disabled: an entirely unrelated test seems to cause this to fail.  Moreover,
-# given the test's dependence on interactions between the compiler, the GC, and
-# conservative stack scanning, the fix isn't obvious: more investigation
-# needed.
-#CPPSRCS += \
-#  testRegExpInstanceProperties.cpp \
-#  $(NULL)
-
 DEFINES         += -DEXPORT_JS_API
 # Building against js_static requires that we declare mfbt sybols "exported"
 # on its behalf.
@@ -88,6 +19,18 @@ DEFINES         += -DIMPL_MFBT
 LIBS      = $(DEPTH)/$(LIB_PREFIX)js_static.$(LIB_SUFFIX) $(NSPR_LIBS) $(MOZ_ZLIB_LIBS)
 
 LOCAL_INCLUDES += -I$(topsrcdir) -I..
+
+EXTRA_LIBS += $(MOZ_FFI_LIBS)
+
+ifdef QEMU_EXE
+MOZ_POST_PROGRAM_COMMAND = $(topsrcdir)/build/qemu-wrap --qemu $(QEMU_EXE) --libdir $(CROSS_LIB)
+endif
+
+# Place a GDB Python auto-load file next to the jsapi-tests executable in
+# the build directory.
+PP_TARGETS += JSAPI_TESTS_AUTOLOAD
+JSAPI_TESTS_AUTOLOAD := jsapi-tests-gdb.py.in
+JSAPI_TESTS_AUTOLOAD_FLAGS := -Dtopsrcdir=$(abspath $(topsrcdir))
 
 include $(topsrcdir)/config/rules.mk
 

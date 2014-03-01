@@ -23,7 +23,7 @@ public:
   // Accessible
   virtual mozilla::a11y::role NativeRole();
   virtual void AppendTextTo(nsAString& aText, uint32_t aStartOffset = 0,
-                            uint32_t aLength = PR_UINT32_MAX);
+                            uint32_t aLength = UINT32_MAX);
   virtual ENameValueFlag Name(nsString& aName);
 
   // TextLeafAccessible
@@ -38,18 +38,18 @@ protected:
   nsString mText;
 };
 
-} // namespace a11y
-} // namespace mozilla
 
 ////////////////////////////////////////////////////////////////////////////////
 // Accessible downcast method
 
-inline mozilla::a11y::TextLeafAccessible*
+inline TextLeafAccessible*
 Accessible::AsTextLeaf()
 {
-  return mFlags & eTextLeafAccessible ?
-    static_cast<mozilla::a11y::TextLeafAccessible*>(this) : nullptr;
+  return IsTextLeaf() ? static_cast<TextLeafAccessible*>(this) : nullptr;
 }
+
+} // namespace a11y
+} // namespace mozilla
 
 #endif
 

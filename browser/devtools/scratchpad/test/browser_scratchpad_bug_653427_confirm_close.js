@@ -9,7 +9,7 @@ let NetUtil = tempScope.NetUtil;
 let FileUtils = tempScope.FileUtils;
 
 // only finish() when correct number of tests are done
-const expected = 5;
+const expected = 9;
 var count = 0;
 function done()
 {
@@ -68,15 +68,42 @@ function testSavedFile()
 
 function testUnsaved()
 {
-  testUnsavedFileCancel();
-  testUnsavedFileSave();
+  function setFilename(aScratchpad, aFile) {
+    aScratchpad.setFilename(aFile);
+  }
+
+  testUnsavedFileCancel(setFilename);
+  testUnsavedFileSave(setFilename);
+  testUnsavedFileDontSave(setFilename);
+  testCancelAfterLoad();
+
+  function mockSaveFile(aScratchpad) {
+    let SaveFileStub = function (aCallback) {
+      /*
+       * An argument for aCallback must pass Components.isSuccessCode
+       *
+       * A version of isSuccessCode in JavaScript:
+       *  function isSuccessCode(returnCode) {
+       *    return (returnCode & 0x80000000) == 0;
+       *  }
+       */
+      aCallback(1);
+    };
+
+    aScratchpad.saveFile = SaveFileStub;
+  }
+
+  // Run these tests again but this time without setting a filename to
+  // test that Scratchpad always asks for confirmation on dirty editor.
+  testUnsavedFileCancel(mockSaveFile);
+  testUnsavedFileSave(mockSaveFile);
   testUnsavedFileDontSave();
 }
 
-function testUnsavedFileCancel()
+function testUnsavedFileCancel(aCallback=function () {})
 {
   openScratchpad(function(win) {
-    win.Scratchpad.setFilename("test.js");
+    aCallback(win.Scratchpad, "test.js");
     win.Scratchpad.editor.dirty = true;
 
     promptButton = win.BUTTON_POSITION_CANCEL;
@@ -89,11 +116,39 @@ function testUnsavedFileCancel()
   }, {noFocus: true});
 }
 
-function testUnsavedFileSave()
+// Test a regression where our confirmation dialog wasn't appearing
+// after openFile calls. See bug 801982.
+function testCancelAfterLoad()
+{
+  openScratchpad(function(win) {
+    win.Scratchpad.setRecentFile(gFile);
+    win.Scratchpad.openFile(0);
+    win.Scratchpad.editor.dirty = true;
+    promptButton = win.BUTTON_POSITION_CANCEL;
+
+    let EventStub = {
+      called: false,
+      preventDefault: function() {
+        EventStub.called = true;
+      }
+    };
+
+    win.Scratchpad.onClose(EventStub, function() {
+      ok(!win.closed, "cancelling dialog shouldn't close scratchpad");
+      ok(EventStub.called, "aEvent.preventDefault was called");
+
+      win.Scratchpad.editor.dirty = false;
+      win.close();
+      done();
+    });
+  }, {noFocus: true});
+}
+
+function testUnsavedFileSave(aCallback=function () {})
 {
   openScratchpad(function(win) {
     win.Scratchpad.importFromFile(gFile, true, function(status, content) {
-      win.Scratchpad.setFilename(gFile.path);
+      aCallback(win.Scratchpad, gFile.path);
 
       let text = "new text";
       win.Scratchpad.setText(text);
@@ -111,10 +166,10 @@ function testUnsavedFileSave()
   }, {noFocus: true});
 }
 
-function testUnsavedFileDontSave()
+function testUnsavedFileDontSave(aCallback=function () {})
 {
   openScratchpad(function(win) {
-    win.Scratchpad.setFilename(gFile.path);
+    aCallback(win.Scratchpad, gFile.path);
     win.Scratchpad.editor.dirty = true;
 
     promptButton = win.BUTTON_POSITION_DONT_SAVE;

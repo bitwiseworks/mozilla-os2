@@ -11,31 +11,14 @@ relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS += \
-  chrome \
-  websocket_hybi \
-  $(NULL)
-
-MODULE = content
-
 CPP_UNIT_TESTS = \
                  TestNativeXMLHttpRequest.cpp \
                  TestGetURL.cpp \
                  TestPlainTextSerializer.cpp \
                  $(NULL)
 
-
-XPCSHELL_TESTS = \
-               unit \
-               $(NULL)
-# FIXME/bug 575918: out-of-process xpcshell is broken on OS X
-ifneq ($(OS_ARCH),Darwin)
-XPCSHELL_TESTS += unit_ipc
-endif
-
-
-# Split files arbitrarily in two groups to not run into too-long command lines
-# which break on Windows (see bug 563151)
+# Split files arbitrarily in three groups to not run into too-long command lines
+# which break on Windows (see bug 563151 and bug 831989)
 MOCHITEST_FILES_A = \
 		responseIdentical.sjs \
 		test_bug5141.html \
@@ -43,8 +26,6 @@ MOCHITEST_FILES_A = \
 		test_bug166235.html \
 		test_bug199959.html \
 		test_bug218236.html \
-		file_bug218236_multipart.txt \
-		file_bug218236_multipart.txt^headers^ \
 		test_bug218277.html \
 		test_bug238409.html \
 		test_bug254337.html \
@@ -95,7 +76,6 @@ MOCHITEST_FILES_A = \
 		test_bug378969.html \
 		test_bug382113.html \
 		test_bug382871.html \
-		test_bug383430.html \
 		test_bug384003.xhtml \
 		test_bug390219.html \
 		test_bug390735.html \
@@ -113,8 +93,6 @@ MOCHITEST_FILES_A = \
 		file_bug326337_inner.html \
 		file_bug326337_outer.html \
 		file_bug326337.xml \
-		file_bug326337_multipart.txt \
-		file_bug326337_multipart.txt^headers^ \
 		test_bug333198.html \
 		test_bug402150.html \
 		test_bug402150.html^headers^ \
@@ -188,6 +166,8 @@ MOCHITEST_FILES_A = \
 		file_XHR_binary1.bin \
 		file_XHR_binary1.bin^headers^ \
 		file_XHR_binary2.bin \
+		file_XHR_header.sjs \
+		test_XHR_header.html \
 		test_bug428847.html \
 		file_bug428847-1.xhtml \
 		file_bug428847-2.xhtml \
@@ -210,9 +190,6 @@ MOCHITEST_FILES_A = \
 		test_bug28293.html \
 		test_bug28293.xhtml \
 		file_bug28293.sjs \
-		test_bug445225.html \
-		file_bug445225_multipart.txt \
-		file_bug445225_multipart.txt^headers^ \
 		test_title.html \
 		test_bug453521.html \
 		test_bug454325.html \
@@ -250,9 +227,27 @@ MOCHITEST_FILES_A = \
 		file_XHRDocURI.text \
 		file_XHRDocURI.text^headers^ \
 		test_DOMException.html \
+		test_domparsing.html \
+		test_meta_viewport0.html \
+		test_meta_viewport1.html \
+		test_meta_viewport2.html \
+		test_meta_viewport3.html \
+		test_meta_viewport4.html \
+		test_meta_viewport5.html \
+		test_meta_viewport6.html \
+			viewport_helpers.js \
 		test_mutationobservers.html \
 		mutationobserver_dialog.html \
 		test_bug744830.html \
+		file_bug782342.txt \
+		test_bug782342.html \
+		test_bug282547.html \
+		bug282547.sjs \
+		test_domparser_null_char.html \
+		test_bug811701.html \
+		test_bug811701.xhtml \
+		test_bug820909.html \
+		test_bug704063.html \
 		$(NULL)
 
 MOCHITEST_FILES_B = \
@@ -337,6 +332,8 @@ MOCHITEST_FILES_B = \
 		test_bug564863.xhtml \
 		test_bug588990.html \
 		test_copypaste.html \
+		test_copypaste.xhtml \
+		copypaste.js \
 		test_bug503481.html \
 		file_bug503481.sjs \
 		test_bug503481b.html \
@@ -344,20 +341,47 @@ MOCHITEST_FILES_B = \
 		test_viewport_scroll.html \
 		test_CSP.html \
 		file_CSP.sjs \
+		file_CSP.css \
 		file_CSP_main.html \
 		file_CSP_main.html^headers^ \
+		file_CSP_main_spec_compliant.html \
+		file_CSP_main_spec_compliant.html^headers^ \
 		file_CSP_main.js \
+		file_CSP_main_spec_compliant.js \
 		test_CSP_frameancestors.html \
 		file_CSP_frameancestors.sjs \
 		file_CSP_frameancestors_main.html \
 		file_CSP_frameancestors_main.js \
+		file_CSP_frameancestors_spec_compliant.sjs \
+		file_CSP_frameancestors_main_spec_compliant.html \
+		file_CSP_frameancestors_main_spec_compliant.js \
 		test_CSP_inlinescript.html \
 		file_CSP_inlinescript_main.html \
 		file_CSP_inlinescript_main.html^headers^ \
+		file_CSP_inlinescript_main_spec_compliant.html \
+		file_CSP_inlinescript_main_spec_compliant.html^headers^ \
+		file_CSP_inlinescript_main_spec_compliant_allowed.html \
+		file_CSP_inlinescript_main_spec_compliant_allowed.html^headers^ \
 		test_CSP_evalscript.html \
 		file_CSP_evalscript_main.html \
 		file_CSP_evalscript_main.html^headers^ \
 		file_CSP_evalscript_main.js \
+		file_CSP_evalscript_main_allowed.js \
+		file_CSP_evalscript_main_spec_compliant.html \
+	 	file_CSP_evalscript_main_spec_compliant.html^headers^ \
+		file_CSP_evalscript_main_spec_compliant_allowed.html \
+		file_CSP_evalscript_main_spec_compliant_allowed.html^headers^ \
+		test_CSP_inlinestyle.html \
+		file_CSP_inlinestyle_main.html \
+		file_CSP_inlinestyle_main.html^headers^ \
+		file_CSP_inlinestyle_main_spec_compliant.html \
+		file_CSP_inlinestyle_main_spec_compliant.html^headers^ \
+		file_CSP_inlinestyle_main_spec_compliant_allowed.html \
+		file_CSP_inlinestyle_main_spec_compliant_allowed.html^headers^ \
+		file_csp_bug768029.html \
+		file_csp_bug768029.sjs \
+		file_csp_bug773891.html \
+		file_csp_bug773891.sjs \
 		test_bug540854.html \
 		bug540854.sjs \
 		test_bug548463.html \
@@ -448,7 +472,6 @@ MOCHITEST_FILES_B = \
 		bug638112-response.txt \
 		bug638112.sjs \
 		test_bug656283.html \
-		test_blobbuilder.html \
 		test_blobconstructor.html \
 		fileutils.js \
 		test_bug338583.html \
@@ -461,8 +484,6 @@ MOCHITEST_FILES_B = \
 		eventsource_redirect_to.resource^headers^ \
 		badContentType.eventsource \
 		badContentType.eventsource^headers^ \
-		badEventFieldName.eventsource \
-		badEventFieldName.eventsource^headers^ \
 		badHTTPResponseCode.eventsource \
 		badHTTPResponseCode.eventsource^headers^ \
 		badMessageEvent.eventsource \
@@ -474,6 +495,11 @@ MOCHITEST_FILES_B = \
 		accesscontrol.resource^headers^ \
 		invalid_accesscontrol.resource \
 		invalid_accesscontrol.resource^headers^ \
+		file_bug869432.eventsource \
+		file_bug869432.eventsource^headers^ \
+		$(NULL)
+
+MOCHITEST_FILES_C= \
 		test_xhr_progressevents.html \
 		progressserver.sjs \
 		somedatas.resource \
@@ -485,6 +511,8 @@ MOCHITEST_FILES_B = \
 		file_html_in_xhr3.html \
 		file_html_in_xhr.sjs \
 		test_bug647518.html \
+		test_caretPositionFromPoint.html \
+		Ahem.ttf \
 		test_bug664916.html \
 		test_bug666604.html \
 		test_bug675121.html \
@@ -517,9 +545,6 @@ MOCHITEST_FILES_B = \
 		test_bug708620.html \
 		file_bug708620.html \
 		file_bug708620-2.html \
-		test_XHR_timeout.html \
-		test_XHR_timeout.js \
-		file_XHR_timeout.sjs \
 		test_bug717511.html \
 		file_bug717511.html \
 		file_bug717511.html^headers^ \
@@ -543,32 +568,108 @@ MOCHITEST_FILES_B = \
 		test_bug650386_redirect_307.html \
 		file_bug650386_content.sjs \
 		file_bug650386_report.sjs \
+		test_bug687859.html \
+		file_bug687859-bom.js \
+		file_bug687859-bom.js^headers^ \
+		file_bug687859-16.js \
+		file_bug687859-16.js^headers^ \
+		file_bug687859-http.js \
+		file_bug687859-http.js^headers^ \
+		file_bug687859-charset.js \
+		file_bug687859-inherit.js \
 		test_bug719533.html \
 		test_bug737087.html \
 		test_bug433662.html \
 		test_bug749367.html \
 		test_bug753278.html \
 		test_bug761120.html \
+		test_bug787778.html \
+		file_bug787778.sjs \
+		test_xbl_userdata.xhtml \
 		test_XHR_onuploadprogress.html \
 		test_XHR_anon.html \
 		file_XHR_anon.sjs \
+		file_XHR_system_redirect.html \
+		file_XHR_system_redirect.html^headers^ \
 		test_XHR_system.html \
 		test_XHR_parameters.html \
 		test_ipc_messagemanager_blob.html \
+		test_mixed_content_blocker.html \
+		file_mixed_content_main.html \
+		file_mixed_content_server.sjs \
+		test_mixed_content_blocker_bug803225.html \
+		file_mixed_content_main_bug803225.html \
+		file_mixed_content_main_bug803225_websocket_wsh.py \
+		bug803225_test_mailto.html \
+		test_mixed_content_blocker_frameNavigation.html \
+		file_mixed_content_frameNavigation.html \
+		file_mixed_content_frameNavigation_innermost.html \
+		file_mixed_content_frameNavigation_grandchild.html \
+		file_mixed_content_frameNavigation_secure.html \
+		file_mixed_content_frameNavigation_secure_grandchild.html \
+		file_mixed_content_frameNavigation_blankTarget.html \
+		file_bug902350.html \
+		file_bug902350_frame.html \
+		test_bug789856.html \
+		file_bug804395.jar \
+		test_bug804395.html \
+		test_bug809003.html \
+		test_bug810494.html \
+		test_bug819051.html \
+		bug819051.sjs \
+		test_textnode_split_in_selection.html \
+		test_textnode_normalize_in_selection.html \
+		test_xhr_send_readystate.html \
+		test_bug813919.html \
+		test_bug814576.html \
+		test_xhr_withCredentials.html \
+		test_bothCSPheaders.html \
+		file_bothCSPheaders.html \
+		file_bothCSPheaders.html^headers^ \
+		badMessageEvent2.eventsource \
+		badMessageEvent2.eventsource^headers^ \
+		test_object.html \
+		test_bug840098.html \
+		test_bug869006.html \
+		test_bug868999.html \
+		test_bug869000.html \
+		test_bug869002.html \
+		test_bug876282.html \
+		test_CSP_bug885433.html \
+		file_CSP_bug885433_allows.html \
+		file_CSP_bug885433_allows.html^headers^ \
+		file_CSP_bug885433_blocks.html \
+		file_CSP_bug885433_blocks.html^headers^ \
+		test_CSP_bug888172.html \
+		file_CSP_bug888172.html \
+		file_CSP_bug888172.sjs \
 		$(NULL)
+
+# OOP tests don't work on Windows (bug 763081) or native-fennec
+# (see Bug 774939)
+ifneq ($(OS_ARCH),WINNT)
+ifndef MOZ_ANDROID_OMTC
+MOCHITEST_FILES_B += \
+		test_messagemanager_assertpermission.html \
+		test_child_process_shutdown_message.html \
+		$(NULL)
+endif
+endif
 
 MOCHITEST_CHROME_FILES =	\
 		test_bug357450.js \
+		test_copypaste.xul \
 		$(NULL)
-
-MOCHITEST_FILES_PARTS = $(foreach s,A B,MOCHITEST_FILES_$(s))
 
 # This test fails on the Mac for some reason
-ifneq (,$(filter gtk2 windows,$(MOZ_WIDGET_TOOLKIT)))
-MOCHITEST_FILES_C = 	test_copyimage.html \
+ifneq (,$(filter gtk2 gtk3 windows,$(MOZ_WIDGET_TOOLKIT)))
+MOCHITEST_FILES_C += \
+		test_copyimage.html \
 		$(NULL)
-MOCHITEST_FILES_PARTS += MOCHITEST_FILES_C
 endif
+
+MOCHITEST_FILES_PARTS = $(foreach s,A B C,MOCHITEST_FILES_$(s))
+
 
 # Disabled for now. Mochitest isn't reliable enough for these.
 # test_bug444546.html \
@@ -578,8 +679,14 @@ endif
 #		test_bug503473.html \
 #		file_bug503473-frame.sjs \
 
+# Disabled for frequent failures (bug 841505, bug 842344, etc)
+#		test_XHR_timeout.html \
+#		test_XHR_timeout.js \
+#		file_XHR_timeout.sjs \
+
 MOCHITEST_BROWSER_FILES = \
 		browser_bug593387.js \
+		browser_bug902350.js \
 		$(NULL)
 
 include $(topsrcdir)/config/rules.mk

@@ -15,6 +15,8 @@
 #endif 
 
 #include "nsXPCOM.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/Likely.h"
 
 #ifdef DEBUG
 #include "prprf.h"
@@ -39,11 +41,11 @@
  * evaluate the message argument.
  */
 #define NS_ABORT_IF_FALSE(_expr, _msg)                        \
-  PR_BEGIN_MACRO                                              \
+  do {                                                        \
     if (!(_expr)) {                                           \
       NS_DebugBreak(NS_DEBUG_ABORT, _msg, #_expr, __FILE__, __LINE__); \
     }                                                         \
-  PR_END_MACRO
+  } while(0)
 
 /**
  * Warn if a given condition is false.
@@ -54,44 +56,44 @@
  * evaluate the message argument.
  */
 #define NS_WARN_IF_FALSE(_expr,_msg)                          \
-  PR_BEGIN_MACRO                                              \
+  do {                                                        \
     if (!(_expr)) {                                           \
       NS_DebugBreak(NS_DEBUG_WARNING, _msg, #_expr, __FILE__, __LINE__); \
     }                                                         \
-  PR_END_MACRO
+  } while(0)
 
 /**
  * Test a precondition for truth. If the expression is not true then
  * trigger a program failure.
  */
 #define NS_PRECONDITION(expr, str)                            \
-  PR_BEGIN_MACRO                                              \
+  do {                                                        \
     if (!(expr)) {                                            \
       NS_DebugBreak(NS_DEBUG_ASSERTION, str, #expr, __FILE__, __LINE__); \
     }                                                         \
-  PR_END_MACRO
+  } while(0)
 
 /**
  * Test an assertion for truth. If the expression is not true then
  * trigger a program failure.
  */
 #define NS_ASSERTION(expr, str)                               \
-  PR_BEGIN_MACRO                                              \
+  do {                                                        \
     if (!(expr)) {                                            \
       NS_DebugBreak(NS_DEBUG_ASSERTION, str, #expr, __FILE__, __LINE__); \
     }                                                         \
-  PR_END_MACRO
+  } while(0)
 
 /**
  * Test a post-condition for truth. If the expression is not true then
  * trigger a program failure.
  */
 #define NS_POSTCONDITION(expr, str)                           \
-  PR_BEGIN_MACRO                                              \
+  do {                                                        \
     if (!(expr)) {                                            \
       NS_DebugBreak(NS_DEBUG_ASSERTION, str, #expr, __FILE__, __LINE__); \
     }                                                         \
-  PR_END_MACRO
+  } while(0)
 
 /**
  * This macros triggers a program failure if executed. It indicates that
@@ -137,17 +139,17 @@
  * The non-debug version of these macros do not evaluate the
  * expression or the message arguments to the macro.
  */
-#define NS_ABORT_IF_FALSE(_expr, _msg) PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_WARN_IF_FALSE(_expr, _msg)  PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_PRECONDITION(expr, str)     PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_ASSERTION(expr, str)        PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_POSTCONDITION(expr, str)    PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_NOTYETIMPLEMENTED(str)      PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_NOTREACHED(str)             PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_ERROR(str)                  PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_WARNING(str)                PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_ABORT()                     PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define NS_BREAK()                     PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
+#define NS_ABORT_IF_FALSE(_expr, _msg) do { /* nothing */ } while(0)
+#define NS_WARN_IF_FALSE(_expr, _msg)  do { /* nothing */ } while(0)
+#define NS_PRECONDITION(expr, str)     do { /* nothing */ } while(0)
+#define NS_ASSERTION(expr, str)        do { /* nothing */ } while(0)
+#define NS_POSTCONDITION(expr, str)    do { /* nothing */ } while(0)
+#define NS_NOTYETIMPLEMENTED(str)      do { /* nothing */ } while(0)
+#define NS_NOTREACHED(str)             do { /* nothing */ } while(0)
+#define NS_ERROR(str)                  do { /* nothing */ } while(0)
+#define NS_WARNING(str)                do { /* nothing */ } while(0)
+#define NS_ABORT()                     do { /* nothing */ } while(0)
+#define NS_BREAK()                     do { /* nothing */ } while(0)
 
 #endif /* ! DEBUG */
 
@@ -174,22 +176,22 @@
 #define STATIC_PASTE1(X,Y) STATIC_PASTE2(X,Y)
 
 #define STATIC_ASSERT(COND)                          \
-  PR_BEGIN_MACRO                                     \
+  do {                                               \
     __attribute__((assert_static(#COND), unused))    \
     int STATIC_PASTE1(assert_static_, __COUNTER__);  \
-  PR_END_MACRO
+  } while(0)
 
 #define STATIC_ASSUME(COND)                          \
-  PR_BEGIN_MACRO                                     \
+  do {                                               \
     __attribute__((assume_static(#COND), unused))    \
     int STATIC_PASTE1(assume_static_, __COUNTER__);  \
-  PR_END_MACRO
+  } while(0)
 
 #define STATIC_ASSERT_RUNTIME(COND)                         \
-  PR_BEGIN_MACRO                                            \
+  do {                                                      \
     __attribute__((assert_static_runtime(#COND), unused))   \
     int STATIC_PASTE1(assert_static_runtime_, __COUNTER__); \
-  PR_END_MACRO
+  } while(0)
 
 #else /* XGILL_PLUGIN */
 
@@ -200,9 +202,9 @@
 #define STATIC_INVARIANT(COND)             /* nothing */
 #define STATIC_INVARIANT_ASSUME(COND)      /* nothing */
 
-#define STATIC_ASSERT(COND)          PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define STATIC_ASSUME(COND)          PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
-#define STATIC_ASSERT_RUNTIME(COND)  PR_BEGIN_MACRO /* nothing */ PR_END_MACRO
+#define STATIC_ASSERT(COND)          do { /* nothing */ } while(0)
+#define STATIC_ASSUME(COND)          do { /* nothing */ } while(0)
+#define STATIC_ASSERT_RUNTIME(COND)  do { /* nothing */ } while(0)
 
 #endif /* XGILL_PLUGIN */
 
@@ -246,15 +248,26 @@
 ******************************************************************************/
 
 #define NS_ENSURE_TRUE(x, ret)                                \
-  PR_BEGIN_MACRO                                              \
-    if (NS_UNLIKELY(!(x))) {                                  \
+  do {                                                        \
+    if (MOZ_UNLIKELY(!(x))) {                                 \
        NS_WARNING("NS_ENSURE_TRUE(" #x ") failed");           \
        return ret;                                            \
     }                                                         \
-  PR_END_MACRO
+  } while(0)
 
 #define NS_ENSURE_FALSE(x, ret)                               \
   NS_ENSURE_TRUE(!(x), ret)
+
+#define NS_ENSURE_TRUE_VOID(x)                                \
+  do {                                                        \
+    if (MOZ_UNLIKELY(!(x))) {                                 \
+       NS_WARNING("NS_ENSURE_TRUE(" #x ") failed");           \
+       return;                                                \
+    }                                                         \
+  } while(0)
+
+#define NS_ENSURE_FALSE_VOID(x)                               \
+  NS_ENSURE_TRUE_VOID(!(x))
 
 /******************************************************************************
 ** Macros for checking results
@@ -268,21 +281,39 @@
     NS_WARNING(msg);                                                      \
     PR_smprintf_free(msg);
 
+#define NS_ENSURE_SUCCESS_BODY_VOID(res)                                  \
+    char *msg = PR_smprintf("NS_ENSURE_SUCCESS_VOID(%s) failed with "     \
+                            "result 0x%X", #res, __rv);                   \
+    NS_WARNING(msg);                                                      \
+    PR_smprintf_free(msg);
+
 #else
 
 #define NS_ENSURE_SUCCESS_BODY(res, ret)                                  \
     NS_WARNING("NS_ENSURE_SUCCESS(" #res ", " #ret ") failed");
 
+#define NS_ENSURE_SUCCESS_BODY_VOID(res)                                  \
+    NS_WARNING("NS_ENSURE_SUCCESS_VOID(" #res ") failed");
+
 #endif
 
 #define NS_ENSURE_SUCCESS(res, ret)                                       \
-  PR_BEGIN_MACRO                                                          \
+  do {                                                                    \
     nsresult __rv = res; /* Don't evaluate |res| more than once */        \
     if (NS_FAILED(__rv)) {                                                \
       NS_ENSURE_SUCCESS_BODY(res, ret)                                    \
       return ret;                                                         \
     }                                                                     \
-  PR_END_MACRO
+  } while(0)
+
+#define NS_ENSURE_SUCCESS_VOID(res)                                       \
+  do {                                                                    \
+    nsresult __rv = res;                                                  \
+    if (NS_FAILED(__rv)) {                                                \
+      NS_ENSURE_SUCCESS_BODY_VOID(res)                                    \
+      return;                                                             \
+    }                                                                     \
+  } while(0)
 
 /******************************************************************************
 ** Macros for checking state and arguments upon entering interface boundaries
@@ -316,12 +347,9 @@
 
 #ifdef XPCOM_GLUE
   #define NS_CheckThreadSafe(owningThread, msg)
-#elif defined MOZ_FATAL_ASSERTIONS_FOR_THREAD_SAFETY
-  #define NS_CheckThreadSafe(owningThread, msg)                 \
-    NS_ABORT_IF_FALSE(owningThread == PR_GetCurrentThread(), msg)
 #else
   #define NS_CheckThreadSafe(owningThread, msg)                 \
-    NS_ASSERTION(owningThread == PR_GetCurrentThread(), msg)
+    MOZ_ASSERT(owningThread == PR_GetCurrentThread(), msg)
 #endif
 
 /* When compiling the XPCOM Glue on Windows, we pretend that it's going to
@@ -329,11 +357,15 @@
  * cannot link to data exports from the CRT, only function exports. So,
  * instead of referencing "stderr" directly, use fdopen.
  */
-PR_BEGIN_EXTERN_C
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 NS_COM_GLUE void
 printf_stderr(const char *fmt, ...);
 
-PR_END_EXTERN_C
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* nsDebug_h___ */

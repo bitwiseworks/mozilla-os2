@@ -22,8 +22,8 @@ struct gfxMargin : public mozilla::gfx::BaseMargin<gfxFloat, gfxMargin> {
   // Constructors
   gfxMargin() : Super() {}
   gfxMargin(const gfxMargin& aMargin) : Super(aMargin) {}
-  gfxMargin(gfxFloat aLeft,  gfxFloat aTop, gfxFloat aRight, gfxFloat aBottom)
-    : Super(aLeft, aTop, aRight, aBottom) {}
+  gfxMargin(gfxFloat aTop, gfxFloat aRight, gfxFloat aBottom, gfxFloat aLeft)
+    : Super(aTop, aRight, aBottom, aLeft) {}
 };
 
 namespace mozilla {
@@ -56,7 +56,7 @@ static inline mozilla::css::Corner operator++(mozilla::css::Corner& corner, int)
     return corner;
 }
 
-struct THEBES_API gfxRect :
+struct gfxRect :
     public mozilla::gfx::BaseRect<gfxFloat, gfxRect, gfxPoint, gfxSize, gfxMargin> {
     typedef mozilla::gfx::BaseRect<gfxFloat, gfxRect, gfxPoint, gfxSize, gfxMargin> Super;
 
@@ -141,7 +141,7 @@ struct THEBES_API gfxRect :
     }
 };
 
-struct THEBES_API gfxCornerSizes {
+struct gfxCornerSizes {
     gfxSize sizes[NS_NUM_CORNERS];
 
     gfxCornerSizes () { }

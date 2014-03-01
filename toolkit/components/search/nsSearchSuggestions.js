@@ -399,10 +399,21 @@ SuggestAutoComplete.prototype = {
     if (!previousResult)
       this._formHistoryResult = null;
 
+    var formHistorySearchParam = searchParam.split("|")[0];
+
+    // Receive the information about the privacy mode of the window to which
+    // this search box belongs.  The front-end's search.xml bindings passes this
+    // information in the searchParam parameter.  The alternative would have
+    // been to modify nsIAutoCompleteSearch to add an argument to startSearch
+    // and patch all of autocomplete to be aware of this, but the searchParam
+    // argument is already an opaque argument, so this solution is hopefully
+    // less hackish (although still gross.)
+    var privacyMode = (searchParam.split("|")[1] == "private");
+
     // Start search immediately if possible, otherwise once the search
     // service is initialized
     if (Services.search.isInitialized) {
-      this._triggerSearch(searchString, searchParam, listener);
+      this._triggerSearch(searchString, formHistorySearchParam, listener, privacyMode);
       return;
     }
 
@@ -411,14 +422,14 @@ SuggestAutoComplete.prototype = {
         Cu.reportError("Could not initialize search service, bailing out: " + aResult);
         return;
       }
-      this._triggerSearch(searchString, searchParam, listener);
+      this._triggerSearch(searchString, formHistorySearchParam, listener, privacyMode);
     }).bind(this));
   },
 
   /**
    * Actual implementation of search.
    */
-  _triggerSearch: function(searchString, searchParam, listener) {
+  _triggerSearch: function(searchString, searchParam, listener, privacyMode) {
     // If there's an existing request, stop it. There is no smart filtering
     // here as there is when looking through history/form data because the
     // result set returned by the server is different for every typed value -
@@ -453,7 +464,10 @@ SuggestAutoComplete.prototype = {
     this._suggestURI = submission.uri;
     var method = (submission.postData ? "POST" : "GET");
     this._request.open(method, this._suggestURI.spec, true);
-    this._request.channel.notificationCallbacks = new SearchSuggestLoadListener();
+    this._request.channel.notificationCallbacks = new AuthPromptOverride();
+    if (this._request.channel instanceof Ci.nsIPrivateBrowsingChannel) {
+      this._request.channel.setPrivate(privacyMode);
+    }
 
     var self = this;
     function onReadyStateChange() {
@@ -510,17 +524,20 @@ SuggestAutoComplete.prototype = {
                                          Ci.nsIAutoCompleteObserver])
 };
 
-function SearchSuggestLoadListener() {
+function AuthPromptOverride() {
 }
-SearchSuggestLoadListener.prototype = {
-  // nsIBadCertListener2
-  notifyCertProblem: function SSLL_certProblem(socketInfo, status, targetSite) {
-    return true;
-  },
-
-  // nsISSLErrorListener
-  notifySSLError: function SSLL_SSLError(socketInfo, error, targetSite) {
-    return true;
+AuthPromptOverride.prototype = {
+  // nsIAuthPromptProvider
+  getAuthPrompt: function (reason, iid) {
+    // Return a no-op nsIAuthPrompt2 implementation.
+    return {
+      promptAuth: function () {
+        throw Cr.NS_ERROR_NOT_IMPLEMENTED;
+      },
+      asyncPromptAuth: function () {
+        throw Cr.NS_ERROR_NOT_IMPLEMENTED;
+      }
+    };
   },
 
   // nsIInterfaceRequestor
@@ -529,11 +546,9 @@ SearchSuggestLoadListener.prototype = {
   },
 
   // nsISupports
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIBadCertListener2,
-                                         Ci.nsISSLErrorListener,
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIAuthPromptProvider,
                                          Ci.nsIInterfaceRequestor])
 };
-
 /**
  * SearchSuggestAutoComplete is a service implementation that handles suggest
  * results specific to web searches.
@@ -551,4 +566,4 @@ SearchSuggestAutoComplete.prototype = {
 };
 
 var component = [SearchSuggestAutoComplete];
-var NSGetFactory = XPCOMUtils.generateNSGetFactory(component);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

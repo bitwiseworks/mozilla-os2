@@ -16,7 +16,7 @@
 
 * {
   -moz-user-focus: ignore;
-  -moz-user-select: -moz-none;
+  -moz-user-select: none;
   display: -moz-box;
   -moz-box-sizing: border-box;
 }
@@ -25,12 +25,6 @@
   text-rendering: optimizeLegibility;
   -moz-binding: url("chrome://global/content/bindings/general.xml#root-element");
 }
-
-%ifdef XP_MACOSX
-:root[drawintitlebar="true"] {
-  padding-top: 22px;
-}
-%endif
 
 :root:-moz-locale-dir(rtl) {
   direction: rtl;
@@ -931,7 +925,7 @@ grippy {
 /********** scrollbar **********/
 
 /* Scrollbars are never flipped even if BiDI kicks in. */
-scrollbar {
+scrollbar[orient="horizontal"] {
   direction: ltr;
 }
 

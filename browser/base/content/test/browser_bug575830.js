@@ -8,30 +8,26 @@ function test() {
   const TEST_IMAGE = "http://example.org/browser/browser/base/content/test/moz.png";
 
   waitForExplicitFinish();
-  registerCleanupFunction(function cleanup() {
-    gBrowser.removeTab(tab1);
-    gBrowser.removeTab(tab2);
-  });
 
-  tab1 = gBrowser.addTab(TEST_IMAGE);
-  tab2 = gBrowser.addTab();
-  gBrowser.selectedTab = tab1;
+  Task.spawn(function () {
+    tab1 = gBrowser.addTab();
+    tab2 = gBrowser.addTab();
+    yield FullZoomHelper.selectTabAndWaitForLocationChange(tab1);
+    yield FullZoomHelper.load(tab1, TEST_IMAGE);
 
-  tab1.linkedBrowser.addEventListener("load", function onload() {
-    tab1.linkedBrowser.removeEventListener("load", onload, true);
     is(ZoomManager.zoom, 1, "initial zoom level for first should be 1");
 
     FullZoom.enlarge();
     let zoom = ZoomManager.zoom;
     isnot(zoom, 1, "zoom level should have changed");
 
-    gBrowser.selectedTab = tab2;
+    yield FullZoomHelper.selectTabAndWaitForLocationChange(tab2);
     is(ZoomManager.zoom, 1, "initial zoom level for second tab should be 1");
 
-    gBrowser.selectedTab = tab1;
+    yield FullZoomHelper.selectTabAndWaitForLocationChange(tab1);
     is(ZoomManager.zoom, zoom, "zoom level for first tab should not have changed");
 
-    finish();
-  }, true);
+    yield FullZoomHelper.removeTabAndWaitForLocationChange(tab1);
+    yield FullZoomHelper.removeTabAndWaitForLocationChange(tab2);
+  }).then(finish, FullZoomHelper.failAndContinue(finish));
 }
-

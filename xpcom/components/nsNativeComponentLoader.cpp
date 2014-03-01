@@ -52,14 +52,20 @@
 
 using namespace mozilla;
 
-static PRLogModuleInfo *nsNativeModuleLoaderLog =
-    PR_NewLogModule("nsNativeModuleLoader");
+static PRLogModuleInfo *
+GetNativeModuleLoaderLog()
+{
+    static PRLogModuleInfo *sLog;
+    if (!sLog)
+        sLog = PR_NewLogModule("nsNativeModuleLoader");
+    return sLog;
+}
 
 bool gInXPCOMLoadOnMainThread = false;
 
-#define LOG(level, args) PR_LOG(nsNativeModuleLoaderLog, level, args)
+#define LOG(level, args) PR_LOG(GetNativeModuleLoaderLog(), level, args)
 
-NS_IMPL_QUERY_INTERFACE1(nsNativeModuleLoader, 
+NS_IMPL_QUERY_INTERFACE1(nsNativeModuleLoader,
                          mozilla::ModuleLoader)
 
 NS_IMPL_ADDREF_USING_AGGREGATOR(nsNativeModuleLoader,
@@ -70,8 +76,7 @@ NS_IMPL_RELEASE_USING_AGGREGATOR(nsNativeModuleLoader,
 nsresult
 nsNativeModuleLoader::Init()
 {
-    NS_ASSERTION(NS_IsMainThread(), "Startup not on main thread?");
-
+    MOZ_ASSERT(NS_IsMainThread(), "Startup not on main thread?");
     LOG(PR_LOG_DEBUG, ("nsNativeModuleLoader::Init()"));
     mLibraries.Init();
     return NS_OK;
@@ -122,7 +127,7 @@ nsNativeModuleLoader::LoadModule(FileLocation &aFile)
         return NULL;
     }
 
-    nsCAutoString filePath;
+    nsAutoCString filePath;
     file->GetNativePath(filePath);
 
     NativeLoadData data;
@@ -154,7 +159,7 @@ nsNativeModuleLoader::LoadModule(FileLocation &aFile)
     }
 
 #ifdef IMPLEMENT_BREAK_AFTER_LOAD
-    nsCAutoString leafName;
+    nsAutoCString leafName;
     file->GetNativeLeafName(leafName);
 
     char *env = getenv("XPCOM_BREAK_ON_LOAD");
@@ -204,10 +209,10 @@ PLDHashOperator
 nsNativeModuleLoader::UnloaderFunc(nsIHashable* aHashedFile,
                                    NativeLoadData& aLoadData, void*)
 {
-    if (PR_LOG_TEST(nsNativeModuleLoaderLog, PR_LOG_DEBUG)) {
+    if (PR_LOG_TEST(GetNativeModuleLoaderLog(), PR_LOG_DEBUG)) {
         nsCOMPtr<nsIFile> file(do_QueryInterface(aHashedFile));
 
-        nsCAutoString filePath;
+        nsAutoCString filePath;
         file->GetNativePath(filePath);
 
         LOG(PR_LOG_DEBUG,
@@ -235,8 +240,7 @@ nsNativeModuleLoader::UnloaderFunc(nsIHashable* aHashedFile,
 void
 nsNativeModuleLoader::UnloadLibraries()
 {
-    NS_ASSERTION(NS_IsMainThread(), "Shutdown not on main thread?");
-
+    MOZ_ASSERT(NS_IsMainThread(), "Shutdown not on main thread?");
     mLibraries.Enumerate(ReleaserFunc, nullptr);
     mLibraries.Enumerate(UnloaderFunc, nullptr);
 }

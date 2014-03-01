@@ -10,66 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkconevents_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS = 1
-
-EXPORTS		= \
-		nsEventStateManager.h \
-		nsEventListenerManager.h \
-		nsDOMEventTargetHelper.h \
-		nsDOMEvent.h \
-		nsDOMTouchEvent.h \
-		nsDOMUIEvent.h \
-		$(NULL)
-
-CPPSRCS		= \
-		nsEventListenerManager.cpp \
-		nsEventStateManager.cpp \
-		nsDOMEvent.cpp \
-		nsDOMDataContainerEvent.cpp \
-		nsDOMUIEvent.cpp \
-		nsDOMKeyboardEvent.cpp \
-		nsDOMTextEvent.cpp \
-		nsDOMMouseEvent.cpp \
-		nsDOMMouseScrollEvent.cpp \
-		nsDOMDragEvent.cpp \
-		nsDOMMutationEvent.cpp \
-		nsDOMDeviceMotionEvent.cpp \
-		nsDOMBeforeUnloadEvent.cpp \
-		nsDOMXULCommandEvent.cpp \
-		nsDOMCommandEvent.cpp \
-		nsDOMMessageEvent.cpp \
-		nsPaintRequest.cpp \
-		nsPrivateTextRange.cpp \
-		nsXMLEventsManager.cpp \
-		nsXMLEventsElement.cpp \
-		nsAsyncDOMEvent.cpp \
-		nsEventDispatcher.cpp \
-		nsIMEStateManager.cpp \
-		nsContentEventHandler.cpp \
-		nsEventListenerService.cpp \
-		nsDOMProgressEvent.cpp \
-		nsDOMDataTransfer.cpp \
-		nsDOMNotifyPaintEvent.cpp \
-		nsDOMNotifyAudioAvailableEvent.cpp \
-		nsDOMSimpleGestureEvent.cpp \
-		nsDOMMozTouchEvent.cpp \
-		nsDOMEventTargetHelper.cpp \
-		nsDOMScrollAreaEvent.cpp \
-		nsDOMTransitionEvent.cpp \
-		nsDOMAnimationEvent.cpp \
-		nsDOMTouchEvent.cpp \
-		nsDOMCompositionEvent.cpp \
-		DOMWheelEvent.cpp \
-		$(NULL)
-
-ifdef MOZ_B2G_RIL
-CPPSRCS += \
-    nsDOMWifiEvent.cpp \
-    $(NULL)
-endif
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -88,7 +32,7 @@ LOCAL_INCLUDES	+= \
              -I$(srcdir)/../../../dom/src/storage \
              -I$(srcdir)/../../../layout/generic \
              -I$(srcdir)/../../../layout/xul/base/src \
-             -I$(srcdir)/../../../layout/xul/base/src/tree/src \
+             -I$(srcdir)/../../../layout/xul/tree/ \
              $(NULL)
 
 ifdef MOZ_B2G_RIL

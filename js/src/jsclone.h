@@ -1,10 +1,11 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsclone_h___
-#define jsclone_h___
+#ifndef jsclone_h
+#define jsclone_h
 
 #include "jsapi.h"
 #include "jscntxt.h"
@@ -15,12 +16,20 @@
 namespace js {
 
 bool
-WriteStructuredClone(JSContext *cx, const Value &v, uint64_t **bufp, size_t *nbytesp,
-                     const JSStructuredCloneCallbacks *cb, void *cbClosure);
+WriteStructuredClone(JSContext *cx, HandleValue v, uint64_t **bufp, size_t *nbytesp,
+                     const JSStructuredCloneCallbacks *cb, void *cbClosure,
+                     jsval transferable);
 
 bool
-ReadStructuredClone(JSContext *cx, const uint64_t *data, size_t nbytes, Value *vp,
+ReadStructuredClone(JSContext *cx, uint64_t *data, size_t nbytes, Value *vp,
                     const JSStructuredCloneCallbacks *cb, void *cbClosure);
+
+bool
+ClearStructuredClone(const uint64_t *data, size_t nbytes);
+
+bool
+StructuredCloneHasTransferObjects(const uint64_t *data, size_t nbytes,
+                                  bool *hasTransferable);
 
 struct SCOutput {
   public:
@@ -33,6 +42,7 @@ struct SCOutput {
     bool writeDouble(double d);
     bool writeBytes(const void *p, size_t nbytes);
     bool writeChars(const jschar *p, size_t nchars);
+    bool writePtr(const void *);
 
     template <class T>
     bool writeArray(const T *p, size_t nbytes);
@@ -48,7 +58,7 @@ struct SCOutput {
 
 struct SCInput {
   public:
-    SCInput(JSContext *cx, const uint64_t *data, size_t nbytes);
+    SCInput(JSContext *cx, uint64_t *data, size_t nbytes);
 
     JSContext *context() const { return cx; }
 
@@ -57,6 +67,13 @@ struct SCInput {
     bool readDouble(double *p);
     bool readBytes(void *p, size_t nbytes);
     bool readChars(jschar *p, size_t nchars);
+    bool readPtr(void **);
+
+    bool get(uint64_t *p);
+    bool getPair(uint32_t *tagp, uint32_t *datap);
+
+    bool replace(uint64_t u);
+    bool replacePair(uint32_t tag, uint32_t data);
 
     template <class T>
     bool readArray(T *p, size_t nelems);
@@ -71,11 +88,11 @@ struct SCInput {
     }
 
     JSContext *cx;
-    const uint64_t *point;
-    const uint64_t *end;
+    uint64_t *point;
+    uint64_t *end;
 };
 
-}
+} /* namespace js */
 
 struct JSStructuredCloneReader {
   public:
@@ -90,10 +107,13 @@ struct JSStructuredCloneReader {
   private:
     JSContext *context() { return in.context(); }
 
+    bool readTransferMap();
+
     bool checkDouble(double d);
     JSString *readString(uint32_t nchars);
-    bool readTypedArray(uint32_t tag, uint32_t nelems, js::Value *vp);
+    bool readTypedArray(uint32_t arrayType, uint32_t nelems, js::Value *vp, bool v1Read = false);
     bool readArrayBuffer(uint32_t nbytes, js::Value *vp);
+    bool readV1ArrayBuffer(uint32_t arrayType, uint32_t nelems, js::Value *vp);
     bool readId(jsid *idp);
     bool startRead(js::Value *vp);
 
@@ -116,12 +136,17 @@ struct JSStructuredCloneReader {
 
 struct JSStructuredCloneWriter {
   public:
-    explicit JSStructuredCloneWriter(js::SCOutput &out, const JSStructuredCloneCallbacks *cb,
-                                     void *cbClosure)
-        : out(out), objs(out.context()), counts(out.context()), ids(out.context()),
-          memory(out.context()), callbacks(cb), closure(cbClosure) { }
+    explicit JSStructuredCloneWriter(js::SCOutput &out,
+                                     const JSStructuredCloneCallbacks *cb,
+                                     void *cbClosure,
+                                     jsval tVal)
+        : out(out), objs(out.context()),
+          counts(out.context()), ids(out.context()),
+          memory(out.context()), callbacks(cb), closure(cbClosure),
+          transferable(out.context(), tVal), transferableObjects(out.context()) { }
 
-    bool init() { return memory.init(); }
+    bool init() { return transferableObjects.init() && parseTransferable() &&
+                         memory.init() && writeTransferMap(); }
 
     bool write(const js::Value &v);
 
@@ -130,12 +155,18 @@ struct JSStructuredCloneWriter {
   private:
     JSContext *context() { return out.context(); }
 
+    bool writeTransferMap();
+
     bool writeString(uint32_t tag, JSString *str);
     bool writeId(jsid id);
-    bool writeArrayBuffer(JSHandleObject obj);
-    bool writeTypedArray(JSHandleObject obj);
-    bool startObject(JSHandleObject obj);
+    bool writeArrayBuffer(JS::HandleObject obj);
+    bool writeTypedArray(JS::HandleObject obj);
+    bool startObject(JS::HandleObject obj, bool *backref);
     bool startWrite(const js::Value &v);
+    bool traverseObject(JS::HandleObject obj);
+
+    bool parseTransferable();
+    void reportErrorTransferable();
 
     inline void checkStack();
 
@@ -157,7 +188,7 @@ struct JSStructuredCloneWriter {
     // The "memory" list described in the HTML5 internal structured cloning algorithm.
     // memory is a superset of objs; items are never removed from Memory
     // until a serialization operation is finished
-    typedef js::HashMap<JSObject *, uint32_t> CloneMemory;
+    typedef js::AutoObjectUnsigned32HashMap CloneMemory;
     CloneMemory memory;
 
     // The user defined callbacks that will be used for cloning.
@@ -166,7 +197,11 @@ struct JSStructuredCloneWriter {
     // Any value passed to JS_WriteStructuredClone.
     void *closure;
 
+    // List of transferable objects
+    JS::RootedValue transferable;
+    js::AutoObjectHashSet transferableObjects;
+
     friend JSBool JS_WriteTypedArray(JSStructuredCloneWriter *w, jsval v);
 };
 
-#endif /* jsclone_h___ */
+#endif /* jsclone_h */

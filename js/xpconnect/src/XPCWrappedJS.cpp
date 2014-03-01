@@ -7,14 +7,16 @@
 /* Class that wraps JS objects to appear as XPCOM objects. */
 
 #include "xpcprivate.h"
+#include "nsCxPusher.h"
 #include "nsAtomicRefcnt.h"
 #include "nsProxyRelease.h"
 #include "nsThreadUtils.h"
 #include "nsTextFormatter.h"
+#include "nsCycleCollectorUtils.h"
+
+using namespace mozilla;
 
 // NOTE: much of the fancy footwork is done in xpcstubs.cpp
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXPCWrappedJS)
 
 NS_IMETHODIMP
 NS_CYCLE_COLLECTION_CLASSNAME(nsXPCWrappedJS)::TraverseImpl
@@ -34,7 +36,7 @@ NS_CYCLE_COLLECTION_CLASSNAME(nsXPCWrappedJS)::TraverseImpl
                         tmp->GetClass()->GetInterfaceName());
         else
             JS_snprintf(name, sizeof(name), "nsXPCWrappedJS");
-        cb.DescribeRefCountedNode(refcnt, sizeof(nsXPCWrappedJS), name);
+        cb.DescribeRefCountedNode(refcnt, name);
     } else {
         NS_IMPL_CYCLE_COLLECTION_DESCRIBE(nsXPCWrappedJS, refcnt)
     }
@@ -152,6 +154,8 @@ nsXPCWrappedJS::QueryInterface(REFNSIID aIID, void** aInstancePtr)
 nsrefcnt
 nsXPCWrappedJS::AddRef(void)
 {
+    if (!MOZ_LIKELY(NS_IsMainThread() || NS_IsCycleCollectorThread()))
+        MOZ_CRASH();
     nsrefcnt cnt = NS_AtomicIncrementRefcnt(mRefCnt);
     NS_LOG_ADDREF(this, cnt, "nsXPCWrappedJS", sizeof(*this));
 
@@ -166,22 +170,9 @@ nsXPCWrappedJS::AddRef(void)
 nsrefcnt
 nsXPCWrappedJS::Release(void)
 {
+    if (!MOZ_LIKELY(NS_IsMainThread() || NS_IsCycleCollectorThread()))
+        MOZ_CRASH();
     NS_PRECONDITION(0 != mRefCnt, "dup release");
-
-    if (mMainThreadOnly && !NS_IsMainThread()) {
-        // We'd like to abort here, but this can happen if someone uses a proxy
-        // for the nsXPCWrappedJS.
-        nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-        // If we can't get the main thread anymore we just leak, but this really
-        // shouldn't happen.
-        NS_ASSERTION(mainThread,
-                     "Can't get main thread, leaking nsXPCWrappedJS!");
-        if (mainThread) {
-            NS_ProxyRelease(mainThread,
-                            static_cast<nsIXPConnectWrappedJS*>(this));
-        }
-        return mRefCnt;
-    }
 
     // need to take the map lock here to prevent GetNewOrUsed from trying
     // to reuse a wrapper on one thread while it's being destroyed on another
@@ -216,7 +207,7 @@ nsXPCWrappedJS::TraceJS(JSTracer* trc)
 {
     NS_ASSERTION(mRefCnt >= 2 && IsValid(), "must be strongly referenced");
     JS_SET_TRACING_DETAILS(trc, GetTraceName, this, 0);
-    JS_CallTracer(trc, GetJSObjectPreserveColor(), JSTRACE_OBJECT);
+    JS_CallObjectTracer(trc, &mJSObj, "nsXPCWrappedJS::mJSObj");
 }
 
 // static
@@ -238,53 +229,29 @@ nsXPCWrappedJS::GetWeakReference(nsIWeakReference** aInstancePtr)
     return nsSupportsWeakReference::GetWeakReference(aInstancePtr);
 }
 
-NS_IMETHODIMP
-nsXPCWrappedJS::GetJSObject(JSObject** aJSObj)
+JSObject*
+nsXPCWrappedJS::GetJSObject()
 {
-    NS_PRECONDITION(aJSObj, "bad param");
-    NS_PRECONDITION(IsValid(), "bad wrapper");
-
-    if (!(*aJSObj = GetJSObject()))
-        return NS_ERROR_OUT_OF_MEMORY;
-    return NS_OK;
-}
-
-static bool
-CheckMainThreadOnly(nsXPCWrappedJS *aWrapper)
-{
-    if(aWrapper->IsMainThreadOnly())
-        return NS_IsMainThread();
-
-    nsCOMPtr<nsIClassInfo> ci;
-    CallQueryInterface(aWrapper, getter_AddRefs(ci));
-    if (ci) {
-        uint32_t flags;
-        if (NS_SUCCEEDED(ci->GetFlags(&flags)) && !(flags & nsIClassInfo::MAIN_THREAD_ONLY))
-            return true;
-
-        if (!NS_IsMainThread())
-            return false;
-    }
-
-    aWrapper->SetIsMainThreadOnly();
-
-    return true;
+    return xpc_UnmarkGrayObject(mJSObj);
 }
 
 // static
 nsresult
-nsXPCWrappedJS::GetNewOrUsed(XPCCallContext& ccx,
-                             JSObject* aJSObj,
+nsXPCWrappedJS::GetNewOrUsed(JSObject* aJSObj,
                              REFNSIID aIID,
-                             nsISupports* aOuter,
                              nsXPCWrappedJS** wrapperResult)
 {
+    // Do a release-mode assert against accessing nsXPCWrappedJS off-main-thread.
+    if (!MOZ_LIKELY(NS_IsMainThread() || NS_IsCycleCollectorThread()))
+        MOZ_CRASH();
+
+    AutoJSContext cx;
+    JS::RootedObject jsObj(cx, aJSObj);
     JSObject2WrappedJSMap* map;
-    JSObject* rootJSObj;
     nsXPCWrappedJS* root = nullptr;
     nsXPCWrappedJS* wrapper = nullptr;
     nsXPCWrappedJSClass* clazz = nullptr;
-    XPCJSRuntime* rt = ccx.GetRuntime();
+    XPCJSRuntime* rt = nsXPConnect::GetRuntimeInstance();
     JSBool release_root = false;
 
     map = rt->GetWrappedJSMap();
@@ -293,13 +260,13 @@ nsXPCWrappedJS::GetNewOrUsed(XPCCallContext& ccx,
         return NS_ERROR_FAILURE;
     }
 
-    nsXPCWrappedJSClass::GetNewOrUsed(ccx, aIID, &clazz);
+    nsXPCWrappedJSClass::GetNewOrUsed(cx, aIID, &clazz);
     if (!clazz)
         return NS_ERROR_FAILURE;
     // from here on we need to return through 'return_wrapper'
 
     // always find the root JSObject
-    rootJSObj = clazz->GetRootJSObject(ccx, aJSObj);
+    JS::RootedObject rootJSObj(cx, clazz->GetRootJSObject(cx, jsObj));
     if (!rootJSObj)
         goto return_wrapper;
 
@@ -320,39 +287,31 @@ nsXPCWrappedJS::GetNewOrUsed(XPCCallContext& ccx,
 
     if (!root) {
         // build the root wrapper
-        if (rootJSObj == aJSObj) {
+        if (rootJSObj == jsObj) {
             // the root will do double duty as the interface wrapper
-            wrapper = root = new nsXPCWrappedJS(ccx, aJSObj, clazz, nullptr,
-                                                aOuter);
+            wrapper = root = new nsXPCWrappedJS(cx, jsObj, clazz, nullptr);
             if (!root)
                 goto return_wrapper;
 
             {   // scoped lock
 #if DEBUG_xpc_leaks
                 printf("Created nsXPCWrappedJS %p, JSObject is %p\n",
-                       (void*)wrapper, (void*)aJSObj);
+                       (void*)wrapper, (void*)jsObj);
 #endif
                 XPCAutoLock lock(rt->GetMapLock());
                 map->Add(root);
-            }
-
-            if (!CheckMainThreadOnly(root)) {
-                XPCAutoLock lock(rt->GetMapLock());
-                map->Remove(root);
-
-                wrapper = NULL;
             }
 
             goto return_wrapper;
         } else {
             // just a root wrapper
             nsXPCWrappedJSClass* rootClazz = nullptr;
-            nsXPCWrappedJSClass::GetNewOrUsed(ccx, NS_GET_IID(nsISupports),
+            nsXPCWrappedJSClass::GetNewOrUsed(cx, NS_GET_IID(nsISupports),
                                               &rootClazz);
             if (!rootClazz)
                 goto return_wrapper;
 
-            root = new nsXPCWrappedJS(ccx, rootJSObj, rootClazz, nullptr, aOuter);
+            root = new nsXPCWrappedJS(cx, rootJSObj, rootClazz, nullptr);
             NS_RELEASE(rootClazz);
 
             if (!root)
@@ -369,12 +328,6 @@ nsXPCWrappedJS::GetNewOrUsed(XPCCallContext& ccx,
                 map->Add(root);
             }
 
-            if (!CheckMainThreadOnly(root)) {
-                XPCAutoLock lock(rt->GetMapLock());
-                map->Remove(root);
-
-                goto return_wrapper;
-            }
         }
     }
 
@@ -383,12 +336,12 @@ nsXPCWrappedJS::GetNewOrUsed(XPCCallContext& ccx,
     NS_ASSERTION(clazz,"bad clazz");
 
     if (!wrapper) {
-        wrapper = new nsXPCWrappedJS(ccx, aJSObj, clazz, root, aOuter);
+        wrapper = new nsXPCWrappedJS(cx, jsObj, clazz, root);
         if (!wrapper)
             goto return_wrapper;
 #if DEBUG_xpc_leaks
         printf("Created nsXPCWrappedJS %p, JSObject is %p\n",
-               (void*)wrapper, (void*)aJSObj);
+               (void*)wrapper, (void*)jsObj);
 #endif
     }
 
@@ -409,35 +362,22 @@ return_wrapper:
     return NS_OK;
 }
 
-nsXPCWrappedJS::nsXPCWrappedJS(XPCCallContext& ccx,
+nsXPCWrappedJS::nsXPCWrappedJS(JSContext* cx,
                                JSObject* aJSObj,
                                nsXPCWrappedJSClass* aClass,
-                               nsXPCWrappedJS* root,
-                               nsISupports* aOuter)
+                               nsXPCWrappedJS* root)
     : mJSObj(aJSObj),
       mClass(aClass),
       mRoot(root ? root : this),
       mNext(nullptr),
-      mOuter(root ? nullptr : aOuter),
-      mMainThread(NS_IsMainThread()),
-      mMainThreadOnly(root && root->mMainThreadOnly)
+      mOuter(nullptr)
 {
-#ifdef DEBUG_stats_jband
-    static int count = 0;
-    static const int interval = 10;
-    if (0 == (++count % interval))
-        printf("//////// %d instances of nsXPCWrappedJS created\n", count);
-#endif
-
-    JS_ASSERT_IF(mMainThreadOnly, mMainThread);
-
     InitStub(GetClass()->GetIID());
 
     // intentionally do double addref - see Release().
     NS_ADDREF_THIS();
     NS_ADDREF_THIS();
     NS_ADDREF(aClass);
-    NS_IF_ADDREF(mOuter);
 
     if (mRoot != this)
         NS_ADDREF(mRoot);
@@ -561,22 +501,12 @@ nsXPCWrappedJS::CallMethod(uint16_t methodIndex,
                            const XPTMethodDescriptor* info,
                            nsXPTCMiniVariant* params)
 {
+    // Do a release-mode assert against accessing nsXPCWrappedJS off-main-thread.
+    if (!MOZ_LIKELY(NS_IsMainThread() || NS_IsCycleCollectorThread()))
+        MOZ_CRASH();
+
     if (!IsValid())
         return NS_ERROR_UNEXPECTED;
-    if (NS_IsMainThread() != mMainThread) {
-        NS_NAMED_LITERAL_STRING(kFmt, "Attempt to use JS function on a different thread calling %s.%s. JS objects may not be shared across threads.");
-        PRUnichar* msg =
-            nsTextFormatter::smprintf(kFmt.get(),
-                                      GetClass()->GetInterfaceName(),
-                                      info->name);
-        nsCOMPtr<nsIConsoleService> cs =
-            do_GetService(NS_CONSOLESERVICE_CONTRACTID);
-        if (cs)
-            cs->LogStringMessage(msg);
-        NS_Free(msg);
-
-        return NS_ERROR_NOT_SAME_THREAD;
-    }
     return GetClass()->CallMethod(this, methodIndex, info, params);
 }
 

@@ -65,7 +65,7 @@ CSPService::ShouldLoad(uint32_t aContentType,
 
 #ifdef PR_LOGGING
     {
-        nsCAutoString location;
+        nsAutoCString location;
         aContentLocation->GetSpec(location);
         PR_LOG(gCspPRLog, PR_LOG_DEBUG,
             ("CSPService::ShouldLoad called for %s", location.get()));
@@ -77,6 +77,32 @@ CSPService::ShouldLoad(uint32_t aContentType,
     // No need to continue processing if CSP is disabled
     if (!sCSPEnabled)
         return NS_OK;
+
+    // shortcut for about: chrome: and resource: and javascript: uris since
+    // they're not subject to CSP content policy checks.
+    bool schemeMatch = false;
+    NS_ENSURE_SUCCESS(aContentLocation->SchemeIs("about", &schemeMatch), NS_OK);
+    if (schemeMatch)
+        return NS_OK;
+    NS_ENSURE_SUCCESS(aContentLocation->SchemeIs("chrome", &schemeMatch), NS_OK);
+    if (schemeMatch)
+        return NS_OK;
+    NS_ENSURE_SUCCESS(aContentLocation->SchemeIs("resource", &schemeMatch), NS_OK);
+    if (schemeMatch)
+        return NS_OK;
+    NS_ENSURE_SUCCESS(aContentLocation->SchemeIs("javascript", &schemeMatch), NS_OK);
+    if (schemeMatch)
+        return NS_OK;
+
+
+    // These content types are not subject to CSP content policy checks:
+    // TYPE_CSP_REPORT, TYPE_REFRESH, TYPE_DOCUMENT
+    // (their mappings are null in contentSecurityPolicy.js)
+    if (aContentType == nsIContentPolicy::TYPE_CSP_REPORT ||
+        aContentType == nsIContentPolicy::TYPE_REFRESH ||
+        aContentType == nsIContentPolicy::TYPE_DOCUMENT) {
+        return NS_OK;
+    }
 
     // find the principal of the document that initiated this request and see
     // if it has a CSP policy object
@@ -108,7 +134,7 @@ CSPService::ShouldLoad(uint32_t aContentType,
     }
 #ifdef PR_LOGGING
     else {
-        nsCAutoString uriSpec;
+        nsAutoCString uriSpec;
         aContentLocation->GetSpec(uriSpec);
         PR_LOG(gCspPRLog, PR_LOG_DEBUG,
             ("COULD NOT get nsINode for location: %s", uriSpec.get()));
@@ -167,7 +193,7 @@ CSPService::ShouldProcess(uint32_t         aContentType,
     }
 #ifdef PR_LOGGING
     else {
-        nsCAutoString uriSpec;
+        nsAutoCString uriSpec;
         aContentLocation->GetSpec(uriSpec);
         PR_LOG(gCspPRLog, PR_LOG_DEBUG,
             ("COULD NOT get nsINode for location: %s", uriSpec.get()));
@@ -234,7 +260,7 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
 
 #ifdef PR_LOGGING
   if (newUri) {
-    nsCAutoString newUriSpec("None");
+    nsAutoCString newUriSpec("None");
     newUri->GetSpec(newUriSpec);
     PR_LOG(gCspPRLog, PR_LOG_DEBUG,
            ("CSPService::AsyncOnChannelRedirect called for %s",
@@ -268,7 +294,7 @@ CSPService::AsyncOnChannelRedirect(nsIChannel *oldChannel,
 
   // The redirecting channel isn't a writable property bag, we won't be able
   // to enforce the load policy if it redirects again, so we stop it now.
-  nsCAutoString newUriSpec;
+  nsAutoCString newUriSpec;
   rv = newUri->GetSpec(newUriSpec);
   const PRUnichar *formatParams[] = { NS_ConvertUTF8toUTF16(newUriSpec).get() };
   if (NS_SUCCEEDED(rv)) {

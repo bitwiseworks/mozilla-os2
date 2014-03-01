@@ -9,52 +9,43 @@ srcdir = @srcdir@
 VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
+USE_RCS_MK := 1
+include $(topsrcdir)/config/makefiles/rcs.mk
 
-MODULE = telemetry
-XPIDL_MODULE = telemetry
 MODULE_NAME = telemetry
-GRE_MODULE = 1
 
 LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
 IS_COMPONENT = 1
+FAIL_ON_WARNINGS = 1
 
 LIBRARY_NAME = telemetry
+MSVC_ENABLE_PGO := 1
 
-EXPORTS_NAMESPACES = mozilla
-
-EXPORTS_mozilla = \
-  Telemetry.h \
-  ProcessedStack.h \
-  TelemetryHistogramEnums.h \
-  $(NULL)
-
-XPIDLSRCS = \
-  nsITelemetry.idl \
-  $(NULL)
-
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
   TelemetryPing.manifest \
-  TelemetryPing.js \
   $(NULL)
 
 EXTRA_JS_MODULES = \
   TelemetryStopwatch.jsm \
+  ThirdPartyCookieProbe.jsm \
   $(NULL)
 
-CPPSRCS = \
-  Telemetry.cpp \
-  $(NULL)
+LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/build
+LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/threads
 
 EXTRA_DSO_LDOPTS += \
   $(MOZ_COMPONENT_LIBS) \
   $(MOZ_JS_LIBS) \
   $(NULL)
 
-TEST_DIRS += tests
-
 ifdef MOZILLA_OFFICIAL
 DEFINES += -DMOZILLA_OFFICIAL
+endif
+
+MOZ_HISTOGRAMS_VERSION ?= $(call getSourceRepo)/rev/$(firstword $(shell hg -R $(topsrcdir) parent --template="{node|short}\n" 2>/dev/null))
+ifdef MOZ_HISTOGRAMS_VERSION
+DEFINES += -DHISTOGRAMS_FILE_VERSION="$(MOZ_HISTOGRAMS_VERSION)"
 endif
 
 include $(topsrcdir)/config/config.mk
@@ -65,9 +56,19 @@ histograms_file := $(srcdir)/Histograms.json
 histogram_enum_file := TelemetryHistogramEnums.h
 histogram_data_file := TelemetryHistogramData.inc
 
-$(histogram_enum_file): $(histograms_file) $(srcdir)/gen-histogram-enum.py
+enum_python_deps := \
+  $(srcdir)/gen-histogram-enum.py \
+  $(srcdir)/histogram_tools.py \
+  $(NULL)
+
+data_python_deps := \
+  $(srcdir)/gen-histogram-data.py \
+  $(srcdir)/histogram_tools.py \
+  $(NULL)
+
+$(histogram_enum_file): $(histograms_file) $(enum_python_deps)
 	$(PYTHON) $(srcdir)/gen-histogram-enum.py $< > $@
-$(histogram_data_file): $(histograms_file) $(srcdir)/gen-histogram-data.py
+$(histogram_data_file): $(histograms_file) $(data_python_deps)
 	$(PYTHON) $(srcdir)/gen-histogram-data.py $< > $@
 
 Telemetry.$(OBJ_SUFFIX): $(histogram_data_file)

@@ -77,7 +77,6 @@ public:
   NS_IMETHOD DoAction(uint8_t index);
 
   // Accessible
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual mozilla::a11y::role NativeRole();
   virtual uint64_t State();
   virtual uint64_t NativeState();
@@ -87,11 +86,16 @@ public:
 
   // Widgets
   virtual bool IsWidget() const;
+
+protected:
+  // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
 };
 
 
 /**
- * Accessible for HTML input@type="text" element.
+ * Accessible for HTML input@type="text", input@type="password", textarea and
+ * other HTML text controls.
  */
 class HTMLTextFieldAccessible : public HyperTextAccessibleWrap
 {
@@ -113,9 +117,7 @@ public:
   // Accessible
   virtual void Value(nsString& aValue);
   virtual void ApplyARIAState(uint64_t* aState) const;
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual mozilla::a11y::role NativeRole();
-  virtual uint64_t State();
   virtual uint64_t NativeState();
 
   // ActionAccessible
@@ -124,6 +126,12 @@ public:
   // Widgets
   virtual bool IsWidget() const;
   virtual Accessible* ContainerWidget() const;
+
+protected:
+  // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
+
+  virtual void CacheChildren() MOZ_OVERRIDE;
 };
 
 
@@ -140,6 +148,31 @@ public:
   virtual nsresult HandleAccEvent(AccEvent* aAccEvent);
 };
 
+
+/**
+  * Used for input@type="range" element.
+  */
+class HTMLRangeAccessible : public LeafAccessible
+{
+public:
+  HTMLRangeAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+    LeafAccessible(aContent, aDoc)
+  {
+    mStateFlags |= eHasNumericValue;
+  }
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIACCESSIBLEVALUE
+
+  // Accessible
+  virtual void Value(nsString& aValue);
+  virtual mozilla::a11y::role NativeRole();
+
+  // Widgets
+  virtual bool IsWidget() const;
+};
+
+
 /**
  * Accessible for HTML fieldset element.
  */
@@ -149,11 +182,14 @@ public:
   HTMLGroupboxAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // Accessible
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual mozilla::a11y::role NativeRole();
   virtual Relation RelationByType(uint32_t aType);
 
 protected:
+  // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
+
+  // HTMLGroupboxAccessible
   nsIContent* GetLegend();
 };
 
@@ -180,12 +216,15 @@ public:
   HTMLFigureAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // Accessible
-  virtual nsresult GetAttributesInternal(nsIPersistentProperties* aAttributes);
-  virtual nsresult GetNameInternal(nsAString& aName);
+  virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
   virtual mozilla::a11y::role NativeRole();
   virtual Relation RelationByType(uint32_t aType);
 
 protected:
+  // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
+
+  // HTMLLegendAccessible
   nsIContent* Caption() const;
 };
 

@@ -10,7 +10,6 @@
 
 #include "nsAttrAndChildArray.h"
 #include "nsMappedAttributeElement.h"
-#include "prmem.h"
 #include "prbit.h"
 #include "nsString.h"
 #include "nsHTMLStyleSheet.h"
@@ -31,7 +30,7 @@ However not all elements will have enough children to get cached. And any
 allocator that doesn't return addresses aligned to 64 bytes will ensure that
 any index will get used.
 
-[*] sizeof(nsGenericElement) + 4 bytes for nsIDOMElement vtable pointer.
+[*] sizeof(Element) + 4 bytes for nsIDOMElement vtable pointer.
 */
 
 #define CACHE_POINTER_SHIFT 5
@@ -100,7 +99,7 @@ nsAttrAndChildArray::~nsAttrAndChildArray()
 
   Clear();
 
-  PR_Free(mImpl);
+  moz_free(mImpl);
 }
 
 nsIContent*
@@ -210,11 +209,11 @@ nsAttrAndChildArray::TakeChildAt(uint32_t aPos)
   memmove(pos, pos + 1, (childCount - aPos - 1) * sizeof(nsIContent*));
   SetChildCount(childCount - 1);
 
-  return child;
+  return dont_AddRef(child);
 }
 
 int32_t
-nsAttrAndChildArray::IndexOfChild(nsINode* aPossibleChild) const
+nsAttrAndChildArray::IndexOfChild(const nsINode* aPossibleChild) const
 {
   if (!mImpl) {
     return -1;
@@ -314,6 +313,23 @@ nsAttrAndChildArray::GetAttr(nsIAtom* aLocalName, int32_t aNamespaceID) const
         return &ATTRS(mImpl)[i].mValue;
       }
     }
+  }
+
+  return nullptr;
+}
+
+const nsAttrValue*
+nsAttrAndChildArray::GetAttr(const nsAString& aLocalName) const
+{
+  uint32_t i, slotCount = AttrSlotCount();
+  for (i = 0; i < slotCount && AttrSlotIsTaken(i); ++i) {
+    if (ATTRS(mImpl)[i].mName.Equals(aLocalName)) {
+      return &ATTRS(mImpl)[i].mValue;
+    }
+  }
+
+  if (mImpl && mImpl->mMappedAttrs) {
+    return mImpl->mMappedAttrs->GetAttr(aLocalName);
   }
 
   return nullptr;
@@ -564,8 +580,7 @@ nsAttrAndChildArray::SetAndTakeMappedAttr(nsIAtom* aLocalName,
   nsRefPtr<nsMappedAttributes> mapped =
     GetModifiableMapped(aContent, aSheet, willAdd);
 
-  nsresult rv = mapped->SetAndTakeAttr(aLocalName, aValue);
-  NS_ENSURE_SUCCESS(rv, rv);
+  mapped->SetAndTakeAttr(aLocalName, aValue);
 
   return MakeMappedUnique(mapped);
 }
@@ -617,11 +632,11 @@ nsAttrAndChildArray::Compact()
   // Then resize or free buffer
   uint32_t newSize = attrCount * ATTRSIZE + childCount;
   if (!newSize && !mImpl->mMappedAttrs) {
-    PR_Free(mImpl);
+    moz_free(mImpl);
     mImpl = nullptr;
   }
   else if (newSize < mImpl->mBufferSize) {
-    mImpl = static_cast<Impl*>(PR_Realloc(mImpl, (newSize + NS_IMPL_EXTRA_SIZE) * sizeof(nsIContent*)));
+    mImpl = static_cast<Impl*>(moz_realloc(mImpl, (newSize + NS_IMPL_EXTRA_SIZE) * sizeof(nsIContent*)));
     NS_ASSERTION(mImpl, "failed to reallocate to smaller buffer");
 
     mImpl->mBufferSize = newSize;
@@ -754,11 +769,11 @@ nsAttrAndChildArray::GrowBy(uint32_t aGrowSize)
     } while (size < minSize);
   }
   else {
-    size = PR_BIT(PR_CeilingLog2(minSize));
+    size = 1u << PR_CeilingLog2(minSize);
   }
 
   bool needToInitialize = !mImpl;
-  Impl* newImpl = static_cast<Impl*>(PR_Realloc(mImpl, size * sizeof(void*)));
+  Impl* newImpl = static_cast<Impl*>(moz_realloc(mImpl, size * sizeof(void*)));
   NS_ENSURE_TRUE(newImpl, false);
 
   mImpl = newImpl;

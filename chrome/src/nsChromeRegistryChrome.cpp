@@ -13,7 +13,7 @@
 #include <windows.h>
 #elif defined(XP_MACOSX)
 #include <CoreServices/CoreServices.h>
-#elif defined(MOZ_WIDGET_GTK2)
+#elif defined(MOZ_WIDGET_GTK)
 #include <gtk/gtk.h>
 #endif
 
@@ -36,6 +36,7 @@
 #include "nsIObserverService.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
+#include "mozilla/Preferences.h"
 #include "nsIResProtocolHandler.h"
 #include "nsIScriptError.h"
 #include "nsIVersionComparator.h"
@@ -48,6 +49,7 @@
 #define MATCH_OS_LOCALE_PREF "intl.locale.matchOS"
 #define SELECTED_LOCALE_PREF "general.useragent.locale"
 #define SELECTED_SKIN_PREF   "general.skins.selectedSkin"
+#define PACKAGE_OVERRIDE_BRANCH "chrome.override_package."
 
 using namespace mozilla;
 
@@ -196,20 +198,25 @@ NS_IMETHODIMP
 nsChromeRegistryChrome::GetLocalesForPackage(const nsACString& aPackage,
                                        nsIUTF8StringEnumerator* *aResult)
 {
+  nsCString realpackage;
+  nsresult rv = OverrideLocalePackage(aPackage, realpackage);
+  if (NS_FAILED(rv))
+    return rv;
+
   nsTArray<nsCString> *a = new nsTArray<nsCString>;
   if (!a)
     return NS_ERROR_OUT_OF_MEMORY;
 
   PackageEntry* entry =
       static_cast<PackageEntry*>(PL_DHashTableOperate(&mPackagesHash,
-                                                      & aPackage,
+                                                      & realpackage,
                                                       PL_DHASH_LOOKUP));
 
   if (PL_DHASH_ENTRY_IS_BUSY(entry)) {
     entry->locales.EnumerateToArray(a);
   }
 
-  nsresult rv = NS_NewAdoptingUTF8StringEnumerator(aResult, a);
+  rv = NS_NewAdoptingUTF8StringEnumerator(aResult, a);
   if (NS_FAILED(rv))
     delete a;
 
@@ -237,7 +244,7 @@ nsChromeRegistryChrome::IsLocaleRTL(const nsACString& package, bool *aResult)
 {
   *aResult = false;
 
-  nsCAutoString locale;
+  nsAutoCString locale;
   GetSelectedLocale(package, locale);
   if (locale.Length() < 2)
     return NS_OK;
@@ -245,7 +252,7 @@ nsChromeRegistryChrome::IsLocaleRTL(const nsACString& package, bool *aResult)
   // first check the intl.uidirection.<locale> preference, and if that is not
   // set, check the same preference but with just the first two characters of
   // the locale. If that isn't set, default to left-to-right.
-  nsCAutoString prefString = NS_LITERAL_CSTRING("intl.uidirection.") + locale;
+  nsAutoCString prefString = NS_LITERAL_CSTRING("intl.uidirection.") + locale;
   nsCOMPtr<nsIPrefBranch> prefBranch (do_GetService(NS_PREFSERVICE_CONTRACTID));
   if (!prefBranch)
     return NS_OK;
@@ -255,7 +262,7 @@ nsChromeRegistryChrome::IsLocaleRTL(const nsACString& package, bool *aResult)
   if (dir.IsEmpty()) {
     int32_t hyphen = prefString.FindChar('-');
     if (hyphen >= 1) {
-      nsCAutoString shortPref(Substring(prefString, 0, hyphen));
+      nsAutoCString shortPref(Substring(prefString, 0, hyphen));
       prefBranch->GetCharPref(shortPref.get(), getter_Copies(dir));
     }
   }
@@ -267,9 +274,13 @@ nsresult
 nsChromeRegistryChrome::GetSelectedLocale(const nsACString& aPackage,
                                           nsACString& aLocale)
 {
+  nsCString realpackage;
+  nsresult rv = OverrideLocalePackage(aPackage, realpackage);
+  if (NS_FAILED(rv))
+    return rv;
   PackageEntry* entry =
       static_cast<PackageEntry*>(PL_DHashTableOperate(&mPackagesHash,
-                                                      & aPackage,
+                                                      & realpackage,
                                                       PL_DHASH_LOOKUP));
 
   if (PL_DHASH_ENTRY_IS_FREE(entry))
@@ -283,6 +294,21 @@ nsChromeRegistryChrome::GetSelectedLocale(const nsACString& aPackage,
 }
 
 nsresult
+nsChromeRegistryChrome::OverrideLocalePackage(const nsACString& aPackage,
+                                              nsACString& aOverride)
+{
+  const nsACString& pref = NS_LITERAL_CSTRING(PACKAGE_OVERRIDE_BRANCH) + aPackage;
+  nsAdoptingCString override = mozilla::Preferences::GetCString(PromiseFlatCString(pref).get());
+  if (override) {
+    aOverride = override;
+  }
+  else {
+    aOverride = aPackage;
+  }
+  return NS_OK;
+}
+
+nsresult
 nsChromeRegistryChrome::SelectLocaleFromPref(nsIPrefBranch* prefs)
 {
   nsresult rv;
@@ -291,7 +317,7 @@ nsChromeRegistryChrome::SelectLocaleFromPref(nsIPrefBranch* prefs)
 
   if (NS_SUCCEEDED(rv) && matchOSLocale) {
     // compute lang and region code only when needed!
-    nsCAutoString uiLocale;
+    nsAutoCString uiLocale;
     rv = getUILangCountry(uiLocale);
     if (NS_SUCCEEDED(rv))
       mSelectedLocale = uiLocale;
@@ -449,11 +475,11 @@ nsChromeRegistryChrome::SendRegisteredChrome(
   PL_DHashTableEnumerate(&mPackagesHash, CollectPackages, &args);
 
   nsCOMPtr<nsIIOService> io (do_GetIOService());
-  NS_ENSURE_TRUE(io, );
+  NS_ENSURE_TRUE_VOID(io);
 
   nsCOMPtr<nsIProtocolHandler> ph;
   nsresult rv = io->GetProtocolHandler("resource", getter_AddRefs(ph));
-  NS_ENSURE_SUCCESS(rv, );
+  NS_ENSURE_SUCCESS_VOID(rv);
 
   //FIXME: Some substitutions are set up lazily and might not exist yet
   nsCOMPtr<nsIResProtocolHandler> irph (do_QueryInterface(ph));
@@ -464,7 +490,7 @@ nsChromeRegistryChrome::SendRegisteredChrome(
 
   bool success = aParent->SendRegisterChrome(packages, resources, overrides,
                                              mSelectedLocale);
-  NS_ENSURE_TRUE(success, );
+  NS_ENSURE_TRUE_VOID(success);
 }
 
 PLDHashOperator
@@ -772,12 +798,12 @@ nsChromeRegistry::ManifestProcessingContext::ResolveURI(const char* uri)
 {
   nsIURI* baseuri = GetManifestURI();
   if (!baseuri)
-    return NULL;
+    return nullptr;
 
   nsCOMPtr<nsIURI> resolved;
   nsresult rv = NS_NewURI(getter_AddRefs(resolved), uri, baseuri);
   if (NS_FAILED(rv))
-    return NULL;
+    return nullptr;
 
   return resolved.forget();
 }

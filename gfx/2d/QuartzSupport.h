@@ -9,13 +9,14 @@
 #ifdef XP_MACOSX
 
 #import <OpenGL/OpenGL.h>
+#import <OpenGL/gl.h>
 #import "ApplicationServices/ApplicationServices.h"
 #include "gfxTypes.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/gfx/MacIOSurface.h"
 
 // Get the system color space.
-CGColorSpaceRef THEBES_API CreateSystemColorSpace();
+CGColorSpaceRef CreateSystemColorSpace();
 
 // Manages a CARenderer
 struct _CGLPBufferObject;
@@ -25,15 +26,25 @@ enum AllowOfflineRendererEnum { ALLOW_OFFLINE_RENDERER, DISALLOW_OFFLINE_RENDERE
 
 class nsCARenderer : public mozilla::RefCounted<nsCARenderer> {
 public:
-  nsCARenderer() : mCARenderer(nullptr), mFBOTexture(0), mOpenGLContext(nullptr),
-                   mCGImage(nullptr), mCGData(nullptr), mIOSurface(nullptr), mFBO(0),
-                   mIOTexture(0),
+  nsCARenderer() : mCARenderer(nullptr), mWrapperCALayer(nullptr), mFBOTexture(0),
+                   mOpenGLContext(nullptr), mCGImage(nullptr), mCGData(nullptr),
+                   mIOSurface(nullptr), mFBO(0), mIOTexture(0),
                    mUnsupportedWidth(UINT32_MAX), mUnsupportedHeight(UINT32_MAX),
-                   mAllowOfflineRenderer(DISALLOW_OFFLINE_RENDERER) {}
+                   mAllowOfflineRenderer(DISALLOW_OFFLINE_RENDERER),
+                   mContentsScaleFactor(1.0) {}
   ~nsCARenderer();
+  // aWidth and aHeight are in "display pixels".  A "display pixel" is the
+  // smallest fully addressable part of a display.  But in HiDPI modes each
+  // "display pixel" corresponds to more than one device pixel.  Multiply
+  // display pixels by aContentsScaleFactor to get device pixels.
   nsresult SetupRenderer(void* aCALayer, int aWidth, int aHeight,
+                         double aContentsScaleFactor,
                          AllowOfflineRendererEnum aAllowOfflineRenderer);
-  nsresult Render(int aWidth, int aHeight, CGImageRef *aOutCAImage);
+  // aWidth and aHeight are in "display pixels".  Multiply by
+  // aContentsScaleFactor to get device pixels.
+  nsresult Render(int aWidth, int aHeight,
+                  double aContentsScaleFactor,
+                  CGImageRef *aOutCAImage);
   bool isInit() { return mCARenderer != nullptr; }
   /*
    * Render the CALayer to an IOSurface. If no IOSurface
@@ -42,6 +53,8 @@ public:
    */
   void AttachIOSurface(mozilla::RefPtr<MacIOSurface> aSurface);
   IOSurfaceID GetIOSurfaceID();
+  // aX, aY, aWidth and aHeight are in "display pixels".  Multiply by
+  // surf->GetContentsScaleFactor() to get device pixels.
   static nsresult DrawSurfaceToCGContext(CGContextRef aContext,
                                          MacIOSurface *surf,
                                          CGColorSpaceRef aColorSpace,
@@ -50,17 +63,22 @@ public:
 
   // Remove & Add the layer without destroying
   // the renderer for fast back buffer swapping.
-  void DettachCALayer();
+  void DetachCALayer();
   void AttachCALayer(void *aCALayer);
 #ifdef DEBUG
   static void SaveToDisk(MacIOSurface *surf);
 #endif
 private:
+  // aWidth and aHeight are in "display pixels".  Multiply by
+  // mContentsScaleFactor to get device pixels.
   void SetBounds(int aWidth, int aHeight);
+  // aWidth and aHeight are in "display pixels".  Multiply by
+  // mContentsScaleFactor to get device pixels.
   void SetViewport(int aWidth, int aHeight);
   void Destroy();
 
   void *mCARenderer;
+  void *mWrapperCALayer;
   GLuint                    mFBOTexture;
   _CGLContextObject        *mOpenGLContext;
   CGImageRef                mCGImage;
@@ -71,6 +89,7 @@ private:
   uint32_t                  mUnsupportedWidth;
   uint32_t                  mUnsupportedHeight;
   AllowOfflineRendererEnum  mAllowOfflineRenderer;
+  double                    mContentsScaleFactor;
 };
 
 enum CGContextType {

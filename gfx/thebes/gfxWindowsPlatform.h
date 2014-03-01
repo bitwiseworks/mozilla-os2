@@ -25,8 +25,26 @@
 #include "nsTArray.h"
 #include "nsDataHashtable.h"
 
+#include "mozilla/RefPtr.h"
+
 #include <windows.h>
 #include <objbase.h>
+
+#ifdef CAIRO_HAS_D2D_SURFACE
+#include <dxgi.h>
+#endif
+
+// This header is available in the June 2010 SDK and in the Win8 SDK
+#include <d3dcommon.h>
+// Win 8.0 SDK types we'll need when building using older sdks.
+#if !defined(D3D_FEATURE_LEVEL_11_1) // defined in the 8.0 SDK only
+#define D3D_FEATURE_LEVEL_11_1 static_cast<D3D_FEATURE_LEVEL>(0xb100)
+#define D3D_FL9_1_REQ_TEXTURE2D_U_OR_V_DIMENSION 2048
+#define D3D_FL9_3_REQ_TEXTURE2D_U_OR_V_DIMENSION 4096
+#endif
+
+class ID3D11Device;
+class IDXGIAdapter1;
 
 class nsIMemoryMultiReporter;
 
@@ -84,7 +102,7 @@ struct ClearTypeParameterInfo {
     int32_t     enhancedContrast;
 };
 
-class THEBES_API gfxWindowsPlatform : public gfxPlatform {
+class gfxWindowsPlatform : public gfxPlatform {
 public:
     enum TextRenderingMode {
         TEXT_RENDERING_NO_CLEARTYPE,
@@ -107,7 +125,7 @@ public:
       CreateOffscreenImageSurface(const gfxIntSize& aSize,
                                   gfxASurface::gfxContentType aContentType);
 
-    virtual mozilla::RefPtr<mozilla::gfx::ScaledFont>
+    virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
     virtual already_AddRefed<gfxASurface>
       GetThebesSurfaceForDrawTarget(mozilla::gfx::DrawTarget *aTarget);
@@ -147,7 +165,20 @@ public:
      */
     void VerifyD2DDevice(bool aAttemptForce);
 
+#ifdef CAIRO_HAS_D2D_SURFACE
+    HRESULT CreateDevice(nsRefPtr<IDXGIAdapter1> &adapter1, int featureLevelIndex);
+#endif
+
     HDC GetScreenDC() { return mScreenDC; }
+
+    /**
+     * Return the resolution scaling factor to convert between "logical" or
+     * "screen" pixels as used by Windows (dependent on the DPI scaling option
+     * in the Display control panel) and actual device pixels.
+     */
+    double GetDPIScale() {
+        return GetDeviceCaps(mScreenDC, LOGPIXELSY) / 96.0;
+    }
 
     nsresult GetFontList(nsIAtom *aLangGroup,
                          const nsACString& aGenericFamily,
@@ -238,18 +269,11 @@ public:
     cairo_device_t *GetD2DDevice() { return mD2DDevice; }
     ID3D10Device1 *GetD3D10Device() { return mD2DDevice ? cairo_d2d_device_get_device(mD2DDevice) : nullptr; }
 #endif
+    ID3D11Device *GetD3D11Device();
 
     static bool IsOptimus();
-    static bool IsRunningInWindows8Metro();
 
 protected:
-    virtual mozilla::gfx::BackendType GetContentBackend()
-    {
-      return UseAzureContentDrawing() && mRenderMode == RENDER_DIRECT2D ?
-               mozilla::gfx::BACKEND_DIRECT2D :
-               mozilla::gfx::BACKEND_NONE;
-    }
-
     RenderMode mRenderMode;
 
     int8_t mUseClearTypeForDownloadableFonts;
@@ -258,6 +282,7 @@ protected:
 
 private:
     void Init();
+    IDXGIAdapter1 *GetDXGIAdapter();
 
     bool mUseDirectWrite;
     bool mUsingGDIFonts;
@@ -271,6 +296,9 @@ private:
 #ifdef CAIRO_HAS_D2D_SURFACE
     cairo_device_t *mD2DDevice;
 #endif
+    mozilla::RefPtr<IDXGIAdapter1> mAdapter;
+    mozilla::RefPtr<ID3D11Device> mD3D11Device;
+    bool mD3D11DeviceInitialized;
 
     virtual qcms_profile* GetPlatformCMSOutputProfile();
 

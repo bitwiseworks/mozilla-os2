@@ -11,6 +11,9 @@
   <preference id="privacy.donottrackheader.enabled"
               name="privacy.donottrackheader.enabled"
               type="bool"/>
+  <preference id="privacy.donottrackheader.value"
+              name="privacy.donottrackheader.value"
+              type="int"/>
 
   <!-- XXX button prefs -->
   <preference id="pref.privacy.disable_button.cookie_exceptions"
@@ -59,10 +62,6 @@
               name="browser.privatebrowsing.autostart"
               onchange="gPrivacyPane.updatePrivacyMicroControls();"
               type="bool"/>
-  <preference id="browser.privatebrowsing.keep_current_session"
-              name="browser.privatebrowsing.keep_current_session"
-              instantApply="true"
-              type="bool"/>
 
 </preferences>
 
@@ -72,13 +71,22 @@
 </hbox>
 
 <!-- Tracking -->
-<groupbox id="trackingGroup" data-category="panePrivacy" hidden="true">
+<groupbox id="trackingGroup" data-category="panePrivacy" hidden="true" align="start">
   <caption label="&tracking.label;"/>
-
-  <checkbox id="privacyDoNotTrackPrefs"
-            label="&doNotTrack.label;"
-            accesskey="&doNotTrack.accesskey;"
-            preference="privacy.donottrackheader.enabled"/>
+  <radiogroup id="doNotTrackSelection" orient="vertical"
+              preference="privacy.donottrackheader.value"
+              onsynctopreference="return gPrivacyPane.setTrackingPrefs()"
+              onsyncfrompreference="return gPrivacyPane.getTrackingPrefs()">
+    <radio id="dntnotrack" value="1" label="&dntTrackingNotOkay.label2;"
+            accesskey="&dntTrackingNotOkay.accesskey;" />
+    <radio id="dntdotrack" value="0" label="&dntTrackingOkay.label2;"
+            accesskey="&dntTrackingOkay.accesskey;" />
+    <radio id="dntnopref" value="-1" label="&dntTrackingNopref.label2;"
+            accesskey="&dntTrackingNopref.accesskey;" />
+  </radiogroup>
+  <label class="text-link" id="doNotTrackInfo"
+         href="https://www.mozilla.org/dnt"
+         value="&doNotTrackInfo.label;"/>
 </groupbox>
 
 <!-- History -->
@@ -92,7 +100,8 @@
     <menulist id="historyMode"
               oncommand="gPrivacyPane.updateHistoryModePane();
                         gPrivacyPane.updateHistoryModePrefs();
-                        gPrivacyPane.updatePrivacyMicroControls();">
+                        gPrivacyPane.updatePrivacyMicroControls();
+                        gPrivacyPane.updateAutostart();">
       <menupopup>
         <menuitem label="&historyHeader.remember.label;" value="remember"/>
         <menuitem label="&historyHeader.dontremember.label;" value="dontremember"/>
@@ -139,7 +148,8 @@
         <checkbox id="privateBrowsingAutoStart"
                   label="&privateBrowsingPermanent2.label;"
                   accesskey="&privateBrowsingPermanent2.accesskey;"
-                  preference="browser.privatebrowsing.autostart"/>
+                  preference="browser.privatebrowsing.autostart"
+                  oncommand="gPrivacyPane.updateAutostart()"/>
 
         <vbox class="indent">
           <checkbox id="rememberHistory"
@@ -161,11 +171,19 @@
                     label="&cookieExceptions.label;" accesskey="&cookieExceptions.accesskey;"
                     preference="pref.privacy.disable_button.cookie_exceptions"/>
           </hbox>
-          <checkbox id="acceptThirdParty" label="&acceptThirdParty.label;" class="indent"
-                    preference="network.cookie.cookieBehavior"
-                    accesskey="&acceptThirdParty.accesskey;"
-                    onsyncfrompreference="return gPrivacyPane.readAcceptThirdPartyCookies();"
-                    onsynctopreference="return gPrivacyPane.writeAcceptThirdPartyCookies();"/>
+          <hbox id="acceptThirdPartyRow" class="indent">
+            <label id="acceptThirdPartyLabel" control="acceptThirdPartyMenu"
+                   accesskey="&acceptThirdParty.pre.accesskey;">&acceptThirdParty.pre.label;</label>
+            <menulist id="acceptThirdPartyMenu" preference="network.cookie.cookieBehavior"
+            onsyncfrompreference="return gPrivacyPane.readAcceptThirdPartyCookies();"
+            onsynctopreference="return gPrivacyPane.writeAcceptThirdPartyCookies();">
+              <menupopup>
+                <menuitem label="&acceptThirdParty.always.label;" value="always"/>
+                <menuitem label="&acceptThirdParty.visited.label;" value="visited"/>
+                <menuitem label="&acceptThirdParty.never.label;" value="never"/>
+              </menupopup>
+            </menulist>
+          </hbox>
           <hbox id="keepRow" class="indent">
             <label id="keepUntil"
                    control="keepCookiesUntil"

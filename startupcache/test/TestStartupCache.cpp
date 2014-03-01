@@ -21,7 +21,11 @@
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
 #include "nsITelemetry.h"
+#include "nsIXPConnect.h"
 #include "jsapi.h"
+#include "prio.h"
+
+using namespace JS;
 
 namespace mozilla {
 namespace scache {
@@ -56,7 +60,7 @@ PR_END_MACRO
 nsresult
 WaitForStartupTimer() {
   nsresult rv;
-  nsCOMPtr<nsIStartupCache> sc 
+  nsCOMPtr<nsIStartupCache> sc
     = do_GetService("@mozilla.org/startupcache/cache;1");
   PR_Sleep(10 * PR_TicksPerSecond());
   
@@ -75,7 +79,7 @@ WaitForStartupTimer() {
 nsresult
 TestStartupWriteRead() {
   nsresult rv;
-  nsCOMPtr<nsIStartupCache> sc 
+  nsCOMPtr<nsIStartupCache> sc
     = do_GetService("@mozilla.org/startupcache/cache;1", &rv);
   if (!sc) {
     fail("didn't get a pointer...");
@@ -118,7 +122,7 @@ TestWriteInvalidateRead() {
   const char* id = "id";
   char* outbuf = NULL;
   uint32_t len;
-  nsCOMPtr<nsIStartupCache> sc 
+  nsCOMPtr<nsIStartupCache> sc
     = do_GetService("@mozilla.org/startupcache/cache;1", &rv);
   sc->InvalidateCache();
 
@@ -248,9 +252,109 @@ TestWriteObject() {
 }
 
 nsresult
+LockCacheFile(bool protect, nsIFile* profileDir) {
+  NS_ENSURE_ARG(profileDir);
+
+  nsCOMPtr<nsIFile> startupCache;
+  profileDir->Clone(getter_AddRefs(startupCache));
+  NS_ENSURE_STATE(startupCache);
+  startupCache->AppendNative(NS_LITERAL_CSTRING("startupCache"));
+
+  nsresult rv;
+#ifndef XP_WIN
+  static uint32_t oldPermissions;
+#else
+  static PRFileDesc* fd = nullptr;
+#endif
+
+  // To prevent deletion of the startupcache file, we change the containing
+  // directory's permissions on Linux/Mac, and hold the file open on Windows
+  if (protect) {
+#ifndef XP_WIN
+    rv = startupCache->GetPermissions(&oldPermissions);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = startupCache->SetPermissions(0555);
+    NS_ENSURE_SUCCESS(rv, rv);
+#else
+    // Filename logic from StartupCache.cpp
+    #ifdef IS_BIG_ENDIAN
+    #define SC_ENDIAN "big"
+    #else
+    #define SC_ENDIAN "little"
+    #endif
+
+    #if PR_BYTES_PER_WORD == 4
+    #define SC_WORDSIZE "4"
+    #else
+    #define SC_WORDSIZE "8"
+    #endif
+    char sStartupCacheName[] = "startupCache." SC_WORDSIZE "." SC_ENDIAN;
+    startupCache->AppendNative(NS_LITERAL_CSTRING(sStartupCacheName));
+
+    rv = startupCache->OpenNSPRFileDesc(PR_RDONLY, 0, &fd);
+    NS_ENSURE_SUCCESS(rv, rv);
+#endif
+  } else {
+#ifndef XP_WIN
+    rv = startupCache->SetPermissions(oldPermissions);
+    NS_ENSURE_SUCCESS(rv, rv);
+#else
+   PR_Close(fd);
+#endif
+  }
+
+  return NS_OK;
+}
+
+nsresult
+TestIgnoreDiskCache(nsIFile* profileDir) {
+  nsresult rv;
+  nsCOMPtr<nsIStartupCache> sc
+    = do_GetService("@mozilla.org/startupcache/cache;1", &rv);
+  sc->InvalidateCache();
+  
+  const char* buf = "Get a Beardbook app for your smartphone";
+  const char* id = "id";
+  char* outbuf = NULL;
+  uint32_t len;
+  
+  rv = sc->PutBuffer(id, buf, strlen(buf) + 1);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = sc->ResetStartupWriteTimer();
+  rv = WaitForStartupTimer();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Prevent StartupCache::InvalidateCache from deleting the disk file
+  rv = LockCacheFile(true, profileDir);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  sc->IgnoreDiskCache();
+
+  rv = sc->GetBuffer(id, &outbuf, &len);
+
+  nsresult r = LockCacheFile(false, profileDir);
+  NS_ENSURE_SUCCESS(r, r);
+
+  delete[] outbuf;
+
+  if (rv == NS_ERROR_NOT_AVAILABLE) {
+    passed("buffer not available after ignoring disk cache");
+  } else if (NS_SUCCEEDED(rv)) {
+    fail("GetBuffer succeeded unexpectedly after ignoring disk cache");
+    return NS_ERROR_UNEXPECTED;
+  } else {
+    fail("GetBuffer gave an unexpected failure, expected NOT_AVAILABLE");
+    return rv;
+  }
+
+  sc->InvalidateCache();
+  return NS_OK;
+}
+
+nsresult
 TestEarlyShutdown() {
   nsresult rv;
-  nsCOMPtr<nsIStartupCache> sc 
+  nsCOMPtr<nsIStartupCache> sc
     = do_GetService("@mozilla.org/startupcache/cache;1", &rv);
   sc->InvalidateCache();
 
@@ -260,7 +364,7 @@ TestEarlyShutdown() {
   char* outbuf = NULL;
   
   sc->ResetStartupWriteTimer();
-  rv = sc->PutBuffer(buf, id, strlen(buf) + 1);
+  rv = sc->PutBuffer(id, buf, strlen(buf) + 1);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIObserver> obs;
@@ -272,61 +376,59 @@ TestEarlyShutdown() {
   rv = sc->GetBuffer(id, &outbuf, &len);
   delete[] outbuf;
 
+  if (NS_SUCCEEDED(rv)) {
+    passed("GetBuffer succeeded after early shutdown");
+  } else {
+    fail("GetBuffer failed after early shutdown");
+    return rv;
+  }
+
+  const char* other_id = "other_id";
+  rv = sc->PutBuffer(other_id, buf, strlen(buf) + 1);
+
   if (rv == NS_ERROR_NOT_AVAILABLE) {
-    passed("buffer not available after early shutdown");
+    passed("PutBuffer not available after early shutdown");
   } else if (NS_SUCCEEDED(rv)) {
-    fail("GetBuffer succeeded unexpectedly after early shutdown");
+    fail("PutBuffer succeeded unexpectedly after early shutdown");
     return NS_ERROR_UNEXPECTED;
   } else {
-    fail("GetBuffer gave an unexpected failure, expected NOT_AVAILABLE");
+    fail("PutBuffer gave an unexpected failure, expected NOT_AVAILABLE");
     return rv;
   }
  
   return NS_OK;
 }
 
-bool
-SetupJS(JSContext **cxp)
-{
-  JSRuntime *rt = JS_NewRuntime(32 * 1024 * 1024);
-  if (!rt)
-    return false;
-  JSContext *cx = JS_NewContext(rt, 8192);
-  if (!cx)
-    return false;
-  *cxp = cx;
-  return true;
-}
-
-bool
-GetHistogramCounts(const char *testmsg, JSContext *cx, jsval *counts)
+static bool
+GetHistogramCounts(const char *testmsg, const nsACString &histogram_id,
+                   JSContext *cx, MutableHandle<Value> counts)
 {
   nsCOMPtr<nsITelemetry> telemetry = do_GetService("@mozilla.org/base/telemetry;1");
-  NS_NAMED_LITERAL_CSTRING(histogram_id, "STARTUP_CACHE_AGE_HOURS");
-  JS::AutoValueRooter h(cx);
-  nsresult trv = telemetry->GetHistogramById(histogram_id, cx, h.addr());
+  Rooted<Value> h(cx);
+  nsresult trv = telemetry->GetHistogramById(histogram_id, cx, h.address());
   if (NS_FAILED(trv)) {
-    fail("%s: couldn't get histogram", testmsg);
+    fail("%s: couldn't get histogram %s", testmsg, ToNewCString(histogram_id));
     return false;
   }
   passed(testmsg);
 
-  JS::AutoValueRooter snapshot_val(cx);
+  Rooted<Value> snapshot_val(cx);
   JSFunction *snapshot_fn = NULL;
-  JS::AutoValueRooter ss(cx);
-  return (JS_GetProperty(cx, JSVAL_TO_OBJECT(h.value()), "snapshot",
-                         snapshot_val.addr())
-          && (snapshot_fn = JS_ValueToFunction(cx, snapshot_val.value()))
-          && JS::Call(cx, JSVAL_TO_OBJECT(h.value()),
-                      snapshot_fn, 0, NULL, ss.addr())
-          && JS_GetProperty(cx, JSVAL_TO_OBJECT(ss.value()),
-                            "counts", counts));
+  Rooted<Value> ss(cx);
+  return (JS_GetProperty(cx, JSVAL_TO_OBJECT(h), "snapshot",
+                         snapshot_val.address())
+          && (snapshot_fn = JS_ValueToFunction(cx, snapshot_val))
+          && JS::Call(cx, JSVAL_TO_OBJECT(h),
+                      snapshot_fn, 0, NULL, ss.address())
+          && JS_GetProperty(cx, JSVAL_TO_OBJECT(ss), "counts", counts.address()));
 }
 
 nsresult
-CompareCountArrays(JSContext *cx, JSObject *before, JSObject *after)
+CompareCountArrays(JSContext *cx, JSObject *aBefore, JSObject *aAfter)
 {
   uint32_t before_size, after_size;
+  JS::RootedObject before(cx, aBefore);
+  JS::RootedObject after(cx, aAfter);
   if (!(JS_GetArrayLength(cx, before, &before_size)
         && JS_GetArrayLength(cx, after, &after_size))) {
     return NS_ERROR_UNEXPECTED;
@@ -336,11 +438,10 @@ CompareCountArrays(JSContext *cx, JSObject *before, JSObject *after)
     return NS_ERROR_UNEXPECTED;
   }
 
+  JS::RootedValue before_num(cx), after_num(cx);
   for (uint32_t i = 0; i < before_size; ++i) {
-    jsval before_num, after_num;
-
-    if (!(JS_GetElement(cx, before, i, &before_num)
-          && JS_GetElement(cx, after, i, &after_num))) {
+    if (!(JS_GetElement(cx, before, i, before_num.address())
+          && JS_GetElement(cx, after, i, after_num.address()))) {
       return NS_ERROR_UNEXPECTED;
     }
 
@@ -358,9 +459,30 @@ CompareCountArrays(JSContext *cx, JSObject *before, JSObject *after)
     }
   }
 
-  // All of the elements of the histograms's count arrays differed.
+  // None of the elements of the histograms's count arrays differed.
   // Not good, we should have recorded something.
   return NS_ERROR_FAILURE;
+}
+
+nsresult
+TestHistogramValues(const char* type, bool use_js, JSContext *cx,
+                    JSObject *before, JSObject *after)
+{
+  if (!use_js) {
+    fail("couldn't check histogram recording");
+    return NS_ERROR_FAILURE;
+  }
+  nsresult compare = CompareCountArrays(cx, before, after);
+  if (compare == NS_ERROR_UNEXPECTED) {
+    fail("count comparison error");
+    return compare;
+  }
+  if (compare == NS_ERROR_FAILURE) {
+    fail("histogram didn't record %s", type);
+    return compare;
+  }
+  passed("histogram records %s", type);
+  return NS_OK;
 }
 
 int main(int argc, char** argv)
@@ -374,15 +496,26 @@ int main(int argc, char** argv)
   
   int rv = 0;
   // nsITelemetry doesn't have a nice C++ interface.
-  JSContext *cx;
-  bool use_js = true;
-  if (!SetupJS(&cx))
-    use_js = false;
+  JSContext *cx = nullptr;
 
+  // XPCOM initialization spins up XPConnect, which spins up a JSRuntime, which
+  // we can only have one of per thread. So we need to get a JSContext out of
+  // XPConnect here, rather than creating our own runtime. XPConnect rules
+  // dictate that we push the context as well, but we're trying to make the
+  // pushing/popping APIs accessible only through nsCxPusher, which isn't
+  // accessible via the external linkage used by this test. We can get away with
+  // using the cx here without triggering a cx stack assert, so just do that
+  // for now. Eventually, the whole notion of pushing and popping will just go
+  // away.
+  nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID());
+  if (xpc)
+    cx = xpc->GetSafeJSContext();
+
+  bool use_js = !!cx;
   JSAutoRequest req(cx);
   static JSClass global_class = {
     "global", JSCLASS_NEW_RESOLVE | JSCLASS_GLOBAL_FLAGS | JSCLASS_HAS_PRIVATE,
-    JS_PropertyStub,  JS_PropertyStub,
+    JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub,
     JS_ConvertStub
@@ -392,17 +525,25 @@ int main(int argc, char** argv)
     glob = JS_NewGlobalObject(cx, &global_class, NULL);
   if (!glob)
     use_js = false;
-  JSCrossCompartmentCall *compartment = nullptr;
+  mozilla::Maybe<JSAutoCompartment> ac;
   if (use_js)
-    compartment = JS_EnterCrossCompartmentCall(cx, glob);
-  if (!compartment)
-    use_js = false;
+    ac.construct(cx, glob);
   if (use_js && !JS_InitStandardClasses(cx, glob))
     use_js = false;
 
-  JS::AutoValueRooter before_counts(cx);
-  if (use_js && !GetHistogramCounts("STARTUP_CACHE_AGE_HOURS histogram before test",
-                                 cx, before_counts.addr()))
+  NS_NAMED_LITERAL_CSTRING(age_histogram_id, "STARTUP_CACHE_AGE_HOURS");
+  NS_NAMED_LITERAL_CSTRING(invalid_histogram_id, "STARTUP_CACHE_INVALID");
+
+  Rooted<Value> age_before_counts(cx);
+  if (use_js &&
+      !GetHistogramCounts("STARTUP_CACHE_AGE_HOURS histogram before test",
+                          age_histogram_id, cx, &age_before_counts))
+    use_js = false;
+  
+  Rooted<Value> invalid_before_counts(cx);
+  if (use_js &&
+      !GetHistogramCounts("STARTUP_CACHE_INVALID histogram before test",
+                          invalid_histogram_id, cx, &invalid_before_counts))
     use_js = false;
   
   nsresult scrv;
@@ -418,34 +559,34 @@ int main(int argc, char** argv)
     rv = 1;
   if (NS_FAILED(TestWriteObject()))
     rv = 1;
+  nsCOMPtr<nsIFile> profileDir = xpcom.GetProfileDirectory();
+  if (NS_FAILED(TestIgnoreDiskCache(profileDir)))
+    rv = 1;
   if (NS_FAILED(TestEarlyShutdown()))
     rv = 1;
 
-  JS::AutoValueRooter after_counts(cx);
-  if (use_js && !GetHistogramCounts("STARTUP_CACHE_AGE_HOURS histogram after test",
-                                    cx, after_counts.addr()))
+  Rooted<Value> age_after_counts(cx);
+  if (use_js &&
+      !GetHistogramCounts("STARTUP_CACHE_AGE_HOURS histogram after test",
+                          age_histogram_id, cx, &age_after_counts))
     use_js = false;
 
-  if (!use_js) {
-    fail("couldn't check histogram recording");
+  if (NS_FAILED(TestHistogramValues("age samples", use_js, cx,
+                                    age_before_counts.toObjectOrNull(),
+                                    age_after_counts.toObjectOrNull())))
     rv = 1;
-  } else {
-    nsresult compare = CompareCountArrays(cx,
-                                          JSVAL_TO_OBJECT(before_counts.value()),
-                                          JSVAL_TO_OBJECT(after_counts.value()));
-    if (compare == NS_ERROR_UNEXPECTED) {
-      fail("count comparison error");
-      rv = 1;
-    } else if (compare == NS_ERROR_FAILURE) {
-      fail("histogram didn't record samples");
-      rv = 1;
-    } else {
-      passed("histogram records samples");
-    }
-  }
+                                                    
+  Rooted<Value> invalid_after_counts(cx);
+  if (use_js &&
+      !GetHistogramCounts("STARTUP_CACHE_INVALID histogram after test",
+                          invalid_histogram_id, cx, &invalid_after_counts))
+    use_js = false;
 
-  if (use_js)
-    JS_LeaveCrossCompartmentCall(compartment);
+  // STARTUP_CACHE_INVALID should have been triggered by TestIgnoreDiskCache()
+  if (NS_FAILED(TestHistogramValues("invalid disk cache", use_js, cx,
+                                    invalid_before_counts.toObjectOrNull(),
+                                    invalid_after_counts.toObjectOrNull())))
+    rv = 1;
 
   return rv;
 }

@@ -6,6 +6,7 @@
 #ifndef nsBindingManager_h_
 #define nsBindingManager_h_
 
+#include "nsIContent.h"
 #include "nsStubMutationObserver.h"
 #include "pldhash.h"
 #include "nsInterfaceHashtable.h"
@@ -16,7 +17,7 @@
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
 
-class nsIContent;
+struct ElementDependentRuleProcessorData;
 class nsIXPConnectWrappedJS;
 class nsIAtom;
 class nsIDOMNodeList;
@@ -30,7 +31,7 @@ template<class E> class nsRefPtr;
 typedef nsTArray<nsRefPtr<nsXBLBinding> > nsBindingList;
 class nsIPrincipal;
 
-class nsBindingManager : public nsStubMutationObserver
+class nsBindingManager MOZ_FINAL : public nsStubMutationObserver
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -156,9 +157,7 @@ public:
   nsIContent* GetNestedSingleInsertionPoint(nsIContent* aParent,
                                             bool* aMultipleInsertionPoints);
 
-  nsresult AddLayeredBinding(nsIContent* aContent, nsIURI* aURL,
-                             nsIPrincipal* aOriginPrincipal);
-  nsresult RemoveLayeredBinding(nsIContent* aContent, nsIURI* aURL);
+  nsresult ClearBinding(nsIContent* aContent);
   nsresult LoadBindingDocument(nsIDocument* aBoundDoc, nsIURI* aURL,
                                nsIPrincipal* aOriginPrincipal);
 
@@ -181,11 +180,11 @@ public:
 
   // Style rule methods
   nsresult WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc,
-                     RuleProcessorData* aData,
+                     ElementDependentRuleProcessorData* aData,
                      bool* aCutOffInheritance);
 
   void WalkAllRules(nsIStyleRuleProcessor::EnumFunc aFunc,
-                    RuleProcessorData* aData);
+                    ElementDependentRuleProcessorData* aData);
   /**
    * Do any processing that needs to happen as a result of a change in
    * the characteristics of the medium, and return whether this rule

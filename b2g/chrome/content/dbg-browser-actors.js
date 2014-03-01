@@ -6,145 +6,125 @@
 
 'use strict';
 /**
- * B2G-specific actors that extend BrowserRootActor and BrowserTabActor,
- * overriding some of their methods.
+ * B2G-specific actors.
  */
 
 /**
- * The function that creates the root actor. DebuggerServer expects to find this
- * function in the loaded actors in order to initialize properly.
+ * Construct a root actor appropriate for use in a server running in B2G. The
+ * returned root actor:
+ * - respects the factories registered with DebuggerServer.addGlobalActor,
+ * - uses a ContentTabList to supply tab actors,
+ * - sends all navigator:browser window documents a Debugger:Shutdown event
+ *   when it exits.
+ *
+ * * @param connection DebuggerServerConnection
+ *        The conection to the client.
  */
-function createRootActor(connection) {
-  return new DeviceRootActor(connection);
+function createRootActor(connection)
+{
+  let parameters = {
+#ifndef MOZ_WIDGET_GONK
+    tabList: new ContentTabList(connection),
+#else
+    tabList: [],
+#endif
+    globalActorFactories: DebuggerServer.globalActorFactories,
+    onShutdown: sendShutdownEvent
+  };
+  let root = new RootActor(connection, parameters);
+  root.applicationType = "operating-system";
+  return root;
 }
 
 /**
- * Creates the root actor that client-server communications always start with.
- * The root actor is responsible for the initial 'hello' packet and for
- * responding to a 'listTabs' request that produces the list of currently open
- * tabs.
+ * A live list of BrowserTabActors representing the current browser tabs,
+ * to be provided to the root actor to answer 'listTabs' requests. In B2G,
+ * only a single tab is ever present.
+ *
+ * @param connection DebuggerServerConnection
+ *     The connection in which this list's tab actors may participate.
+ *
+ * @see BrowserTabList for more a extensive description of how tab list objects
+ *      work.
+ */
+function ContentTabList(connection)
+{
+  BrowserTabList.call(this, connection);
+}
+
+ContentTabList.prototype = Object.create(BrowserTabList.prototype);
+
+ContentTabList.prototype.constructor = ContentTabList;
+
+ContentTabList.prototype.iterator = function() {
+  let browser = Services.wm.getMostRecentWindow('navigator:browser');
+  // Do we have an existing actor for this browser? If not, create one.
+  let actor = this._actorByBrowser.get(browser);
+  if (!actor) {
+    actor = new ContentTabActor(this._connection, browser);
+    this._actorByBrowser.set(browser, actor);
+    actor.selected = true;
+  }
+
+  yield actor;
+};
+
+ContentTabList.prototype.onCloseWindow = makeInfallible(function(aWindow) {
+  /*
+   * nsIWindowMediator deadlocks if you call its GetEnumerator method from
+   * a nsIWindowMediatorListener's onCloseWindow hook (bug 873589), so
+   * handle the close in a different tick.
+   */
+  Services.tm.currentThread.dispatch(makeInfallible(() => {
+    /*
+     * Scan the entire map for actors representing tabs that were in this
+     * top-level window, and exit them.
+     */
+    for (let [browser, actor] of this._actorByBrowser) {
+      this._handleActorClose(actor, browser);
+    }
+  }, "ContentTabList.prototype.onCloseWindow's delayed body"), 0);
+}, "ContentTabList.prototype.onCloseWindow");
+
+/**
+ * Creates a tab actor for handling requests to the single tab, like
+ * attaching and detaching. ContentTabActor respects the actor factories
+ * registered with DebuggerServer.addTabActor.
  *
  * @param connection DebuggerServerConnection
  *        The conection to the client.
- */
-function DeviceRootActor(connection) {
-  BrowserRootActor.call(this, connection);
-  this.browser = Services.wm.getMostRecentWindow('navigator:browser');
-}
-
-DeviceRootActor.prototype = new BrowserRootActor();
-
-/**
- * Disconnects the actor from the browser window.
- */
-DeviceRootActor.prototype.disconnect = function DRA_disconnect() {
-  let actor = this._tabActors.get(this.browser);
-  if (actor) {
-    actor.exit();
-  }
-};
-
-/**
- * Handles the listTabs request.  Builds a list of actors for the single
- * tab (window) running in the process. The actors will survive
- * until at least the next listTabs request.
- */
-DeviceRootActor.prototype.onListTabs = function DRA_onListTabs() {
-  let actor = this._tabActors.get(this.browser);
-  if (!actor) {
-    actor = new DeviceTabActor(this.conn, this.browser);
-    // this.actorID is set by ActorPool when an actor is put into one.
-    actor.parentID = this.actorID;
-    this._tabActors.set(this.browser, actor);
-  }
-
-  let actorPool = new ActorPool(this.conn);
-  actorPool.addActor(actor);
-
-  // Now drop the old actorID -> actor map. Actors that still mattered were
-  // added to the new map, others will go away.
-  if (this._tabActorPool) {
-    this.conn.removeActorPool(this._tabActorPool);
-  }
-  this._tabActorPool = actorPool;
-  this.conn.addActorPool(this._tabActorPool);
-
-  return {
-    'from': 'root',
-    'selected': 0,
-    'tabs': [actor.grip()]
-  };
-};
-
-/**
- * The request types this actor can handle.
- */
-DeviceRootActor.prototype.requestTypes = {
-  'listTabs': DeviceRootActor.prototype.onListTabs
-};
-
-/**
- * Creates a tab actor for handling requests to the single tab, like attaching
- * and detaching.
- *
- * @param connection DebuggerServerConnection
- *        The connection to the client.
  * @param browser browser
  *        The browser instance that contains this tab.
  */
-function DeviceTabActor(connection, browser) {
+function ContentTabActor(connection, browser)
+{
   BrowserTabActor.call(this, connection, browser);
 }
 
-DeviceTabActor.prototype = new BrowserTabActor();
+ContentTabActor.prototype.constructor = ContentTabActor;
 
-DeviceTabActor.prototype.grip = function DTA_grip() {
-  dbg_assert(!this.exited,
-             'grip() should not be called on exited browser actor.');
-  dbg_assert(this.actorID,
-             'tab should have an actorID.');
-  return {
-    'actor': this.actorID,
-    'title': this.browser.title,
-    'url': this.browser.document.documentURI
-  }
-};
+ContentTabActor.prototype = Object.create(BrowserTabActor.prototype);
 
-/**
- * Creates a thread actor and a pool for context-lifetime actors. It then sets
- * up the content window for debugging.
- */
-DeviceTabActor.prototype._pushContext = function DTA_pushContext() {
-  dbg_assert(!this._contextPool, "Can't push multiple contexts");
+Object.defineProperty(ContentTabActor.prototype, "title", {
+  get: function() {
+    return this.browser.title;
+  },
+  enumerable: true,
+  configurable: false
+});
 
-  this._contextPool = new ActorPool(this.conn);
-  this.conn.addActorPool(this._contextPool);
+Object.defineProperty(ContentTabActor.prototype, "url", {
+  get: function() {
+    return this.browser.document.documentURI;
+  },
+  enumerable: true,
+  configurable: false
+});
 
-  this.threadActor = new ThreadActor(this);
-  this._addDebuggees(this.browser.wrappedJSObject);
-  this._contextPool.addActor(this.threadActor);
-};
-
-// Protocol Request Handlers
-
-/**
- * Prepare to enter a nested event loop by disabling debuggee events.
- */
-DeviceTabActor.prototype.preNest = function DTA_preNest() {
-  let windowUtils = this.browser
-                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindowUtils);
-  windowUtils.suppressEventHandling(true);
-  windowUtils.suspendTimeouts();
-};
-
-/**
- * Prepare to exit a nested event loop by enabling debuggee events.
- */
-DeviceTabActor.prototype.postNest = function DTA_postNest(aNestData) {
-  let windowUtils = this.browser
-                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindowUtils);
-  windowUtils.resumeTimeouts();
-  windowUtils.suppressEventHandling(false);
-};
+Object.defineProperty(ContentTabActor.prototype, "contentWindow", {
+  get: function() {
+    return this.browser;
+  },
+  enumerable: true,
+  configurable: false
+});

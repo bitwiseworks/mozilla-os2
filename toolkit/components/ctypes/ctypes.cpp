@@ -9,6 +9,8 @@
 #include "nsMemory.h"
 #include "nsString.h"
 #include "nsNativeCharsetUtils.h"
+#include "mozilla/Preferences.h"
+#include "mozJSComponentLoader.h"
 
 #define JSCTYPES_CONTRACTID \
   "@mozilla.org/jsctypes;1"
@@ -23,7 +25,7 @@ namespace ctypes {
 static char*
 UnicodeToNative(JSContext *cx, const jschar *source, size_t slen)
 {
-  nsCAutoString native;
+  nsAutoCString native;
   nsDependentString unicode(reinterpret_cast<const PRUnichar*>(source), slen);
   nsresult rv = NS_CopyUnicodeToNative(unicode, native);
   if (NS_FAILED(rv)) {
@@ -64,28 +66,33 @@ Module::~Module()
 static JSBool
 SealObjectAndPrototype(JSContext* cx, JSObject* parent, const char* name)
 {
-  jsval prop;
-  if (!JS_GetProperty(cx, parent, name, &prop))
+  JS::Rooted<JS::Value> prop(cx);
+  if (!JS_GetProperty(cx, parent, name, prop.address()))
     return false;
 
-  JSObject* obj = JSVAL_TO_OBJECT(prop);
-  if (!JS_GetProperty(cx, obj, "prototype", &prop))
+  if (prop.isUndefined()) {
+    // Pretend we sealed the object.
+    return true;
+  }
+
+  JS::Rooted<JSObject*> obj(cx, prop.toObjectOrNull());
+  if (!JS_GetProperty(cx, obj, "prototype", prop.address()))
     return false;
 
-  JSObject* prototype = JSVAL_TO_OBJECT(prop);
+  JS::Rooted<JSObject*> prototype(cx, prop.toObjectOrNull());
   return JS_FreezeObject(cx, obj) && JS_FreezeObject(cx, prototype);
 }
 
 static JSBool
-InitAndSealCTypesClass(JSContext* cx, JSObject* global)
+InitAndSealCTypesClass(JSContext* cx, JS::Handle<JSObject*> global)
 {
   // Init the ctypes object.
   if (!JS_InitCTypesClass(cx, global))
     return false;
 
   // Set callbacks for charset conversion and such.
-  jsval ctypes;
-  if (!JS_GetProperty(cx, global, "ctypes", &ctypes))
+  JS::Rooted<JS::Value> ctypes(cx);
+  if (!JS_GetProperty(cx, global, "ctypes", ctypes.address()))
     return false;
 
   JS_SetCTypesCallbacks(JSVAL_TO_OBJECT(ctypes), &sCallbacks);
@@ -108,16 +115,15 @@ NS_IMETHODIMP
 Module::Call(nsIXPConnectWrappedNative* wrapper,
              JSContext* cx,
              JSObject* obj,
-             uint32_t argc,
-             jsval* argv,
-             jsval* vp,
+             const JS::CallArgs& args,
              bool* _retval)
 {
-  JSObject* global = JS_GetGlobalForScopeChain(cx);
-  if (!global)
-    return NS_ERROR_NOT_AVAILABLE;
+  mozJSComponentLoader* loader = mozJSComponentLoader::Get();
+  JS::Rooted<JSObject*> targetObj(cx);
+  nsresult rv = loader->FindTargetObject(cx, &targetObj);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  *_retval = InitAndSealCTypesClass(cx, global);
+  *_retval = InitAndSealCTypesClass(cx, targetObj);
   return NS_OK;
 }
 

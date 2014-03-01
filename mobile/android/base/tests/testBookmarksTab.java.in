@@ -2,38 +2,27 @@
 package @ANDROID_PACKAGE_NAME@.tests;
 
 import @ANDROID_PACKAGE_NAME@.*;
-import android.app.Activity;
-import android.content.ContentUris;
+import android.view.ViewGroup;
 import android.view.View;
 import android.widget.ListView;
-import android.widget.ExpandableListView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.ImageView;
-import android.widget.TabHost;
 import android.text.TextUtils;
 
-import android.content.ContentValues;
-import android.content.ContentResolver;
-import android.database.Cursor;
-import android.net.Uri;
-
-import java.util.Arrays;
 import java.util.ArrayList;
-import java.io.File;
 
-/* Tests opening the all pages tab, that items look correct, clicking on an item
-   and long tapping on an item
-*/
-
+/**
+ * Tests the Bookmarks Tab
+ * - opening the bookmarks tab
+ * - items look correct
+ * - clicking on an item
+ * - long tapping on an item
+ * - editing the name, url and keyword of a bookmark from the context menu
+ * - removing a bookmark
+ */
 public class testBookmarksTab extends BaseTest {
-    private static final String ABOUT_HOME_URL = "about:home";
-    private String[] defaultBookmarksUrls = new String[] {
-        "about:firefox",
-        "about:home",
-        "http://support.mozilla.org/en-US/mobile",
-        "https://addons.mozilla.org/en-US/android/"
-    };
+    private View mFirstChild;
+    private ListView list;
 
     @Override
     protected int getTestType() {
@@ -41,11 +30,11 @@ public class testBookmarksTab extends BaseTest {
     }
 
     public void testBookmarksTab() {
-        mActions.expectGeckoEvent("Gecko:Ready").blockForEvent();
+        blockForGeckoReady();
         String url = "http://www.example.com";
 
         // add one page to desktop folders so that we can see them
-        addBookmark("BOOKMARK_TITLE", url);
+        addOrUpdateBookmark("BOOKMARK_TITLE", url, false);
 
         testList(url);
         testContextMenu(url);
@@ -53,39 +42,34 @@ public class testBookmarksTab extends BaseTest {
 
     private void testList(String url) {
         View child;
-        ListView list = getBookmarksList();
+        ListView list = getBookmarksList("about:firefox", 5);
+        mAsserter.isnot(list, null, "checking that bookmarks list exists and has 5 children (defaults + a folder)");
 
-        // Clear VKB so that list is not obscured
-        mActions.sendSpecialKey(Actions.SpecialKey.BACK);
-
-        mSolo.waitForText(url);
-        mAsserter.ok(list != null, "checking that bookmarks list exists", list.toString());
-
-        mAsserter.is(list.getChildCount(), 5, "bookmarks list has 5 children (defaults + a folder)");
-
-        int count = list.getChildCount();
+        int count = list.getAdapter().getCount();
         for (int i = count - 1; i >= 0; i--) {
             child = list.getChildAt(i);
             compareRow(child, i == 0 ? 1 : 2, 1);
         }
 
         child = list.getChildAt(0);
+        mAsserter.ok(child != null, "first list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickOnView(child);
-        mSolo.waitForText("Bookmarks Toolbar");
+        waitForText("Bookmarks Toolbar");
 
-        mAsserter.is(list.getChildCount(), 4, "desktop folder has correct number of children");
-        count = list.getChildCount();
+        count = list.getAdapter().getCount();
+        mAsserter.is(count, 4, "desktop folder has correct number of children");
         for (int i = count - 1; i >= 0; i--) {
             child = list.getChildAt(i);
             compareRow(child, 1, i == 0 ? 0 : 1);
         }
 
         child = list.getChildAt(1);
+        mAsserter.ok(child != null, "second list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickOnView(child);
-        mSolo.waitForText("BOOKMARK_TITLE");
+        waitForText("BOOKMARK_TITLE");
 
-        mAsserter.is(list.getChildCount(), 2, "toolbar folder has correct number of children");
-        count = list.getChildCount();
+        count = list.getAdapter().getCount();
+        mAsserter.is(count, 2, "toolbar folder has correct number of children");
         for (int i = count - 1; i >= 0; i--) {
             child = list.getChildAt(i);
             compareRow(child, i == 0 ? 1:2, i == 0 ? 0:1);
@@ -102,38 +86,103 @@ public class testBookmarksTab extends BaseTest {
     }
 
     private void testContextMenu(String url) {
-        ListView list = getBookmarksList();
+        list = getBookmarksList(url);
+        // wait for the bookmarks list to be populated
+        View child;
+        mFirstChild = null;
+        boolean success = waitForTest(new BooleanTest() {
+            @Override
+            public boolean test() {
+                mFirstChild = list.getChildAt(1);
+                if (mFirstChild == null) {
+                    return false;
+                }
+                if (mFirstChild instanceof android.view.ViewGroup) {
+                    ViewGroup group = (ViewGroup)mFirstChild;
+                    if (group.getChildCount() < 1) {
+                        return false;
+                    }
+                    for (int i = 0; i < group.getChildCount(); i++) {
+                        View grandChild = group.getChildAt(i);
+                        if (grandChild instanceof android.widget.TextView) {
+                            mAsserter.ok(true, "found TextView:", ((android.widget.TextView)grandChild).getText().toString());
+                        }
+                    }
+                } else {
+                    mAsserter.dumpLog("first child not a ViewGroup: "+mFirstChild);
+                    return false;
+                }
+                return true;
+            }
+        }, MAX_WAIT_MS);
+        if (success == true && mFirstChild != null) {
+            mAsserter.dumpLog("clickLongOnView: "+mFirstChild);
 
-        // Clear VKB so that list is not obscured
-        mActions.sendSpecialKey(Actions.SpecialKey.BACK);
+            // long tap on a bookmark should show a context menu with an edit option
+            mSolo.clickLongOnView(mFirstChild);
 
-        mSolo.waitForText(url);
+            // TODO: Test clicking these does the right thing
+            mAsserter.ok(mSolo.waitForText("Open in New Tab"), "Context menu has Open in New Tab option", "Open in New Tab");
+            mAsserter.ok(mSolo.waitForText("Share"), "Context menu has Share option", "Share");
+            mAsserter.ok(mSolo.searchText("Edit", true), "Context menu has Edit option", "Edit");
+            mAsserter.ok(mSolo.searchText("Remove", true), "Context menu has Remove option", "Remove");
+            mAsserter.ok(mSolo.searchText("Add to Home Screen", true), "Context menu has Add to Home Screen option", "Add to Home Screen");
 
-        // test long tap on a folder, this should fail but will still open the folder
-        View child = list.getChildAt(0);
-        mSolo.clickLongOnView(child);
-        mAsserter.is(mSolo.waitForText("Open in New Tab"), false, "Folders have no context menu");
-        // pressing back should exit the folder
-        mActions.sendSpecialKey(Actions.SpecialKey.BACK);
+            // press back to exit the context menu
+            mActions.sendSpecialKey(Actions.SpecialKey.BACK);
 
-        // long tap on a bookmark should show a context menu with an edit option
+            // test long tap on a folder, this should fail but will still open the folder
+            child = list.getChildAt(0);
+            mAsserter.ok(child != null, "first list item can be retrieved", child != null ? child.toString() : "null!");
+            mSolo.clickLongOnView(child);
+            mAsserter.is(mSolo.waitForText("Share"), false, "Folders have no context menu");
+        } else {
+            mAsserter.ok(false, "waiting for bookmark item", "bookmark item available");
+        }
+
+        list = getBookmarksList(url);
+
+        // Test edit bookmark name
+        editBookmark(1,0," Bookmark Name ",list);
+        mAsserter.is(checkBookmarkEdit(1," Bookmark Name ",list), true, "Bookmark Name was changed");
+
+        // Test edit bookmark link
+        editBookmark(1,1," Bookmark Link ",list);
+        mAsserter.is(checkBookmarkEdit(1,"Bookmark Link",list), true, "Bookmark Link was changed");
+
+        // Test edit bookmark keyword
+        editBookmark(1,2," BookmarkKeyword ",list);
+        mAsserter.is(checkBookmarkEdit(1,"BookmarkKeyword",list), true, "Bookmark Keyword was changed");
+
+        // Remove Bookmark from Context Menu
+        waitForText("Bookmarks");
         child = list.getChildAt(1);
+        mAsserter.ok(child != null, "second list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickLongOnView(child);
+        waitForText("Remove");
+        mSolo.clickOnText("Remove");
 
-        // TODO: Test clicking these does the right thing
-        mAsserter.ok(mSolo.waitForText("Open in New Tab"), "Context menu has New Tab option", "Open in New Tab");
-        mAsserter.ok(mSolo.searchText("Share", true), "Context menu has Share option", "Share");
-        mAsserter.ok(mSolo.searchText("Edit", true), "Context menu has Edit option", "Edit");
-        mAsserter.ok(mSolo.searchText("Remove", true), "Context menu has Remove option", "Remove");
-        mAsserter.ok(mSolo.searchText("Add to Home Screen", true), "Context menu has Add to Home Screen option", "Add to Home Screen");
+        // Wait for the toaster notification
+        waitForText("Bookmark removed");
 
-        // press back to exit the context menu
+        // Verify Bookmark is removed
+        child = list.getChildAt(1);
+        mAsserter.ok(child != null, "second list item can be retrieved", child != null ? child.toString() : "null!");
+        mSolo.clickLongOnView(child);
+        waitForText("Share");
+        mAsserter.is(mSolo.searchText("Bookmark Name"), false, "Removed bookmark has been deleted");
+        mActions.sendSpecialKey(Actions.SpecialKey.BACK); // Exit the Context Menu
+
         // back again to exit the awesomebar
-        mActions.sendSpecialKey(Actions.SpecialKey.BACK);
         mActions.sendSpecialKey(Actions.SpecialKey.BACK);
     }
 
     private void compareRow(View child, int numTextViews, int numImageViews) {
+        if (child == null) {
+            // this list item may be obscured or offscreen
+            mAsserter.dumpLog("ListView child not available for comparison - offscreen?");
+            return;
+        }
         ArrayList<View> views = mSolo.getViews(child);
         ArrayList<ImageView> imageViews = new ArrayList<ImageView>();
         ArrayList<TextView> textViews = new ArrayList<TextView>();
@@ -166,60 +215,9 @@ public class testBookmarksTab extends BaseTest {
         mAsserter.is(textViews.size(), numTextViews, "Correct number of TextViews visible");
     }
 
-    private ListView getBookmarksList() {
-        Activity awesomeBarActivity = clickOnAwesomeBar();
-        mSolo.clickOnText("Bookmarks");
-
-        TabHost tabHost = (TabHost)mSolo.getView(TabHost.class, 0);
-        return (ListView)tabHost.getCurrentView();
-    }
-
-    private long addBookmark(String title, String url) {
-        ContentResolver resolver = getActivity().getContentResolver();
-        Uri bookmarksUri = Uri.parse("content://@ANDROID_PACKAGE_NAME@.db.browser/bookmarks");
-        bookmarksUri = bookmarksUri.buildUpon().appendQueryParameter("profile", "default").build();
-
-        long folderId = -1;
-        Cursor c = null;
-        try {
-            c = resolver.query(bookmarksUri,
-                               new String[] { "_id" },
-                               "guid = ?",
-                               new String[] { "toolbar" },
-                               null);
-
-            if (c.moveToFirst())
-                folderId = c.getLong(c.getColumnIndexOrThrow("_id"));
-        } finally {
-            if (c != null)
-                c.close();
-        }
-
-        ContentValues values = new ContentValues();
-        values.put("title", title);
-        values.put("url", url);
-        values.put("type", 1);
-        values.put("parent", folderId);
-        values.put("guid", url);
-        values.put("position", 10);
-        long now = System.currentTimeMillis();
-        values.put("created", now);
-        values.put("modified", now);
-
-        Uri uri = resolver.insert(bookmarksUri, values);
-        mAsserter.ok(true, "Inserted at: ", uri.toString());
-        return ContentUris.parseId(uri);
-    }
-
+    @Override
     public void tearDown() throws Exception {
-        ContentResolver resolver = getActivity().getContentResolver();
-        Uri uri = Uri.parse("content://@ANDROID_PACKAGE_NAME@.db.browser/bookmarks");
-        uri = uri.buildUpon().appendQueryParameter("profile", "default")
-                             .appendQueryParameter("sync", "true").build();
-        resolver.delete(uri, "title = ?", new String[] {
-            "BOOKMARK_TITLE"
-        });
-
+        deleteBookmark("BOOKMARK_TITLE");
         super.tearDown();
     }
 }

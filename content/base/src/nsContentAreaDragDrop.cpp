@@ -53,7 +53,7 @@
 #include "nsDOMDataTransfer.h"
 #include "mozilla/dom/Element.h"
 
-class NS_STACK_CLASS DragDataProducer
+class MOZ_STACK_CLASS DragDataProducer
 {
 public:
   DragDataProducer(nsPIDOMWindow* aWindow,
@@ -130,7 +130,8 @@ NS_IMPL_ISUPPORTS1(nsContentAreaDragDropDataProvider, nsIFlavorDataProvider)
 // into the file system
 nsresult
 nsContentAreaDragDropDataProvider::SaveURIToFile(nsAString& inSourceURIString,
-                                                 nsIFile* inDestFile)
+                                                 nsIFile* inDestFile,
+                                                 bool isPrivate)
 {
   nsCOMPtr<nsIURI> sourceURI;
   nsresult rv = NS_NewURI(getter_AddRefs(sourceURI), inSourceURIString);
@@ -155,7 +156,8 @@ nsContentAreaDragDropDataProvider::SaveURIToFile(nsAString& inSourceURIString,
 
   persist->SetPersistFlags(nsIWebBrowserPersist::PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION);
 
-  return persist->SaveURI(sourceURI, nullptr, nullptr, nullptr, nullptr, inDestFile);
+  return persist->SavePrivacyAwareURI(sourceURI, nullptr, nullptr, nullptr, nullptr,
+                                      inDestFile, isPrivate);
 }
 
 // This is our nsIFlavorDataProvider callback. There are several
@@ -227,7 +229,10 @@ nsContentAreaDragDropDataProvider::GetFlavorData(nsITransferable *aTransferable,
 
     file->Append(targetFilename);
 
-    rv = SaveURIToFile(sourceURLString, file);
+    bool isPrivate;
+    aTransferable->GetIsPrivateData(&isPrivate);
+
+    rv = SaveURIToFile(sourceURLString, file, isPrivate);
     // send back an nsIFile
     if (NS_SUCCEEDED(rv)) {
       CallQueryInterface(file, aData);
@@ -269,8 +274,8 @@ DragDataProducer::FindParentLinkNode(nsIContent* inNode)
 
   for (; content; content = content->GetParent()) {
     if (nsContentUtils::IsDraggableLink(content)) {
-      NS_ADDREF(content);
-      return content;
+      nsCOMPtr<nsIContent> ret = content;
+      return ret.forget();
     }
   }
 
@@ -291,7 +296,7 @@ DragDataProducer::GetAnchorURL(nsIContent* inNode, nsAString& outURL)
     return;
   }
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   linkURI->GetSpec(spec);
   CopyUTF8toUTF16(spec, outURL);
 }
@@ -527,7 +532,7 @@ DragDataProducer::Produce(nsDOMDataTransfer* aDataTransfer,
         nsCOMPtr<nsIURI> imageURI;
         image->GetCurrentURI(getter_AddRefs(imageURI));
         if (imageURI) {
-          nsCAutoString spec;
+          nsAutoCString spec;
           imageURI->GetSpec(spec);
           CopyUTF8toUTF16(spec, mUrlString);
         }
@@ -561,7 +566,7 @@ DragDataProducer::Produce(nsDOMDataTransfer* aDataTransfer,
           nsCOMPtr<nsIURL> imgUrl(do_QueryInterface(imgUri));
 
           if (imgUrl) {
-            nsCAutoString extension;
+            nsAutoCString extension;
             imgUrl->GetFileExtension(extension);
 
             nsXPIDLCString mimeType;
@@ -572,7 +577,7 @@ DragDataProducer::Produce(nsDOMDataTransfer* aDataTransfer,
                                                  getter_AddRefs(mimeInfo));
 
             if (mimeInfo) {
-              nsCAutoString spec;
+              nsAutoCString spec;
               imgUrl->GetSpec(spec);
 
               // pass out the image source string
@@ -589,13 +594,13 @@ DragDataProducer::Produce(nsDOMDataTransfer* aDataTransfer,
 
                 imgUrl = do_QueryInterface(imgUri);
 
-                nsCAutoString primaryExtension;
+                nsAutoCString primaryExtension;
                 mimeInfo->GetPrimaryExtension(primaryExtension);
 
                 imgUrl->SetFileExtension(primaryExtension);
               }
 
-              nsCAutoString fileName;
+              nsAutoCString fileName;
               imgUrl->GetFileName(fileName);
 
               NS_UnescapeURL(fileName);

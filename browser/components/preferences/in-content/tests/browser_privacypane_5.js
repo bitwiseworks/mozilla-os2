@@ -10,7 +10,7 @@ function test() {
     let tmpdir = extractJarToTmp(jar);
     rootDir = "file://" + tmpdir.path + '/';
   }
-  loader.loadSubScript(rootDir + "privacypane_tests.js", this);
+  loader.loadSubScript(rootDir + "privacypane_tests_perwindow.js", this);
 
   run_test_subset([
     test_locbar_suggestion_retention(-1, undefined),

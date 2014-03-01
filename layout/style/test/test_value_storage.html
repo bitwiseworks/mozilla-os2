@@ -16,7 +16,7 @@
 <div id="content" style="display: none">
 
 <div id="testnode"></div>
-  
+
 </div>
 <pre id="test">
 <script class="testbody" type="text/javascript">
@@ -55,6 +55,16 @@ var gSystemFont = {
   "message-box": true,
   "small-caption": true,
   "status-bar": true,
+  "-moz-window": true,
+  "-moz-document": true,
+  "-moz-desktop": true,
+  "-moz-info": true,
+  "-moz-dialog": true,
+  "-moz-button": true,
+  "-moz-pull-down-menu": true,
+  "-moz-list": true,
+  "-moz-field": true,
+  "-moz-workspace": true,
 };
 
 var gBadCompute = {
@@ -98,6 +108,16 @@ function test_property(property)
   var info = gCSSProperties[property];
 
   var test_computed = !("backend_only" in info);
+
+  // can all properties be removed from the style?
+  function test_remove_all_properties(property, value) {
+    var i, p = [];
+    for (i = 0; i < gDeclaration.length; i++) p.push(gDeclaration[i]);
+    for (i = 0; i < p.length; i++) gDeclaration.removeProperty(p[i]);
+    var errstr = "when setting property " + property + " to " + value;
+    is(gDeclaration.length, 0, "unremovable properties " + errstr);
+    is(gDeclaration.cssText, "", "non-empty serialization after removing all properties " + errstr);
+  }
 
   function test_value(value) {
     gDeclaration.setProperty(property, value, "");
@@ -212,6 +232,12 @@ function test_property(property)
       }
     }
 
+    // sanity check shorthands to make sure disabled props aren't exposed
+    if (info.type != CSS_TYPE_LONGHAND) {
+      gDeclaration.setProperty(property, value, "");
+      test_remove_all_properties(property, value);
+    }
+
     gDeclaration.removeProperty(property);
   }
 
@@ -239,6 +265,7 @@ function test_property(property)
 // To avoid triggering the slow script dialog, we have to test one
 // property at a time.
 SimpleTest.waitForExplicitFinish();
+SimpleTest.requestLongerTimeout(2);
 var props = [];
 for (var prop in gCSSProperties)
   props.push(prop);

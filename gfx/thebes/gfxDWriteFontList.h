@@ -14,6 +14,7 @@
 
 #include "gfxPlatformFontList.h"
 #include "gfxPlatform.h"
+#include <algorithm>
 
 
 /**
@@ -80,8 +81,8 @@ public:
         mStretch = FontStretchFromDWriteStretch(aFont->GetStretch());
         uint16_t weight = NS_ROUNDUP(aFont->GetWeight() - 50, 100);
 
-        weight = NS_MAX<uint16_t>(100, weight);
-        weight = NS_MIN<uint16_t>(900, weight);
+        weight = std::max<uint16_t>(100, weight);
+        weight = std::min<uint16_t>(900, weight);
         mWeight = weight;
 
         mIsCJK = UNINITIALIZED_VALUE;
@@ -142,8 +143,7 @@ public:
 
     virtual bool IsSymbolFont();
 
-    virtual nsresult GetFontTable(uint32_t aTableTag,
-                                  FallibleTArray<uint8_t>& aBuffer);
+    virtual hb_blob_t* GetFontTable(uint32_t aTableTag) MOZ_OVERRIDE;
 
     nsresult ReadCMAP();
 
@@ -161,6 +161,9 @@ protected:
     friend class gfxDWriteFont;
     friend class gfxDWriteFontList;
 
+    virtual nsresult CopyFontTable(uint32_t aTableTag,
+                                   FallibleTArray<uint8_t>& aBuffer) MOZ_OVERRIDE;
+
     virtual gfxFont *CreateFontInstance(const gfxFontStyle *aFontStyle,
                                         bool aNeedsBold);
     
@@ -176,6 +179,11 @@ protected:
      */
     nsRefPtr<IDWriteFont> mFont;
     nsRefPtr<IDWriteFontFile> mFontFile;
+
+    // font face corresponding to the mFont/mFontFile *without* any DWrite
+    // style simulations applied
+    nsRefPtr<IDWriteFontFace> mFontFace;
+
     DWRITE_FONT_FACE_TYPE mFaceType;
 
     int8_t mIsCJK;
@@ -183,7 +191,7 @@ protected:
 };
 
 // custom text renderer used to determine the fallback font for a given char
-class FontFallbackRenderer : public IDWriteTextRenderer
+class FontFallbackRenderer MOZ_FINAL : public IDWriteTextRenderer
 {
 public:
     FontFallbackRenderer(IDWriteFactory *aFactory)
@@ -333,8 +341,7 @@ public:
     // initialize font lists
     virtual nsresult InitFontList();
 
-    virtual gfxFontEntry* GetDefaultFont(const gfxFontStyle* aStyle,
-                                         bool& aNeedsBold);
+    virtual gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle);
 
     virtual gfxFontEntry* LookupLocalFont(const gfxProxyFontEntry *aProxyEntry,
                                           const nsAString& aFontName);
@@ -374,7 +381,8 @@ private:
     virtual gfxFontEntry* GlobalFontFallback(const uint32_t aCh,
                                              int32_t aRunScript,
                                              const gfxFontStyle* aMatchStyle,
-                                             uint32_t& aCmapCount);
+                                             uint32_t& aCmapCount,
+                                             gfxFontFamily** aMatchedFamily);
 
     virtual bool UsesSystemFallback() { return true; }
 

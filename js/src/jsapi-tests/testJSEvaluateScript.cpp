@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  */
 
 #include "tests.h"
@@ -14,9 +14,9 @@ BEGIN_TEST(testJSEvaluateScript)
 
     static const char src[] = "var x = 5;";
 
-    JS::Value retval;
+    JS::RootedValue retval(cx);
     CHECK(JS_EvaluateScript(cx, obj, src, sizeof(src) - 1, __FILE__, __LINE__,
-                            &retval));
+                            retval.address()));
 
     JSBool hasProp = JS_TRUE;
     CHECK(JS_AlreadyHasOwnProperty(cx, obj, "x", &hasProp));
@@ -32,7 +32,7 @@ BEGIN_TEST(testJSEvaluateScript)
     static const char src2[] = "var y = 5;";
 
     CHECK(JS_EvaluateScript(cx, obj, src2, sizeof(src2) - 1, __FILE__, __LINE__,
-                            &retval));
+                            retval.address()));
 
     hasProp = JS_FALSE;
     CHECK(JS_AlreadyHasOwnProperty(cx, obj, "y", &hasProp));

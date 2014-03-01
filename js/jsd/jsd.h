@@ -1,5 +1,6 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -28,20 +29,7 @@
 #define JSD_USE_NSPR_LOCKS 1
 #endif /* MOZILLA_CLIENT */
 
-
-/* Get jstypes.h included first. After that we can use PR macros for doing
-*  this extern "C" stuff!
-*/
-#ifdef __cplusplus
-extern "C"
-{
-#endif
 #include "jstypes.h"
-#ifdef __cplusplus
-}
-#endif
-
-JS_BEGIN_EXTERN_C
 #include "jsprf.h"
 #include "jsutil.h" /* Added by JSIFY */
 #include "jshash.h" /* Added by JSIFY */
@@ -61,9 +49,6 @@ JS_BEGIN_EXTERN_C
 #include <frame/log.h>
 #include <frame/req.h>
 #endif /* LIVEWIRE */
-JS_END_EXTERN_C
-
-JS_BEGIN_EXTERN_C
 
 #define JSD_MAJOR_VERSION 1
 #define JSD_MINOR_VERSION 1
@@ -123,7 +108,6 @@ struct JSDContext
     void*                   functionHookData;
     JSD_CallHookProc        toplevelHook;
     void*                   toplevelHookData;
-    JSContext*              dumbContext;
     JSObject*               glob;
     JSD_UserCallbacks       userCallbacks;
     void*                   user;
@@ -138,11 +122,11 @@ struct JSDContext
     JSDProfileData*         callingFunctionPData;
     int64_t                 lastReturnTime;
 #ifdef JSD_THREADSAFE
-    void*                   scriptsLock;
-    void*                   sourceTextLock;
-    void*                   objectsLock;
-    void*                   atomsLock;
-    void*                   threadStatesLock;
+    JSDStaticLock*          scriptsLock;
+    JSDStaticLock*          sourceTextLock;
+    JSDStaticLock*          objectsLock;
+    JSDStaticLock*          atomsLock;
+    JSDStaticLock*          threadStatesLock;
 #endif /* JSD_THREADSAFE */
 #ifdef JSD_HAS_DANGEROUS_THREAD
     void*                   dangerousThread;
@@ -226,7 +210,8 @@ struct JSDStackFrameInfo
     JSDThreadState*     jsdthreadstate;
     JSDScript*          jsdscript;
     uintptr_t           pc;
-    JSStackFrame*       fp;
+    bool                isConstructing;
+    JSAbstractFramePtr  frame;
 };
 
 #define GOT_PROTO   ((short) (1 << 0))
@@ -363,7 +348,7 @@ extern JSDScript*
 jsd_FindOrCreateJSDScript(JSDContext    *jsdc,
                           JSContext     *cx,
                           JSScript      *script,
-                          JSStackFrame  *fp);
+                          JSAbstractFramePtr frame);
 
 extern JSDProfileData*
 jsd_GetScriptProfileData(JSDContext* jsdc, JSDScript *script);
@@ -713,7 +698,7 @@ jsd_EvaluateUCScriptInStackFrame(JSDContext* jsdc,
                                  JSDStackFrameInfo* jsdframe,
                                  const jschar *bytes, unsigned length,
                                  const char *filename, unsigned lineno,
-                                 JSBool eatExceptions, jsval *rval);
+                                 JSBool eatExceptions, JS::MutableHandleValue rval);
 
 extern JSBool
 jsd_EvaluateScriptInStackFrame(JSDContext* jsdc,
@@ -721,7 +706,7 @@ jsd_EvaluateScriptInStackFrame(JSDContext* jsdc,
                                JSDStackFrameInfo* jsdframe,
                                const char *bytes, unsigned length,
                                const char *filename, unsigned lineno,
-                               JSBool eatExceptions, jsval *rval);
+                               JSBool eatExceptions, JS::MutableHandleValue rval);
 
 extern JSString*
 jsd_ValToStringInStackFrame(JSDContext* jsdc,
@@ -759,7 +744,7 @@ jsd_SetException(JSDContext* jsdc, JSDThreadState* jsdthreadstate,
 #ifdef JSD_THREADSAFE
 
 /* the system-wide lock */
-extern void* _jsd_global_lock;
+extern JSDStaticLock* _jsd_global_lock;
 #define JSD_LOCK()                               \
     JS_BEGIN_MACRO                               \
         if(!_jsd_global_lock)                    \
@@ -994,12 +979,12 @@ jsd_GetPropertyFlags(JSDContext* jsdc, JSDProperty* jsdprop);
 /* Stepping Functions */
 
 extern void *
-jsd_FunctionCallHook(JSContext *cx, JSStackFrame *fp, JSBool before,
-                     JSBool *ok, void *closure);
+jsd_FunctionCallHook(JSContext *cx, JSAbstractFramePtr frame, bool isConstructing,
+                     JSBool before, JSBool *ok, void *closure);
 
 extern void *
-jsd_TopLevelCallHook(JSContext *cx, JSStackFrame *fp, JSBool before,
-                     JSBool *ok, void *closure);
+jsd_TopLevelCallHook(JSContext *cx, JSAbstractFramePtr frame, bool isConstructing,
+                     JSBool before, JSBool *ok, void *closure);
 
 /**************************************************/
 /* Object Functions */
@@ -1015,7 +1000,7 @@ jsd_DestroyObjects(JSDContext* jsdc);
 
 extern void
 jsd_Constructing(JSDContext* jsdc, JSContext *cx, JSObject *obj,
-                 JSStackFrame *fp);
+                 JSAbstractFramePtr frame);
 
 extern JSDObject*
 jsd_IterateObjects(JSDContext* jsdc, JSDObject** iterp);
@@ -1070,6 +1055,17 @@ jsd_DropAtom(JSDContext* jsdc, JSDAtom* atom);
 
 #define JSD_ATOM_TO_STRING(a) ((const char*)((a)->str))
 
+struct AutoSaveExceptionState {
+    AutoSaveExceptionState(JSContext *cx) : mCx(cx) {
+        mState = JS_SaveExceptionState(cx);
+    }
+    ~AutoSaveExceptionState() {
+        JS_RestoreExceptionState(mCx, mState);
+    }
+    JSContext *mCx;
+    JSExceptionState *mState;
+};
+
 /***************************************************************************/
 /* Livewire specific API */
 #ifdef LIVEWIRE
@@ -1098,7 +1094,6 @@ extern JSBool
 jsdlw_ProcessedToRawLineNumber(JSDContext* jsdc, JSDScript* jsdscript,
                                unsigned lineIn, unsigned* lineOut);
 
-
 #if 0
 /* our hook proc for LiveWire app start/stop */
 extern void
@@ -1110,7 +1105,5 @@ jsdlw_AppHookProc(LWDBGApp* app,
 
 #endif
 /***************************************************************************/
-
-JS_END_EXTERN_C
 
 #endif /* jsd_h___ */

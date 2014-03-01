@@ -45,7 +45,6 @@
 #include <string>
 #include <vector>
 
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "base/time.h"
 #include "base/lock.h"
 
@@ -290,6 +289,7 @@ class Histogram {
   enum Flags {
     kNoFlags = 0,
     kUmaTargetedHistogramFlag = 0x1,  // Histogram should be UMA uploaded.
+    kExtendedStatisticsFlag = 0x2, // OK to gather extended statistics on histograms.
 
     // Indicate that the histogram was pickled to be sent across an IPC Channel.
     // If we observe this flag on a histogram being aggregated into after IPC,
@@ -316,6 +316,11 @@ class Histogram {
     const char* description;  // Null means end of a list of pairs.
   };
 
+  // To avoid depending on XPCOM headers, we define our own MallocSizeOf type.
+  typedef size_t (*MallocSizeOf)(const void*);
+
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf);
+
   //----------------------------------------------------------------------------
   // Statistic values, developed over the life of the histogram.
 
@@ -329,13 +334,20 @@ class Histogram {
     void CheckSize(const Histogram& histogram) const;
 
     // Accessor for histogram to make routine additions.
-    void Accumulate(Sample value, Count count, size_t index);
+    void AccumulateWithLinearStats(Sample value, Count count, size_t index);
+    // Alternate routine for exponential histograms.
+    // computeExpensiveStatistics should be true if we want to compute log sums.
+    void AccumulateWithExponentialStats(Sample value, Count count, size_t index,
+					bool computeExtendedStatistics);
 
     // Accessor methods.
     Count counts(size_t i) const { return counts_[i]; }
     Count TotalCount() const;
-    int64 sum() const { return sum_; }
-    int64 redundant_count() const { return redundant_count_; }
+    int64_t sum() const { return sum_; }
+    uint64_t sum_squares() const { return sum_squares_; }
+    double log_sum() const { return log_sum_; }
+    double log_sum_squares() const { return log_sum_squares_; }
+    int64_t redundant_count() const { return redundant_count_; }
     size_t size() const { return counts_.size(); }
 
     // Arithmetic manipulation of corresponding elements of the set.
@@ -345,6 +357,8 @@ class Histogram {
     bool Serialize(Pickle* pickle) const;
     bool Deserialize(void** iter, const Pickle& pickle);
 
+    size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf);
+
    protected:
     // Actual histogram data is stored in buckets, showing the count of values
     // that fit into each bucket.
@@ -352,11 +366,17 @@ class Histogram {
 
     // Save simple stats locally.  Note that this MIGHT get done in base class
     // without shared memory at some point.
-    int64 sum_;         // sum of samples.
+    int64_t sum_;         // sum of samples.
+    uint64_t sum_squares_; // sum of squares of samples.
+
+    // These fields may or may not be updated at the discretion of the
+    // histogram.  We use the natural log and compute ln(sample+1) so that
+    // zeros are handled sanely.
+    double log_sum_;      // sum of logs of samples.
+    double log_sum_squares_; // sum of squares of logs of samples
 
    private:
-    // Allow tests to corrupt our innards for testing purposes.
-    FRIEND_TEST(HistogramTest, CorruptSampleCounts);
+    void Accumulate(Sample value, Count count, size_t index);
 
     // To help identify memory corruption, we reduntantly save the number of
     // samples we've accumulated into all of our buckets.  We can compare this
@@ -365,7 +385,7 @@ class Histogram {
     // updated on several threads simultaneously), the tallies might mismatch,
     // and also the snapshotting code may asynchronously get a mismatch (though
     // generally either race based mismatch cause is VERY rare).
-    int64 redundant_count_;
+    int64_t redundant_count_;
   };
 
   //----------------------------------------------------------------------------
@@ -442,7 +462,7 @@ class Histogram {
   Sample declared_min() const { return declared_min_; }
   Sample declared_max() const { return declared_max_; }
   virtual Sample ranges(size_t i) const;
-  uint32 range_checksum() const { return range_checksum_; }
+  uint32_t range_checksum() const { return range_checksum_; }
   virtual size_t bucket_count() const;
   // Snapshot the current complete set of sample data.
   // Override with atomic/locked snapshot if needed.
@@ -502,22 +522,20 @@ class Histogram {
   // values relate properly to the declared_min_ and declared_max_)..
   bool ValidateBucketRanges() const;
 
-  virtual uint32 CalculateRangeChecksum() const;
+  virtual uint32_t CalculateRangeChecksum() const;
+
+  // Finally, provide the state that changes with the addition of each new
+  // sample.
+  SampleSet sample_;
 
  private:
-  // Allow tests to corrupt our innards for testing purposes.
-  FRIEND_TEST(HistogramTest, CorruptBucketBounds);
-  FRIEND_TEST(HistogramTest, CorruptSampleCounts);
-  FRIEND_TEST(HistogramTest, Crc32SampleHash);
-  FRIEND_TEST(HistogramTest, Crc32TableTest);
-
   friend class StatisticsRecorder;  // To allow it to delete duplicates.
 
   // Post constructor initialization.
   void Initialize();
 
   // Checksum function for accumulating range values into a checksum.
-  static uint32 Crc32(uint32 sum, Sample range);
+  static uint32_t Crc32(uint32_t sum, Sample range);
 
   //----------------------------------------------------------------------------
   // Helpers for emitting Ascii graphic.  Each method appends data to output.
@@ -531,8 +549,8 @@ class Histogram {
 
   // Write information about previous, current, and next buckets.
   // Information such as cumulative percentage, etc.
-  void WriteAsciiBucketContext(const int64 past, const Count current,
-                               const int64 remaining, const size_t i,
+  void WriteAsciiBucketContext(const int64_t past, const Count current,
+                               const int64_t remaining, const size_t i,
                                std::string* output) const;
 
   // Write textual description of the bucket contents (relative to histogram).
@@ -546,7 +564,7 @@ class Histogram {
 
   //----------------------------------------------------------------------------
   // Table for generating Crc32 values.
-  static const uint32 kCrcTable[256];
+  static const uint32_t kCrcTable[256];
   //----------------------------------------------------------------------------
   // Invariant values set at/near construction time
 
@@ -569,11 +587,7 @@ class Histogram {
   // For redundancy, we store a checksum of all the sample ranges when ranges
   // are generated.  If ever there is ever a difference, then the histogram must
   // have been corrupted.
-  uint32 range_checksum_;
-
-  // Finally, provide the state that changes with the addition of each new
-  // sample.
-  SampleSet sample_;
+  uint32_t range_checksum_;
 
   DISALLOW_COPY_AND_ASSIGN(Histogram);
 };
@@ -601,6 +615,8 @@ class LinearHistogram : public Histogram {
 
   // Overridden from Histogram:
   virtual ClassType histogram_type() const;
+
+  virtual void Accumulate(Sample value, Count count, size_t index);
 
   // Store a list of number/text values for use in rendering the histogram.
   // The last element in the array has a null in its "description" slot.
@@ -645,6 +661,8 @@ class BooleanHistogram : public LinearHistogram {
   virtual ClassType histogram_type() const;
 
   virtual void AddBoolean(bool value);
+
+  virtual void Accumulate(Sample value, Count count, size_t index);
 
  protected:
   explicit BooleanHistogram(const std::string& name);

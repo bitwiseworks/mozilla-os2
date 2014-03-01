@@ -7,12 +7,9 @@
 
 function test() {
   // initialization
-  gPrefService.setBoolPref("browser.privatebrowsing.keep_current_session", true);
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
   waitForExplicitFinish();
 
-  function openLocation(url, autofilled, callback) {
+  function openLocation(aWindow, url, autofilled, callback) {
     function observer(aSubject, aTopic, aData) {
       switch (aTopic) {
         case "domwindowopened":
@@ -20,12 +17,15 @@ function test() {
           dialog.addEventListener("load", function () {
             dialog.removeEventListener("load", arguments.callee, false);
 
-            let browser = gBrowser.selectedBrowser;
+            let browser = aWindow.gBrowser.selectedBrowser;
             browser.addEventListener("load", function() {
+              // Ignore non-related loads (could be about:privatebrowsing for example, see bug 817932)
+              if (browser.currentURI.spec != url) {
+                return;
+              }
+
               browser.removeEventListener("load", arguments.callee, true);
 
-              is(browser.currentURI.spec, url,
-                 "The correct URL should be loaded via the open location dialog");
               executeSoon(callback);
             }, true);
 
@@ -46,30 +46,52 @@ function test() {
       }
     }
 
-    Services.ww.registerNotification(observer);
-    gPrefService.setIntPref("general.open_location.last_window_choice", 0);
-    openDialog("chrome://browser/content/openLocation.xul", "_blank",
-               "chrome,titlebar", window);
+    executeSoon(function() {
+      Services.ww.registerNotification(observer);
+      gPrefService.setIntPref("general.open_location.last_window_choice", 0);
+      aWindow.openDialog("chrome://browser/content/openLocation.xul", "_blank",
+                         "chrome,titlebar", aWindow);
+    });
   }
 
+  let windowsToClose = [];
+  function testOnWindow(options, callback) {
+    let win = OpenBrowserWindow(options);
+    win.addEventListener("load", function onLoad() {
+      win.removeEventListener("load", onLoad, false);
+      windowsToClose.push(win);
+      callback(win);
+    }, false);
+  };
+
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(win) {
+      win.close();
+    });
+  });
 
   if (gPrefService.prefHasUserValue("general.open_location.last_url"))
     gPrefService.clearUserPref("general.open_location.last_url");
 
-  openLocation("http://example.com/", "", function() {
-    openLocation("http://example.org/", "http://example.com/", function() {
-      // enter private browsing mode
-      pb.privateBrowsingEnabled = true;
-      openLocation("about:logo", "", function() {
-        openLocation("about:buildconfig", "about:logo", function() {
-          // exit private browsing mode
-          pb.privateBrowsingEnabled = false;
-          openLocation("about:blank", "http://example.org/", function() {
-            gPrefService.clearUserPref("general.open_location.last_url");
-            if (gPrefService.prefHasUserValue("general.open_location.last_window_choice"))
-              gPrefService.clearUserPref("general.open_location.last_window_choice");
-            gPrefService.clearUserPref("browser.privatebrowsing.keep_current_session");
-            finish();
+  testOnWindow({private: false}, function(win) {
+    openLocation(win, "http://example.com/", "", function() {
+      testOnWindow({private: false}, function(win) {
+        openLocation(win, "http://example.org/", "http://example.com/", function() {
+          testOnWindow({private: true}, function(win) {
+            openLocation(win, "about:logo", "", function() {
+                testOnWindow({private: true}, function(win) {
+                  openLocation(win, "about:buildconfig", "about:logo", function() {
+                    testOnWindow({private: false}, function(win) {
+                      openLocation(win, "about:blank", "http://example.org/", function() {
+                        gPrefService.clearUserPref("general.open_location.last_url");
+                        if (gPrefService.prefHasUserValue("general.open_location.last_window_choice"))
+                          gPrefService.clearUserPref("general.open_location.last_window_choice");
+                        finish();
+                       });
+                     });
+                  });
+               });
+            });
           });
         });
       });

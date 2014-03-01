@@ -1,0 +1,87 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'pipnss'
+
+EXPORTS += [
+    'CryptoTask.h',
+    'ScopedNSSTypes.h',
+    'nsNSSShutDown.h',
+    'nsRandomGenerator.h',
+]
+
+EXPORTS.mozilla += [
+    'PublicSSL.h',
+]
+
+CPP_SOURCES += [
+    'CertVerifier.cpp',
+    'CryptoTask.cpp',
+    'JARSignatureVerification.cpp',
+    'nsCertificatePrincipal.cpp',
+    'nsCertOverrideService.cpp',
+    'nsCertPicker.cpp',
+    'nsCertVerificationThread.cpp',
+    'nsClientAuthRemember.cpp',
+    'nsCMS.cpp',
+    'nsCMSSecureMessage.cpp',
+    'nsCrypto.cpp',
+    'nsCryptoHash.cpp',
+    'nsDataSignatureVerifier.cpp',
+    'nsIdentityChecking.cpp',
+    'nsKeygenHandler.cpp',
+    'nsKeygenThread.cpp',
+    'nsKeyModule.cpp',
+    'nsNSSASN1Object.cpp',
+    'nsNSSCallbacks.cpp',
+    'nsNSSCertCache.cpp',
+    'nsNSSCertHelper.cpp',
+    'nsNSSCertificate.cpp',
+    'nsNSSCertificateDB.cpp',
+    'nsNSSCertificateFakeTransport.cpp',
+    'nsNSSCertTrust.cpp',
+    'nsNSSCertValidity.cpp',
+    'nsNSSCleaner.cpp',
+    'nsNSSComponent.cpp',
+    'nsNSSErrors.cpp',
+    'nsNSSIOLayer.cpp',
+    'nsNSSModule.cpp',
+    'nsNSSShutDown.cpp',
+    'nsNSSVersion.cpp',
+    'nsNTLMAuthModule.cpp',
+    'nsPK11TokenDB.cpp',
+    'nsPKCS11Slot.cpp',
+    'nsPKCS12Blob.cpp',
+    'nsProtectedAuthThread.cpp',
+    'nsPSMBackgroundThread.cpp',
+    'nsRandomGenerator.cpp',
+    'nsRecentBadCerts.cpp',
+    'nsSDR.cpp',
+    'NSSErrorsService.cpp',
+    'nsSSLSocketProvider.cpp',
+    'nsSSLStatus.cpp',
+    'nsStreamCipher.cpp',
+    'nsTLSSocketProvider.cpp',
+    'nsUsageArrayHelper.cpp',
+	'PSMContentListener.cpp',
+    'PSMRunnable.cpp',
+    'SharedSSLState.cpp',
+    'SSLServerCertVerification.cpp',
+    'TransportSecurityInfo.cpp',
+]
+
+if not CONFIG['MOZ_DISABLE_CRYPTOLEGACY']:
+    CPP_SOURCES += [
+        'nsSmartCardMonitor.cpp',
+    ]
+
+if CONFIG['MOZ_XUL']:
+    CPP_SOURCES += [
+        'nsCertTree.cpp',
+    ]
+
+LIBRARY_NAME = 'pipnss'
+

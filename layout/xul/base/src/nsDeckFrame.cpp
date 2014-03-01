@@ -20,11 +20,15 @@
 #include "nsHTMLParts.h"
 #include "nsIPresShell.h"
 #include "nsCSSRendering.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsBoxLayoutState.h"
 #include "nsStackLayout.h"
 #include "nsDisplayList.h"
 #include "nsContainerFrame.h"
+
+#ifdef ACCESSIBILITY
+#include "nsAccessibilityService.h"
+#endif
 
 nsIFrame*
 NS_NewDeckFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -70,16 +74,14 @@ nsDeckFrame::AttributeChanged(int32_t         aNameSpaceID,
   return rv;
 }
 
-NS_IMETHODIMP
+void
 nsDeckFrame::Init(nsIContent*     aContent,
                   nsIFrame*       aParent,
                   nsIFrame*       aPrevInFlow)
 {
-  nsresult rv = nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
+  nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
 
   mIndex = GetSelectedIndex();
-
-  return rv;
 }
 
 void
@@ -97,7 +99,7 @@ nsDeckFrame::IndexChanged()
     return;
 
   // redraw
-  InvalidateOverflowRect();
+  InvalidateFrame();
 
   // hide the currently showing box
   nsIFrame* currentBox = GetSelectedBox();
@@ -105,6 +107,14 @@ nsDeckFrame::IndexChanged()
     HideBox(currentBox);
 
   mIndex = index;
+
+#ifdef ACCESSIBILITY
+  nsAccessibilityService* accService = GetAccService();
+  if (accService) {
+    accService->DeckPanelSwitched(PresContext()->GetPresShell(), mContent,
+                                  currentBox, GetSelectedBox());
+  }
+#endif
 }
 
 int32_t
@@ -132,21 +142,19 @@ nsDeckFrame::GetSelectedBox()
   return (mIndex >= 0) ? mFrames.FrameAt(mIndex) : nullptr; 
 }
 
-NS_IMETHODIMP
+void
 nsDeckFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                               const nsRect&           aDirtyRect,
                               const nsDisplayListSet& aLists)
 {
   // if a tab is hidden all its children are too.
-  if (!GetStyleVisibility()->mVisible)
-    return NS_OK;
+  if (!StyleVisibility()->mVisible)
+    return;
     
-  // REVIEW: The old code skipped painting of background/borders/outline for this
-  // frame and painting of debug boxes ... I've put it back.
-  return nsBoxFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
+  nsBoxFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
 }
 
-NS_IMETHODIMP
+void
 nsDeckFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
                                          const nsRect&           aDirtyRect,
                                          const nsDisplayListSet& aLists)
@@ -154,12 +162,12 @@ nsDeckFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
   // only paint the selected box
   nsIFrame* box = GetSelectedBox();
   if (!box)
-    return NS_OK;
+    return;
 
   // Putting the child in the background list. This is a little weird but
   // it matches what we were doing before.
   nsDisplayListSet set(aLists, aLists.BlockBorderBackgrounds());
-  return BuildDisplayListForChild(aBuilder, box, aDirtyRect, set);
+  BuildDisplayListForChild(aBuilder, box, aDirtyRect, set);
 }
 
 NS_IMETHODIMP

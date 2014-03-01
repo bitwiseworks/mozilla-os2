@@ -8,8 +8,17 @@
 
 interface nsIDOMTelephonyCall;
 
-[scriptable, builtinclass, uuid(d836f0e6-7305-4fdd-966e-ee261fa44001)]
+[scriptable, builtinclass, uuid(476aacec-661e-44ec-80b4-4b7292b927b5)]
 interface nsIDOMCallEvent : nsIDOMEvent
 {
   readonly attribute nsIDOMTelephonyCall call;
+  [noscript] void initCallEvent(in DOMString aType,
+                                in boolean aCanBubble,
+                                in boolean aCancelable,
+                                in nsIDOMTelephonyCall aCall);
+};
+
+dictionary CallEventInit : EventInit
+{
+  nsIDOMTelephonyCall call;
 };

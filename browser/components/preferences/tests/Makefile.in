@@ -9,25 +9,24 @@ VPATH		= @srcdir@
 relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
-include $(topsrcdir)/config/rules.mk
 
-_BROWSER_FILES = \
+MOCHITEST_BROWSER_FILES := \
+    head.js \
     browser_advanced_update.js \
     browser_bug410900.js \
-    browser_bug567487.js \
     browser_bug705422.js \
-    privacypane_tests.js \
+    browser_permissions.js \
+    browser_chunk_permissions.js \
     browser_privacypane_1.js \
-    browser_privacypane_2.js \
     browser_privacypane_3.js \
     browser_privacypane_4.js \
     browser_privacypane_5.js \
-    browser_privacypane_6.js \
-    browser_privacypane_7.js \
     browser_privacypane_8.js \
-    browser_permissions.js \
-    browser_chunk_permissions.js \
+    privacypane_tests_perwindow.js \
     $(NULL)
 
-libs::	$(_BROWSER_FILES)
-	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)
+ifdef MOZ_SERVICES_HEALTHREPORT
+MOCHITEST_BROWSER_FILES += browser_healthreport.js
+endif
+
+include $(topsrcdir)/config/rules.mk

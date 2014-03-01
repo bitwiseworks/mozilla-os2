@@ -1,0 +1,52 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'xpcom'
+
+EXPORTS += [
+    'nsXPCOMCIDInternal.h',
+    'nsXREAppData.h',
+    'nsXULAppAPI.h',
+    'xrecore.h',
+]
+
+EXPORTS.mozilla += [
+    'FileLocation.h',
+    'Omnijar.h',
+    'ServiceList.h',
+    'Services.h',
+    'XPCOM.h',
+    'mozPoisonWrite.h',
+]
+
+if CONFIG['OS_ARCH'] == 'WINNT':
+    EXPORTS.mozilla += ['perfprobe.h']
+    CPP_SOURCES += [
+        'mozPoisonWriteBase.cpp',
+        'mozPoisonWriteWin.cpp',
+        'perfprobe.cpp',
+    ]
+elif CONFIG['OS_ARCH'] == 'Darwin':
+    CPP_SOURCES += [
+        'mozPoisonWriteBase.cpp',
+        'mozPoisonWriteMac.cpp',
+    ]
+else:
+    CPP_SOURCES += [
+        'mozPoisonWriteStub.cpp',
+    ]
+
+CPP_SOURCES += [
+    '$(XPCOM_GLUENS_SRC_LCPPSRCS)',
+    '$(XPCOM_GLUE_SRC_LCPPSRCS)',
+    'FileLocation.cpp',
+    'FrozenFunctions.cpp',
+    'Omnijar.cpp',
+    'Services.cpp',
+    'nsXPCOMStrings.cpp',
+    'nsXPComInit.cpp',
+]
+

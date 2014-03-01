@@ -17,7 +17,7 @@ function test()
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
 
     testSimpleCall();
   });
@@ -27,7 +27,7 @@ function testSimpleCall() {
   gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
     Services.tm.currentThread.dispatch({
       run: function() {
-        var frames = gDebugger.DebuggerView.StackFrames._frames,
+        var frames = gDebugger.DebuggerView.StackFrames.widget._list,
             childNodes = frames.childNodes;
 
         is(gDebugger.DebuggerController.activeThread.state, "paused",
@@ -50,7 +50,7 @@ function testSimpleCall() {
 function testLocationChange()
 {
   gDebugger.DebuggerController.activeThread.resume(function() {
-    gDebugger.DebuggerController.client.addOneTimeListener("tabNavigated", function(aEvent, aPacket) {
+    gDebugger.DebuggerController._target.once("navigate", function onTabNavigated(aEvent, aPacket) {
       ok(true, "tabNavigated event was fired.");
       info("Still attached to the tab.");
 

@@ -5,6 +5,8 @@
 
 #include "nsIDOMNode.idl"
 
+interface nsIDOMMozNamedAttrMap;
+
 /**
  * The nsIDOMElement interface represents an element in an HTML or 
  * XML document. 
@@ -13,7 +15,7 @@
  * http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#interface-element
  */
 
-[scriptable, uuid(69D44CE2-B544-49A8-BB5F-87804B971EE4)]
+[scriptable, uuid(43d985da-b7ee-4d1f-a26f-348ccd9506f3)]
 interface nsIDOMElement : nsIDOMNode
 {
   readonly attribute DOMString        tagName;
@@ -21,8 +23,9 @@ interface nsIDOMElement : nsIDOMNode
   /**
    * Returns a DOMTokenList object reflecting the class attribute.
    */
-  readonly attribute nsIDOMDOMTokenList classList;
+  readonly attribute nsISupports classList;
 
+  readonly attribute nsIDOMMozNamedAttrMap attributes;
   DOMString          getAttribute(in DOMString name);
   DOMString          getAttributeNS(in DOMString namespaceURI, 
                                     in DOMString localName);
@@ -47,14 +50,14 @@ interface nsIDOMElement : nsIDOMNode
   nsIDOMAttr         setAttributeNodeNS(in nsIDOMAttr newAttr)
                                         raises(DOMException);
 
-  nsIDOMNodeList     getElementsByTagName(in DOMString name);
-  nsIDOMNodeList     getElementsByTagNameNS(in DOMString namespaceURI, 
-                                            in DOMString localName);
+  nsIDOMHTMLCollection getElementsByTagName(in DOMString name);
+  nsIDOMHTMLCollection getElementsByTagNameNS(in DOMString namespaceURI, 
+                                              in DOMString localName);
   /**
    * Retrieve elements matching all classes listed in a
    * space-separated string.
    */
-  nsIDOMNodeList getElementsByClassName(in DOMString classes);
+  nsIDOMHTMLCollection getElementsByClassName(in DOMString classes);
 
   /**
    * Returns a live nsIDOMNodeList of the current child elements.
@@ -73,6 +76,9 @@ interface nsIDOMElement : nsIDOMNode
    * Returns the number of child nodes that are nsIDOMElements.
    */
   readonly attribute unsigned long childElementCount;
+
+  [binaryname(MozRemove)]
+  void remove();
 
 
   // HTML

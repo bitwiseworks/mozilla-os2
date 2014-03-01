@@ -777,8 +777,6 @@ function test22()
   waitTest22 = true;
 
   const pref_open = "network.websocket.timeout.open";
-  var oldpref_open_value = 20;
-  oldpref_open_value = SpecialPowers.getIntPref(pref_open);
   SpecialPowers.setIntPref(pref_open, 5);
 
   var ws = CreateTestWS("ws://sub2.test2.example.org/tests/content/base/test/file_websocket", "test-22");
@@ -791,7 +789,7 @@ function test22()
     maybeFinished();
   };
 
-  SpecialPowers.setIntPref(pref_open, oldpref_open_value);
+  SpecialPowers.clearUserPref(pref_open);
   doTest(23);
 }
 
@@ -1233,7 +1231,13 @@ function test41()
         var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
         var thehost = ios.newURI("http://example.com", null, null);
         var stss = Cc["@mozilla.org/stsservice;1"].getService(Ci.nsIStrictTransportSecurityService);
-        stss.removeStsState(thehost);
+        var loadContext = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                                .getInterface(Ci.nsIWebNavigation)
+                                .QueryInterface(Ci.nsILoadContext);
+        var flags = 0;
+        if (loadContext.usePrivateBrowsing)
+          flags |= Ci.nsISocketProvider.NO_PERMANENT_STORAGE;
+        stss.removeStsState(thehost, flags);
         doTest(42);
        }
      }
@@ -1245,9 +1249,9 @@ function test42()
 // test some utf-8 non-characters. They should be allowed in the
 // websockets context. Test via round trip echo.
   var ws = CreateTestWS("ws://mochi.test:8888/tests/content/base/test/file_websocket", "test-42");
-  var data = ["U+FFFE ￾",
-              "U+FFFF ￿",
-              "U+10FFFF 􏿿"];
+  var data = ["U+FFFE \ufffe",
+		"U+FFFF \uffff",
+		"U+10FFFF \udbff\udfff"];
   var index = 0;
 
   ws.onopen = function()
@@ -1282,30 +1286,14 @@ function test43()
     // Test binaryType setting
     ws.binaryType = "arraybuffer";
     ws.binaryType = "blob";
-    try {
-        ws.binaryType = "";  // illegal
-        ok(false, "allowed ws.binaryType to be set to empty string"); 
-    } catch(e) {
-        ok(true, "prevented ws.binaryType to be set to empty string: " + e); 
-    }
-    try {
-        ws.binaryType = "ArrayBuffer";  // illegal
-        ok(false, "allowed ws.binaryType to be set to 'ArrayBuffer'"); 
-    } catch(e) {
-        ok(true, "prevented ws.binaryType to be set to 'ArrayBuffer' " + e); 
-    }
-    try {
-        ws.binaryType = "Blob";  // illegal
-        ok(false, "allowed ws.binaryType to be set to 'Blob'"); 
-    } catch(e) {
-        ok(true, "prevented ws.binaryType to be set to 'Blob' " + e); 
-    }
-    try {
-        ws.binaryType = "mcfoofluu";  // illegal
-        ok(false, "allowed ws.binaryType to be set to 'mcfoofluu'"); 
-    } catch(e) {
-        ok(true, "prevented ws.binaryType to be set to 'mcfoofluu'"); 
-    }
+    ws.binaryType = "";  // illegal
+    is(ws.binaryType, "blob");
+    ws.binaryType = "ArrayBuffer";  // illegal
+    is(ws.binaryType, "blob");
+    ws.binaryType = "Blob";  // illegal
+    is(ws.binaryType, "blob");
+    ws.binaryType = "mcfoofluu";  // illegal
+    is(ws.binaryType, "blob");
     ws.close();
   };
 

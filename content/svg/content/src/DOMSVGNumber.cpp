@@ -20,16 +20,15 @@ using namespace mozilla;
 // clear our list's weak ref to us to be safe. (The other option would be to
 // not unlink and rely on the breaking of the other edges in the cycle, as
 // NS_SVG_VAL_IMPL_CYCLE_COLLECTION does.)
-NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGNumber)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGNumber)
   // We may not belong to a list, so we must null check tmp->mList.
   if (tmp->mList) {
     tmp->mList->mItems[tmp->mListIndex] = nullptr;
   }
-NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mList)
+NS_IMPL_CYCLE_COLLECTION_UNLINK(mList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGNumber)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mList)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGNumber)
@@ -47,7 +46,7 @@ NS_INTERFACE_MAP_END
 DOMSVGNumber::DOMSVGNumber(DOMSVGNumberList *aList,
                            uint8_t aAttrEnum,
                            uint32_t aListIndex,
-                           uint8_t aIsAnimValItem)
+                           bool aIsAnimValItem)
   : mList(aList)
   , mListIndex(aListIndex)
   , mAttrEnum(aAttrEnum)
@@ -57,8 +56,7 @@ DOMSVGNumber::DOMSVGNumber(DOMSVGNumberList *aList,
   // These shifts are in sync with the members in the header.
   NS_ABORT_IF_FALSE(aList &&
                     aAttrEnum < (1 << 4) &&
-                    aListIndex <= MaxListIndex() &&
-                    aIsAnimValItem < (1 << 1), "bad arg");
+                    aListIndex <= MaxListIndex(), "bad arg");
 
   NS_ABORT_IF_FALSE(IndexIsValid(), "Bad index for DOMSVGNumber!");
 }
@@ -111,7 +109,7 @@ void
 DOMSVGNumber::InsertingIntoList(DOMSVGNumberList *aList,
                                 uint8_t aAttrEnum,
                                 uint32_t aListIndex,
-                                uint8_t aIsAnimValItem)
+                                bool aIsAnimValItem)
 {
   NS_ASSERTION(!HasOwner(), "Inserting item that is already in a list");
 

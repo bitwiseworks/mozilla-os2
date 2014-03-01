@@ -13,24 +13,24 @@
 [NoInterfaceObject]
 interface XMLHttpRequestEventTarget : EventTarget {
   // event handlers
-  [TreatNonCallableAsNull, GetterInfallible=MainThread]
-  attribute Function? onloadstart;
+  [SetterThrows, GetterThrows=Workers]
+  attribute EventHandler onloadstart;
 
-  [TreatNonCallableAsNull, GetterInfallible=MainThread]
-  attribute Function? onprogress;
+  [SetterThrows, GetterThrows=Workers]
+  attribute EventHandler onprogress;
 
-  [TreatNonCallableAsNull, GetterInfallible=MainThread]
-  attribute Function? onabort;
+  [SetterThrows, GetterThrows=Workers]
+  attribute EventHandler onabort;
 
-  [TreatNonCallableAsNull, GetterInfallible=MainThread]
-  attribute Function? onerror;
+  [SetterThrows, GetterThrows=Workers]
+  attribute EventHandler onerror;
 
-  [TreatNonCallableAsNull, GetterInfallible=MainThread]
-  attribute Function? onload;
+  [SetterThrows, GetterThrows=Workers]
+  attribute EventHandler onload;
 
-  [TreatNonCallableAsNull, GetterInfallible=MainThread]
-  attribute Function? ontimeout;
+  [SetterThrows, GetterThrows=Workers]
+  attribute EventHandler ontimeout;
 
-  [TreatNonCallableAsNull, GetterInfallible=MainThread]
-  attribute Function? onloadend;
+  [SetterThrows, GetterThrows=Workers]
+  attribute EventHandler onloadend;
 };

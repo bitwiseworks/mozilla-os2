@@ -5,21 +5,36 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/AvailableMemoryTracker.h"
-#include "nsThread.h"
-#include "nsIObserverService.h"
-#include "mozilla/Services.h"
-#include "mozilla/Preferences.h"
-#include "nsWindowsDllInterceptor.h"
+
 #include "prinrval.h"
 #include "pratom.h"
 #include "prenv.h"
+
 #include "nsIMemoryReporter.h"
+#include "nsIObserver.h"
+#include "nsIObserverService.h"
+#include "nsIRunnable.h"
+#include "nsISupports.h"
 #include "nsPrintfCString.h"
-#include <windows.h>
+#include "nsThread.h"
+
+#include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
+
+#if defined(XP_WIN)
+#   include "nsWindowsDllInterceptor.h"
+#   include <windows.h>
+#endif
+
+#if defined(MOZ_MEMORY)
+#   include "mozmemory.h"
+#endif  // MOZ_MEMORY
 
 using namespace mozilla;
 
 namespace {
+
+#if defined(XP_WIN)
 
 // We don't want our diagnostic functions to call malloc, because that could
 // call VirtualAlloc, and we'd end up back in here!  So here are a few simple
@@ -77,12 +92,12 @@ void safe_write(const char *a)
 void safe_write(uint64_t x)
 {
   // 2^64 is 20 decimal digits.
-  const int max_len = 21;
+  const unsigned int max_len = 21;
   char buf[max_len];
   buf[max_len - 1] = '\0';
 
   uint32_t i;
-  for (i = max_len - 2; i >= 0 && x > 0; i--)
+  for (i = max_len - 2; i < max_len && x > 0; i--)
   {
     buf[i] = "0123456789"[x % 10];
     x /= 10;
@@ -330,7 +345,7 @@ class NumLowMemoryEventsReporter : public nsIMemoryReporter
   }
 };
 
-class NumLowVirtualMemoryEventsMemoryReporter : public NumLowMemoryEventsReporter
+class NumLowVirtualMemoryEventsMemoryReporter MOZ_FINAL : public NumLowMemoryEventsReporter
 {
 public:
   NS_DECL_ISUPPORTS
@@ -376,7 +391,7 @@ public:
 
 NS_IMPL_ISUPPORTS1(NumLowVirtualMemoryEventsMemoryReporter, nsIMemoryReporter)
 
-class NumLowCommitSpaceEventsMemoryReporter : public NumLowMemoryEventsReporter
+class NumLowCommitSpaceEventsMemoryReporter MOZ_FINAL : public NumLowMemoryEventsReporter
 {
 public:
   NS_DECL_ISUPPORTS
@@ -418,7 +433,7 @@ public:
 
 NS_IMPL_ISUPPORTS1(NumLowCommitSpaceEventsMemoryReporter, nsIMemoryReporter)
 
-class NumLowPhysicalMemoryEventsMemoryReporter : public NumLowMemoryEventsReporter
+class NumLowPhysicalMemoryEventsMemoryReporter MOZ_FINAL : public NumLowMemoryEventsReporter
 {
 public:
   NS_DECL_ISUPPORTS
@@ -461,6 +476,93 @@ public:
 
 NS_IMPL_ISUPPORTS1(NumLowPhysicalMemoryEventsMemoryReporter, nsIMemoryReporter)
 
+#endif // defined(XP_WIN)
+
+/**
+ * This runnable is executed in response to a memory-pressure event; we spin
+ * the event-loop when receiving the memory-pressure event in the hope that
+ * other observers will synchronously free some memory that we'll be able to
+ * purge here.
+ */
+class nsJemallocFreeDirtyPagesRunnable MOZ_FINAL : public nsIRunnable
+{
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIRUNNABLE
+};
+
+NS_IMPL_ISUPPORTS1(nsJemallocFreeDirtyPagesRunnable, nsIRunnable)
+
+NS_IMETHODIMP
+nsJemallocFreeDirtyPagesRunnable::Run()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+#if defined(MOZ_MEMORY)
+  jemalloc_free_dirty_pages();
+#endif
+
+  return NS_OK;
+}
+
+/**
+ * The memory pressure watcher is used for listening to memory-pressure events
+ * and reacting upon them. We use one instance per process currently only for
+ * cleaning up dirty unused pages held by jemalloc.
+ */
+class nsMemoryPressureWatcher MOZ_FINAL : public nsIObserver
+{
+public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+
+  void Init();
+
+private:
+  static bool sFreeDirtyPages;
+};
+
+NS_IMPL_ISUPPORTS1(nsMemoryPressureWatcher, nsIObserver)
+
+bool nsMemoryPressureWatcher::sFreeDirtyPages = false;
+
+/**
+ * Initialize and subscribe to the memory-pressure events. We subscribe to the
+ * observer service in this method and not in the constructor because we need
+ * to hold a strong reference to 'this' before calling the observer service.
+ */
+void
+nsMemoryPressureWatcher::Init()
+{
+  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+
+  if (os) {
+    os->AddObserver(this, "memory-pressure", /* ownsWeak */ false);
+  }
+
+  Preferences::AddBoolVarCache(&sFreeDirtyPages, "memory.free_dirty_pages",
+                               false);
+}
+
+/**
+ * Reacts to all types of memory-pressure events, launches a runnable to
+ * free dirty pages held by jemalloc.
+ */
+NS_IMETHODIMP
+nsMemoryPressureWatcher::Observe(nsISupports *subject, const char *topic,
+                                 const PRUnichar *data)
+{
+  MOZ_ASSERT(!strcmp(topic, "memory-pressure"), "Unknown topic");
+
+  if (sFreeDirtyPages) {
+    nsRefPtr<nsIRunnable> runnable = new nsJemallocFreeDirtyPagesRunnable();
+
+    NS_DispatchToMainThread(runnable);
+  }
+
+  return NS_OK;
+}
+
 } // anonymous namespace
 
 namespace mozilla {
@@ -468,7 +570,7 @@ namespace AvailableMemoryTracker {
 
 void Activate()
 {
-#if defined(_M_IX86)
+#if defined(_M_IX86) && defined(XP_WIN)
   MOZ_ASSERT(sInitialized);
   MOZ_ASSERT(!sHooksActive);
 
@@ -496,6 +598,10 @@ void Activate()
   }
   sHooksActive = true;
 #endif
+
+  // This object is held alive by the observer service.
+  nsRefPtr<nsMemoryPressureWatcher> watcher = new nsMemoryPressureWatcher();
+  watcher->Init();
 }
 
 void Init()
@@ -509,7 +615,7 @@ void Init()
   // process, because we aren't going to run out of virtual memory, and the
   // system is likely to have a fair bit of physical memory.
 
-#if defined(_M_IX86)
+#if defined(_M_IX86) && defined(XP_WIN)
   // Don't register the hooks if we're a build instrumented for PGO: If we're
   // an instrumented build, the compiler adds function calls all over the place
   // which may call VirtualAlloc; this makes it hard to prevent

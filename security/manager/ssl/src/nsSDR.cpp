@@ -8,6 +8,7 @@
 #include "plstr.h"
 #include "plbase64.h"
 
+#include "mozilla/Services.h"
 #include "nsMemory.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
@@ -18,17 +19,18 @@
 #include "nsITokenPasswordDialogs.h"
 
 #include "nsISecretDecoderRing.h"
+#include "nsCRT.h"
 #include "nsSDR.h"
 #include "nsNSSComponent.h"
 #include "nsNSSShutDown.h"
+#include "ScopedNSSTypes.h"
 
 #include "pk11func.h"
 #include "pk11sdr.h" // For PK11SDR_Encrypt, PK11SDR_Decrypt
 
 #include "ssl.h" // For SSL_ClearSessionCache
 
-#include "nsNSSCleaner.h"
-NSSCleanupAutoPtrClass(PK11SlotInfo, PK11_FreeSlot)
+using namespace mozilla;
 
 // Standard ISupports implementation
 // NOTE: Should these be the thread-safe versions?
@@ -51,14 +53,12 @@ Encrypt(unsigned char * data, int32_t dataLen, unsigned char * *result, int32_t 
 {
   nsNSSShutDownPreventionLock locker;
   nsresult rv = NS_OK;
-  PK11SlotInfo *slot = 0;
-  PK11SlotInfoCleaner tmpSlotCleaner(slot);
+  ScopedPK11SlotInfo slot;
   SECItem keyid;
   SECItem request;
   SECItem reply;
   SECStatus s;
   nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
-  if (!ctx) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
 
   slot = PK11_GetInternalKeySlot();
   if (!slot) { rv = NS_ERROR_NOT_AVAILABLE; goto loser; }
@@ -95,13 +95,11 @@ Decrypt(unsigned char * data, int32_t dataLen, unsigned char * *result, int32_t 
 {
   nsNSSShutDownPreventionLock locker;
   nsresult rv = NS_OK;
-  PK11SlotInfo *slot = 0;
-  PK11SlotInfoCleaner tmpSlotCleaner(slot);
+  ScopedPK11SlotInfo slot;
   SECStatus s;
   SECItem request;
   SECItem reply;
   nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
-  if (!ctx) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
 
   *result = 0;
   *_retval = 0;
@@ -140,12 +138,12 @@ EncryptString(const char *text, char **_retval)
   unsigned char *encrypted = 0;
   int32_t eLen;
 
-  if (text == nullptr || _retval == nullptr) {
+  if (!text || !_retval) {
     rv = NS_ERROR_INVALID_POINTER;
     goto loser;
   }
 
-  rv = Encrypt((unsigned char *)text, PL_strlen(text), &encrypted, &eLen);
+  rv = Encrypt((unsigned char *)text, strlen(text), &encrypted, &eLen);
   if (rv != NS_OK) { goto loser; }
 
   rv = encode(encrypted, eLen, _retval);
@@ -168,7 +166,7 @@ DecryptString(const char *crypt, char **_retval)
   unsigned char *decrypted = 0;
   int32_t decryptedLen;
 
-  if (crypt == nullptr || _retval == nullptr) {
+  if (!crypt || !_retval) {
     rv = NS_ERROR_INVALID_POINTER;
     goto loser;
   }
@@ -202,15 +200,11 @@ ChangePassword()
 {
   nsNSSShutDownPreventionLock locker;
   nsresult rv;
-  PK11SlotInfo *slot;
-
-  slot = PK11_GetInternalKeySlot();
+  ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
   if (!slot) return NS_ERROR_NOT_AVAILABLE;
 
   /* Convert UTF8 token name to UCS2 */
   NS_ConvertUTF8toUTF16 tokenName(PK11_GetTokenName(slot));
-
-  PK11_FreeSlot(slot);
 
   /* Get the set password dialog handler imlementation */
   nsCOMPtr<nsITokenPasswordDialogs> dialogs;
@@ -297,7 +291,7 @@ encode(const unsigned char *data, int32_t dataLen, char **_retval)
 {
   nsresult rv = NS_OK;
 
-  char *result = PL_Base64Encode((const char *)data, dataLen, NULL);
+  char *result = PL_Base64Encode((const char *)data, dataLen, nullptr);
   if (!result) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
 
   *_retval = NS_strdup(result);
@@ -312,7 +306,7 @@ nsresult nsSecretDecoderRing::
 decode(const char *data, unsigned char **result, int32_t * _retval)
 {
   nsresult rv = NS_OK;
-  uint32_t len = PL_strlen(data);
+  uint32_t len = strlen(data);
   int adjust = 0;
 
   /* Compute length adjustment */
@@ -321,7 +315,7 @@ decode(const char *data, unsigned char **result, int32_t * _retval)
     if (data[len-2] == '=') adjust++;
   }
 
-  *result = (unsigned char *)PL_Base64Decode(data, len, NULL);
+  *result = (unsigned char *)PL_Base64Decode(data, len, nullptr);
   if (!*result) { rv = NS_ERROR_ILLEGAL_VALUE; goto loser; }
 
   *_retval = (len*3)/4 - adjust;

@@ -6,7 +6,7 @@
 
 #include "nsISupports.idl"
 
-interface imgIDecoderObserver;
+interface imgINotificationObserver;
 interface imgIRequest;
 
 interface nsIChannel;
@@ -27,7 +27,7 @@ interface nsIChannelPolicy;
  * @version 0.3
  * @see imagelib2
  */
-[scriptable, uuid(20a5e3e9-0d5b-482c-9f41-942b5f19e5a3)]
+[scriptable, builtinclass, uuid(c8126129-8dac-43cd-b1ba-3896fba2dd01)]
 interface imgILoader : nsISupports
 {
   // Extra flags to pass to loadImage if you want a load to use CORS
@@ -47,8 +47,6 @@ interface imgILoader : nsISupports
    * @param aLoadFlags Load flags for the request
    * @param aCacheKey cache key to use for a load if the original
    *                  image came from a request that had post data
-   * @param aRequest A newly created, unused imgIRequest object or NULL for one to
-                     be created for you.
 
 
    * libpr0n does NOT keep a strong ref to the observer; this prevents
@@ -56,17 +54,16 @@ interface imgILoader : nsISupports
    * make sure to Cancel() the resulting request before the observer
    * goes away.
    */
-  imgIRequest loadImage(in nsIURI aURI,
-                        in nsIURI aInitialDocumentURL,
-                        in nsIURI aReferrerURI,
-                        in nsIPrincipal aLoadingPrincipal,
-                        in nsILoadGroup aLoadGroup,
-                        in imgIDecoderObserver aObserver,
-                        in nsISupports aCX,
-                        in nsLoadFlags aLoadFlags,
-                        in nsISupports cacheKey,
-                        in imgIRequest aRequest,
-                        in nsIChannelPolicy channelPolicy);
+  imgIRequest loadImageXPCOM(in nsIURI aURI,
+                             in nsIURI aInitialDocumentURL,
+                             in nsIURI aReferrerURI,
+                             in nsIPrincipal aLoadingPrincipal,
+                             in nsILoadGroup aLoadGroup,
+                             in imgINotificationObserver aObserver,
+                             in nsISupports aCX,
+                             in nsLoadFlags aLoadFlags,
+                             in nsISupports cacheKey,
+                             in nsIChannelPolicy channelPolicy);
 
   /**
    * Start the load and decode of an image.
@@ -85,15 +82,8 @@ interface imgILoader : nsISupports
    * reference cycles.  This means that callers of loadImageWithChannel should
    * make sure to Cancel() the resulting request before the observer goes away.
    */
-  imgIRequest loadImageWithChannel(in nsIChannel aChannel,
-                        in imgIDecoderObserver aObserver,
-                        in nsISupports cx,
-                        out nsIStreamListener aListener);
-
-  /**
-   * Checks if a decoder for the an image with the given mime type is available
-   * @param mimeType The type to find a decoder for
-   * @return true if a decoder is available, false otherwise
-   */
-  boolean supportImageWithMimeType(in string mimeType);
+  imgIRequest loadImageWithChannelXPCOM(in nsIChannel aChannel,
+                                        in imgINotificationObserver aObserver,
+                                        in nsISupports cx,
+                                        out nsIStreamListener aListener);
 };

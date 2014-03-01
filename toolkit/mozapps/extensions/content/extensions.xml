@@ -82,7 +82,7 @@
         ]]></getter>
         <setter><![CDATA[
           if (val != "average" || val != "user")
-            throw new Error("Invalid value");
+            throw Components.Exception("Invalid value", Components.results.NS_ERROR_ILLEGAL_VALUE);
           this.setAttribute("showrating", val);
           this._updateStars();
         ]]></setter>
@@ -876,6 +876,27 @@
                 <xul:button anonid="remove-btn" class="addon-control remove"
                             label="&cmd.uninstallAddon.label;"
                             oncommand="document.getBindingParent(this).uninstall();"/>
+                <xul:menulist anonid="state-menulist"
+                              class="addon-control state"
+                              tooltiptext="&cmd.stateMenu.tooltip;">
+                  <xul:menupopup>
+                    <xul:menuitem anonid="ask-to-activate-menuitem"
+                                  class="addon-control"
+                                  label="&cmd.askToActivate.label;"
+                                  tooltiptext="&cmd.askToActivate.tooltip;"
+                                  oncommand="document.getBindingParent(this).userDisabled = AddonManager.STATE_ASK_TO_ACTIVATE;"/>
+                    <xul:menuitem anonid="always-activate-menuitem"
+                                  class="addon-control"
+                                  label="&cmd.alwaysActivate.label;"
+                                  tooltiptext="&cmd.alwaysActivate.tooltip;"
+                                  oncommand="document.getBindingParent(this).userDisabled = false;"/>
+                    <xul:menuitem anonid="never-activate-menuitem"
+                                  class="addon-control"
+                                  label="&cmd.neverActivate.label;"
+                                  tooltiptext="&cmd.neverActivate.tooltip;"
+                                  oncommand="document.getBindingParent(this).userDisabled = true;"/>
+                  </xul:menupopup>
+                </xul:menulist>
               </xul:hbox>
             </xul:vbox>
           </xul:hbox>
@@ -957,6 +978,22 @@
       <field name="_description">
         document.getAnonymousElementByAttribute(this, "anonid",
                                                 "description");
+      </field>
+      <field name="_stateMenulist">
+        document.getAnonymousElementByAttribute(this, "anonid",
+                                                "state-menulist");
+      </field>
+      <field name="_askToActivateMenuitem">
+        document.getAnonymousElementByAttribute(this, "anonid",
+                                                "ask-to-activate-menuitem");
+      </field>
+      <field name="_alwaysActivateMenuitem">
+        document.getAnonymousElementByAttribute(this, "anonid",
+                                                "always-activate-menuitem");
+      </field>
+      <field name="_neverActivateMenuitem">
+        document.getAnonymousElementByAttribute(this, "anonid",
+                                                "never-activate-menuitem");
       </field>
       <field name="_preferencesBtn">
         document.getAnonymousElementByAttribute(this, "anonid",
@@ -1055,7 +1092,7 @@
           if (iconURL)
             this._icon.src = iconURL;
           else
-            this._icon.src = null;
+            this._icon.src = "";
 
           if (shouldShowVersionNumber(this.mAddon))
             this._version.value = this.mAddon.version;
@@ -1137,10 +1174,12 @@
             this.removeAttribute("notification");
 
             var pending = null;
-            ["enable", "disable", "install", "uninstall", "upgrade"].forEach(function(aOp) {
-              if (this.isPending(aOp))
-                pending = aOp;
-            }, this);
+            const PENDING_OPERATIONS = ["enable", "disable", "install",
+                                        "uninstall", "upgrade"];
+            for (let op of PENDING_OPERATIONS) {
+              if (this.isPending(op))
+                pending = op;
+            }
 
             this.setAttribute("pending", pending);
             this._pending.textContent = gStrings.ext.formatStringFromName(
@@ -1184,7 +1223,8 @@
               this._errorLink.value = gStrings.ext.GetStringFromName("notification.blocked.link");
               this._errorLink.href = this.mAddon.blocklistURL;
               this._errorLink.hidden = false;
-            } else if (!isUpgrade && !this.mAddon.isCompatible) {
+            } else if ((!isUpgrade && !this.mAddon.isCompatible) && (AddonManager.checkCompatibility
+            || (this.mAddon.blocklistState != Ci.nsIBlocklistService.STATE_SOFTBLOCKED))) {
               this.setAttribute("notification", "warning");
               this._warning.textContent = gStrings.ext.formatStringFromName(
                 "notification.incompatible",
@@ -1192,8 +1232,7 @@
               );
               this._warningLink.hidden = true;
               this._warningBtn.hidden = true;
-            } else if (!isUpgrade && (this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_SOFTBLOCKED ||
-                                      this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_NO_UPDATE)) {
+            } else if (!isUpgrade && this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_SOFTBLOCKED) {
               this.setAttribute("notification", "warning");
               this._warning.textContent = gStrings.ext.formatStringFromName(
                 "notification.softblocked",
@@ -1203,8 +1242,7 @@
               this._warningLink.href = this.mAddon.blocklistURL;
               this._warningLink.hidden = false;
               this._warningBtn.hidden = true;
-            } else if (!isUpgrade && (this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_OUTDATED ||
-                                      this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE)) {
+            } else if (!isUpgrade && this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_OUTDATED) {
               this.setAttribute("notification", "warning");
               this._warning.textContent = gStrings.ext.formatStringFromName(
                 "notification.outdated",
@@ -1214,29 +1252,70 @@
               this._warningLink.href = Services.urlFormatter.formatURLPref("plugins.update.url");
               this._warningLink.hidden = false;
               this._warningBtn.hidden = true;
+            } else if (!isUpgrade && this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE) {
+              this.setAttribute("notification", "error");
+              this._error.textContent = gStrings.ext.formatStringFromName(
+                "notification.vulnerableUpdatable",
+                [this.mAddon.name], 1
+              );
+              this._errorLink.value = gStrings.ext.GetStringFromName("notification.vulnerableUpdatable.link");
+              this._errorLink.href = this.mAddon.blocklistURL;
+              this._errorLink.hidden = false;
+            } else if (!isUpgrade && this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_NO_UPDATE) {
+              this.setAttribute("notification", "error");
+              this._error.textContent = gStrings.ext.formatStringFromName(
+                "notification.vulnerableNoUpdate",
+                [this.mAddon.name], 1
+              );
+              this._errorLink.value = gStrings.ext.GetStringFromName("notification.vulnerableNoUpdate.link");
+              this._errorLink.href = this.mAddon.blocklistURL;
+              this._errorLink.hidden = false;
             } else {
               this.removeAttribute("notification");
             }
           }
 
-          this._preferencesBtn.hidden = !this.mAddon.optionsURL;
+          this._preferencesBtn.hidden = (!this.mAddon.optionsURL) ||
+                                        this.mAddon.optionsType == AddonManager.OPTIONS_TYPE_INLINE_INFO;
 
-          if (this.hasPermission("enable")) {
-            this._enableBtn.hidden = false;
-            let tooltip = gViewController.commands["cmd_enableItem"]
-                                         .getTooltip(this.mAddon);
-            this._enableBtn.setAttribute("tooltiptext", tooltip);
+          let addonType = AddonManager.addonTypes[this.mAddon.type];
+          if (addonType.flags & AddonManager.TYPE_SUPPORTS_ASK_TO_ACTIVATE &&
+              (this.hasPermission("ask_to_activate") ||
+               this.hasPermission("enable") ||
+               this.hasPermission("disable"))) {
+            this._enableBtn.disabled = true;
+            this._disableBtn.disabled = true;
+            this._askToActivateMenuitem.disabled = !this.hasPermission("ask_to_activate");
+            this._alwaysActivateMenuitem.disabled = !this.hasPermission("enable");
+            this._neverActivateMenuitem.disabled = !this.hasPermission("disable");
+            if (this.mAddon.userDisabled === true) {
+              this._stateMenulist.selectedItem = this._neverActivateMenuitem;
+            } else if (this.mAddon.userDisabled == AddonManager.STATE_ASK_TO_ACTIVATE) {
+              this._stateMenulist.selectedItem = this._askToActivateMenuitem;
+            } else {
+              this._stateMenulist.selectedItem = this._alwaysActivateMenuitem;
+            }
+            this._stateMenulist.selectedItem.disabled = false;
+            this._stateMenulist.disabled = false;
           } else {
-            this._enableBtn.hidden = true;
-          }
+            this._stateMenulist.disabled = true;
+            if (this.hasPermission("enable")) {
+              this._enableBtn.hidden = false;
+              let tooltip = gViewController.commands["cmd_enableItem"]
+                                           .getTooltip(this.mAddon);
+              this._enableBtn.setAttribute("tooltiptext", tooltip);
+            } else {
+              this._enableBtn.hidden = true;
+            }
 
-          if (this.hasPermission("disable")) {
-            this._disableBtn.hidden = false;
-            let tooltip = gViewController.commands["cmd_disableItem"]
-                                         .getTooltip(this.mAddon);
-            this._disableBtn.setAttribute("tooltiptext", tooltip);
-          } else {
-            this._disableBtn.hidden = true;
+            if (this.hasPermission("disable")) {
+              this._disableBtn.hidden = false;
+              let tooltip = gViewController.commands["cmd_disableItem"]
+                                           .getTooltip(this.mAddon);
+              this._disableBtn.setAttribute("tooltiptext", tooltip);
+            } else {
+              this._disableBtn.hidden = true;
+            }
           }
 
           if (this.hasPermission("uninstall")) {
@@ -1494,7 +1573,8 @@
       <method name="onPropertyChanged">
         <parameter name="aProperties"/>
         <body><![CDATA[
-          if (aProperties.indexOf("appDisabled") != -1)
+          if (aProperties.indexOf("appDisabled") != -1 ||
+              aProperties.indexOf("userDisabled") != -1)
             this._updateState();
         ]]></body>
       </method>

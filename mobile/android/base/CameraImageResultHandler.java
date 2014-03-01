@@ -13,29 +13,43 @@ import android.text.format.Time;
 import android.util.Log;
 
 import java.io.File;
-import java.util.concurrent.SynchronousQueue;
+import java.util.Queue;
 
 class CameraImageResultHandler implements ActivityResultHandler {
     private static final String LOGTAG = "GeckoCameraImageResultHandler";
 
-    private final SynchronousQueue<String> mFilePickerResult;
+    private final Queue<String> mFilePickerResult;
+    private final ActivityHandlerHelper.FileResultHandler mHandler;
 
-    CameraImageResultHandler(SynchronousQueue<String> resultQueue) {
+    CameraImageResultHandler(Queue<String> resultQueue) {
         mFilePickerResult = resultQueue;
+        mHandler = null;
     }
 
-    public void onActivityResult(int resultCode, Intent data) {
-        try {
-            if (resultCode != Activity.RESULT_OK) {
-                mFilePickerResult.put("");
-                return;
-            }
+    /* Use this constructor to asynchronously listen for results */
+    public CameraImageResultHandler(ActivityHandlerHelper.FileResultHandler handler) {
+        mHandler = handler;
+        mFilePickerResult = null;
+    }
 
-            File file = new File(Environment.getExternalStorageDirectory(), sImageName);
-            sImageName = "";
-            mFilePickerResult.put(file.getAbsolutePath());
-        } catch (InterruptedException e) {
-            Log.i(LOGTAG, "error returning file picker result", e);
+    @Override
+    public void onActivityResult(int resultCode, Intent data) {
+        if (resultCode != Activity.RESULT_OK) {
+            if (mFilePickerResult != null) {
+                mFilePickerResult.offer("");
+            }
+            return;
+        }
+
+        File file = new File(Environment.getExternalStorageDirectory(), sImageName);
+        sImageName = "";
+
+        if (mFilePickerResult != null) {
+            mFilePickerResult.offer(file.getAbsolutePath());
+        }
+
+        if (mHandler != null) {
+            mHandler.gotFile(file.getAbsolutePath());
         }
     }
 

@@ -2,13 +2,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-let tempScope = {};
-Cu.import("resource:///modules/devtools/CssRuleView.jsm", tempScope);
-let CssRuleView = tempScope.CssRuleView;
-let _ElementStyle = tempScope._ElementStyle;
-let _editableField = tempScope._editableField;
-let inplaceEditor = tempScope._getInplaceEditorForSpan;
-
 let doc;
 let ruleDialog;
 let ruleView;
@@ -39,7 +32,7 @@ function startTest()
   doc.body.innerHTML = '<div id="testid" class="testclass">Styled Node</div>';
   let testElement = doc.getElementById("testid");
 
-  ruleDialog = openDialog("chrome://browser/content/devtools/cssruleview.xul",
+  ruleDialog = openDialog("chrome://browser/content/devtools/cssruleview.xhtml",
                           "cssruleviewtest",
                           "width=200,height=350");
   ruleDialog.addEventListener("load", function onLoad(evt) {
@@ -57,7 +50,6 @@ function testCancelNew()
 {
   // Start at the beginning: start to add a rule to the element's style
   // declaration, but leave it empty.
-
   let elementRuleEditor = ruleView.element.children[0]._ruleEditor;
   waitForEditorFocus(elementRuleEditor.element, function onNewElement(aEditor) {
     is(inplaceEditor(elementRuleEditor.newPropSpan), aEditor, "Next focused editor should be the new property editor.");
@@ -70,7 +62,6 @@ function testCancelNew()
     });
     aEditor.input.blur();
   });
-
   EventUtils.synthesizeMouse(elementRuleEditor.closeBrace, 1, 1,
                              { },
                              ruleDialog);
@@ -137,9 +128,10 @@ function testEditProperty()
     }
   });
 
-  EventUtils.synthesizeMouse(propEditor.nameSpan, 1, 1,
+  EventUtils.synthesizeMouse(propEditor.nameSpan, 32, 1,
                              { },
-                             ruleDialog);}
+                             ruleDialog);
+}
 
 function finishTest()
 {

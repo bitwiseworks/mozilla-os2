@@ -25,6 +25,8 @@ const TESTROOT = "http://example.com/" + RELATIVE_DIR;
 const TESTROOT2 = "http://example.org/" + RELATIVE_DIR;
 const CHROMEROOT = pathParts.join("/") + "/";
 const PREF_DISCOVERURL = "extensions.webservice.discoverURL";
+const PREF_DISCOVER_ENABLED = "extensions.getAddons.showPane";
+const PREF_XPI_ENABLED = "xpinstall.enabled";
 const PREF_UPDATEURL = "extensions.update.url";
 const PREF_GETADDONS_CACHE_ENABLED = "extensions.getAddons.cache.enabled";
 
@@ -69,35 +71,35 @@ var gRestorePrefs = [{name: PREF_LOGGING_ENABLED},
                      {name: PREF_STRICT_COMPAT},
                      {name: PREF_CHECK_COMPATIBILITY}];
 
-gRestorePrefs.forEach(function(aPref) {
-  if (!Services.prefs.prefHasUserValue(aPref.name)) {
-    aPref.type = "clear";
-    return;
+for (let pref of gRestorePrefs) {
+  if (!Services.prefs.prefHasUserValue(pref.name)) {
+    pref.type = "clear";
+    continue;
   }
-  aPref.type = Services.prefs.getPrefType(aPref.name);
-  if (aPref.type == Services.prefs.PREF_BOOL)
-    aPref.value = Services.prefs.getBoolPref(aPref.name);
-  else if (aPref.type == Services.prefs.PREF_INT)
-    aPref.value = Services.prefs.getIntPref(aPref.name);
-  else if (aPref.type == Services.prefs.PREF_STRING)
-    aPref.value = Services.prefs.getCharPref(aPref.name);
-});
+  pref.type = Services.prefs.getPrefType(pref.name);
+  if (pref.type == Services.prefs.PREF_BOOL)
+    pref.value = Services.prefs.getBoolPref(pref.name);
+  else if (pref.type == Services.prefs.PREF_INT)
+    pref.value = Services.prefs.getIntPref(pref.name);
+  else if (pref.type == Services.prefs.PREF_STRING)
+    pref.value = Services.prefs.getCharPref(pref.name);
+}
 
 // Turn logging on for all tests
 Services.prefs.setBoolPref(PREF_LOGGING_ENABLED, true);
 
 registerCleanupFunction(function() {
   // Restore prefs
-  gRestorePrefs.forEach(function(aPref) {
-    if (aPref.type == "clear")
-      Services.prefs.clearUserPref(aPref.name);
-    else if (aPref.type == Services.prefs.PREF_BOOL)
-      Services.prefs.setBoolPref(aPref.name, aPref.value);
-    else if (aPref.type == Services.prefs.PREF_INT)
-      Services.prefs.setIntPref(aPref.name, aPref.value);
-    else if (aPref.type == Services.prefs.PREF_STRING)
-      Services.prefs.setCharPref(aPref.name, aPref.value);
-  });
+  for (let pref of gRestorePrefs) {
+    if (pref.type == "clear")
+      Services.prefs.clearUserPref(pref.name);
+    else if (pref.type == Services.prefs.PREF_BOOL)
+      Services.prefs.setBoolPref(pref.name, pref.value);
+    else if (pref.type == Services.prefs.PREF_INT)
+      Services.prefs.setIntPref(pref.name, pref.value);
+    else if (pref.type == Services.prefs.PREF_STRING)
+      Services.prefs.setCharPref(pref.name, pref.value);
+  }
 
   // Throw an error if the add-ons manager window is open anywhere
   var windows = Services.wm.getEnumerator("Addons:Manager");
@@ -122,13 +124,13 @@ registerCleanupFunction(function() {
   // We can for now know that getAllInstalls actually calls its callback before
   // it returns so this will complete before the next test start.
   AddonManager.getAllInstalls(function(aInstalls) {
-    aInstalls.forEach(function(aInstall) {
-      if (aInstall instanceof MockInstall)
-        return;
+    for (let install of aInstalls) {
+      if (install instanceof MockInstall)
+        continue;
 
-      ok(false, "Should not have seen an install of " + aInstall.sourceURI.spec + " in state " + aInstall.state);
-      aInstall.cancel();
-    });
+      ok(false, "Should not have seen an install of " + install.sourceURI.spec + " in state " + install.state);
+      install.cancel();
+    }
   });
 });
 
@@ -505,7 +507,7 @@ CertOverrideListener.prototype = {
         aIID.equals(Ci.nsISupports))
       return this;
 
-    throw Components.results.NS_ERROR_NO_INTERFACE;
+    throw Components.Exception("No interface", Components.results.NS_ERROR_NO_INTERFACE);
   },
 
   notifyCertProblem: function (socketInfo, sslStatus, targetHost) {
@@ -663,20 +665,20 @@ MockProvider.prototype = {
    */
   createAddons: function MP_createAddons(aAddonProperties) {
     var newAddons = [];
-    aAddonProperties.forEach(function(aAddonProp) {
-      var addon = new MockAddon(aAddonProp.id);
-      for (var prop in aAddonProp) {
+    for (let addonProp of aAddonProperties) {
+      let addon = new MockAddon(addonProp.id);
+      for (let prop in addonProp) {
         if (prop == "id")
           continue;
         if (prop == "applyBackgroundUpdates") {
-          addon._applyBackgroundUpdates = aAddonProp[prop];
+          addon._applyBackgroundUpdates = addonProp[prop];
           continue;
         }
         if (prop == "appDisabled") {
-          addon._appDisabled = aAddonProp[prop];
+          addon._appDisabled = addonProp[prop];
           continue;
         }
-        addon[prop] = aAddonProp[prop];
+        addon[prop] = addonProp[prop];
       }
       if (!addon.optionsType && !!addon.optionsURL)
         addon.optionsType = AddonManager.OPTIONS_TYPE_DIALOG;
@@ -686,7 +688,7 @@ MockProvider.prototype = {
 
       this.addAddon(addon);
       newAddons.push(addon);
-    }, this);
+    }
 
     return newAddons;
   },
@@ -701,25 +703,25 @@ MockProvider.prototype = {
    */
   createInstalls: function MP_createInstalls(aInstallProperties) {
     var newInstalls = [];
-    aInstallProperties.forEach(function(aInstallProp) {
-      var install = new MockInstall(aInstallProp.name || null,
-                                    aInstallProp.type || null,
+    for (let installProp of aInstallProperties) {
+      let install = new MockInstall(installProp.name || null,
+                                    installProp.type || null,
                                     null);
-      for (var prop in aInstallProp) {
+      for (let prop in installProp) {
         switch (prop) {
           case "name":
           case "type":
             break;
           case "sourceURI":
-            install[prop] = NetUtil.newURI(aInstallProp[prop]);
+            install[prop] = NetUtil.newURI(installProp[prop]);
             break;
           default:
-            install[prop] = aInstallProp[prop];
+            install[prop] = installProp[prop];
         }
       }
       this.addInstall(install);
       newInstalls.push(install);
-    }, this);
+    }
 
     return newInstalls;
   },
@@ -737,9 +739,8 @@ MockProvider.prototype = {
    * Called when the provider should shutdown.
    */
   shutdown: function MP_shutdown() {
-    this.callbackTimers.forEach(function(aTimer) {
-      aTimer.cancel();
-    });
+    for (let timer of this.callbackTimers)
+      timer.cancel();
     this.callbackTimers = [];
 
     this.started = false;
@@ -1044,7 +1045,7 @@ MockAddon.prototype = {
 
   uninstall: function() {
     if (this.pendingOperations & AddonManager.PENDING_UNINSTALL)
-      throw new Error("Add-on is already pending uninstall");
+      throw Components.Exception("Add-on is already pending uninstall");
 
     var needsRestart = !!(this.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_UNINSTALL);
     this.pendingOperations |= AddonManager.PENDING_UNINSTALL;
@@ -1057,7 +1058,7 @@ MockAddon.prototype = {
 
   cancelUninstall: function() {
     if (!(this.pendingOperations & AddonManager.PENDING_UNINSTALL))
-      throw new Error("Add-on is not pending uninstall");
+      throw Components.Exception("Add-on is not pending uninstall");
 
     this.pendingOperations -= AddonManager.PENDING_UNINSTALL;
     AddonManagerPrivate.callAddonListeners("onOperationCancelled", this);
@@ -1218,18 +1219,45 @@ MockInstall.prototype = {
 
     // Call test listeners after standard listeners to remove race condition
     // between standard and test listeners
-    this.testListeners.forEach(function(aListener) {
+    for (let listener of this.testListeners) {
       try {
-        if (aMethod in aListener)
-          if (aListener[aMethod].call(aListener, this, this.addon) === false)
+        if (aMethod in listener)
+          if (listener[aMethod].call(listener, this, this.addon) === false)
             result = false;
       }
       catch (e) {
         ok(false, "Test listener threw exception: " + e);
       }
-    }, this);
+    }
 
     return result;
   }
 };
 
+function waitForCondition(condition, nextTest, errorMsg) {
+  let tries = 0;
+  let interval = setInterval(function() {
+    if (tries >= 30) {
+      ok(false, errorMsg);
+      moveOn();
+    }
+    if (condition()) {
+      moveOn();
+    }
+    tries++;
+  }, 100);
+  let moveOn = function() { clearInterval(interval); nextTest(); };
+}
+
+function getTestPluginTag() {
+  let ph = Cc["@mozilla.org/plugin/host;1"].getService(Ci.nsIPluginHost);
+  let tags = ph.getPluginTags();
+
+  // Find the test plugin
+  for (let i = 0; i < tags.length; i++) {
+    if (tags[i].name == "Test Plug-in")
+      return tags[i];
+  }
+  ok(false, "Unable to find plugin");
+  return null;
+}

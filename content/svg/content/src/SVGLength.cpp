@@ -7,13 +7,14 @@
 
 #include "SVGLength.h"
 #include "nsSVGElement.h"
-#include "nsSVGSVGElement.h"
+#include "mozilla/dom/SVGSVGElement.h"
 #include "nsString.h"
-#include "nsSVGUtils.h"
 #include "nsTextFormatter.h"
 #include "prdtoa.h"
 #include "nsMathUtils.h"
+#include "SVGContentUtils.h"
 #include <limits>
+#include <algorithm>
 
 namespace mozilla {
 
@@ -57,7 +58,7 @@ SVGLength::SetValueFromString(const nsAString &aValue)
     tmpUnit = GetUnitTypeForString(
                 Substring(aValue, unit - str, theRest - unit));
     if (tmpUnit == nsIDOMSVGLength::SVG_LENGTHTYPE_UNKNOWN) {
-      // nsSVGUtils::ReportToConsole
+      // SVGContentUtils::ReportToConsole
       return false;
     }
     while (*theRest && IsSVGWhitespace(*theRest)) {
@@ -97,15 +98,15 @@ inline static float GetAbsUnitsPerAbsUnit(uint8_t aUnits, uint8_t aPerUnit)
 
   float CSSAbsoluteUnitConversionFactors[5][5] = { // columns: cm, mm, in, pt, pc
     // cm per...:
-    { 1.0, 0.1, 2.54, 0.035277777777777778, 0.42333333333333333 },
+    { 1.0f, 0.1f, 2.54f, 0.035277777777777778f, 0.42333333333333333f },
     // mm per...:
-    { 10.0, 1.0, 25.4, 0.35277777777777778, 4.2333333333333333 },
+    { 10.0f, 1.0f, 25.4f, 0.35277777777777778f, 4.2333333333333333f },
     // in per...:
-    { 0.39370078740157481, 0.039370078740157481, 1.0, 0.013888888888888889, 0.16666666666666667 },
+    { 0.39370078740157481f, 0.039370078740157481f, 1.0f, 0.013888888888888889f, 0.16666666666666667f },
     // pt per...:
-    { 28.346456692913386, 2.8346456692913386, 72.0, 1.0, 12.0 },
+    { 28.346456692913386f, 2.8346456692913386f, 72.0f, 1.0f, 12.0f },
     // pc per...:
-    { 2.3622047244094489, 0.23622047244094489, 6.0, 0.083333333333333333, 1.0 }
+    { 2.3622047244094489f, 0.23622047244094489f, 6.0f, 0.083333333333333333f, 1.0f }
   };
 
   // First absolute unit is SVG_LENGTHTYPE_CM = 6
@@ -178,9 +179,9 @@ SVGLength::GetUserUnitsPerUnit(const nsSVGElement *aElement, uint8_t aAxis) cons
     case nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE:
       return GetUserUnitsPerPercent(aElement, aAxis);
     case nsIDOMSVGLength::SVG_LENGTHTYPE_EMS:
-      return nsSVGUtils::GetFontSize(const_cast<nsSVGElement*>(aElement));
+      return SVGContentUtils::GetFontSize(const_cast<nsSVGElement*>(aElement));
     case nsIDOMSVGLength::SVG_LENGTHTYPE_EXS:
-      return nsSVGUtils::GetFontXHeight(const_cast<nsSVGElement*>(aElement));
+      return SVGContentUtils::GetFontXHeight(const_cast<nsSVGElement*>(aElement));
     default:
       NS_NOTREACHED("Unknown unit type");
       return std::numeric_limits<float>::quiet_NaN();
@@ -191,9 +192,9 @@ SVGLength::GetUserUnitsPerUnit(const nsSVGElement *aElement, uint8_t aAxis) cons
 SVGLength::GetUserUnitsPerPercent(const nsSVGElement *aElement, uint8_t aAxis)
 {
   if (aElement) {
-    nsSVGSVGElement *viewportElement = const_cast<nsSVGElement*>(aElement)->GetCtx();
+    dom::SVGSVGElement *viewportElement = aElement->GetCtx();
     if (viewportElement) {
-      return NS_MAX(viewportElement->GetLength(aAxis) / 100.0f, 0.0f);
+      return std::max(viewportElement->GetLength(aAxis) / 100.0f, 0.0f);
     }
   }
   return std::numeric_limits<float>::quiet_NaN();

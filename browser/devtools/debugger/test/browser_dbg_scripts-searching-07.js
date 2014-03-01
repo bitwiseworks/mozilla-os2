@@ -4,12 +4,18 @@
 
 const TAB_URL = EXAMPLE_URL + "browser_dbg_script-switching.html";
 
+/**
+ * Tests if the global search results are expanded on scroll or click, and
+ * clicking matches makes the source editor shows the correct script and
+ * makes a selection based on the match.
+ */
+
 var gPane = null;
 var gTab = null;
 var gDebuggee = null;
 var gDebugger = null;
 var gEditor = null;
-var gScripts = null;
+var gSources = null;
 var gSearchView = null;
 var gSearchBox = null;
 
@@ -22,7 +28,17 @@ function test()
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
+    gDebugger.SourceResults.prototype.alwaysExpand = false;
+
+    gDebugger.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
+      let url = aEvent.detail.url;
+      if (url.indexOf("-02.js") != -1) {
+        scriptShown = true;
+        gDebugger.removeEventListener(aEvent.type, _onEvent);
+        runTest();
+      }
+    });
 
     gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
       framesAdded = true;
@@ -30,15 +46,6 @@ function test()
     });
 
     gDebuggee.firstCall();
-  });
-
-  window.addEventListener("Debugger:ScriptShown", function _onEvent(aEvent) {
-    let url = aEvent.detail.url;
-    if (url.indexOf("-02.js") != -1) {
-      scriptShown = true;
-      window.removeEventListener(aEvent.type, _onEvent);
-      runTest();
-    }
   });
 
   function runTest()
@@ -50,23 +57,21 @@ function test()
 }
 
 function testScriptSearching() {
-  gDebugger.DebuggerController.activeThread.resume(function() {
-    gEditor = gDebugger.DebuggerView.editor;
-    gScripts = gDebugger.DebuggerView.Scripts;
-    gSearchView = gDebugger.DebuggerView.GlobalSearch;
-    gSearchBox = gScripts._searchbox;
+  gEditor = gDebugger.DebuggerView.editor;
+  gSources = gDebugger.DebuggerView.Sources;
+  gSearchView = gDebugger.DebuggerView.GlobalSearch;
+  gSearchBox = gDebugger.DebuggerView.Filtering._searchbox;
 
-    doSearch();
-  });
+  doSearch();
 }
 
 function doSearch() {
-  window.addEventListener("Debugger:GlobalSearch:MatchFound", function _onEvent(aEvent) {
-    window.removeEventListener(aEvent.type, _onEvent);
-    info("Current script url:\n" + gScripts.selected + "\n");
+  gDebugger.addEventListener("Debugger:GlobalSearch:MatchFound", function _onEvent(aEvent) {
+    gDebugger.removeEventListener(aEvent.type, _onEvent);
+    info("Current script url:\n" + gSources.selectedValue + "\n");
     info("Debugger editor text:\n" + gEditor.getText() + "\n");
 
-    let url = gScripts.selected;
+    let url = gSources.selectedValue;
     if (url.indexOf("-02.js") != -1) {
       executeSoon(function() {
         continueTest();
@@ -81,7 +86,7 @@ function doSearch() {
 }
 
 function continueTest() {
-  let scriptResults = gDebugger.document.querySelectorAll(".dbg-script-results");
+  let scriptResults = gDebugger.document.querySelectorAll(".dbg-source-results");
   is(scriptResults.length, 2,
     "There should be matches found in two scripts.");
 
@@ -92,71 +97,79 @@ function continueTest() {
 }
 
 function testScrollToExpand(scriptResults) {
-  is(scriptResults[0].expanded, true,
+  let item0 = gDebugger.SourceResults.getItemForElement(scriptResults[0]);
+  let item1 = gDebugger.SourceResults.getItemForElement(scriptResults[1]);
+
+  is(item0.instance.expanded, true,
     "The first script results should automatically be expanded.");
-  is(scriptResults[1].expanded, false,
+  is(item1.instance.expanded, false,
     "The first script results should not be automatically expanded.");
 
   gSearchView._forceExpandResults = true;
-  gSearchView._onResultsScroll();
+  gSearchView._onScroll();
 
-  is(scriptResults[0].expanded, true,
+  is(item0.instance.expanded, true,
     "The first script results should be expanded after scrolling.");
-  is(scriptResults[1].expanded, true,
+  is(item1.instance.expanded, true,
     "The second script results should be expanded after scrolling.");
 }
 
 function testExpandCollapse(scriptResults) {
+  let item0 = gDebugger.SourceResults.getItemForElement(scriptResults[0]);
+  let item1 = gDebugger.SourceResults.getItemForElement(scriptResults[1]);
   let firstHeader = scriptResults[0].querySelector(".dbg-results-header");
   let secondHeader = scriptResults[1].querySelector(".dbg-results-header");
 
   EventUtils.sendMouseEvent({ type: "click" }, firstHeader);
   EventUtils.sendMouseEvent({ type: "click" }, secondHeader);
 
-  is(scriptResults[0].expanded, false,
+  is(item0.instance.expanded, false,
     "The first script results should be collapsed on click.")
-  is(scriptResults[1].expanded, false,
+  is(item1.instance.expanded, false,
     "The second script results should be collapsed on click.")
 
   EventUtils.sendMouseEvent({ type: "click" }, firstHeader);
   EventUtils.sendMouseEvent({ type: "click" }, secondHeader);
 
-  is(scriptResults[0].expanded, true,
+  is(item0.instance.expanded, true,
     "The first script results should be expanded on an additional click.");
-  is(scriptResults[1].expanded, true,
+  is(item1.instance.expanded, true,
     "The second script results should be expanded on an additional click.");
 }
 
 function testAdditionalScrollToExpand(scriptResults) {
+  let item0 = gDebugger.SourceResults.getItemForElement(scriptResults[0]);
+  let item1 = gDebugger.SourceResults.getItemForElement(scriptResults[1]);
   let firstHeader = scriptResults[0].querySelector(".dbg-results-header");
   let secondHeader = scriptResults[1].querySelector(".dbg-results-header");
 
   EventUtils.sendMouseEvent({ type: "click" }, firstHeader);
   EventUtils.sendMouseEvent({ type: "click" }, secondHeader);
 
-  is(scriptResults[0].expanded, false,
+  is(item0.instance.expanded, false,
     "The first script results should be recollapsed on click.")
-  is(scriptResults[1].expanded, false,
+  is(item1.instance.expanded, false,
     "The second script results should be recollapsed on click.")
 
-  gSearchView._onResultsScroll();
+  gSearchView._onScroll();
 
-  is(scriptResults[0].expanded, false,
+  is(item0.instance.expanded, false,
     "The first script results should not be automatically re-expanded on scroll after a user collapsed them.")
-  is(scriptResults[1].expanded, false,
+  is(item1.instance.expanded, false,
     "The second script results should not be automatically re-expanded on scroll after a user collapsed them.")
 }
 
 function testClickLineToJump(scriptResults, callbacks) {
   let targetResults = scriptResults[0];
   let firstHeader = targetResults.querySelector(".dbg-results-header");
-  firstHeader.parentNode.expand()
+  let firstHeaderItem = gDebugger.SourceResults.getItemForElement(firstHeader);
+  firstHeaderItem.instance.expand()
 
-  is(firstHeader.parentNode.expanded, true,
+  is(firstHeaderItem.instance.expanded, true,
     "The first script results should be expanded after direct function call.");
 
-  window.addEventListener("Debugger:ScriptShown", function _onEvent(aEvent) {
-    window.removeEventListener(aEvent.type, _onEvent);
+  gDebugger.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
+    gDebugger.removeEventListener(aEvent.type, _onEvent);
     info("Current script url:\n" + aEvent.detail.url + "\n");
     info("Debugger editor text:\n" + gEditor.getText() + "\n");
 
@@ -167,7 +180,7 @@ function testClickLineToJump(scriptResults, callbacks) {
         ok(gEditor.getCaretPosition().line == 0 &&
            gEditor.getCaretPosition().col == 4,
           "The editor didn't jump to the correct line. (1)");
-        is(gScripts.visibleItemsCount, 2,
+        is(gSources.visibleItems.length, 2,
           "Not all the correct scripts are shown after the search. (1)");
 
         callbacks[0](scriptResults, callbacks.slice(1));
@@ -177,20 +190,21 @@ function testClickLineToJump(scriptResults, callbacks) {
     }
   });
 
-  let firstLine = targetResults.querySelector(".line-contents");
+  let firstLine = targetResults.querySelector(".dbg-results-line-contents");
   EventUtils.sendMouseEvent({ type: "click" }, firstLine);
 }
 
 function testClickMatchToJump(scriptResults, callbacks) {
   let targetResults = scriptResults[1];
   let secondHeader = targetResults.querySelector(".dbg-results-header");
-  secondHeader.parentNode.expand()
+  let secondHeaderItem = gDebugger.SourceResults.getItemForElement(secondHeader);
+  secondHeaderItem.instance.expand()
 
-  is(secondHeader.parentNode.expanded, true,
+  is(secondHeaderItem.instance.expanded, true,
     "The second script results should be expanded after direct function call.");
 
-  window.addEventListener("Debugger:ScriptShown", function _onEvent(aEvent) {
-    window.removeEventListener(aEvent.type, _onEvent);
+  gDebugger.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
+    gDebugger.removeEventListener(aEvent.type, _onEvent);
     info("Current script url:\n" + aEvent.detail.url + "\n");
     info("Debugger editor text:\n" + gEditor.getText() + "\n");
 
@@ -201,7 +215,7 @@ function testClickMatchToJump(scriptResults, callbacks) {
         ok(gEditor.getCaretPosition().line == 5 &&
            gEditor.getCaretPosition().col == 5,
           "The editor didn't jump to the correct line. (1)");
-        is(gScripts.visibleItemsCount, 2,
+        is(gSources.visibleItems.length, 2,
           "Not all the correct scripts are shown after the search. (1)");
 
         callbacks[0]();
@@ -211,7 +225,7 @@ function testClickMatchToJump(scriptResults, callbacks) {
     }
   });
 
-  let matches = targetResults.querySelectorAll(".string[match=true]");
+  let matches = targetResults.querySelectorAll(".dbg-results-line-contents-string[match=true]");
   let lastMatch = matches[matches.length - 1];
   EventUtils.sendMouseEvent({ type: "click" }, lastMatch);
 }
@@ -230,7 +244,7 @@ function append(text) {
   gSearchBox.focus();
 
   for (let i = 0; i < text.length; i++) {
-    EventUtils.sendChar(text[i]);
+    EventUtils.sendChar(text[i], gDebugger);
   }
   info("Editor caret position: " + gEditor.getCaretPosition().toSource() + "\n");
 }
@@ -242,6 +256,7 @@ registerCleanupFunction(function() {
   gDebuggee = null;
   gDebugger = null;
   gEditor = null;
-  gScripts = null;
+  gSources = null;
+  gSearchView = null;
   gSearchBox = null;
 });

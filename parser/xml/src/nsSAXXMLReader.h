@@ -16,11 +16,11 @@
 #include "nsISAXDTDHandler.h"
 #include "nsISAXErrorHandler.h"
 #include "nsISAXLexicalHandler.h"
+#include "nsIMozSAXXMLDeclarationHandler.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 
 #define NS_SAXXMLREADER_CONTRACTID "@mozilla.org/saxparser/xmlreader;1"
-#define NS_SAXXMLREADER_CLASSNAME "SAX XML Reader"
 #define NS_SAXXMLREADER_CID  \
 { 0xab1da296, 0x6125, 0x40ba, \
 { 0x96, 0xd0, 0x47, 0xa8, 0x28, 0x2a, 0xe3, 0xdb} }
@@ -79,6 +79,7 @@ private:
   nsCOMPtr<nsISAXDTDHandler> mDTDHandler;
   nsCOMPtr<nsISAXErrorHandler> mErrorHandler;
   nsCOMPtr<nsISAXLexicalHandler> mLexicalHandler;
+  nsCOMPtr<nsIMozSAXXMLDeclarationHandler> mDeclarationHandler;
   nsCOMPtr<nsIURI> mBaseURI;
   nsCOMPtr<nsIStreamListener> mListener;
   nsCOMPtr<nsIRequestObserver> mParserObserver;
@@ -94,6 +95,9 @@ private:
                           nsString &aQName);
   nsString mPublicId;
   nsString mSystemId;
+
+  // Feature flags
+  bool mEnableNamespacePrefixes;
 };
 
 #endif // nsSAXXMLReader_h__

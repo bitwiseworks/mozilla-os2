@@ -38,12 +38,6 @@ richlistitem[type="download"]:not([selected]) button {
 .download-state:not(          [state="4"]  /* Paused             */)
                                            .downloadResumeMenuItem,
 
-.download-state:not(:-moz-any([state="-1"],/* Starting (initial) */
-                              [state="5"], /* Starting (queued)  */
-                              [state="0"], /* Downloading        */
-                              [state="4"]) /* Paused             */)
-                                           .downloadCancel,
-
 .download-state:not(:-moz-any([state="2"], /* Failed             */
                               [state="4"]) /* Paused             */)
                                            .downloadCancelMenuItem,
@@ -54,19 +48,13 @@ richlistitem[type="download"]:not([selected]) button {
                               [state="6"], /* Blocked (parental) */
                               [state="8"], /* Blocked (dirty)    */
                               [state="9"]) /* Blocked (policy)   */)
-                                           .downloadRemoveFromListMenuItem,
-
-.download-state:not(:-moz-any([state="2"], /* Failed             */
-                              [state="3"]) /* Canceled           */)
-                                           .downloadRetry,
-
-.download-state:not(          [state="1"]  /* Finished           */)
-                                           .downloadShow,
+                                           .downloadRemoveFromHistoryMenuItem,
 
 .download-state:not(:-moz-any([state="-1"],/* Starting (initial) */
-                              [state="5"], /* Starting (queued)  */
                               [state="0"], /* Downloading        */
-                              [state="4"]) /* Paused             */)
+                              [state="1"], /* Finished           */
+                              [state="4"], /* Paused             */
+                              [state="5"]) /* Starting (queued)  */)
                                            .downloadShowMenuItem,
 
 .download-state[state="7"]                 .downloadCommandsSeparator
@@ -75,7 +63,20 @@ richlistitem[type="download"]:not([selected]) button {
   display: none;
 }
 
-/*** Visibility of controls inside the downloads indicator ***/
+/*** Visibility of download buttons and indicator controls. ***/
+
+.download-state:not(:-moz-any([state="-1"],/* Starting (initial) */
+                              [state="5"], /* Starting (queued)  */
+                              [state="0"], /* Downloading        */
+                              [state="4"]) /* Paused             */)
+                                           .downloadCancel,
+
+.download-state:not(:-moz-any([state="2"], /* Failed             */
+                              [state="3"]) /* Canceled           */)
+                                           .downloadRetry,
+
+.download-state:not(          [state="1"]  /* Finished           */)
+                                           .downloadShow,
 
 #downloads-indicator:-moz-any([progress],
                               [counter],
@@ -88,4 +89,35 @@ richlistitem[type="download"]:not([selected]) button {
 
 {
   visibility: hidden;
+}
+
+.download-state[state="1"]:not([exists]) .downloadShow
+{
+  display: none;
+}
+
+#downloadsSummary:not([inprogress]) > vbox > #downloadsSummaryProgress,
+#downloadsSummary:not([inprogress]) > vbox > #downloadsSummaryDetails,
+#downloadsFooter[showingsummary] > #downloadsHistory,
+#downloadsFooter:not([showingsummary]) > #downloadsSummary
+{
+  display: none;
+}
+
+/* Hacks for toolbar full and text modes, until bug 573329 removes them */
+
+toolbar[mode="text"] > #downloads-indicator {
+  display: -moz-box;
+  -moz-box-orient: vertical;
+  -moz-box-pack: center;
+}
+
+toolbar[mode="text"] > #downloads-indicator > .toolbarbutton-text {
+  -moz-box-ordinal-group: 1;
+}
+
+toolbar[mode="text"] > #downloads-indicator > .toolbarbutton-icon {
+  display: -moz-box;
+  -moz-box-ordinal-group: 2;
+  visibility: collapse;
 }

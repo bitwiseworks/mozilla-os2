@@ -175,7 +175,7 @@ nsInputStreamTransport::Read(char *buf, uint32_t count, uint32_t *result)
         mFirstTime = false;
         if (mOffset != 0) {
             // read from current position if offset equal to max
-            if (mOffset != LL_MAXUINT) {
+            if (mOffset != UINT64_MAX) {
                 nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mSource);
                 if (seekable)
                     seekable->Seek(nsISeekableStream::NS_SEEK_SET, mOffset);
@@ -186,14 +186,14 @@ nsInputStreamTransport::Read(char *buf, uint32_t count, uint32_t *result)
     }
 
     // limit amount read
-    uint32_t max = mLimit - mOffset;
+    uint64_t max = mLimit - mOffset;
     if (max == 0) {
         *result = 0;
         return NS_OK;
     }
-        
+
     if (count > max)
-        count = max;
+        count = static_cast<uint32_t>(max);
 
     nsresult rv = mSource->Read(buf, count, result);
 
@@ -375,7 +375,7 @@ nsOutputStreamTransport::Write(const char *buf, uint32_t count, uint32_t *result
         mFirstTime = false;
         if (mOffset != 0) {
             // write to current position if offset equal to max
-            if (mOffset != LL_MAXUINT) {
+            if (mOffset != UINT64_MAX) {
                 nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mSink);
                 if (seekable)
                     seekable->Seek(nsISeekableStream::NS_SEEK_SET, mOffset);
@@ -386,14 +386,14 @@ nsOutputStreamTransport::Write(const char *buf, uint32_t count, uint32_t *result
     }
 
     // limit amount written
-    uint32_t max = mLimit - mOffset;
+    uint64_t max = mLimit - mOffset;
     if (max == 0) {
         *result = 0;
         return NS_OK;
     }
-        
+
     if (count > max)
-        count = max;
+        count = static_cast<uint32_t>(max);
 
     nsresult rv = mSink->Write(buf, count, result);
 
@@ -442,10 +442,10 @@ nsStreamTransportService::Init()
     NS_ENSURE_STATE(mPool);
 
     // Configure the pool
-    mPool->SetThreadLimit(4);
-    mPool->SetIdleThreadLimit(1);
-    mPool->SetIdleThreadTimeout(PR_SecondsToInterval(60));
     mPool->SetName(NS_LITERAL_CSTRING("StreamTrans"));
+    mPool->SetThreadLimit(25);
+    mPool->SetIdleThreadLimit(1);
+    mPool->SetIdleThreadTimeout(PR_SecondsToInterval(30));
 
     nsCOMPtr<nsIObserverService> obsSvc =
         mozilla::services::GetObserverService();
@@ -501,35 +501,6 @@ nsStreamTransportService::CreateOutputTransport(nsIOutputStream *stream,
         return NS_ERROR_OUT_OF_MEMORY;
     NS_ADDREF(*result = trans);
     return NS_OK;
-}
-
-NS_IMETHODIMP
-nsStreamTransportService::RaiseThreadLimit()
-{
-    NS_ENSURE_TRUE(mPool, NS_ERROR_NOT_INITIALIZED);
-
-    uint32_t threadLimit;
-    nsresult rv = mPool->GetThreadLimit(&threadLimit);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    return mPool->SetThreadLimit(threadLimit + 1);
-}
-
-NS_IMETHODIMP
-nsStreamTransportService::LowerThreadLimit()
-{
-    NS_ENSURE_TRUE(mPool, NS_ERROR_NOT_INITIALIZED);
-
-    uint32_t threadLimit;
-    nsresult rv = mPool->GetThreadLimit(&threadLimit);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (threadLimit == 4) {
-      NS_WARNING("Badly nested raise/lower thread limit!");
-      return NS_ERROR_UNEXPECTED;
-    }
-
-    return mPool->SetThreadLimit(threadLimit - 1);
 }
 
 NS_IMETHODIMP

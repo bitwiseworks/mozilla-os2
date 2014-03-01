@@ -15,6 +15,14 @@
 #include "nsAgg.h"
 #include "nsTArray.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/ErrorResult.h"
+
+namespace mozilla {
+namespace dom {
+class GlobalObject;
+}
+}
+class nsINode;
 
 /**
  * A class for evaluating an XPath expression string
@@ -34,14 +42,29 @@ public:
     NS_DECL_NSIDOMXPATHEVALUATOR
 
     // nsIXPathEvaluatorInternal interface
-    NS_IMETHOD SetDocument(nsIDOMDocument* aDocument);
+    NS_IMETHOD SetDocument(nsIDOMDocument* aDocument) MOZ_OVERRIDE;
     NS_IMETHOD CreateExpression(const nsAString &aExpression, 
                                 nsIDOMXPathNSResolver *aResolver,
                                 nsTArray<nsString> *aNamespaceURIs,
                                 nsTArray<nsCString> *aContractIDs,
                                 nsCOMArray<nsISupports> *aState,
-                                nsIDOMXPathExpression **aResult);
+                                nsIDOMXPathExpression **aResult) MOZ_OVERRIDE;
 
+    // WebIDL API
+    JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope);
+    static already_AddRefed<nsXPathEvaluator>
+        Constructor(const mozilla::dom::GlobalObject& aGlobal,
+                    mozilla::ErrorResult& rv);
+    already_AddRefed<nsIDOMXPathExpression>
+        CreateExpression(const nsAString& aExpression,
+                         nsIDOMXPathNSResolver* aResolver,
+                         mozilla::ErrorResult& rv);
+    already_AddRefed<nsIDOMXPathNSResolver>
+        CreateNSResolver(nsINode* aNodeResolver, mozilla::ErrorResult& rv);
+    already_AddRefed<nsISupports>
+        Evaluate(const nsAString& aExpression, nsINode* aContextNode,
+                 nsIDOMXPathNSResolver* aResolver, uint16_t aType,
+                 nsISupports* aResult, mozilla::ErrorResult& rv);
 private:
     nsresult CreateExpression(const nsAString & aExpression,
                               nsIDOMXPathNSResolver *aResolver,
@@ -53,6 +76,12 @@ private:
     nsWeakPtr mDocument;
     nsRefPtr<txResultRecycler> mRecycler;
 };
+
+inline nsISupports*
+ToSupports(nsXPathEvaluator* e)
+{
+    return static_cast<nsIDOMXPathEvaluator*>(e);
+}
 
 /* d0a75e02-b5e7-11d5-a7f2-df109fb8a1fc */
 #define TRANSFORMIIX_XPATH_EVALUATOR_CID   \

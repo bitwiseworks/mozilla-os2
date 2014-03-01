@@ -7,48 +7,19 @@
 const CC = Components.classes;
 const CI = Components.interfaces;
 const CR = Components.results;
-
-/**
- * FIXME/bug 622224: work around lack of reliable setTimeout available
- * to frame scripts.
- */
-// This gives us >=2^30 unique timer IDs, enough for 1 per ms for 12.4
-// days.  Should be fine as a temporary workaround.
-var gNextTimeoutId = 0;
-var gTimeoutTable = { };        // int -> nsITimer
-
-function setTimeout(callbackFn, delayMs) {
-    var id = gNextTimeoutId++;
-    var timer = CC["@mozilla.org/timer;1"].createInstance(CI.nsITimer);
-    timer.initWithCallback({
-        notify: function notify_callback() {
-                    clearTimeout(id);
-                    callbackFn();
-                }
-        },
-        delayMs,
-        timer.TYPE_ONE_SHOT);
-
-    gTimeoutTable[id] = timer;
-
-    return id;
-}
-
-function clearTimeout(id) {
-    var timer = gTimeoutTable[id];
-    if (timer) {
-        timer.cancel();
-        delete gTimeoutTable[id];
-    }
-}
+const CU = Components.utils;
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 const DEBUG_CONTRACTID = "@mozilla.org/xpcom/debug;1";
 const PRINTSETTINGS_CONTRACTID = "@mozilla.org/gfx/printsettings-service;1";
+const ENVIRONMENT_CONTRACTID = "@mozilla.org/process/environment;1";
 
 // "<!--CLEAR-->"
-const BLANK_URL_FOR_CLEARING = "data:text/html,%3C%21%2D%2DCLEAR%2D%2D%3E";
+const BLANK_URL_FOR_CLEARING = "data:text/html;charset=UTF-8,%3C%21%2D%2DCLEAR%2D%2D%3E";
+
+CU.import("resource://gre/modules/Timer.jsm");
+CU.import("resource://gre/modules/AsyncSpellCheckTestHelper.jsm");
 
 var gBrowserIsRemote;
 var gHaveCanvasSnapshot = false;
@@ -69,10 +40,13 @@ var gFailureReason;
 var gAssertionCount = 0;
 
 var gDebug;
+var gVerbose = false;
 
 var gCurrentTestStartTime;
 var gClearingForAssertionCheck = false;
 
+const TYPE_LOAD = 'load';  // test without a reference (just test that it does
+                           // not assert, crash, hang, or leak)
 const TYPE_SCRIPT = 'script'; // test contains individual test results
 
 function markupDocumentViewer() {
@@ -124,6 +98,8 @@ function OnInitialLoad()
 #endif
 
     gDebug = CC[DEBUG_CONTRACTID].getService(CI.nsIDebug2);
+    var env = CC[ENVIRONMENT_CONTRACTID].getService(CI.nsIEnvironment);
+    gVerbose = !!env.get("MOZ_REFTEST_VERBOSE");
 
     RegisterMessageListeners();
 
@@ -265,6 +241,18 @@ function shouldWaitForReftestWaitRemoval(contentRootElement) {
                              .indexOf("reftest-wait") != -1;
 }
 
+function shouldSnapshotWholePage(contentRootElement) {
+    // use getAttribute because className works differently in HTML and SVG
+    return contentRootElement &&
+           contentRootElement.hasAttribute('class') &&
+           contentRootElement.getAttribute('class').split(/\s+/)
+                             .indexOf("reftest-snapshot-all") != -1;
+}
+
+function getNoPaintElements(contentRootElement) {
+  return contentRootElement.getElementsByClassName('reftest-no-paint');
+}
+
 // Initial state. When the document has loaded and all MozAfterPaint events and
 // all explicit paint waits are flushed, we can fire the MozReftestInvalidate
 // event and move to the next state.
@@ -272,12 +260,15 @@ const STATE_WAITING_TO_FIRE_INVALIDATE_EVENT = 0;
 // When reftest-wait has been removed from the root element, we can move to the
 // next state.
 const STATE_WAITING_FOR_REFTEST_WAIT_REMOVAL = 1;
+// When spell checking is done on all spell-checked elements, we can move to the
+// next state.
+const STATE_WAITING_FOR_SPELL_CHECKS = 2;
 // When all MozAfterPaint events and all explicit paint waits are flushed, we're
 // done and can move to the COMPLETED state.
-const STATE_WAITING_TO_FINISH = 2;
-const STATE_COMPLETED = 3;
+const STATE_WAITING_TO_FINISH = 3;
+const STATE_COMPLETED = 4;
 
-function WaitForTestEnd(contentRootElement, inPrintMode) {
+function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
     var stopAfterPaintReceived = false;
     var currentDoc = content.document;
     var state = STATE_WAITING_TO_FIRE_INVALIDATE_EVENT;
@@ -323,7 +314,7 @@ function WaitForTestEnd(contentRootElement, inPrintMode) {
             return;
         }
 
-        SendUpdateCanvasForEvent(event);
+        SendUpdateCanvasForEvent(event, contentRootElement);
         // These events are fired immediately after a paint. Don't
         // confuse ourselves by firing synchronously if we triggered the
         // paint ourselves.
@@ -391,6 +382,10 @@ function WaitForTestEnd(contentRootElement, inPrintMode) {
             // Notify the test document that now is a good time to test some invalidation
             LogInfo("MakeProgress: dispatching MozReftestInvalidate");
             if (contentRootElement) {
+                var elements = getNoPaintElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                  windowUtils().checkAndClearPaintedState(elements[i]);
+                }
                 var notification = content.document.createEvent("Events");
                 notification.initEvent("MozReftestInvalidate", true, false);
                 contentRootElement.dispatchEvent(notification);
@@ -415,6 +410,20 @@ function WaitForTestEnd(contentRootElement, inPrintMode) {
                 LogInfo("MakeProgress: waiting for reftest-wait to be removed");
                 return;
             }
+
+            // Try next state
+            state = STATE_WAITING_FOR_SPELL_CHECKS;
+            MakeProgress();
+            return;
+
+        case STATE_WAITING_FOR_SPELL_CHECKS:
+            LogInfo("MakeProgress: STATE_WAITING_FOR_SPELL_CHECKS");
+            if (numPendingSpellChecks) {
+                gFailureReason = "timed out waiting for spell checks to end";
+                LogInfo("MakeProgress: waiting for spell checks to end");
+                return;
+            }
+
             state = STATE_WAITING_TO_FINISH;
             if (!inPrintMode && doPrintMode(contentRootElement)) {
                 LogInfo("MakeProgress: setting up print mode");
@@ -439,6 +448,14 @@ function WaitForTestEnd(contentRootElement, inPrintMode) {
                 }
                 return;
             }
+            if (contentRootElement) {
+              var elements = getNoPaintElements(contentRootElement);
+              for (var i = 0; i < elements.length; ++i) {
+                  if (windowUtils().checkAndClearPaintedState(elements[i])) {
+                      SendFailedNoPaint();
+                  }
+              }
+            }
             LogInfo("MakeProgress: Completed");
             state = STATE_COMPLETED;
             gFailureReason = "timed out while taking snapshot (bug in harness?)";
@@ -458,6 +475,21 @@ function WaitForTestEnd(contentRootElement, inPrintMode) {
     }
     gExplicitPendingPaintsCompleteHook = ExplicitPaintsCompleteListener;
     gTimeoutHook = RemoveListeners;
+
+    // Listen for spell checks on spell-checked elements.
+    var numPendingSpellChecks = spellCheckedElements.length;
+    function decNumPendingSpellChecks() {
+        --numPendingSpellChecks;
+        MakeProgress();
+    }
+    for (let editable of spellCheckedElements) {
+        try {
+            onSpellCheck(editable, decNumPendingSpellChecks);
+        } catch (err) {
+            // The element may not have an editor, so ignore it.
+            setTimeout(decNumPendingSpellChecks, 0);
+        }
+    }
 
     // Take a full snapshot now that all our listeners are set up. This
     // ensures it's impossible for us to miss updates between taking the snapshot
@@ -485,6 +517,19 @@ function OnDocumentLoad(event)
         return;
     }
 
+    // Collect all editable, spell-checked elements.  It may be the case that
+    // not all the elements that match this selector will be spell checked: for
+    // example, a textarea without a spellcheck attribute may have a parent with
+    // spellcheck=false, or script may set spellcheck=false on an element whose
+    // markup sets it to true.  But that's OK since onSpellCheck detects the
+    // absence of spell checking, too.
+    var querySelector =
+        '*[class~="spell-checked"],' +
+        'textarea:not([spellcheck="false"]),' +
+        'input[spellcheck]:-moz-any([spellcheck=""],[spellcheck="true"]),' +
+        '*[contenteditable]:-moz-any([contenteditable=""],[contenteditable="true"])';
+    var spellCheckedElements = currentDoc.querySelectorAll(querySelector);
+
     var contentRootElement = currentDoc ? currentDoc.documentElement : null;
     currentDoc = null;
     setupZoom(contentRootElement);
@@ -510,7 +555,7 @@ function OnDocumentLoad(event)
             !painted) {
             LogInfo("AfterOnLoadScripts belatedly entering WaitForTestEnd");
             // Go into reftest-wait mode belatedly.
-            WaitForTestEnd(contentRootElement, inPrintMode);
+            WaitForTestEnd(contentRootElement, inPrintMode, []);
         } else {
             CheckForProcessCrashExpectation();
             RecordResult();
@@ -518,12 +563,13 @@ function OnDocumentLoad(event)
     }
 
     if (shouldWaitForReftestWaitRemoval(contentRootElement) ||
-        shouldWaitForExplicitPaintWaiters()) {
+        shouldWaitForExplicitPaintWaiters() ||
+        spellCheckedElements.length) {
         // Go into reftest-wait mode immediately after painting has been
         // unsuppressed, after the onload event has finished dispatching.
         gFailureReason = "timed out waiting for test to complete (trying to get into WaitForTestEnd)";
         LogInfo("OnDocumentLoad triggering WaitForTestEnd");
-        setTimeout(function () { WaitForTestEnd(contentRootElement, inPrintMode); }, 0);
+        setTimeout(function () { WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements); }, 0);
     } else {
         if (doPrintMode(contentRootElement)) {
             LogInfo("OnDocumentLoad setting up print mode");
@@ -641,18 +687,32 @@ function LoadURI(uri)
 
 function LogWarning(str)
 {
-    sendAsyncMessage("reftest:Log", { type: "warning", msg: str });
+    if (gVerbose) {
+        sendSyncMessage("reftest:Log", { type: "warning", msg: str });
+    } else {
+        sendAsyncMessage("reftest:Log", { type: "warning", msg: str });
+    }
 }
 
 function LogInfo(str)
 {
-    sendAsyncMessage("reftest:Log", { type: "info", msg: str });
+    if (gVerbose) {
+        sendSyncMessage("reftest:Log", { type: "info", msg: str });
+    } else {
+        sendAsyncMessage("reftest:Log", { type: "info", msg: str });
+    }
 }
 
 const SYNC_DEFAULT = 0x0;
 const SYNC_ALLOW_DISABLE = 0x1;
 function SynchronizeForSnapshot(flags)
 {
+    if (gCurrentTestType == TYPE_SCRIPT ||
+        gCurrentTestType == TYPE_LOAD) {
+        // Script tests or load-only tests do not need any snapshotting
+        return;
+    }
+
     if (flags & SYNC_ALLOW_DISABLE) {
         var docElt = content.document.documentElement;
         if (docElt && docElt.hasAttribute("reftest-no-sync-layers")) {
@@ -732,6 +792,11 @@ function SendFailedLoad(why)
     sendAsyncMessage("reftest:FailedLoad", { why: why });
 }
 
+function SendFailedNoPaint()
+{
+    sendAsyncMessage("reftest:FailedNoPaint");
+}
+
 function SendEnableAsyncScroll()
 {
     sendAsyncMessage("reftest:EnableAsyncScroll");
@@ -783,13 +848,26 @@ function roundTo(x, fraction)
     return Math.round(x/fraction)*fraction;
 }
 
-function SendUpdateCanvasForEvent(event)
+function SendUpdateCanvasForEvent(event, contentRootElement)
 {
     var win = content;
     var scale = markupDocumentViewer().fullZoom;
 
     var rects = [ ];
+    if (shouldSnapshotWholePage) {
+      // See comments in SendInitCanvasWithSnapshot() re: the split
+      // logic here.
+      if (!gBrowserIsRemote) {
+          sendSyncMessage("reftest:UpdateWholeCanvasForInvalidation");
+      } else {
+          SynchronizeForSnapshot(SYNC_ALLOW_DISABLE);
+          sendAsyncMessage("reftest:UpdateWholeCanvasForInvalidation");
+      }
+      return;
+    }
+    
     var rectList = event.clientRects;
+    LogInfo("SendUpdateCanvasForEvent with " + rectList.length + " rects");
     for (var i = 0; i < rectList.length; ++i) {
         var r = rectList[i];
         // Set left/top/right/bottom to "device pixel" boundaries
@@ -797,6 +875,7 @@ function SendUpdateCanvasForEvent(event)
         var top = Math.floor(roundTo(r.top*scale, 0.001));
         var right = Math.ceil(roundTo(r.right*scale, 0.001));
         var bottom = Math.ceil(roundTo(r.bottom*scale, 0.001));
+        LogInfo("Rect: " + left + " " + top + " " + right + " " + bottom);
 
         rects.push({ left: left, top: top, right: right, bottom: bottom });
     }

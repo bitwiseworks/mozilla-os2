@@ -6,31 +6,43 @@
 
 import sys
 import os
+sys.path.insert(0, os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0]))))
+
 import traceback
 from remotexpcshelltests import XPCShellRemote, RemoteXPCShellOptions
-from automationutils import *
-import devicemanagerADB
+from mozdevice import devicemanagerADB, DMError
 
 DEVICE_TEST_ROOT = '/data/local/tests'
 
-sys.path.insert(0, os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0]))))
 
 from marionette import Marionette
-
 
 class B2GXPCShellRemote(XPCShellRemote):
 
     # Overridden
     def setupUtilities(self):
-        # Ensure a fresh directory structure for our tests
-        self.clean()
-        self.device.mkDir(DEVICE_TEST_ROOT)
+        if self.options.clean:
+            # Ensure a fresh directory structure for our tests
+            self.clean()
+            self.device.mkDir(self.options.remoteTestRoot)
 
         XPCShellRemote.setupUtilities(self)
 
     def clean(self):
         print >>sys.stderr, "\nCleaning files from previous run.."
-        self.device.removeDir(DEVICE_TEST_ROOT)
+        self.device.removeDir(self.options.remoteTestRoot)
+
+    # Overriden
+    def setupTestDir(self):
+        if self.device._useZip:
+            return XPCShellRemote.setupTestDir(self)
+
+        for root, dirs, files in os.walk(self.xpcDir):
+            for filename in files:
+                rel_path = os.path.relpath(os.path.join(root, filename), self.xpcDir)
+                test_file = os.path.join(self.remoteScriptsDir, rel_path)
+                print 'pushing %s' % test_file
+                self.device.pushFile(os.path.join(root, filename), test_file, retryLimit=10)
 
     # Overridden
     def pushLibs(self):
@@ -41,18 +53,23 @@ class B2GXPCShellRemote(XPCShellRemote):
     def setLD_LIBRARY_PATH(self, env):
         if self.options.use_device_libs:
             env['LD_LIBRARY_PATH'] = '/system/b2g'
+            env['LD_PRELOAD'] = '/system/b2g/libmozglue.so'
         else:
             XPCShellRemote.setLD_LIBRARY_PATH(self, env)
 
     # Overridden
-    # This returns 1 even when tests pass - this is why it's switched to 0
-    # https://bugzilla.mozilla.org/show_bug.cgi?id=773703
-    def getReturnCode(self, proc):
-#        if self.shellReturnCode is not None:
-#            return self.shellReturnCode
-#        return -1
-        return 0
-
+    def launchProcess(self, cmd, stdout, stderr, env, cwd):
+        try:
+            # This returns 1 even when tests pass - hardcode returncode to 0 (bug 773703)
+            outputFile = XPCShellRemote.launchProcess(self, cmd, stdout, stderr, env, cwd)
+            self.shellReturnCode = 0
+        except DMError:
+            self.shellReturnCode = -1
+            outputFile = "xpcshelloutput"
+            f = open(outputFile, "a")
+            f.write("\n%s" % traceback.format_exc())
+            f.close()
+        return outputFile
 
 class B2GOptions(RemoteXPCShellOptions):
 
@@ -69,6 +86,12 @@ class B2GOptions(RemoteXPCShellOptions):
                         type='string', dest='emu_path',
                         help="Path to emulator folder (if different "
                                                       "from b2gpath")
+
+        self.add_option('--no-clean', action='store_false',
+                        dest='clean',
+                        help="Do not clean TESTROOT. Saves [lots of] time")
+        defaults['clean'] = True
+
         defaults['emu_path'] = None
 
         self.add_option('--emulator', action='store',
@@ -95,24 +118,42 @@ class B2GOptions(RemoteXPCShellOptions):
                         dest='use_device_libs',
                         help="Don't push .so's")
         defaults['use_device_libs'] = False
+        self.add_option("--gecko-path", action="store",
+                        type="string", dest="geckoPath",
+                        help="the path to a gecko distribution that should "
+                        "be installed on the emulator prior to test")
+        defaults["geckoPath"] = None
+        self.add_option("--logcat-dir", action="store",
+                        type="string", dest="logcat_dir",
+                        help="directory to store logcat dump files")
+        defaults["logcat_dir"] = None
+        self.add_option('--busybox', action='store',
+                        type='string', dest='busybox',
+                        help="Path to busybox binary to install on device")
+        defaults['busybox'] = None
 
+        defaults["remoteTestRoot"] = DEVICE_TEST_ROOT
         defaults['dm_trans'] = 'adb'
         defaults['debugger'] = None
         defaults['debuggerArgs'] = None
 
         self.set_defaults(**defaults)
 
+    def verifyRemoteOptions(self, options):
+        if options.b2g_path is None:
+            self.error("Need to specify a --b2gpath")
+
+        if options.geckoPath and not options.emulator:
+            self.error("You must specify --emulator if you specify --gecko-path")
+
+        if options.logcat_dir and not options.emulator:
+            self.error("You must specify --emulator if you specify --logcat-dir")
+        return RemoteXPCShellOptions.verifyRemoteOptions(self, options)
 
 def main():
     parser = B2GOptions()
     options, args = parser.parse_args()
-
-    if options.objdir is None:
-        try:
-            options.objdir = os.path.join(options.b2g_path, 'objdir-gecko')
-        except:
-            print >> sys.stderr, "Need to specify a --b2gpath"
-            sys.exit(1)
+    options = parser.verifyRemoteOptions(options)
 
     # Create the Marionette instance
     kwargs = {}
@@ -120,6 +161,14 @@ def main():
         kwargs['emulator'] = options.emulator
         if options.no_window:
             kwargs['noWindow'] = True
+        if options.geckoPath:
+            kwargs['gecko_path'] = options.geckoPath
+        if options.logcat_dir:
+            kwargs['logcat_dir'] = options.logcat_dir
+        if options.busybox:
+            kwargs['busybox'] = options.busybox
+        if options.symbolsPath:
+            kwargs['symbols_path'] = options.symbolsPath
     if options.b2g_path:
         kwargs['homedir'] = options.emu_path or options.b2g_path
     if options.address:
@@ -136,11 +185,11 @@ def main():
     if options.deviceIP:
         kwargs['host'] = options.deviceIP
         kwargs['port'] = options.devicePort
-    kwargs['deviceRoot'] = DEVICE_TEST_ROOT
+    kwargs['deviceRoot'] = options.remoteTestRoot
     dm = devicemanagerADB.DeviceManagerADB(**kwargs)
 
-    options.remoteTestRoot = dm.getDeviceRoot()
-
+    if not options.remoteTestRoot:
+        options.remoteTestRoot = dm.getDeviceRoot()
     xpcsh = B2GXPCShellRemote(dm, options, args)
 
     try:
@@ -154,8 +203,8 @@ def main():
 
 
 # You usually run this like :
-# python runtestsb2g.py --emulator arm --b2gpath $B2GPATH --manifest $MANIFEST [--objdir $OBJDIR
-#                                                                               --adbpath $ADBPATH
+# python runtestsb2g.py --emulator arm --b2gpath $B2GPATH --manifest $MANIFEST [--xre-path $MOZ_HOST_BIN
+#                                                                               --adbpath $ADB_PATH
 #                                                                               ...]
 #
 # For xUnit output you should also pass in --tests-root-dir ..objdir-gecko/_tests

@@ -5,13 +5,15 @@
 "use strict";
 
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
+// Permission to embed an app.
+SpecialPowers.addPermission("embed-apps", true, document);
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
 
   var iframe1 = document.createElement('iframe');
-  iframe1.mozbrowser = true;
+  SpecialPowers.wrap(iframe1).mozbrowser = true;
   iframe1.setAttribute('mozapp', 'http://example.org/manifest.webapp');
 
   // Two mozapp frames for different apps with the same code both do the same
@@ -24,11 +26,12 @@ function runTest() {
 
     SimpleTest.executeSoon(function() {
       var iframe2 = document.createElement('iframe');
-      iframe2.mozbrowser = true;
+      SpecialPowers.wrap(iframe2).mozbrowser = true;
       iframe2.setAttribute('mozapp', 'http://example.com/manifest.webapp');
 
       iframe2.addEventListener('mozbrowseropenwindow', function(e) {
         ok(true, "Got second mozbrowseropenwindow event.");
+        SpecialPowers.removePermission("embed-apps", document);
         SimpleTest.finish();
       });
 
@@ -41,4 +44,4 @@ function runTest() {
   iframe1.src = 'http://example.org/tests/dom/browser-element/mochitest/file_browserElement_AppWindowNamespace.html';
 }
 
-runTest();
+addEventListener('testready', runTest);

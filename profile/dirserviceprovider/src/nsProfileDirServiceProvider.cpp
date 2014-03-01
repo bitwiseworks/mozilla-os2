@@ -130,6 +130,7 @@ nsProfileDirServiceProvider::Shutdown()
 
   NS_NAMED_LITERAL_STRING(context, "shutdown-persist");
   observerService->NotifyObservers(nullptr, "profile-before-change", context.get());
+  observerService->NotifyObservers(nullptr, "profile-before-change2", context.get());
   return NS_OK;
 }
 
@@ -269,7 +270,7 @@ nsProfileDirServiceProvider::InitProfileDir(nsIFile *profileDir)
   if (!exists) {
     nsCOMPtr<nsIFile> profileDefaultsDir;
     nsCOMPtr<nsIFile> profileDirParent;
-    nsCAutoString profileDirName;
+    nsAutoCString profileDirName;
 
     (void)profileDir->GetParent(getter_AddRefs(profileDirParent));
     if (!profileDirParent)
@@ -371,7 +372,7 @@ nsProfileDirServiceProvider::EnsureProfileFileExists(nsIFile *aFile, nsIFile *de
       return rv;
   }
 
-  nsCAutoString leafName;
+  nsAutoCString leafName;
   rv = aFile->GetNativeLeafName(leafName);
   if (NS_FAILED(rv))
     return rv;

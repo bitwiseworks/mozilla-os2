@@ -4,15 +4,24 @@
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-                style="@style/AwesomeBar"
-                android:background="@drawable/address_bar_bg">
+                xmlns:gecko="http://schemas.android.com/apk/res-auto"
+                style="@style/AwesomeBar">
 
-    <ImageView android:id="@+id/dummy_tab"
-               style="@style/AddressBar.ImageButton"
-               android:layout_width="84dip"
-               android:layout_alignParentLeft="true"
-               android:background="@drawable/tabs_crop_normal"
-               android:gravity="center_vertical"/>
+    <org.mozilla.gecko.BrowserToolbarBackground android:id="@+id/address_bar_bg"
+                                                android:layout_width="fill_parent"
+                                                android:layout_height="fill_parent"
+                                                android:layout_alignParentTop="true"
+                                                android:layout_alignParentRight="true"
+                                                gecko:curveTowards="none"
+                                                android:background="@drawable/address_bar_bg"/>
+
+    <Gecko.ShapedButton android:id="@+id/dummy_tab"
+                        style="@style/AddressBar.ImageButton"
+                        android:layout_width="84dip"
+                        android:layout_alignParentLeft="true"
+                        gecko:curveTowards="left"
+                        android:background="@drawable/shaped_button"
+                        android:gravity="center_vertical"/>
 
     <view class="org.mozilla.gecko.CustomEditText"
           android:id="@+id/awesomebar_text"
@@ -20,15 +29,18 @@
           android:background="@drawable/address_bar_url"
           android:layout_marginLeft="0dip"
           android:layout_marginRight="56dip"
-          android:layout_marginTop="6dip"
-          android:layout_marginBottom="6dip"
+          android:layout_marginTop="7dip"
+          android:layout_marginBottom="7dip"
           android:layout_toRightOf="@id/dummy_tab"
           android:layout_alignParentBottom="true"
           android:layout_centerVertical="true"
           android:paddingLeft="15dip"
           android:paddingRight="40dip"
           android:hint="@string/awesomebar_default_text"
+          android:textColor="@color/awesome_bar_title"
+          android:textColorHint="@color/awesome_bar_title_hint"
           android:textColorHighlight="@color/url_bar_text_highlight"
+          android:textCursorDrawable="@null"
           android:inputType="textUri|textNoSuggestions"
           android:imeOptions="actionSearch|flagNoExtractUi|flagNoFullscreen"
           android:selectAllOnFocus="true"

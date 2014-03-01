@@ -19,6 +19,7 @@
 #include "nsNetUtil.h"
 #include "mozilla/Monitor.h"
 #include <gio/gio.h>
+#include <algorithm>
 
 #define MOZ_GIO_SCHEME              "moz-gio"
 #define MOZ_GIO_SUPPORTED_PROTOCOLS "network.gio.supported-protocols"
@@ -134,7 +135,7 @@ static void mount_operation_ask_password (GMountOperation   *mount_op,
                                           gpointer          user_data);
 //-----------------------------------------------------------------------------
 
-class nsGIOInputStream : public nsIInputStream
+class nsGIOInputStream MOZ_FINAL : public nsIInputStream
 {
   public:
     NS_DECL_ISUPPORTS
@@ -145,7 +146,7 @@ class nsGIOInputStream : public nsIInputStream
       , mChannel(nullptr)
       , mHandle(nullptr)
       , mStream(nullptr)
-      , mBytesRemaining(PR_UINT64_MAX)
+      , mBytesRemaining(UINT64_MAX)
       , mStatus(NS_OK)
       , mDirList(nullptr)
       , mDirListPtr(nullptr)
@@ -226,7 +227,7 @@ nsGIOInputStream::MountVolume() {
   g_file_mount_enclosing_volume(mHandle,
                                 G_MOUNT_MOUNT_NONE,
                                 mount_op,
-                                NULL,
+                                nullptr,
                                 mount_enclosing_volume_finished,
                                 this);
   mozilla::MonitorAutoLock mon(mMonitorMountInProgress);
@@ -251,12 +252,12 @@ nsGIOInputStream::MountVolume() {
 nsresult
 nsGIOInputStream::DoOpenDirectory()
 {
-  GError *error = NULL;
+  GError *error = nullptr;
 
   GFileEnumerator *f_enum = g_file_enumerate_children(mHandle,
                                                       "standard::*,time::*",
                                                       G_FILE_QUERY_INFO_NONE,
-                                                      NULL,
+                                                      nullptr,
                                                       &error);
   if (!f_enum) {
     nsresult rv = MapGIOResult(error);
@@ -265,10 +266,10 @@ nsGIOInputStream::DoOpenDirectory()
     return rv;
   }
   // fill list of file infos
-  GFileInfo *info = g_file_enumerator_next_file(f_enum, NULL, &error);
+  GFileInfo *info = g_file_enumerator_next_file(f_enum, nullptr, &error);
   while (info) {
     mDirList = g_list_append(mDirList, info);
-    info = g_file_enumerator_next_file(f_enum, NULL, &error);
+    info = g_file_enumerator_next_file(f_enum, nullptr, &error);
   }
   g_object_unref(f_enum);
   if (error) {
@@ -308,9 +309,9 @@ nsGIOInputStream::DoOpenDirectory()
 nsresult
 nsGIOInputStream::DoOpenFile(GFileInfo *info)
 {
-  GError *error = NULL;
+  GError *error = nullptr;
 
-  mStream = g_file_read(mHandle, NULL, &error);
+  mStream = g_file_read(mHandle, nullptr, &error);
   if (!mStream) {
     nsresult rv = MapGIOResult(error);
     g_warning("Cannot read from file: %s", error->message);
@@ -348,7 +349,7 @@ nsresult
 nsGIOInputStream::DoOpen()
 {
   nsresult rv;
-  GError *error = NULL;
+  GError *error = nullptr;
 
   NS_ASSERTION(mHandle == nullptr, "already open");
 
@@ -357,7 +358,7 @@ nsGIOInputStream::DoOpen()
   GFileInfo *info = g_file_query_info(mHandle,
                                       "standard::*",
                                       G_FILE_QUERY_INFO_NONE,
-                                      NULL,
+                                      nullptr,
                                       &error);
 
   if (error) {
@@ -366,7 +367,7 @@ nsGIOInputStream::DoOpen()
       g_error_free(error);
       if (NS_IsMainThread()) 
         return NS_ERROR_NOT_CONNECTED;
-      error = NULL;
+      error = nullptr;
       rv = MountVolume();
       if (rv != NS_OK) {
         return rv;
@@ -375,7 +376,7 @@ nsGIOInputStream::DoOpen()
       info = g_file_query_info(mHandle,
                                "standard::*",
                                G_FILE_QUERY_INFO_NONE,
-                               NULL,
+                               nullptr,
                                &error);
       // second try to get file info from remote files after media mount
       if (!info) {
@@ -422,11 +423,11 @@ nsGIOInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
   nsresult rv = NS_ERROR_NOT_AVAILABLE;
   if (mStream) {
     // file read
-    GError *error = NULL;    
+    GError *error = nullptr;    
     uint32_t bytes_read = g_input_stream_read(G_INPUT_STREAM(mStream),
                                               aBuf,
                                               aCount,
-                                              NULL,
+                                              nullptr,
                                               &error);
     if (error) {
       rv = MapGIOResult(error);
@@ -447,7 +448,7 @@ nsGIOInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
       uint32_t bufLen = mDirBuf.Length() - mDirBufCursor;
       if (bufLen)
       {
-        uint32_t n = NS_MIN(bufLen, aCount);
+        uint32_t n = std::min(bufLen, aCount);
         memcpy(aBuf, mDirBuf.get() + mDirBufCursor, n);
         *aCountRead += n;
         aBuf += n;
@@ -618,6 +619,7 @@ nsGIOInputStream::Close()
 
     NS_ASSERTION(thread && NS_SUCCEEDED(rv), "leaking channel reference");
     mChannel = nullptr;
+    (void) rv;
   }
 
   mSpec.Truncate(); // free memory
@@ -708,7 +710,7 @@ mount_enclosing_volume_finished (GObject *source_object,
                                  GAsyncResult *res,
                                  gpointer user_data)
 {
-  GError *error = NULL;
+  GError *error = nullptr;
 
   nsGIOInputStream* istream = static_cast<nsGIOInputStream*>(user_data);
   
@@ -770,7 +772,7 @@ mount_operation_ask_password (GMountOperation   *mount_op,
     return;
   }
 
-  nsCAutoString scheme, hostPort;
+  nsAutoCString scheme, hostPort;
   uri->GetScheme(scheme);
   uri->GetHostPort(hostPort);
 
@@ -879,8 +881,8 @@ mount_operation_ask_password (GMountOperation   *mount_op,
 
 //-----------------------------------------------------------------------------
 
-class nsGIOProtocolHandler : public nsIProtocolHandler
-                           , public nsIObserver
+class nsGIOProtocolHandler MOZ_FINAL : public nsIProtocolHandler
+                                     , public nsIObserver
 {
   public:
     NS_DECL_ISUPPORTS
@@ -890,7 +892,7 @@ class nsGIOProtocolHandler : public nsIProtocolHandler
     nsresult Init();
 
   private:
-    void   InitSupportedProtocolsPref(nsIPrefBranch *prefs);
+    void InitSupportedProtocolsPref(nsIPrefBranch *prefs);
     bool IsSupportedProtocol(const nsCString &spec);
 
     nsCString mSupportedProtocols;
@@ -1011,7 +1013,7 @@ nsGIOProtocolHandler::NewURI(const nsACString &aSpec,
 
     const gchar* const * uri_schemes = g_vfs_get_supported_uri_schemes(gvfs);
 
-    while (*uri_schemes != NULL) {
+    while (*uri_schemes != nullptr) {
       // While flatSpec ends with ':' the uri_scheme does not. Therefore do not
       // compare last character.
       if (StringHead(flatSpec, colon_location).Equals(*uri_schemes)) {
@@ -1046,7 +1048,7 @@ nsGIOProtocolHandler::NewChannel(nsIURI *aURI, nsIChannel **aResult)
   NS_ENSURE_ARG_POINTER(aURI);
   nsresult rv;
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   rv = aURI->GetSpec(spec);
   if (NS_FAILED(rv))
     return rv;
@@ -1106,13 +1108,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsGIOProtocolHandler, Init)
 NS_DEFINE_NAMED_CID(NS_GIOPROTOCOLHANDLER_CID);
 
 static const mozilla::Module::CIDEntry kVFSCIDs[] = {
-  { &kNS_GIOPROTOCOLHANDLER_CID, false, NULL, nsGIOProtocolHandlerConstructor },
-  { NULL }
+  { &kNS_GIOPROTOCOLHANDLER_CID, false, nullptr, nsGIOProtocolHandlerConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kVFSContracts[] = {
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX MOZ_GIO_SCHEME, &kNS_GIOPROTOCOLHANDLER_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kVFSModule = {

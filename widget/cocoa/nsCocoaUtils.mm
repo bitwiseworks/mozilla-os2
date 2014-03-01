@@ -17,39 +17,49 @@
 #include "nsMenuUtilsX.h"
 #include "nsToolkit.h"
 #include "nsGUIEvent.h"
+#include "mozilla/Preferences.h"
 
+using namespace mozilla;
 using namespace mozilla::widget;
 
-float nsCocoaUtils::MenuBarScreenHeight()
+static float
+MenuBarScreenHeight()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
   NSArray* allScreens = [NSScreen screens];
-  if ([allScreens count])
+  if ([allScreens count]) {
     return [[allScreens objectAtIndex:0] frame].size.height;
-  else
-    return 0.0; // If there are no screens, there's not much we can say.
+  }
+
+  return 0.0;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(0.0);
 }
 
-float nsCocoaUtils::FlippedScreenY(float y)
+float
+nsCocoaUtils::FlippedScreenY(float y)
 {
   return MenuBarScreenHeight() - y;
 }
 
 NSRect nsCocoaUtils::GeckoRectToCocoaRect(const nsIntRect &geckoRect)
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
-
   // We only need to change the Y coordinate by starting with the primary screen
-  // height, subtracting the gecko Y coordinate, and subtracting the height.
+  // height and subtracting the gecko Y coordinate of the bottom of the rect.
   return NSMakeRect(geckoRect.x,
-                    MenuBarScreenHeight() - (geckoRect.y + geckoRect.height),
+                    MenuBarScreenHeight() - geckoRect.YMost(),
                     geckoRect.width,
                     geckoRect.height);
+}
 
-  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(NSMakeRect(0.0, 0.0, 0.0, 0.0));
+NSRect nsCocoaUtils::GeckoRectToCocoaRectDevPix(const nsIntRect &aGeckoRect,
+                                                CGFloat aBackingScale)
+{
+  return NSMakeRect(aGeckoRect.x / aBackingScale,
+                    MenuBarScreenHeight() - aGeckoRect.YMost() / aBackingScale,
+                    aGeckoRect.width / aBackingScale,
+                    aGeckoRect.height / aBackingScale);
 }
 
 nsIntRect nsCocoaUtils::CocoaRectToGeckoRect(const NSRect &cocoaRect)
@@ -62,6 +72,17 @@ nsIntRect nsCocoaUtils::CocoaRectToGeckoRect(const NSRect &cocoaRect)
   rect.y = NSToIntRound(FlippedScreenY(cocoaRect.origin.y + cocoaRect.size.height));
   rect.width = NSToIntRound(cocoaRect.origin.x + cocoaRect.size.width) - rect.x;
   rect.height = NSToIntRound(FlippedScreenY(cocoaRect.origin.y)) - rect.y;
+  return rect;
+}
+
+nsIntRect nsCocoaUtils::CocoaRectToGeckoRectDevPix(const NSRect &aCocoaRect,
+                                                   CGFloat aBackingScale)
+{
+  nsIntRect rect;
+  rect.x = NSToIntRound(aCocoaRect.origin.x * aBackingScale);
+  rect.y = NSToIntRound(FlippedScreenY(aCocoaRect.origin.y + aCocoaRect.size.height) * aBackingScale);
+  rect.width = NSToIntRound((aCocoaRect.origin.x + aCocoaRect.size.width) * aBackingScale) - rect.x;
+  rect.height = NSToIntRound(FlippedScreenY(aCocoaRect.origin.y) * aBackingScale) - rect.y;
   return rect;
 }
 
@@ -294,15 +315,17 @@ nsresult nsCocoaUtils::CreateNSImageFromCGImage(CGImageRef aInputImage, NSImage 
 
 nsresult nsCocoaUtils::CreateNSImageFromImageContainer(imgIContainer *aImage, uint32_t aWhichFrame, NSImage **aResult)
 {
-  nsRefPtr<gfxImageSurface> frame;
-  nsresult rv = aImage->CopyFrame(aWhichFrame,
-                                  imgIContainer::FLAG_SYNC_DECODE,
-                                  getter_AddRefs(frame));
-  if (NS_FAILED(rv) || !frame) {
-    return NS_ERROR_FAILURE;
-  }
+  nsRefPtr<gfxASurface> surface;
+  aImage->GetFrame(aWhichFrame,
+                   imgIContainer::FLAG_SYNC_DECODE,
+                   getter_AddRefs(surface));
+  NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
+
+  nsRefPtr<gfxImageSurface> frame(surface->GetAsReadableARGB32ImageSurface());
+  NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
+
   CGImageRef imageRef = NULL;
-  rv = nsCocoaUtils::CreateCGImageFromSurface(frame, &imageRef);
+  nsresult rv = nsCocoaUtils::CreateCGImageFromSurface(frame, &imageRef);
   if (NS_FAILED(rv) || !imageRef) {
     return NS_ERROR_FAILURE;
   }
@@ -352,6 +375,17 @@ nsCocoaUtils::GeckoRectToNSRect(const nsIntRect& aGeckoRect,
 }
 
 // static
+void
+nsCocoaUtils::NSRectToGeckoRect(const NSRect& aCocoaRect,
+                                nsIntRect& aOutGeckoRect)
+{
+  aOutGeckoRect.x = NSToIntRound(aCocoaRect.origin.x);
+  aOutGeckoRect.y = NSToIntRound(aCocoaRect.origin.y);
+  aOutGeckoRect.width = NSToIntRound(aCocoaRect.origin.x + aCocoaRect.size.width) - aOutGeckoRect.x;
+  aOutGeckoRect.height = NSToIntRound(aCocoaRect.origin.y + aCocoaRect.size.height) - aOutGeckoRect.y;
+}
+
+// static
 NSEvent*
 nsCocoaUtils::MakeNewCocoaEventWithType(NSEventType aEventType, NSEvent *aEvent)
 {
@@ -398,7 +432,7 @@ nsCocoaUtils::InitInputEvent(nsInputEvent &aInputEvent,
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   NSUInteger modifiers =
-    aNativeEvent ? [aNativeEvent modifierFlags] : GetCurrentModifiers();
+    aNativeEvent ? [aNativeEvent modifierFlags] : [NSEvent modifierFlags];
   InitInputEvent(aInputEvent, modifiers);
 
   aInputEvent.time = PR_IntervalNow();
@@ -451,40 +485,89 @@ nsCocoaUtils::InitInputEvent(nsInputEvent &aInputEvent,
 }
 
 // static
-NSUInteger
-nsCocoaUtils::GetCurrentModifiers()
+UInt32
+nsCocoaUtils::ConvertToCarbonModifier(NSUInteger aCocoaModifier)
 {
-  // NOTE: [[NSApp currentEvent] modifiers] isn't useful because it sometime 0
-  //       and we cannot check if it's actual state.
-  if (nsCocoaFeatures::OnSnowLeopardOrLater()) {
-    // XXX [NSEvent modifierFlags] returns "current" modifier state, so,
-    //     it's not event-queue-synchronized.  GetCurrentEventKeyModifiers()
-    //     might be better, but it's Carbon API, we shouldn't use it as far as
-    //     possible.
-    return [NSEvent modifierFlags];
+  UInt32 carbonModifier = 0;
+  if (aCocoaModifier & NSAlphaShiftKeyMask) {
+    carbonModifier |= alphaLock;
+  }
+  if (aCocoaModifier & NSControlKeyMask) {
+    carbonModifier |= controlKey;
+  }
+  if (aCocoaModifier & NSAlternateKeyMask) {
+    carbonModifier |= optionKey;
+  }
+  if (aCocoaModifier & NSShiftKeyMask) {
+    carbonModifier |= shiftKey;
+  }
+  if (aCocoaModifier & NSCommandKeyMask) {
+    carbonModifier |= cmdKey;
+  }
+  if (aCocoaModifier & NSNumericPadKeyMask) {
+    carbonModifier |= kEventKeyModifierNumLockMask;
+  }
+  if (aCocoaModifier & NSFunctionKeyMask) {
+    carbonModifier |= kEventKeyModifierFnMask;
+  }
+  return carbonModifier;
+}
+
+// While HiDPI support is not 100% complete and tested, we'll have a pref
+// to allow it to be turned off in case of problems (or for testing purposes).
+
+// gfx.hidpi.enabled is an integer with the meaning:
+//    <= 0 : HiDPI support is disabled
+//       1 : HiDPI enabled provided all screens have the same backing resolution
+//     > 1 : HiDPI enabled even if there are a mixture of screen modes
+
+// All the following code is to be removed once HiDPI work is more complete.
+
+static bool sHiDPIEnabled = false;
+static bool sHiDPIPrefInitialized = false;
+
+// static
+bool
+nsCocoaUtils::HiDPIEnabled()
+{
+  if (!sHiDPIPrefInitialized) {
+    sHiDPIPrefInitialized = true;
+
+    int prefSetting = Preferences::GetInt("gfx.hidpi.enabled", 1);
+    if (prefSetting <= 0) {
+      return false;
+    }
+
+    // prefSetting is at least 1, need to check attached screens...
+
+    int scaleFactors = 0; // used as a bitset to track the screen types found
+    NSEnumerator *screenEnum = [[NSScreen screens] objectEnumerator];
+    while (NSScreen *screen = [screenEnum nextObject]) {
+      NSDictionary *desc = [screen deviceDescription];
+      if ([desc objectForKey:NSDeviceIsScreen] == nil) {
+        continue;
+      }
+      CGFloat scale =
+        [screen respondsToSelector:@selector(backingScaleFactor)] ?
+          [screen backingScaleFactor] : 1.0;
+      // Currently, we only care about differentiating "1.0" and "2.0",
+      // so we set one of the two low bits to record which.
+      if (scale > 1.0) {
+        scaleFactors |= 2;
+      } else {
+        scaleFactors |= 1;
+      }
+    }
+
+    // Now scaleFactors will be:
+    //   0 if no screens (supporting backingScaleFactor) found
+    //   1 if only lo-DPI screens
+    //   2 if only hi-DPI screens
+    //   3 if both lo- and hi-DPI screens
+    // We'll enable HiDPI support if there's only a single screen type,
+    // OR if the pref setting is explicitly greater than 1.
+    sHiDPIEnabled = (scaleFactors <= 2) || (prefSetting > 1);
   }
 
-  // If [NSEvent modifierFlags] isn't available, use carbon API.
-  // GetCurrentEventKeyModifiers() might be better?
-  // It's event-queue-synchronized.
-  UInt32 carbonModifiers = ::GetCurrentKeyModifiers();
-  NSUInteger cocoaModifiers = 0;
-
-  if (carbonModifiers & alphaLock) {
-    cocoaModifiers |= NSAlphaShiftKeyMask;
-  }
-  if (carbonModifiers & (controlKey | rightControlKey)) {
-    cocoaModifiers |= NSControlKeyMask;
-  }
-  if (carbonModifiers & (optionKey | rightOptionKey)) {
-    cocoaModifiers |= NSAlternateKeyMask;
-  }
-  if (carbonModifiers & (shiftKey | rightShiftKey)) {
-    cocoaModifiers |= NSShiftKeyMask;
-  }
-  if (carbonModifiers & cmdKey) {
-    cocoaModifiers |= NSCommandKeyMask;
-  }
-
-  return cocoaModifiers;
+  return sHiDPIEnabled;
 }

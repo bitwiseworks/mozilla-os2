@@ -30,6 +30,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "DownloadsCommon",
 XPCOMUtils.defineLazyServiceGetter(this, "gBrowserGlue",
                                    "@mozilla.org/browser/browserglue;1",
                                    "nsIBrowserGlue");
+XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow",
+                                  "resource:///modules/RecentWindow.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsUI
@@ -56,10 +60,10 @@ DownloadsUI.prototype = {
   //////////////////////////////////////////////////////////////////////////////
   //// nsIDownloadManagerUI
 
-  show: function DUI_show(aWindowContext, aID, aReason)
+  show: function DUI_show(aWindowContext, aDownload, aReason, aUsePrivateUI)
   {
     if (DownloadsCommon.useToolkitUI) {
-      this._toolkitUI.show(aWindowContext, aID, aReason);
+      this._toolkitUI.show(aWindowContext, aDownload, aReason, aUsePrivateUI);
       return;
     }
 
@@ -68,22 +72,33 @@ DownloadsUI.prototype = {
     }
 
     if (aReason == Ci.nsIDownloadManagerUI.REASON_NEW_DOWNLOAD) {
-      // If the indicator is visible, then new download notifications are
-      // already handled by the panel service.
+      const kMinimized = Ci.nsIDOMChromeWindow.STATE_MINIMIZED;
       let browserWin = gBrowserGlue.getMostRecentBrowserWindow();
-      if (browserWin &&
-          browserWin.windowState != Ci.nsIDOMChromeWindow.STATE_MINIMIZED &&
-          browserWin.DownloadsButton.isVisible) {
-        return;
-      }
-    }
 
-    this._toolkitUI.show(aWindowContext, aID, aReason);
+      if (!browserWin || browserWin.windowState == kMinimized) {
+        this._showDownloadManagerUI(aWindowContext, aUsePrivateUI);
+      }
+      else {
+        // If the indicator is visible, then new download notifications are
+        // already handled by the panel service.
+        browserWin.DownloadsButton.checkIsVisible(function(isVisible) {
+          if (!isVisible) {
+            this._showDownloadManagerUI(aWindowContext, aUsePrivateUI);
+          }
+        }.bind(this));
+      }
+    } else {
+      this._showDownloadManagerUI(aWindowContext, aUsePrivateUI);
+    }
   },
 
   get visible()
   {
-    return this._toolkitUI.visible;
+    // If we're still using the toolkit downloads manager, delegate the call
+    // to it. Otherwise, return true for now, until we decide on how we want
+    // to indicate that a new download has started if a browser window is
+    // not available or minimized.
+    return DownloadsCommon.useToolkitUI ? this._toolkitUI.visible : true;
   },
 
   getAttention: function DUI_getAttention()
@@ -91,10 +106,46 @@ DownloadsUI.prototype = {
     if (DownloadsCommon.useToolkitUI) {
       this._toolkitUI.getAttention();
     }
+  },
+
+  /**
+   * Helper function that opens the download manager UI.
+   */
+  _showDownloadManagerUI:
+  function DUI_showDownloadManagerUI(aWindowContext, aUsePrivateUI)
+  {
+    // If we weren't given a window context, try to find a browser window
+    // to use as our parent - and if that doesn't work, error out and give up.
+    let parentWindow = aWindowContext;
+    if (!parentWindow) {
+      parentWindow = RecentWindow.getMostRecentBrowserWindow({ private: !!aUsePrivateUI });
+      if (!parentWindow) {
+        Components.utils.reportError(
+          "Couldn't find a browser window to open the Places Downloads View " +
+          "from.");
+        return;
+      }
+    }
+
+    // If window is private then show it in a tab.
+    if (PrivateBrowsingUtils.isWindowPrivate(parentWindow)) {
+      parentWindow.openUILinkIn("about:downloads", "tab");
+      return;
+    } else {
+      let organizer = Services.wm.getMostRecentWindow("Places:Organizer");
+      if (!organizer) {
+        parentWindow.openDialog("chrome://browser/content/places/places.xul",
+                                "", "chrome,toolbar=yes,dialog=no,resizable",
+                                "Downloads");
+      } else {
+        organizer.PlacesOrganizer.selectLeftPaneQuery("Downloads");
+        organizer.focus();
+      }
+    }
   }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Module
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([DownloadsUI]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([DownloadsUI]);

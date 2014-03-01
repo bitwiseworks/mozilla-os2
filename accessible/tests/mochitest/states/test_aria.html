@@ -110,6 +110,37 @@
       // aria-readonly
       testStates("aria_readonly_textbox", STATE_READONLY);
 
+      // readonly/editable on grid and gridcell
+      testStates("aria_grid_default", 0, EXT_STATE_EDITABLE,
+                 STATE_READONLY, 0);
+      testStates("aria_grid_default_colheader_readonly", STATE_READONLY, 0,
+                 0, EXT_STATE_EDITABLE);
+      testStates("aria_grid_default_colheader_inherited", 0, EXT_STATE_EDITABLE,
+                 STATE_READONLY, 0);
+      testStates("aria_grid_default_rowheader_readonly", STATE_READONLY, 0,
+                 0, EXT_STATE_EDITABLE);
+      testStates("aria_grid_default_rowheader_inherited", 0, EXT_STATE_EDITABLE,
+                 STATE_READONLY, 0);
+      testStates("aria_grid_default_cell_readonly", STATE_READONLY, 0,
+                 0, EXT_STATE_EDITABLE);
+      testStates("aria_grid_default_cell_inherited", 0, EXT_STATE_EDITABLE,
+                 STATE_READONLY, 0);
+
+      testStates("aria_grid_readonly", STATE_READONLY, 0,
+                 0, EXT_STATE_EDITABLE);
+      testStates("aria_grid_readonly_colheader_editable", 0, EXT_STATE_EDITABLE,
+                 STATE_READONLY, 0);
+      testStates("aria_grid_readonly_colheader_inherited", STATE_READONLY, 0,
+                 0, EXT_STATE_EDITABLE);
+      testStates("aria_grid_readonly_rowheader_editable", 0, EXT_STATE_EDITABLE,
+                 STATE_READONLY, 0);
+      testStates("aria_grid_readonly_rowheader_inherited", STATE_READONLY, 0,
+                 0, EXT_STATE_EDITABLE);
+      testStates("aria_grid_readonly_cell_editable", 0, EXT_STATE_EDITABLE,
+                 STATE_READONLY, 0);
+      testStates("aria_grid_readonly_cell_inherited", STATE_READONLY, 0,
+                 0, EXT_STATE_EDITABLE);
+
       // aria-selectable
       testStates("aria_selectable_listitem", STATE_SELECTABLE | STATE_SELECTED);
 
@@ -118,12 +149,10 @@
       testStates("as_item2", 0, 0, 0, EXT_STATE_ACTIVE);
 
       // universal ARIA properties inherited from file input control
-      var fileTextField = getAccessible("fileinput").firstChild;
-      testStates(fileTextField,
-                 STATE_BUSY | STATE_UNAVAILABLE | STATE_REQUIRED | STATE_HASPOPUP | STATE_INVALID);
-      var fileBrowseButton = getAccessible("fileinput").lastChild;
+      var fileBrowseButton = getAccessible("fileinput").firstChild;
       testStates(fileBrowseButton,
                  STATE_BUSY | STATE_UNAVAILABLE | STATE_REQUIRED | STATE_HASPOPUP | STATE_INVALID);
+      // No states on the label.
 
       // offscreen test
       testStates("aria_offscreen_textbox", STATE_OFFSCREEN);
@@ -230,6 +259,11 @@
      title="fix default horizontal / vertical state of role=scrollbar and ensure only one of horizontal / vertical states is exposed">
     Mozilla Bug 762876
   </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=835121
+     title="ARIA grid should be editable by default">
+    Mozilla Bug 835121
+  </a>
   <p id="display"></p>
   <div id="content" style="display: none"></div>
   <pre id="test">
@@ -265,7 +299,52 @@
   <div id="aria_multiline_textbox" role="textbox" aria-multiline="true"></div>
   <div id="aria_multiselectable_listbox" role="listbox" aria-multiselectable="true"></div>
   <div id="aria_pressed_button" role="button" aria-pressed="true">Button</div>
-  <div id="aria_readonly_textbox" role="textbox" aria-readonly="true">This text should be readonly</div>
+
+  <div id="aria_readonly_textbox"
+       role="textbox" aria-readonly="true">This text should be readonly</div>
+
+  <div id="aria_grid_default" role="grid">
+    <div role="row">
+      <div id="aria_grid_default_colheader_readonly"
+           role="columnheader" aria-readonly="true">colheader1</div>
+      <div id="aria_grid_default_colheader_inherited"
+           role="columnheader">colheader2</div>
+    </div>
+    <div role="row">
+      <div id="aria_grid_default_rowheader_readonly"
+           role="rowheader" aria-readonly="true">rowheader1</div>
+      <div id="aria_grid_default_rowheader_inherited"
+           role="rowheader">rowheader2</div>
+    </div>
+    <div role="row">
+      <div id="aria_grid_default_cell_readonly"
+           role="gridcell" aria-readonly="true">gridcell1</div>
+      <div id="aria_grid_default_cell_inherited"
+           role="gridcell">gridcell2</div>
+    </div>
+  </div>
+
+  <div id="aria_grid_readonly" role="grid" aria-readonly="true">
+    <div role="row">
+      <div id="aria_grid_readonly_colheader_editable"
+           role="columnheader" aria-readonly="false">colheader1</div>
+      <div id="aria_grid_readonly_colheader_inherited"
+           role="columnheader">colheader2</div>
+    </div>
+    <div role="row">
+      <div id="aria_grid_readonly_rowheader_editable"
+           role="rowheader" aria-readonly="false">rowheader1</div>
+      <div id="aria_grid_readonly_rowheader_inherited"
+           role="rowheader">rowheader2</div>
+    </div>
+    <div role="row">
+      <div id="aria_grid_readonly_cell_editable"
+           role="gridcell" aria-readonly="false">gridcell1</div>
+      <div id="aria_grid_readonly_cell_inherited"
+           role="gridcell">gridcell2</div>
+    </div>
+  </div>
+
   <div role="listbox">
     <div id="aria_selectable_listitem" role="option" aria-selected="true">Item1</div>
   </div>
@@ -313,7 +392,7 @@
   <a id="aria_application_link" role="application" href="foo">app</a>
   <a id="aria_main_link" role="main" href="foo">main</a>
   <a id="aria_navigation_link" role="navigation" href="foo">nav</a>
-  
+
   <!-- landmarks: anchors -->
   <a id="aria_application_anchor" role="application" name="app_anchor">app</a>
   <a id="aria_main_anchor" role="main" name="main_anchor">main</a>

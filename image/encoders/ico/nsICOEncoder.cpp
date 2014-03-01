@@ -7,10 +7,10 @@
 #include "nsBMPEncoder.h"
 #include "nsPNGEncoder.h"
 #include "nsICOEncoder.h"
-#include "prmem.h"
 #include "prprf.h"
 #include "nsString.h"
 #include "nsStreamUtils.h"
+#include "nsTArray.h"
 
 using namespace mozilla;
 using namespace mozilla::image;
@@ -137,7 +137,7 @@ nsICOEncoder::AddImageFrame(const uint8_t* aData,
     nsresult rv;
 
     nsAutoString params;
-    params.AppendASCII("bpp=");
+    params.AppendLiteral("bpp=");
     params.AppendInt(mICODirEntry.mBitCount);
 
     rv = mContainedEncoder->InitFromData(aData, aLength, aWidth, aHeight,
@@ -279,7 +279,7 @@ nsICOEncoder::ParseOptions(const nsAString& aOptions, uint32_t* bpp,
   }
 
   // For each name/value pair in the set
-  for (int i = 0; i < nameValuePairs.Length(); ++i) {
+  for (unsigned i = 0; i < nameValuePairs.Length(); ++i) {
 
     // Split the name value pair [0] = name, [1] = value
     nsTArray<nsCString> nameValuePair;
@@ -430,9 +430,7 @@ nsICOEncoder::NotifyListener()
        mFinished)) {
     nsCOMPtr<nsIInputStreamCallback> callback;
     if (mCallbackTarget) {
-      NS_NewInputStreamReadyEvent(getter_AddRefs(callback),
-                                  mCallback,
-                                  mCallbackTarget);
+      callback = NS_NewInputStreamReadyEvent(mCallback, mCallbackTarget);
     } else {
       callback = mCallback;
     }

@@ -359,13 +359,13 @@ add_test(function() {
     is_element_visible(get_node(addon, "disable-btn"), "Disable button should be visible");
     is_element_visible(get_node(addon, "remove-btn"), "Remove button should be visible");
 
-    is_element_visible(get_node(addon, "warning"), "Warning message should be visible");
-    is(get_node(addon, "warning").textContent, "An important update is available for Test add-on 8.", "Warning message should be correct");
-    is_element_visible(get_node(addon, "warning-link"), "Warning link should be visible");
-    is(get_node(addon, "warning-link").value, "Update Now", "Warning link text should be correct");
-    is(get_node(addon, "warning-link").href, gPluginURL, "Warning link should be correct");
-    is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
-    is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
+    is_element_hidden(get_node(addon, "warning"), "Warning message should be hidden");
+    is_element_hidden(get_node(addon, "warning-link"), "Warning link should be hidden");
+    is_element_visible(get_node(addon, "error"), "Error message should be visible");
+    is(get_node(addon, "error").textContent, "Test add-on 8 is known to be vulnerable and should be updated.", "Error message should be correct");
+    is_element_visible(get_node(addon, "error-link"), "Error link should be visible");
+    is(get_node(addon, "error-link").value, "Update Now", "Error link text should be correct");
+    is(get_node(addon, "error-link").href, "http://example.com/addon8@tests.mozilla.org", "Error link should be correct");
     is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
 
     info("Addon 9");
@@ -378,13 +378,13 @@ add_test(function() {
     is_element_visible(get_node(addon, "disable-btn"), "Disable button should be visible");
     is_element_visible(get_node(addon, "remove-btn"), "Remove button should be visible");
 
-    is_element_visible(get_node(addon, "warning"), "Warning message should be visible");
-    is(get_node(addon, "warning").textContent, "Test add-on 9 is known to cause security or stability issues.", "Warning message should be correct");
-    is_element_visible(get_node(addon, "warning-link"), "Warning link should be visible");
-    is(get_node(addon, "warning-link").value, "More Information", "Warning link text should be correct");
-    is(get_node(addon, "warning-link").href, "http://example.com/addon9@tests.mozilla.org", "Warning link should be correct");
-    is_element_hidden(get_node(addon, "error"), "Error message should be hidden");
-    is_element_hidden(get_node(addon, "error-link"), "Error link should be hidden");
+    is_element_hidden(get_node(addon, "warning"), "Warning message should be hidden");
+    is_element_hidden(get_node(addon, "warning-link"), "Warning link should be hidden");
+    is_element_visible(get_node(addon, "error"), "Error message should be visible");
+    is(get_node(addon, "error").textContent, "Test add-on 9 is known to be vulnerable. Use with caution.", "Error message should be correct");
+    is_element_visible(get_node(addon, "error-link"), "Error link should be visible");
+    is(get_node(addon, "error-link").value, "More Information", "Error link text should be correct");
+    is(get_node(addon, "error-link").href, "http://example.com/addon9@tests.mozilla.org", "Error link should be correct");
     is_element_hidden(get_node(addon, "pending"), "Pending message should be hidden");
 
     run_next_test();

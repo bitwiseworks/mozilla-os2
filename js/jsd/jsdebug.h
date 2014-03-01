@@ -1,5 +1,6 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -151,10 +152,10 @@ extern JSD_PUBLIC_API(unsigned)
 JSD_GetMinorVersion(void);
 
 /*
-* Returns a 'dumb' JSContext that can be used for utility purposes as needed
+* Returns the default JSD global associated with a given JSDContext.
 */
-extern JSD_PUBLIC_API(JSContext*)
-JSD_GetDefaultJSContext(JSDContext* jsdc);
+extern JSD_PUBLIC_API(JSObject*)
+JSD_GetDefaultGlobal(JSDContext* jsdc);
 
 /*
 * Returns a JSRuntime this context is associated with
@@ -990,7 +991,7 @@ JSD_EvaluateUCScriptInStackFrame(JSDContext* jsdc,
                                  JSDStackFrameInfo* jsdframe,
                                  const jschar *bytes, unsigned length,
                                  const char *filename, unsigned lineno,
-                                 jsval *rval);
+                                 JS::MutableHandleValue rval);
 
 /*
 * Same as above, but does not eat exceptions.
@@ -1001,7 +1002,7 @@ JSD_AttemptUCScriptInStackFrame(JSDContext* jsdc,
                                 JSDStackFrameInfo* jsdframe,
                                 const jschar *bytes, unsigned length,
                                 const char *filename, unsigned lineno,
-                                jsval *rval);
+                                JS::MutableHandleValue rval);
 
 /* single byte character version of JSD_EvaluateUCScriptInStackFrame */
 extern JSD_PUBLIC_API(JSBool)
@@ -1009,7 +1010,7 @@ JSD_EvaluateScriptInStackFrame(JSDContext* jsdc,
                                JSDThreadState* jsdthreadstate,
                                JSDStackFrameInfo* jsdframe,
                                const char *bytes, unsigned length,
-                               const char *filename, unsigned lineno, jsval *rval);
+                               const char *filename, unsigned lineno, JS::MutableHandleValue rval);
 
 /*
 * Same as above, but does not eat exceptions.
@@ -1019,7 +1020,7 @@ JSD_AttemptScriptInStackFrame(JSDContext* jsdc,
                               JSDThreadState* jsdthreadstate,
                               JSDStackFrameInfo* jsdframe,
                               const char *bytes, unsigned length,
-                              const char *filename, unsigned lineno, jsval *rval);
+                              const char *filename, unsigned lineno, JS::MutableHandleValue rval);
 
 /*
 * Convert the given jsval to a string
@@ -1086,6 +1087,8 @@ JSD_GetErrorReporter(JSDContext*        jsdc,
 /***************************************************************************/
 /* Generic locks that callers can use for their own purposes */
 
+struct JSDStaticLock;
+
 /*
 * Is Locking and GetThread supported in this build?
 */
@@ -1095,7 +1098,7 @@ JSD_IsLockingAndThreadIdSupported();
 /*
 * Create a reentrant/nestable lock
 */
-extern JSD_PUBLIC_API(void*)
+extern JSD_PUBLIC_API(JSDStaticLock*)
 JSD_CreateLock();
 
 /*
@@ -1103,27 +1106,27 @@ JSD_CreateLock();
 * counter if this thread already owns the lock.
 */
 extern JSD_PUBLIC_API(void)
-JSD_Lock(void* lock);
+JSD_Lock(JSDStaticLock* lock);
 
 /*
 * Release lock for this thread (or decrement the counter if JSD_Lock
 * was previous called more than once).
 */
 extern JSD_PUBLIC_API(void)
-JSD_Unlock(void* lock);
+JSD_Unlock(JSDStaticLock* lock);
 
 /*
 * For debugging only if not (JS_THREADSAFE AND DEBUG) then returns JS_TRUE
 *    So JSD_IsLocked(lock) may not equal !JSD_IsUnlocked(lock)
 */
 extern JSD_PUBLIC_API(JSBool)
-JSD_IsLocked(void* lock);
+JSD_IsLocked(JSDStaticLock* lock);
 
 /*
 * See above...
 */
 extern JSD_PUBLIC_API(JSBool)
-JSD_IsUnlocked(void* lock);
+JSD_IsUnlocked(JSDStaticLock* lock);
 
 /*
 * return an ID uniquely identifying this thread.

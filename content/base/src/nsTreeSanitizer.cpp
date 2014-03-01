@@ -36,9 +36,7 @@ nsIAtom** const kElementsHTML[] = {
   &nsGkAtoms::area,
   &nsGkAtoms::article,
   &nsGkAtoms::aside,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::audio,
-#endif
   &nsGkAtoms::b,
   &nsGkAtoms::bdi,
   &nsGkAtoms::bdo,
@@ -116,9 +114,7 @@ nsIAtom** const kElementsHTML[] = {
   &nsGkAtoms::section,
   &nsGkAtoms::select,
   &nsGkAtoms::small,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::source,
-#endif
   &nsGkAtoms::span,
   &nsGkAtoms::strike,
   &nsGkAtoms::strong,
@@ -136,16 +132,12 @@ nsIAtom** const kElementsHTML[] = {
   &nsGkAtoms::time,
   // title checked specially
   &nsGkAtoms::tr,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::track,
-#endif
   &nsGkAtoms::tt,
   &nsGkAtoms::u,
   &nsGkAtoms::ul,
   &nsGkAtoms::var,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::video,
-#endif
   &nsGkAtoms::wbr,
   nullptr
 };
@@ -159,9 +151,7 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::alt,
   &nsGkAtoms::autocomplete,
   &nsGkAtoms::autofocus,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::autoplay,
-#endif
   &nsGkAtoms::axis,
   &nsGkAtoms::_char,
   &nsGkAtoms::charoff,
@@ -174,9 +164,7 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::content,
   &nsGkAtoms::contenteditable,
   &nsGkAtoms::contextmenu,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::controls,
-#endif
   &nsGkAtoms::coords,
   &nsGkAtoms::datetime,
   &nsGkAtoms::dir,
@@ -205,9 +193,7 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::lang,
   &nsGkAtoms::list,
   &nsGkAtoms::longdesc,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::loop,
-#endif
   &nsGkAtoms::low,
   &nsGkAtoms::max,
   &nsGkAtoms::maxlength,
@@ -216,9 +202,7 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::min,
   &nsGkAtoms::mozdonotsend,
   &nsGkAtoms::multiple,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::muted,
-#endif
   &nsGkAtoms::name,
   &nsGkAtoms::nohref,
   &nsGkAtoms::novalidate,
@@ -227,13 +211,9 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::optimum,
   &nsGkAtoms::pattern,
   &nsGkAtoms::placeholder,
-#ifdef MOZ_MEDIA
   &nsGkAtoms::playbackrate,
-#endif
-#ifdef MOZ_MEDIA
   &nsGkAtoms::poster,
   &nsGkAtoms::preload,
-#endif
   &nsGkAtoms::prompt,
   &nsGkAtoms::pubdate,
   &nsGkAtoms::radiogroup,
@@ -1051,14 +1031,10 @@ nsTreeSanitizer::MustPrune(int32_t aNamespace,
                        nsGkAtoms::datalist == aLocal)) {
       return true;
     }
-    if (mDropMedia && (nsGkAtoms::img == aLocal
-#ifdef MOZ_MEDIA
-                       ||
+    if (mDropMedia && (nsGkAtoms::img == aLocal ||
                        nsGkAtoms::video == aLocal ||
                        nsGkAtoms::audio == aLocal ||
-                       nsGkAtoms::source == aLocal
-#endif
-                       )) {
+                       nsGkAtoms::source == aLocal)) {
       return true;
     }
     if (nsGkAtoms::meta == aLocal &&
@@ -1120,7 +1096,7 @@ nsTreeSanitizer::SanitizeStyleSheet(const nsAString& aOriginal,
   // -moz-binding is blacklisted.
   bool didSanitize = false;
   // Create a sheet to hold the parsed CSS
-  nsRefPtr<nsCSSStyleSheet> sheet = new nsCSSStyleSheet();
+  nsRefPtr<nsCSSStyleSheet> sheet = new nsCSSStyleSheet(CORS_NONE);
   sheet->SetURIs(aDocument->GetDocumentURI(), nullptr, aBaseURI);
   sheet->SetPrincipal(aDocument->NodePrincipal());
   // Create the CSS parser, and parse the CSS text.
@@ -1298,7 +1274,6 @@ nsTreeSanitizer::SanitizeAttributes(mozilla::dom::Element* aElement,
     i = ac; // i will be decremented immediately thanks to the for loop
   }
 
-#ifdef MOZ_MEDIA
   // If we've got HTML audio or video, add the controls attribute, because
   // otherwise the content is unplayable with scripts removed.
   if (aElement->IsHTML(nsGkAtoms::video) ||
@@ -1308,7 +1283,6 @@ nsTreeSanitizer::SanitizeAttributes(mozilla::dom::Element* aElement,
                       EmptyString(),
                       false);
   }
-#endif
 }
 
 bool
@@ -1413,7 +1387,7 @@ nsTreeSanitizer::SanitizeChildren(nsINode* aRoot)
           RemoveAllAttributes(descendant);
         }
         nsIContent* next = node->GetNextNonChildNode(aRoot);
-        node->GetParent()->RemoveChild(node);
+        node->RemoveFromParent();
         node = next;
         continue;
       }
@@ -1459,14 +1433,14 @@ nsTreeSanitizer::SanitizeChildren(nsINode* aRoot)
         nsIContent* next = node->GetNextNode(aRoot);
         nsIContent* parent = node->GetParent();
         nsCOMPtr<nsIContent> child; // Must keep the child alive during move
-        nsresult rv;
+        ErrorResult rv;
         while ((child = node->GetFirstChild())) {
-          parent->InsertBefore(child, node, &rv);
-          if (NS_FAILED(rv)) {
+          parent->InsertBefore(*child, node, rv);
+          if (rv.Failed()) {
             break;
           }
         }
-        parent->RemoveChild(node);
+        node->RemoveFromParent();
         node = next;
         continue;
       }
@@ -1502,7 +1476,7 @@ nsTreeSanitizer::SanitizeChildren(nsINode* aRoot)
     NS_ASSERTION(!node->GetFirstChild(), "How come non-element node had kids?");
     nsIContent* next = node->GetNextNonChildNode(aRoot);
     if (!mAllowComments && node->IsNodeOfType(nsINode::eCOMMENT)) {
-      node->GetNodeParent()->RemoveChild(node);
+      node->RemoveFromParent();
     }
     node = next;
   }

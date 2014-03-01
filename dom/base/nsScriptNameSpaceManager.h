@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
@@ -55,6 +55,9 @@ struct nsGlobalNameStruct
     eTypeExternalConstructorAlias
   } mType;
 
+  // mChromeOnly is only used for structs that define non-WebIDL things
+  // (possibly in addition to WebIDL ones).  In particular, it's not even
+  // initialized for eTypeNewDOMBinding structs.
   bool mChromeOnly;
   bool mDisabled;
 
@@ -67,16 +70,18 @@ struct nsGlobalNameStruct
   };
 
   // For new style DOM bindings.
-  mozilla::dom::DefineInterface mDefineDOMInterface;
-
-private:
-
-  // copy constructor
+  union {
+    mozilla::dom::DefineInterface mDefineDOMInterface; // for window
+    mozilla::dom::ConstructNavigatorProperty mConstructNavigatorProperty; // for navigator
+  };
+  // May be null if enabled unconditionally
+  mozilla::dom::ConstructorEnabled* mConstructorEnabled;
 };
 
 
 class nsIScriptContext;
 class nsICategoryManager;
+class nsIMemoryReporter;
 class GlobalNameMapEntry;
 
 
@@ -108,8 +113,7 @@ public:
   // null if one is not found. The returned nsGlobalNameStruct is only
   // guaranteed to be valid until the next call to any of the methods
   // in this class.
-  nsresult LookupNavigatorName(const nsAString& aName,
-                               const nsGlobalNameStruct **aNameStruct);
+  const nsGlobalNameStruct* LookupNavigatorName(const nsAString& aName);
 
   nsresult RegisterClassName(const char *aClassName,
                              int32_t aDOMClassInfoID,
@@ -139,7 +143,20 @@ public:
   nsGlobalNameStruct* GetConstructorProto(const nsGlobalNameStruct* aStruct);
 
   void RegisterDefineDOMInterface(const nsAFlatString& aName,
-    mozilla::dom::DefineInterface aDefineDOMInterface);
+    mozilla::dom::DefineInterface aDefineDOMInterface,
+    mozilla::dom::ConstructorEnabled* aConstructorEnabled);
+
+  void RegisterNavigatorDOMConstructor(const nsAFlatString& aName,
+    mozilla::dom::ConstructNavigatorProperty aNavConstructor,
+    mozilla::dom::ConstructorEnabled* aConstructorEnabled);
+
+  typedef PLDHashOperator
+  (* GlobalNameEnumerator)(const nsAString& aGlobalName, void* aClosure);
+
+  void EnumerateGlobalNames(GlobalNameEnumerator aEnumerator,
+                            void* aClosure);
+
+  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
 
 private:
   // Adds a new entry to the hash and returns the nsGlobalNameStruct
@@ -182,6 +199,8 @@ private:
   PLDHashTable mNavigatorNames;
 
   bool mIsInitialized;
+
+  nsCOMPtr<nsIMemoryReporter> mReporter;
 };
 
 #endif /* nsScriptNameSpaceManager_h__ */

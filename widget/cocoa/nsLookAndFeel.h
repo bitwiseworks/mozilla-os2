@@ -16,18 +16,24 @@ public:
   virtual nsresult GetIntImpl(IntID aID, int32_t &aResult);
   virtual nsresult GetFloatImpl(FloatID aID, float &aResult);
   virtual bool GetFontImpl(FontID aID, nsString& aFontName,
-                           gfxFontStyle& aFontStyle);
+                           gfxFontStyle& aFontStyle,
+                           float aDevPixPerCSSPixel);
   virtual PRUnichar GetPasswordCharacterImpl()
   {
     // unicode value for the bullet character, used for password textfields.
     return 0x2022;
   }
 
+  static bool UseOverlayScrollbars();
+
 protected:
 
   // Apple hasn't defined a constant for scollbars with two arrows on each end, so we'll use this one.
   static const int kThemeScrollBarArrowsBoth = 2;
   static const int kThemeScrollBarArrowsUpperLeft = 3;
+
+  static bool SystemWantsOverlayScrollbars();
+  static bool AllowOverlayScrollbarsOverlap();
 };
 
 #endif // nsLookAndFeel_h_

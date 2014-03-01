@@ -3,9 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/PLayers.h"
+#include "mozilla/layers/PLayerTransaction.h"
 
-/* This must occur *after* layers/PLayers.h to avoid typedefs conflicts. */
+// This must occur *after* layers/PLayerTransaction.h to avoid
+// typedefs conflicts.
 #include "mozilla/Util.h"
 
 #include "ThebesLayerD3D10.h"
@@ -42,18 +43,12 @@ ThebesLayerD3D10::~ThebesLayerD3D10()
 {
 }
 
-/**
- * Retention threshold - amount of pixels intersection required to enable
- * layer content retention. This is a guesstimate. Profiling could be done to
- * figure out the optimal threshold.
- */
-#define RETENTION_THRESHOLD 16384
-
 void
-
 ThebesLayerD3D10::InvalidateRegion(const nsIntRegion &aRegion)
 {
-  mValidRegion.Sub(mValidRegion, aRegion);
+  mInvalidRegion.Or(mInvalidRegion, aRegion);
+  mInvalidRegion.SimplifyOutward(10);
+  mValidRegion.Sub(mValidRegion, mInvalidRegion);
 }
 
 void ThebesLayerD3D10::CopyRegion(ID3D10Texture2D* aSrc, const nsIntPoint &aSrcOffset,
@@ -64,26 +59,24 @@ void ThebesLayerD3D10::CopyRegion(ID3D10Texture2D* aSrc, const nsIntPoint &aSrcO
   nsIntRegionRectIterator iter(aCopyRegion);
   const nsIntRect *r;
   while ((r = iter.Next())) {
-    if (r->width * r->height > RETENTION_THRESHOLD) {
-      // Calculate the retained rectangle's position on the old and the new
-      // surface.
-      D3D10_BOX box;
-      box.left = r->x - aSrcOffset.x;
-      box.top = r->y - aSrcOffset.y;
-      box.right = box.left + r->width;
-      box.bottom = box.top + r->height;
-      box.back = 1;
-      box.front = 0;
+    // Calculate the retained rectangle's position on the old and the new
+    // surface.
+    D3D10_BOX box;
+    box.left = r->x - aSrcOffset.x;
+    box.top = r->y - aSrcOffset.y;
+    box.right = box.left + r->width;
+    box.bottom = box.top + r->height;
+    box.back = 1;
+    box.front = 0;
 
-      device()->CopySubresourceRegion(aDest, 0,
-                                      r->x - aDestOffset.x,
-                                      r->y - aDestOffset.y,
-                                      0,
-                                      aSrc, 0,
-                                      &box);
+    device()->CopySubresourceRegion(aDest, 0,
+                                    r->x - aDestOffset.x,
+                                    r->y - aDestOffset.y,
+                                    0,
+                                    aSrc, 0,
+                                    &box);
 
-      retainedRegion.Or(retainedRegion, *r);
-    }
+    retainedRegion.Or(retainedRegion, *r);
   }
 
   // Areas which were valid and were retained are still valid
@@ -173,9 +166,7 @@ ThebesLayerD3D10::Validate(ReadbackProcessor *aReadback)
   nsIntRegion neededRegion = mVisibleRegion;
   if (!neededRegion.GetBounds().IsEqualInterior(newTextureRect) ||
       neededRegion.GetNumRects() > 1) {
-    gfxMatrix transform2d;
-    if (!GetEffectiveTransform().Is2D(&transform2d) ||
-        transform2d.HasNonIntegerTranslation()) {
+    if (MayResample()) {
       neededRegion = newTextureRect;
       if (mode == SURFACE_OPAQUE) {
         // We're going to paint outside the visible region, but layout hasn't
@@ -219,8 +210,7 @@ ThebesLayerD3D10::Validate(ReadbackProcessor *aReadback)
       // and we should silently ignore the failure. In the future when device
       // failures are properly handled we should test for the type of failure
       // and gracefully handle different failures. See bug 569081.
-      if (!oldTexture || !mTexture ||
-          largeRect.width * largeRect.height < RETENTION_THRESHOLD) {
+      if (!oldTexture || !mTexture) {
         mValidRegion.SetEmpty();
       } else {
         CopyRegion(oldTexture, mTextureRect.TopLeft(),
@@ -412,7 +402,7 @@ ThebesLayerD3D10::DrawRegion(nsIntRegion &aRegion, SurfaceMode aMode)
   
   if (aMode == SURFACE_COMPONENT_ALPHA) {
     FillTexturesBlackWhite(aRegion, visibleRect.TopLeft());
-    if (!gfxPlatform::UseAzureContentDrawing()) {
+    if (!gfxPlatform::GetPlatform()->SupportsAzureContent()) {
       gfxASurface* surfaces[2] = { mD2DSurface.get(), mD2DSurfaceOnWhite.get() };
       destinationSurface = new gfxTeeSurface(surfaces, ArrayLength(surfaces));
       // Using this surface as a source will likely go horribly wrong, since
@@ -437,7 +427,7 @@ ThebesLayerD3D10::DrawRegion(nsIntRegion &aRegion, SurfaceMode aMode)
   context->NewPath();
   const nsIntRect *iterRect;
   while ((iterRect = iter.Next())) {
-    context->Rectangle(gfxRect(iterRect->x, iterRect->y, iterRect->width, iterRect->height));      
+    context->Rectangle(gfxRect(iterRect->x, iterRect->y, iterRect->width, iterRect->height));
     if (mDrawTarget && aMode == SURFACE_SINGLE_CHANNEL_ALPHA) {
       mDrawTarget->ClearRect(Rect(iterRect->x, iterRect->y, iterRect->width, iterRect->height));
     }
@@ -487,7 +477,7 @@ ThebesLayerD3D10::CreateNewTextures(const gfxIntSize &aSize, SurfaceMode aMode)
       NS_WARNING("Failed to create shader resource view for ThebesLayerD3D10.");
     }
 
-    if (!gfxPlatform::UseAzureContentDrawing()) {
+    if (!gfxPlatform::GetPlatform()->SupportsAzureContent()) {
       mD2DSurface = new gfxD2DSurface(mTexture, aMode != SURFACE_SINGLE_CHANNEL_ALPHA ?
                                                 gfxASurface::CONTENT_COLOR : gfxASurface::CONTENT_COLOR_ALPHA);
 
@@ -515,7 +505,7 @@ ThebesLayerD3D10::CreateNewTextures(const gfxIntSize &aSize, SurfaceMode aMode)
       NS_WARNING("Failed to create shader resource view for ThebesLayerD3D10.");
     }
 
-    if (!gfxPlatform::UseAzureContentDrawing()) {
+    if (!gfxPlatform::GetPlatform()->SupportsAzureContent()) {
       mD2DSurfaceOnWhite = new gfxD2DSurface(mTextureOnWhite, gfxASurface::CONTENT_COLOR);
 
       if (!mD2DSurfaceOnWhite || mD2DSurfaceOnWhite->CairoStatus()) {
@@ -528,7 +518,7 @@ ThebesLayerD3D10::CreateNewTextures(const gfxIntSize &aSize, SurfaceMode aMode)
     }
   }
 
-  if (gfxPlatform::UseAzureContentDrawing() && !mDrawTarget) {
+  if (gfxPlatform::GetPlatform()->SupportsAzureContent() && !mDrawTarget) {
     if (aMode == SURFACE_COMPONENT_ALPHA) {
       mDrawTarget = Factory::CreateDualDrawTargetForD3D10Textures(mTexture, mTextureOnWhite, FORMAT_B8G8R8X8);
     } else {
@@ -542,112 +532,6 @@ ThebesLayerD3D10::CreateNewTextures(const gfxIntSize &aSize, SurfaceMode aMode)
       return;
     }
   }
-}
- 
-ShadowThebesLayerD3D10::ShadowThebesLayerD3D10(LayerManagerD3D10* aManager)
-  : ShadowThebesLayer(aManager, NULL)
-  , LayerD3D10(aManager)
-{
-  mImplData = static_cast<LayerD3D10*>(this);
-}
-
-ShadowThebesLayerD3D10::~ShadowThebesLayerD3D10()
-{
-}
-
-void
-ShadowThebesLayerD3D10::Swap(
-  const ThebesBuffer& aNewFront, const nsIntRegion& aUpdatedRegion,
-  OptionalThebesBuffer* aNewBack, nsIntRegion* aNewBackValidRegion,
-  OptionalThebesBuffer* aReadOnlyFront, nsIntRegion* aFrontUpdatedRegion)
-{
-  nsRefPtr<ID3D10Texture2D> newBackBuffer = mTexture;
-
-  mTexture = OpenForeign(mD3DManager->device(), aNewFront.buffer());
-  NS_ABORT_IF_FALSE(mTexture, "Couldn't open foreign texture");
-
-  // The content process tracks back/front buffers on its own, so
-  // the newBack is in essence unused.
-  *aNewBack = aNewFront;
-
-  // The content process doesn't need to read back from the front
-  // buffer (yet).
-  *aReadOnlyFront = null_t();
-
-  // FIXME/bug 662109: synchronize using KeyedMutex
-}
-
-void
-ShadowThebesLayerD3D10::DestroyFrontBuffer()
-{
-}
-
-void
-ShadowThebesLayerD3D10::Disconnect()
-{
-}
-
-void
-ShadowThebesLayerD3D10::RenderLayer()
-{
-  if (!mTexture) {
-    return;
-  }
-
-  // FIXME/bug 662109: synchronize using KeyedMutex
-  
-  nsRefPtr<ID3D10ShaderResourceView> srView;
-  HRESULT hr = device()->CreateShaderResourceView(mTexture, NULL, getter_AddRefs(srView));
-  if (FAILED(hr)) {
-      NS_WARNING("Failed to create shader resource view for ThebesLayerD3D10.");
-  }
-
-
-  SetEffectTransformAndOpacity();
-
-  ID3D10EffectTechnique *technique = SelectShader(SHADER_RGB | SHADER_PREMUL | LoadMaskTexture());
-
-  effect()->GetVariableByName("tRGB")->AsShaderResource()->SetResource(srView);
-
-  nsIntRect textureRect = GetVisibleRegion().GetBounds();
-
-  nsIntRegionRectIterator iter(mVisibleRegion);
-  while (const nsIntRect *iterRect = iter.Next()) {
-    effect()->GetVariableByName("vLayerQuad")->AsVector()->SetFloatVector(
-      ShaderConstantRectD3D10(
-        (float)iterRect->x,
-        (float)iterRect->y,
-        (float)iterRect->width,
-        (float)iterRect->height)
-      );
-
-    effect()->GetVariableByName("vTextureCoords")->AsVector()->SetFloatVector(
-      ShaderConstantRectD3D10(
-        (float)(iterRect->x - textureRect.x) / (float)textureRect.width,
-        (float)(iterRect->y - textureRect.y) / (float)textureRect.height,
-        (float)iterRect->width / (float)textureRect.width,
-        (float)iterRect->height / (float)textureRect.height)
-      );
-
-    technique->GetPassByIndex(0)->Apply(0);
-    device()->Draw(4, 0);
-  }
-
-  // FIXME/bug 662109: synchronize using KeyedMutex
-
-  // Set back to default.
-  effect()->GetVariableByName("vTextureCoords")->AsVector()->
-    SetFloatVector(ShaderConstantRectD3D10(0, 0, 1.0f, 1.0f));
-}
-
-void
-ShadowThebesLayerD3D10::Validate()
-{
-}
-
-void
-ShadowThebesLayerD3D10::LayerManagerDestroyed()
-{
 }
 
 } /* namespace layers */

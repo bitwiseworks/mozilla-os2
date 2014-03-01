@@ -11,21 +11,9 @@ include $(DEPTH)/config/autoconf.mk
 
 NO_PROFILE_GUIDED_OPTIMIZE = 1
 
-ifdef _MSC_VER
-ifneq ($(OS_TEST),x86_64)
-TEST_DIRS += vmwarerecordinghelper
-endif
-endif
-
-TEST_DIRS += \
-  crashinjectdll \
-  $(NULL)
-
 ifdef ENABLE_TESTS
 
-PROGRAM = crashinject$(BIN_SUFFIX)
 USE_STATIC_LIBS = 1
-CPPSRCS = crashinject.cpp
 
 endif # ENABLE_TESTS
 
@@ -66,10 +54,6 @@ REDIST_FILES = \
   msvcp110.dll \
   msvcr110.dll \
   $(NULL)
-endif
-
-ifdef MOZ_METRO
-REDIST_FILES += vccorlib110.dll
 endif
 
 ifdef REDIST_FILES

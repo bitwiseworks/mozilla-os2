@@ -8,18 +8,16 @@
 #include "nsGUIEvent.h"
 #include "nsIContent.h"
 #include "nsContentUtils.h"
-#include "DictionaryHelpers.h"
-#include "nsDOMClassInfoID.h"
-
-DOMCI_DATA(WheelEvent, mozilla::dom::DOMWheelEvent)
 
 namespace mozilla {
 namespace dom {
 
-DOMWheelEvent::DOMWheelEvent(nsPresContext* aPresContext,
+DOMWheelEvent::DOMWheelEvent(EventTarget* aOwner,
+                             nsPresContext* aPresContext,
                              widget::WheelEvent* aWheelEvent)
-  : nsDOMMouseEvent(aPresContext, aWheelEvent ? aWheelEvent :
-                                    new widget::WheelEvent(false, 0, nullptr))
+  : nsDOMMouseEvent(aOwner, aPresContext,
+                    aWheelEvent ? aWheelEvent :
+                                  new widget::WheelEvent(false, 0, nullptr))
 {
   if (aWheelEvent) {
     mEventIsInternal = false;
@@ -47,7 +45,6 @@ NS_IMPL_RELEASE_INHERITED(DOMWheelEvent, nsDOMMouseEvent)
 
 NS_INTERFACE_MAP_BEGIN(DOMWheelEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMWheelEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(WheelEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMMouseEvent)
 
 NS_IMETHODIMP
@@ -89,7 +86,7 @@ DOMWheelEvent::GetDeltaX(double* aDeltaX)
 {
   NS_ENSURE_ARG_POINTER(aDeltaX);
 
-  *aDeltaX = static_cast<widget::WheelEvent*>(mEvent)->deltaX;
+  *aDeltaX = DeltaX();
   return NS_OK;
 }
 
@@ -98,7 +95,7 @@ DOMWheelEvent::GetDeltaY(double* aDeltaY)
 {
   NS_ENSURE_ARG_POINTER(aDeltaY);
 
-  *aDeltaY = static_cast<widget::WheelEvent*>(mEvent)->deltaY;
+  *aDeltaY = DeltaY();
   return NS_OK;
 }
 
@@ -107,7 +104,7 @@ DOMWheelEvent::GetDeltaZ(double* aDeltaZ)
 {
   NS_ENSURE_ARG_POINTER(aDeltaZ);
 
-  *aDeltaZ = static_cast<widget::WheelEvent*>(mEvent)->deltaZ;
+  *aDeltaZ = DeltaZ();
   return NS_OK;
 }
 
@@ -116,50 +113,60 @@ DOMWheelEvent::GetDeltaMode(uint32_t* aDeltaMode)
 {
   NS_ENSURE_ARG_POINTER(aDeltaMode);
 
-  *aDeltaMode = static_cast<widget::WheelEvent*>(mEvent)->deltaMode;
+  *aDeltaMode = DeltaMode();
   return NS_OK;
 }
 
-nsresult
-DOMWheelEvent::InitFromCtor(const nsAString& aType,
-                            JSContext* aCx, jsval* aVal)
+static void
+GetModifierList(bool aCtrl, bool aShift, bool aAlt, bool aMeta,
+                nsAString& aModifierList)
 {
-  WheelEventInit d;
-  nsresult rv = d.Init(aCx, aVal);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (aCtrl) {
+    aModifierList.AppendLiteral(NS_DOM_KEYNAME_CONTROL);
+  }
+  if (aShift) {
+    if (!aModifierList.IsEmpty()) {
+      aModifierList.AppendLiteral(" ");
+    }
+    aModifierList.AppendLiteral(NS_DOM_KEYNAME_SHIFT);
+  }
+  if (aAlt) {
+    if (!aModifierList.IsEmpty()) {
+      aModifierList.AppendLiteral(" ");
+    }
+    aModifierList.AppendLiteral(NS_DOM_KEYNAME_ALT);
+  }
+  if (aMeta) {
+    if (!aModifierList.IsEmpty()) {
+      aModifierList.AppendLiteral(" ");
+    }
+    aModifierList.AppendLiteral(NS_DOM_KEYNAME_META);
+  }
+}
 
+already_AddRefed<DOMWheelEvent>
+DOMWheelEvent::Constructor(const GlobalObject& aGlobal,
+                           const nsAString& aType,
+                           const WheelEventInit& aParam,
+                           mozilla::ErrorResult& aRv)
+{
+  nsCOMPtr<EventTarget> t = do_QueryInterface(aGlobal.Get());
+  nsRefPtr<DOMWheelEvent> e = new DOMWheelEvent(t, nullptr, nullptr);
+  bool trusted = e->Init(t);
   nsAutoString modifierList;
-  if (d.ctrlKey) {
-    modifierList.AppendLiteral(NS_DOM_KEYNAME_CONTROL);
-  }
-  if (d.shiftKey) {
-    if (!modifierList.IsEmpty()) {
-      modifierList.AppendLiteral(" ");
-    }
-    modifierList.AppendLiteral(NS_DOM_KEYNAME_SHIFT);
-  }
-  if (d.altKey) {
-    if (!modifierList.IsEmpty()) {
-      modifierList.AppendLiteral(" ");
-    }
-    modifierList.AppendLiteral(NS_DOM_KEYNAME_ALT);
-  }
-  if (d.metaKey) {
-    if (!modifierList.IsEmpty()) {
-      modifierList.AppendLiteral(" ");
-    }
-    modifierList.AppendLiteral(NS_DOM_KEYNAME_META);
-  }
-
-  rv = InitWheelEvent(aType, d.bubbles, d.cancelable,
-                      d.view, d.detail, d.screenX, d.screenY,
-                      d.clientX, d.clientY, d.button, d.relatedTarget,
-                      modifierList, d.deltaX, d.deltaY, d.deltaZ, d.deltaMode);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  static_cast<widget::WheelEvent*>(mEvent)->buttons = d.buttons;
-
-  return NS_OK;
+  GetModifierList(aParam.mCtrlKey, aParam.mShiftKey,
+                  aParam.mAltKey, aParam.mMetaKey,
+                  modifierList);
+  aRv = e->InitWheelEvent(aType, aParam.mBubbles, aParam.mCancelable,
+                          aParam.mView, aParam.mDetail,
+                          aParam.mScreenX, aParam.mScreenY,
+                          aParam.mClientX, aParam.mClientY,
+                          aParam.mButton, aParam.mRelatedTarget,
+                          modifierList, aParam.mDeltaX,
+                          aParam.mDeltaY, aParam.mDeltaZ, aParam.mDeltaMode);
+  static_cast<widget::WheelEvent*>(e->mEvent)->buttons = aParam.mButtons;
+  e->SetTrusted(trusted);
+  return e.forget();
 }
 
 } // namespace dom
@@ -168,9 +175,10 @@ DOMWheelEvent::InitFromCtor(const nsAString& aType,
 using namespace mozilla;
 
 nsresult NS_NewDOMWheelEvent(nsIDOMEvent** aInstancePtrResult,
+                             mozilla::dom::EventTarget* aOwner,
                              nsPresContext* aPresContext,
                              widget::WheelEvent *aEvent)
 {
-  dom::DOMWheelEvent* it = new dom::DOMWheelEvent(aPresContext, aEvent);
+  dom::DOMWheelEvent* it = new dom::DOMWheelEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

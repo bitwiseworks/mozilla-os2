@@ -11,9 +11,6 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE          = test_intl_uconv
-XPCSHELL_TESTS	= unit
-
 # Tests disabled because they dont work in libxul builds.
 #MOZILLA_INTERNAL_API = 1
 #
@@ -34,6 +31,7 @@ relativesrcdir	= @relativesrcdir@
 
 MOCHITEST_FILES =	\
 		test_bug335816.html \
+		test_bug843434.html \
 		test_long_doc.html \
 		test_singlebyte_overconsumption.html \
 		test_unicode_noncharacterescapes.html \

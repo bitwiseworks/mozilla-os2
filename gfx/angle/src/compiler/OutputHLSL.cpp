@@ -7,14 +7,15 @@
 #include "compiler/OutputHLSL.h"
 
 #include "common/angleutils.h"
-#include "compiler/compilerdebug.h"
-#include "compiler/InfoSink.h"
-#include "compiler/UnfoldShortCircuit.h"
-#include "compiler/SearchSymbol.h"
+#include "compiler/compiler_debug.h"
 #include "compiler/DetectDiscontinuity.h"
+#include "compiler/InfoSink.h"
+#include "compiler/SearchSymbol.h"
+#include "compiler/UnfoldShortCircuit.h"
 
-#include <stdio.h>
 #include <algorithm>
+#include <cfloat>
+#include <stdio.h>
 
 namespace sh
 {
@@ -98,7 +99,7 @@ OutputHLSL::~OutputHLSL()
 
 void OutputHLSL::output()
 {
-    mContainsLoopDiscontinuity = containsLoopDiscontinuity(mContext.treeRoot);
+    mContainsLoopDiscontinuity = mContext.shaderType == SH_FRAGMENT_SHADER && containsLoopDiscontinuity(mContext.treeRoot);
 
     mContext.treeRoot->traverse(this);   // Output the body first to determine what has to go in the header
     header();
@@ -973,7 +974,7 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
 
                     if (element)
                     {
-                        int i = element->getUnionArrayPointer()[0].getIConst();
+                        int i = element->getIConst(0);
 
                         switch (i)
                         {
@@ -1340,7 +1341,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpPrototype:
         if (visit == PreVisit)
         {
-            out << typeString(node->getType()) << " " << decorate(node->getName()) << "(";
+            out << typeString(node->getType()) << " " << decorate(node->getName()) << (mOutputLod0Function ? "Lod0(" : "(");
 
             TIntermSequence &arguments = node->getSequence();
 
@@ -1361,6 +1362,14 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
             }
 
             out << ");\n";
+
+            // Also prototype the Lod0 variant if needed
+            if (mContainsLoopDiscontinuity && !mOutputLod0Function)
+            {
+                mOutputLod0Function = true;
+                node->traverse(this);
+                mOutputLod0Function = false;
+            }
 
             return false;
         }
@@ -1770,7 +1779,7 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
 {
     bool wasDiscontinuous = mInsideDiscontinuousLoop;
 
-    if (!mInsideDiscontinuousLoop)
+    if (mContainsLoopDiscontinuity && !mInsideDiscontinuousLoop)
     {
         mInsideDiscontinuousLoop = containsLoopDiscontinuity(node);
     }
@@ -1968,7 +1977,7 @@ bool OutputHLSL::handleExcessiveLoop(TIntermLoop *node)
                         if (constant->getBasicType() == EbtInt && constant->getNominalSize() == 1)
                         {
                             index = symbol;
-                            initial = constant->getUnionArrayPointer()[0].getIConst();
+                            initial = constant->getIConst(0);
                         }
                     }
                 }
@@ -1990,7 +1999,7 @@ bool OutputHLSL::handleExcessiveLoop(TIntermLoop *node)
                 if (constant->getBasicType() == EbtInt && constant->getNominalSize() == 1)
                 {
                     comparator = test->getOp();
-                    limit = constant->getUnionArrayPointer()[0].getIConst();
+                    limit = constant->getIConst(0);
                 }
             }
         }
@@ -2011,7 +2020,7 @@ bool OutputHLSL::handleExcessiveLoop(TIntermLoop *node)
             {
                 if (constant->getBasicType() == EbtInt && constant->getNominalSize() == 1)
                 {
-                    int value = constant->getUnionArrayPointer()[0].getIConst();
+                    int value = constant->getIConst(0);
 
                     switch (op)
                     {
@@ -2557,7 +2566,7 @@ const ConstantUnion *OutputHLSL::writeConstantUnion(const TType &type, const Con
         {
             switch (constUnion->getType())
             {
-              case EbtFloat: out << constUnion->getFConst(); break;
+              case EbtFloat: out << std::min(FLT_MAX, std::max(-FLT_MAX, constUnion->getFConst())); break;
               case EbtInt:   out << constUnion->getIConst(); break;
               case EbtBool:  out << constUnion->getBConst(); break;
               default: UNREACHABLE();

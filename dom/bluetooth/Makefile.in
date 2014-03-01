@@ -16,77 +16,42 @@ DEPTH            = @DEPTH@
 topsrcdir        = @top_srcdir@
 srcdir           = @srcdir@
 VPATH            = @srcdir@
+FAIL_ON_WARNINGS := 1
 
 include $(DEPTH)/config/autoconf.mk
+include $(topsrcdir)/dom/dom-config.mk
 
-MODULE           = dom
+VPATH += $(srcdir)/ipc
+
+ifneq (,$(MOZ_B2G_BT))
+
 LIBRARY_NAME     = dombluetooth_s
-XPIDL_MODULE     = dom_bluetooth
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
 
-include $(topsrcdir)/dom/dom-config.mk
-
-CPPSRCS += \
-  BluetoothService.cpp \
-  BluetoothManager.cpp \
-  BluetoothAdapter.cpp \
-  BluetoothDevice.cpp \
-  BluetoothPropertyEvent.cpp \
-  BluetoothReplyRunnable.cpp \
-  BluetoothPropertyContainer.cpp \
-  BluetoothUtils.cpp \
-  $(NULL)
-
-XPIDLSRCS = \
-  nsIDOMNavigatorBluetooth.idl \
-  nsIDOMBluetoothManager.idl \
-  nsIDOMBluetoothAdapter.idl \
-  nsIDOMBluetoothDevice.idl \
-  nsIDOMBluetoothDeviceEvent.idl \
-  nsIDOMBluetoothDeviceAddressEvent.idl \
-  nsIDOMBluetoothPropertyEvent.idl \
-  nsIDOMBluetoothPairingEvent.idl \
-  nsIDOMBluetoothAuthorizeEvent.idl \
-  $(NULL)
-
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
 VPATH += \
-	$(srcdir)/linux \
-	$(srcdir)/gonk \
-	$(NULL)
+  $(srcdir)/linux \
+  $(srcdir)/gonk \
+  $(NULL)
 LOCAL_INCLUDES += $(MOZ_DBUS_CFLAGS)
-CPPSRCS += \
-	BluetoothDBusService.cpp \
-	BluetoothGonkService.cpp \
-	BluetoothGonkServiceFactory.cpp \
-	$(NULL)
+DEFINES += -DMOZ_BLUETOOTH_GONK
 else
 ifdef MOZ_ENABLE_DBUS
 VPATH += $(srcdir)/linux
 LOCAL_INCLUDES += $(MOZ_DBUS_CFLAGS)
-CPPSRCS += \
-	BluetoothDBusService.cpp \
-	BluetoothDBusServiceFactory.cpp \
-	$(NULL)
 CFLAGS += $(MOZ_DBUS_GLIB_CFLAGS)
 CXXFLAGS += $(MOZ_DBUS_GLIB_CFLAGS) -DHAVE_PTHREADS
-else
-CPPSRCS += BluetoothNullServiceFactory.cpp
+DEFINES += -DMOZ_BLUETOOTH_DBUS
 endif
 endif
-
-LOCAL_INCLUDES += -I$(DEPTH)/ipc/ipdl/_ipdlheaders/mozilla/dom/bluetooth/
 
 # Add VPATH to LOCAL_INCLUDES so we are going to include the correct backend
-# subdirectory
+# subdirectory.
 LOCAL_INCLUDES += $(VPATH:%=-I%)
+
+endif # MOZ_B2G_BT
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
-
-
-XPIDL_FLAGS += \
-  -I$(topsrcdir)/dom/interfaces/events \
-  $(NULL)

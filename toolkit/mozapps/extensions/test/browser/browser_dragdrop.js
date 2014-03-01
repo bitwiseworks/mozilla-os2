@@ -11,10 +11,10 @@
 // Instead of loading ChromeUtils.js into the test scope in browser-test.js for all tests,
 // we only need ChromeUtils.js for a few files which is why we are using loadSubScript.
 var gManagerWindow;
-var chromeUtils = {};
+var ChromeUtils = {};
 this._scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
                      getService(Ci.mozIJSSubScriptLoader);
-this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", chromeUtils);
+this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
 
 // This listens for the next opened window and checks it is of the right url.
 // opencallback is called when the new window is fully loaded
@@ -105,17 +105,16 @@ function test_confirmation(aWindow, aExpectedURLs) {
   var list = aWindow.document.getElementById("itemList");
   is(list.childNodes.length, aExpectedURLs.length, "Should be the right number of installs");
 
-  aExpectedURLs.forEach(function(aURL) {
-    var node = list.firstChild;
-    while (node) {
-      if (node.url == aURL) {
-        ok(true, "Should have seen " + aURL + " in the list");
-        return;
+  for (let url of aExpectedURLs) {
+    let found = false;
+    for (let node of list.children) {
+      if (node.url == url) {
+        found = true;
+        break;
       }
-      node = node.nextSibling;
     }
-    ok(false, "Should have seen " + aURL + " in the list");
-  });
+    ok(found, "Should have seen " + url + " in the list");
+  }
 
   aWindow.document.documentElement.cancelDialog();
 }
@@ -135,9 +134,9 @@ add_test(function() {
   });
 
   var viewContainer = gManagerWindow.document.getElementById("view-port");
-  var effect = chromeUtils.synthesizeDrop(viewContainer, viewContainer,
+  var effect = ChromeUtils.synthesizeDrop(viewContainer, viewContainer,
                [[{type: "text/x-moz-url", data: url}]],
-               "copy", gManagerWindow, EventUtils);
+               "copy", gManagerWindow);
   is(effect, "copy", "Drag should be accepted");
 });
 
@@ -156,9 +155,9 @@ add_test(function() {
   });
 
   var viewContainer = gManagerWindow.document.getElementById("view-port");
-  var effect = chromeUtils.synthesizeDrop(viewContainer, viewContainer,
+  var effect = ChromeUtils.synthesizeDrop(viewContainer, viewContainer,
                [[{type: "application/x-moz-file", data: fileurl.file}]],
-               "copy", gManagerWindow, EventUtils);
+               "copy", gManagerWindow);
   is(effect, "copy", "Drag should be accepted");
 });
 
@@ -178,10 +177,10 @@ add_test(function() {
   });
 
   var viewContainer = gManagerWindow.document.getElementById("view-port");
-  var effect = chromeUtils.synthesizeDrop(viewContainer, viewContainer,
+  var effect = ChromeUtils.synthesizeDrop(viewContainer, viewContainer,
                [[{type: "text/x-moz-url", data: url1}],
                 [{type: "text/x-moz-url", data: url2}]],
-               "copy", gManagerWindow, EventUtils);
+               "copy", gManagerWindow);
   is(effect, "copy", "Drag should be accepted");
 });
 
@@ -201,10 +200,10 @@ add_test(function() {
   });
 
   var viewContainer = gManagerWindow.document.getElementById("view-port");
-  var effect = chromeUtils.synthesizeDrop(viewContainer, viewContainer,
+  var effect = ChromeUtils.synthesizeDrop(viewContainer, viewContainer,
                [[{type: "application/x-moz-file", data: fileurl1.file}],
                 [{type: "application/x-moz-file", data: fileurl2.file}]],
-               "copy", gManagerWindow, EventUtils);
+               "copy", gManagerWindow);
   is(effect, "copy", "Drag should be accepted");
 });
 
@@ -224,9 +223,9 @@ add_test(function() {
   });
 
   var viewContainer = gManagerWindow.document.getElementById("view-port");
-  var effect = chromeUtils.synthesizeDrop(viewContainer, viewContainer,
+  var effect = ChromeUtils.synthesizeDrop(viewContainer, viewContainer,
                [[{type: "text/x-moz-url", data: url}],
                 [{type: "application/x-moz-file", data: fileurl.file}]],
-               "copy", gManagerWindow, EventUtils);
+               "copy", gManagerWindow);
   is(effect, "copy", "Drag should be accepted");
 });

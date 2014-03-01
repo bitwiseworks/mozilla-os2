@@ -34,6 +34,7 @@
 #include "hb-blob.h"
 #include "hb-open-file-private.hh"
 #include "hb-ot-head-table.hh"
+#include "hb-ot-maxp-table.hh"
 
 #include "hb-cache-private.hh"
 
@@ -520,6 +521,7 @@ static const hb_face_t _hb_face_nil = {
 
   0,    /* index */
   1000, /* upem */
+  0,    /* num_glyphs */
 
   {
 #define HB_SHAPER_IMPLEMENT(shaper) HB_SHAPER_DATA_INVALID,
@@ -549,6 +551,7 @@ hb_face_create_for_tables (hb_reference_table_func_t  reference_table_func,
   face->destroy = destroy;
 
   face->upem = 0;
+  face->num_glyphs = (unsigned int) -1;
 
   return face;
 }
@@ -589,10 +592,10 @@ _hb_face_for_data_reference_table (hb_face_t *face HB_UNUSED, hb_tag_t tag, void
   if (tag == HB_TAG_NONE)
     return hb_blob_reference (data->blob);
 
-  const OpenTypeFontFile &ot_file = *Sanitizer<OpenTypeFontFile>::lock_instance (data->blob);
-  const OpenTypeFontFace &ot_face = ot_file.get_face (data->index);
+  const OT::OpenTypeFontFile &ot_file = *OT::Sanitizer<OT::OpenTypeFontFile>::lock_instance (data->blob);
+  const OT::OpenTypeFontFace &ot_face = ot_file.get_face (data->index);
 
-  const OpenTypeTable &table = ot_face.get_table_by_tag (tag);
+  const OT::OpenTypeTable &table = ot_face.get_table_by_tag (tag);
 
   hb_blob_t *blob = hb_blob_create_sub_blob (data->blob, table.offset, table.length);
 
@@ -608,7 +611,7 @@ hb_face_create (hb_blob_t    *blob,
   if (unlikely (!blob || !hb_blob_get_length (blob)))
     return hb_face_get_empty ();
 
-  hb_face_for_data_closure_t *closure = _hb_face_for_data_closure_create (Sanitizer<OpenTypeFontFile>::sanitize (hb_blob_reference (blob)), index);
+  hb_face_for_data_closure_t *closure = _hb_face_for_data_closure_create (OT::Sanitizer<OT::OpenTypeFontFile>::sanitize (hb_blob_reference (blob)), index);
 
   if (unlikely (!closure))
     return hb_face_get_empty ();
@@ -736,14 +739,38 @@ hb_face_get_upem (hb_face_t *face)
   return face->get_upem ();
 }
 
-
 void
 hb_face_t::load_upem (void) const
 {
-  hb_blob_t *head_blob = Sanitizer<head>::sanitize (reference_table (HB_OT_TAG_head));
-  const head *head_table = Sanitizer<head>::lock_instance (head_blob);
+  hb_blob_t *head_blob = OT::Sanitizer<OT::head>::sanitize (reference_table (HB_OT_TAG_head));
+  const OT::head *head_table = OT::Sanitizer<OT::head>::lock_instance (head_blob);
   upem = head_table->get_upem ();
   hb_blob_destroy (head_blob);
+}
+
+void
+hb_face_set_glyph_count (hb_face_t    *face,
+			 unsigned int  glyph_count)
+{
+  if (hb_object_is_inert (face))
+    return;
+
+  face->num_glyphs = glyph_count;
+}
+
+unsigned int
+hb_face_get_glyph_count (hb_face_t *face)
+{
+  return face->get_num_glyphs ();
+}
+
+void
+hb_face_t::load_num_glyphs (void) const
+{
+  hb_blob_t *maxp_blob = OT::Sanitizer<OT::maxp>::sanitize (reference_table (HB_OT_TAG_maxp));
+  const OT::maxp *maxp_table = OT::Sanitizer<OT::maxp>::lock_instance (maxp_blob);
+  num_glyphs = maxp_table->get_num_glyphs ();
+  hb_blob_destroy (maxp_blob);
 }
 
 

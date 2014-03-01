@@ -100,7 +100,21 @@ public:
       gfxWarning() << "Failed to create shared bitmap for old surface.";
     }
 
-    mClippedArea = mDT->GetClippedGeometry();
+    IntRect clipBounds;
+    mClippedArea = mDT->GetClippedGeometry(&clipBounds);
+
+    if (!clipBounds.IsEqualEdges(IntRect(IntPoint(0, 0), mDT->mSize))) {
+      // We still need to take into account clipBounds if it contains additional
+      // clipping information.
+      RefPtr<ID2D1RectangleGeometry> rectGeom;
+      factory()->CreateRectangleGeometry(D2D1::Rect(Float(clipBounds.x),
+                                                    Float(clipBounds.y),
+                                                    Float(clipBounds.XMost()),
+                                                    Float(clipBounds.YMost())),
+                                         byRef(rectGeom));
+
+      mClippedArea = IntersectGeometry(mClippedArea, rectGeom);
+    }
   }
 
   ID2D1Factory *factory() { return mDT->factory(); }
@@ -147,6 +161,11 @@ private:
   // This contains the area drawing is clipped to.
   RefPtr<ID2D1Geometry> mClippedArea;
 };
+
+ID2D1Factory *D2DFactory()
+{
+  return DrawTargetD2D::factory();
+}
 
 DrawTargetD2D::DrawTargetD2D()
   : mCurrentCachedLayer(0)
@@ -243,6 +262,63 @@ DrawTargetD2D::AddDependencyOnSource(SourceSurfaceD2DTarget* aSource)
   }
 }
 
+TemporaryRef<ID2D1Bitmap>
+DrawTargetD2D::GetBitmapForSurface(SourceSurface *aSurface,
+                                   Rect &aSource)
+{
+  RefPtr<ID2D1Bitmap> bitmap;
+
+  switch (aSurface->GetType()) {
+
+  case SURFACE_D2D1_BITMAP:
+    {
+      SourceSurfaceD2D *srcSurf = static_cast<SourceSurfaceD2D*>(aSurface);
+      bitmap = srcSurf->GetBitmap();
+    }
+    break;
+  case SURFACE_D2D1_DRAWTARGET:
+    {
+      SourceSurfaceD2DTarget *srcSurf = static_cast<SourceSurfaceD2DTarget*>(aSurface);
+      bitmap = srcSurf->GetBitmap(mRT);
+      AddDependencyOnSource(srcSurf);
+    }
+    break;
+  default:
+    {
+      RefPtr<DataSourceSurface> srcSurf = aSurface->GetDataSurface();
+
+      if (!srcSurf) {
+        gfxDebug() << "Not able to deal with non-data source surface.";
+        return nullptr;
+      }
+
+      if (aSource.width > mRT->GetMaximumBitmapSize() ||
+          aSource.height > mRT->GetMaximumBitmapSize()) {
+        gfxDebug() << "Bitmap source larger than texture size specified. DrawBitmap will silently fail.";
+        // Don't know how to deal with this yet.
+        return nullptr;
+      }
+
+      int stride = srcSurf->Stride();
+
+      unsigned char *data = srcSurf->GetData() +
+                            (uint32_t)aSource.y * stride +
+                            (uint32_t)aSource.x * BytesPerPixel(srcSurf->GetFormat());
+
+      D2D1_BITMAP_PROPERTIES props =
+        D2D1::BitmapProperties(D2D1::PixelFormat(DXGIFormat(srcSurf->GetFormat()), AlphaMode(srcSurf->GetFormat())));
+      mRT->CreateBitmap(D2D1::SizeU(UINT32(aSource.width), UINT32(aSource.height)), data, stride, props, byRef(bitmap));
+
+      // subtract the integer part leaving the fractional part
+      aSource.x -= (uint32_t)aSource.x;
+      aSource.y -= (uint32_t)aSource.y;
+    }
+    break;
+  }
+
+  return bitmap;
+}
+
 void
 DrawTargetD2D::DrawSurface(SourceSurface *aSurface,
                            const Rect &aDest,
@@ -260,60 +336,43 @@ DrawTargetD2D::DrawSurface(SourceSurface *aSurface,
 
   Rect srcRect = aSource;
 
-  switch (aSurface->GetType()) {
-
-  case SURFACE_D2D1_BITMAP:
-    {
-      SourceSurfaceD2D *srcSurf = static_cast<SourceSurfaceD2D*>(aSurface);
-      bitmap = srcSurf->GetBitmap();
-
-      if (!bitmap) {
-        return;
-      }
-    }
-    break;
-  case SURFACE_D2D1_DRAWTARGET:
-    {
-      SourceSurfaceD2DTarget *srcSurf = static_cast<SourceSurfaceD2DTarget*>(aSurface);
-      bitmap = srcSurf->GetBitmap(mRT);
-      AddDependencyOnSource(srcSurf);
-    }
-    break;
-  default:
-    {
-      RefPtr<DataSourceSurface> srcSurf = aSurface->GetDataSurface();
-
-      if (!srcSurf) {
-        gfxDebug() << "Not able to deal with non-data source surface.";
-        return;
-      }
-
-      if (aSource.width > rt->GetMaximumBitmapSize() ||
-          aSource.height > rt->GetMaximumBitmapSize()) {
-        gfxDebug() << "Bitmap source larger than texture size specified. DrawBitmap will silently fail.";
-        // Don't know how to deal with this yet.
-        return;
-      }
-
-      int stride = srcSurf->Stride();
-
-      unsigned char *data = srcSurf->GetData() +
-                            (uint32_t)aSource.y * stride +
-                            (uint32_t)aSource.x * BytesPerPixel(srcSurf->GetFormat());
-
-      D2D1_BITMAP_PROPERTIES props =
-        D2D1::BitmapProperties(D2D1::PixelFormat(DXGIFormat(srcSurf->GetFormat()), AlphaMode(srcSurf->GetFormat())));
-      mRT->CreateBitmap(D2D1::SizeU(UINT32(aSource.width), UINT32(aSource.height)), data, stride, props, byRef(bitmap));
-
-      srcRect.x -= (uint32_t)aSource.x;
-      srcRect.y -= (uint32_t)aSource.y;
-    }
-    break;
+  bitmap = GetBitmapForSurface(aSurface, srcRect);
+  if (!bitmap) {
+      return;
   }
-
+ 
   rt->DrawBitmap(bitmap, D2DRect(aDest), aOptions.mAlpha, D2DFilter(aSurfOptions.mFilter), D2DRect(srcRect));
 
   FinalizeRTForOperation(aOptions.mCompositionOp, ColorPattern(Color()), aDest);
+}
+
+void
+DrawTargetD2D::MaskSurface(const Pattern &aSource,
+                           SourceSurface *aMask,
+                           Point aOffset,
+                           const DrawOptions &aOptions)
+{
+  RefPtr<ID2D1Bitmap> bitmap;
+
+  ID2D1RenderTarget *rt = GetRTForOperation(aOptions.mCompositionOp, ColorPattern(Color()));
+
+  PrepareForDrawing(rt);
+
+  // FillOpacityMask only works if the antialias mode is MODE_ALIASED
+  rt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+
+  IntSize size = aMask->GetSize();
+  Rect maskRect = Rect(0.f, 0.f, size.width, size.height);
+  bitmap = GetBitmapForSurface(aMask, maskRect);
+  if (!bitmap) {
+       return;
+  }
+
+  Rect dest = Rect(aOffset.x, aOffset.y, size.width, size.height);
+  RefPtr<ID2D1Brush> brush = CreateBrushForPattern(aSource, aOptions.mAlpha);
+  rt->FillOpacityMask(bitmap, brush, D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2DRect(dest), D2DRect(maskRect));
+
+  FinalizeRTForOperation(aOptions.mCompositionOp, ColorPattern(Color()), dest);
 }
 
 void
@@ -328,6 +387,8 @@ DrawTargetD2D::DrawSurfaceWithShadow(SourceSurface *aSurface,
   if (aSurface->GetType() != SURFACE_D2D1_DRAWTARGET) {
     return;
   }
+
+  SetScissorToRect(nullptr);
 
   // XXX - This function is way too long, it should be split up soon to make
   // it more graspable!
@@ -361,8 +422,9 @@ DrawTargetD2D::DrawSurfaceWithShadow(SourceSurface *aSurface,
 
   RefPtr<ID3D10Texture2D> maskTexture;
   RefPtr<ID3D10ShaderResourceView> maskSRView;
+  IntRect clipBounds;
   if (mPushedClips.size()) {
-    EnsureClipMaskTexture();
+    EnsureClipMaskTexture(&clipBounds);
 
     mDevice->CreateShaderResourceView(mCurrentClipMaskTexture, nullptr, byRef(maskSRView));
   }
@@ -618,6 +680,7 @@ DrawTargetD2D::DrawSurfaceWithShadow(SourceSurface *aSurface,
                                              Float(aSurface->GetSize().height) / mSize.height));
     mPrivateData->mEffect->GetTechniqueByName("SampleTextureWithShadow")->
       GetPassByIndex(2)->Apply(0);
+    SetScissorToRect(&clipBounds);
   } else {
     mPrivateData->mEffect->GetTechniqueByName("SampleTextureWithShadow")->
       GetPassByIndex(1)->Apply(0);
@@ -643,6 +706,7 @@ DrawTargetD2D::DrawSurfaceWithShadow(SourceSurface *aSurface,
                                              Float(aSurface->GetSize().height) / mSize.height));
     mPrivateData->mEffect->GetTechniqueByName("SampleMaskedTexture")->
       GetPassByIndex(0)->Apply(0);
+    // We've set the scissor rect here for the previous draw call.
   } else {
     mPrivateData->mEffect->GetTechniqueByName("SampleTexture")->
       GetPassByIndex(0)->Apply(0);
@@ -883,8 +947,15 @@ DrawTargetD2D::FillGlyphs(ScaledFont *aFont,
     }
   }
 
+  AntialiasMode aaMode = font->GetDefaultAAMode();
+
+  if (aOptions.mAntialiasMode != AA_DEFAULT) {
+    aaMode = aOptions.mAntialiasMode;
+  }
+
   if (mFormat == FORMAT_B8G8R8A8 && mPermitSubpixelAA &&
-      aOptions.mCompositionOp == OP_OVER && aPattern.GetType() == PATTERN_COLOR) {
+      aOptions.mCompositionOp == OP_OVER && aPattern.GetType() == PATTERN_COLOR &&
+      aaMode == AA_SUBPIXEL) {
     if (FillGlyphsManual(font, aBuffer,
                          static_cast<const ColorPattern*>(&aPattern)->mColor,
                          params, aOptions)) {
@@ -895,6 +966,29 @@ DrawTargetD2D::FillGlyphs(ScaledFont *aFont,
   ID2D1RenderTarget *rt = GetRTForOperation(aOptions.mCompositionOp, aPattern);
 
   PrepareForDrawing(rt);
+
+  D2D1_TEXT_ANTIALIAS_MODE d2dAAMode = D2D1_TEXT_ANTIALIAS_MODE_DEFAULT;
+
+  switch (aaMode) {
+  case AA_NONE:
+    d2dAAMode = D2D1_TEXT_ANTIALIAS_MODE_ALIASED;
+    break;
+  case AA_GRAY:
+    d2dAAMode = D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;
+    break;
+  case AA_SUBPIXEL:
+    d2dAAMode = D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE;
+    break;
+  default:
+    d2dAAMode = D2D1_TEXT_ANTIALIAS_MODE_DEFAULT;
+  }
+
+  if (d2dAAMode == D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE &&
+      mFormat != FORMAT_B8G8R8X8) {
+    d2dAAMode = D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;
+  }
+
+  rt->SetTextAntialiasMode(d2dAAMode);
 
   if (rt != mRT || params != mTextRenderingParams) {
     rt->SetTextRenderingParams(params);
@@ -937,7 +1031,7 @@ DrawTargetD2D::Mask(const Pattern &aSource,
                                       1.0f, maskBrush),
                 layer);
 
-  Rect rect(0, 0, mSize.width, mSize.height);
+  Rect rect(0, 0, (Float)mSize.width, (Float)mSize.height);
   Matrix mat = mTransform;
   mat.Invert();
   
@@ -1001,15 +1095,20 @@ DrawTargetD2D::PushClipRect(const Rect &aRect)
   }
 
   PushedClip clip;
+  Rect rect = mTransform.TransformBounds(aRect);
+  IntRect intRect;
+  clip.mIsPixelAligned = rect.ToIntRect(&intRect);
+
   // Do not store the transform, just store the device space rectangle directly.
-  clip.mBounds = D2DRect(mTransform.TransformBounds(aRect));
+  clip.mBounds = D2DRect(rect);
 
   mPushedClips.push_back(clip);
 
   mRT->SetTransform(D2D1::IdentityMatrix());
   mTransformDirty = true;
+
   if (mClipsArePushed) {
-    mRT->PushAxisAlignedClip(clip.mBounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    mRT->PushAxisAlignedClip(clip.mBounds, clip.mIsPixelAligned ? D2D1_ANTIALIAS_MODE_ALIASED : D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
   }
 }
 
@@ -1462,11 +1561,15 @@ DrawTargetD2D::GetBlendStateForOperator(CompositionOp aOperator)
 ID2D1RenderTarget*
 DrawTargetD2D::GetRTForOperation(CompositionOp aOperator, const Pattern &aPattern)
 {
-  if (aOperator == OP_OVER && !IsPatternSupportedByD2D(aPattern)) {
+  if (aOperator == OP_OVER && IsPatternSupportedByD2D(aPattern)) {
     return mRT;
   }
 
   PopAllClips();
+
+  if (aOperator > OP_XOR) {
+    mRT->Flush();
+  }
 
   if (mTempRT) {
     mTempRT->Clear(D2D1::ColorF(0, 0));
@@ -1505,7 +1608,7 @@ DrawTargetD2D::GetRTForOperation(CompositionOp aOperator, const Pattern &aPatter
 void
 DrawTargetD2D::FinalizeRTForOperation(CompositionOp aOperator, const Pattern &aPattern, const Rect &aBounds)
 {
-  if (aOperator == OP_OVER && !IsPatternSupportedByD2D(aPattern)) {
+  if (aOperator == OP_OVER && IsPatternSupportedByD2D(aPattern)) {
     return;
   }
 
@@ -1546,15 +1649,65 @@ DrawTargetD2D::FinalizeRTForOperation(CompositionOp aOperator, const Pattern &aP
   viewport.TopLeftX = 0;
   viewport.TopLeftY = 0;
 
+  RefPtr<ID3D10Texture2D> tmpTexture;
+  RefPtr<ID3D10ShaderResourceView> mBckSRView;
+
   mDevice->RSSetViewports(1, &viewport);
   mPrivateData->mEffect->GetVariableByName("QuadDesc")->AsVector()->
     SetFloatVector(ShaderConstantRectD3D10(-1.0f, 1.0f, 2.0f, -2.0f));
 
-  if (!IsPatternSupportedByD2D(aPattern)) {
+  if (IsPatternSupportedByD2D(aPattern)) {
     mPrivateData->mEffect->GetVariableByName("TexCoords")->AsVector()->
       SetFloatVector(ShaderConstantRectD3D10(0, 0, 1.0f, 1.0f));
     mPrivateData->mEffect->GetVariableByName("tex")->AsShaderResource()->SetResource(mSRView);
-    mPrivateData->mEffect->GetTechniqueByName("SampleTexture")->GetPassByIndex(0)->Apply(0);
+
+    // Handle the case where we blend with the backdrop
+    if (aOperator > OP_XOR) {
+      IntSize size = mSize;
+      SurfaceFormat format = mFormat;
+
+      CD3D10_TEXTURE2D_DESC desc(DXGIFormat(format), size.width, size.height, 1, 1);
+      desc.BindFlags = D3D10_BIND_RENDER_TARGET | D3D10_BIND_SHADER_RESOURCE;
+
+      HRESULT hr = mDevice->CreateTexture2D(&desc, nullptr, byRef(tmpTexture));
+      if (FAILED(hr)) {
+        gfxWarning() << "Failed to create temporary texture to hold surface data.";
+        return;
+      }
+
+      mDevice->CopyResource(tmpTexture, mTexture);
+      if (FAILED(hr)) {
+        gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hr;
+        return;
+      }
+
+      DrawTargetD2D::Flush();
+
+      hr = mDevice->CreateShaderResourceView(tmpTexture, nullptr, byRef(mBckSRView));
+
+      if (FAILED(hr)) {
+        gfxWarning() << *this << "Failed to create shader resource view for temp texture. Code: " << hr;
+        return;
+      }
+
+      unsigned int compop = (unsigned int)aOperator - (unsigned int)OP_XOR;
+      mPrivateData->mEffect->GetVariableByName("bcktex")->AsShaderResource()->SetResource(mBckSRView);
+      mPrivateData->mEffect->GetVariableByName("blendop")->AsScalar()->SetInt(compop);
+
+      if (aOperator > OP_EXCLUSION)
+        mPrivateData->mEffect->GetTechniqueByName("SampleTextureForNonSeparableBlending")->
+          GetPassByIndex(0)->Apply(0);
+      else if (aOperator > OP_COLOR_DODGE)
+        mPrivateData->mEffect->GetTechniqueByName("SampleTextureForSeparableBlending_2")->
+          GetPassByIndex(0)->Apply(0);
+      else
+        mPrivateData->mEffect->GetTechniqueByName("SampleTextureForSeparableBlending_1")->
+          GetPassByIndex(0)->Apply(0);
+    }
+    else {
+      mPrivateData->mEffect->GetTechniqueByName("SampleTexture")->GetPassByIndex(0)->Apply(0);
+    }
+
   } else if (aPattern.GetType() == PATTERN_RADIAL_GRADIENT) {
     const RadialGradientPattern *pat = static_cast<const RadialGradientPattern*>(&aPattern);
 
@@ -1570,15 +1723,8 @@ DrawTargetD2D::FinalizeRTForOperation(CompositionOp aOperator, const Pattern &aP
 
   mDevice->OMSetBlendState(GetBlendStateForOperator(aOperator), nullptr, 0xffffffff);
   
+  SetScissorToRect(nullptr);
   mDevice->Draw(4, 0);
-}
-
-TemporaryRef<ID2D1Geometry>
-DrawTargetD2D::ConvertRectToGeometry(const D2D1_RECT_F& aRect)
-{
-  RefPtr<ID2D1RectangleGeometry> rectGeom;
-  factory()->CreateRectangleGeometry(&aRect, byRef(rectGeom));
-  return rectGeom.forget();
 }
 
 static D2D1_RECT_F
@@ -1593,36 +1739,56 @@ IntersectRect(const D2D1_RECT_F& aRect1, const D2D1_RECT_F& aRect2)
 }
 
 TemporaryRef<ID2D1Geometry>
-DrawTargetD2D::GetClippedGeometry()
+DrawTargetD2D::GetClippedGeometry(IntRect *aClipBounds)
 {
   if (mCurrentClippedGeometry) {
+    *aClipBounds = mCurrentClipBounds;
     return mCurrentClippedGeometry;
   }
+
+  mCurrentClipBounds = IntRect(IntPoint(0, 0), mSize);
 
   // if pathGeom is null then pathRect represents the path.
   RefPtr<ID2D1Geometry> pathGeom;
   D2D1_RECT_F pathRect;
+  bool pathRectIsAxisAligned = false;
   std::vector<DrawTargetD2D::PushedClip>::iterator iter = mPushedClips.begin();
+  
   if (iter->mPath) {
-    RefPtr<ID2D1PathGeometry> tmpGeometry;
-    factory()->CreatePathGeometry(byRef(tmpGeometry));
-    RefPtr<ID2D1GeometrySink> currentSink;
-    tmpGeometry->Open(byRef(currentSink));
-    iter->mPath->GetGeometry()->Simplify(D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
-                                         iter->mTransform, currentSink);
-    currentSink->Close();
-    pathGeom = tmpGeometry.forget();
+    pathGeom = GetTransformedGeometry(iter->mPath->GetGeometry(), iter->mTransform);
   } else {
     pathRect = iter->mBounds;
+    pathRectIsAxisAligned = iter->mIsPixelAligned;
   }
 
   iter++;
   for (;iter != mPushedClips.end(); iter++) {
+    // Do nothing but add it to the current clip bounds.
+    if (!iter->mPath && iter->mIsPixelAligned) {
+      mCurrentClipBounds.IntersectRect(mCurrentClipBounds,
+        IntRect(int32_t(iter->mBounds.left), int32_t(iter->mBounds.top),
+                int32_t(iter->mBounds.right - iter->mBounds.left),
+                int32_t(iter->mBounds.bottom - iter->mBounds.top)));
+      continue;
+    }
+
     if (!pathGeom) {
+      if (pathRectIsAxisAligned) {
+        mCurrentClipBounds.IntersectRect(mCurrentClipBounds,
+          IntRect(int32_t(pathRect.left), int32_t(pathRect.top),
+                  int32_t(pathRect.right - pathRect.left),
+                  int32_t(pathRect.bottom - pathRect.top)));
+      }
       if (iter->mPath) {
-        pathGeom = ConvertRectToGeometry(pathRect);
+        // See if pathRect needs to go into the path geometry.
+        if (!pathRectIsAxisAligned) {
+          pathGeom = ConvertRectToGeometry(pathRect);
+        } else {
+          pathGeom = GetTransformedGeometry(iter->mPath->GetGeometry(), iter->mTransform);
+        }
       } else {
         pathRect = IntersectRect(pathRect, iter->mBounds);
+        pathRectIsAxisAligned = false;
         continue;
       }
     }
@@ -1647,10 +1813,15 @@ DrawTargetD2D::GetClippedGeometry()
     pathGeom = newGeom.forget();
   }
 
+  // For now we need mCurrentClippedGeometry to always be non-NULL. This method
+  // might seem a little strange but it is just fine, if pathGeom is NULL
+  // pathRect will always still contain 1 clip unaccounted for regardless of
+  // mCurrentClipBounds.
   if (!pathGeom) {
     pathGeom = ConvertRectToGeometry(pathRect);
   }
   mCurrentClippedGeometry = pathGeom.forget();
+  *aClipBounds = mCurrentClipBounds;
   return mCurrentClippedGeometry;
 }
 
@@ -1745,7 +1916,7 @@ DrawTargetD2D::PushClipsToRT(ID2D1RenderTarget *aRT)
     if (iter->mLayer) {
       PushD2DLayer(aRT, iter->mPath->mGeometry, iter->mLayer, iter->mTransform);
     } else {
-      aRT->PushAxisAlignedClip(iter->mBounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+      aRT->PushAxisAlignedClip(iter->mBounds, iter->mIsPixelAligned ? D2D1_ANTIALIAS_MODE_ALIASED : D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     }
   }
 }
@@ -1763,12 +1934,15 @@ DrawTargetD2D::PopClipsFromRT(ID2D1RenderTarget *aRT)
 }
 
 void
-DrawTargetD2D::EnsureClipMaskTexture()
+DrawTargetD2D::EnsureClipMaskTexture(IntRect *aBounds)
 {
   if (mCurrentClipMaskTexture || mPushedClips.empty()) {
+    *aBounds = mCurrentClipBounds;
     return;
   }
   
+  RefPtr<ID2D1Geometry> geometry = GetClippedGeometry(aBounds);
+
   CD3D10_TEXTURE2D_DESC desc(DXGI_FORMAT_A8_UNORM,
                              mSize.width,
                              mSize.height,
@@ -1792,8 +1966,6 @@ DrawTargetD2D::EnsureClipMaskTexture()
   RefPtr<ID2D1SolidColorBrush> brush;
   rt->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), byRef(brush));
     
-  RefPtr<ID2D1Geometry> geometry = GetClippedGeometry();
-
   rt->BeginDraw();
   rt->Clear(D2D1::ColorF(0, 0));
   rt->FillGeometry(geometry, brush);
@@ -1926,24 +2098,30 @@ DrawTargetD2D::FillGlyphsManual(ScaledFontDWrite *aFont,
 
   bool isMasking = false;
 
+  IntRect clipBoundsStorage;
+  IntRect *clipBounds = nullptr;
+
   if (!mPushedClips.empty()) {
-    RefPtr<ID2D1Geometry> geom = GetClippedGeometry();
+    clipBounds = &clipBoundsStorage;
+    RefPtr<ID2D1Geometry> geom = GetClippedGeometry(clipBounds);
 
     RefPtr<ID2D1RectangleGeometry> rectGeom;
-    factory()->CreateRectangleGeometry(D2D1::RectF(rectBounds.x, rectBounds.y,
-                                                   rectBounds.width + rectBounds.x,
-                                                   rectBounds.height + rectBounds.y),
+    factory()->CreateRectangleGeometry(D2D1::RectF(Float(rectBounds.x),
+                                                   Float(rectBounds.y),
+                                                   Float(rectBounds.width + rectBounds.x),
+                                                   Float(rectBounds.height + rectBounds.y)),
                                        byRef(rectGeom));
 
     D2D1_GEOMETRY_RELATION relation;
     if (FAILED(geom->CompareWithGeometry(rectGeom, D2D1::IdentityMatrix(), &relation)) ||
-        relation != D2D1_GEOMETRY_RELATION_CONTAINS) {
+        relation != D2D1_GEOMETRY_RELATION_CONTAINS ) {
       isMasking = true;
     }        
   }
   
   if (isMasking) {
-    EnsureClipMaskTexture();
+    clipBounds = &clipBoundsStorage;
+    EnsureClipMaskTexture(clipBounds);
 
     RefPtr<ID3D10ShaderResourceView> srViewMask;
     hr = mDevice->CreateShaderResourceView(mCurrentClipMaskTexture, nullptr, byRef(srViewMask));
@@ -1969,7 +2147,7 @@ DrawTargetD2D::FillGlyphsManual(ScaledFontDWrite *aFont,
 
   rtViews = rtView;
   mDevice->OMSetRenderTargets(1, &rtViews, nullptr);
-
+  SetScissorToRect(clipBounds);
   mDevice->Draw(4, 0);
   return true;
 }
@@ -1977,7 +2155,7 @@ DrawTargetD2D::FillGlyphsManual(ScaledFontDWrite *aFont,
 TemporaryRef<ID2D1Brush>
 DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
 {
-  if (IsPatternSupportedByD2D(aPattern)) {
+  if (!IsPatternSupportedByD2D(aPattern)) {
     RefPtr<ID2D1SolidColorBrush> colBrush;
     mRT->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), byRef(colBrush));
     return colBrush;
@@ -2034,8 +2212,8 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
 
     // This will not be a complex radial gradient brush.
     mRT->CreateRadialGradientBrush(
-      D2D1::RadialGradientBrushProperties(D2DPoint(pat->mCenter1),
-                                          D2D1::Point2F(),
+      D2D1::RadialGradientBrushProperties(D2DPoint(pat->mCenter2),
+                                          D2DPoint(pat->mCenter1 - pat->mCenter2),
                                           pat->mRadius2, pat->mRadius2),
       D2D1::BrushProperties(aAlpha, D2DMatrix(pat->mMatrix)),
       stops->mStopCollection,
@@ -2084,7 +2262,7 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
           return nullptr;
         }
 
-        bitmap = CreatePartialBitmapForSurface(dataSurf, mat, pat->mExtendMode); 
+        bitmap = CreatePartialBitmapForSurface(dataSurf, mTransform, mSize, pat->mExtendMode, mat, mRT); 
         if (!bitmap) {
           return nullptr;
         }
@@ -2104,80 +2282,6 @@ DrawTargetD2D::CreateBrushForPattern(const Pattern &aPattern, Float aAlpha)
 
   gfxWarning() << "Invalid pattern type detected.";
   return nullptr;
-}
-
-TemporaryRef<ID2D1StrokeStyle>
-DrawTargetD2D::CreateStrokeStyleForOptions(const StrokeOptions &aStrokeOptions)
-{
-  RefPtr<ID2D1StrokeStyle> style;
-
-  D2D1_CAP_STYLE capStyle;
-  D2D1_LINE_JOIN joinStyle;
-
-  switch (aStrokeOptions.mLineCap) {
-  case CAP_BUTT:
-    capStyle = D2D1_CAP_STYLE_FLAT;
-    break;
-  case CAP_ROUND:
-    capStyle = D2D1_CAP_STYLE_ROUND;
-    break;
-  case CAP_SQUARE:
-    capStyle = D2D1_CAP_STYLE_SQUARE;
-    break;
-  }
-
-  switch (aStrokeOptions.mLineJoin) {
-  case JOIN_MITER:
-    joinStyle = D2D1_LINE_JOIN_MITER;
-    break;
-  case JOIN_MITER_OR_BEVEL:
-    joinStyle = D2D1_LINE_JOIN_MITER_OR_BEVEL;
-    break;
-  case JOIN_ROUND:
-    joinStyle = D2D1_LINE_JOIN_ROUND;
-    break;
-  case JOIN_BEVEL:
-    joinStyle = D2D1_LINE_JOIN_BEVEL;
-    break;
-  }
-
-
-  HRESULT hr;
-  if (aStrokeOptions.mDashPattern) {
-    typedef vector<Float> FloatVector;
-    // D2D "helpfully" multiplies the dash pattern by the line width.
-    // That's not what cairo does, or is what <canvas>'s dash wants.
-    // So fix the multiplication in advance.
-    Float lineWidth = aStrokeOptions.mLineWidth;
-    FloatVector dash(aStrokeOptions.mDashPattern,
-                     aStrokeOptions.mDashPattern + aStrokeOptions.mDashLength);
-    for (FloatVector::iterator it = dash.begin(); it != dash.end(); ++it) {
-      *it /= lineWidth;
-    }
-
-    hr = factory()->CreateStrokeStyle(
-      D2D1::StrokeStyleProperties(capStyle, capStyle,
-                                  capStyle, joinStyle,
-                                  aStrokeOptions.mMiterLimit,
-                                  D2D1_DASH_STYLE_CUSTOM,
-                                  aStrokeOptions.mDashOffset),
-      &dash[0], // data() is not C++98, although it's in recent gcc
-                // and VC10's STL
-      dash.size(),
-      byRef(style));
-  } else {
-    hr = factory()->CreateStrokeStyle(
-      D2D1::StrokeStyleProperties(capStyle, capStyle,
-                                  capStyle, joinStyle,
-                                  aStrokeOptions.mMiterLimit),
-      nullptr, 0, byRef(style));
-  }
-
-  if (FAILED(hr)) {
-    gfxWarning() << "Failed to create Direct2D stroke style.";
-  }
-
-  return style;
 }
 
 TemporaryRef<ID3D10Texture2D>
@@ -2317,128 +2421,6 @@ DrawTargetD2D::CreateTextureForAnalysis(IDWriteGlyphRunAnalysis *aAnalysis, cons
   return tex;
 }
 
-TemporaryRef<ID2D1Bitmap>
-DrawTargetD2D::CreatePartialBitmapForSurface(DataSourceSurface *aSurface, Matrix &aMatrix, ExtendMode aExtendMode)
-{
-  RefPtr<ID2D1Bitmap> bitmap;
-
-  // This is where things get complicated. The source surface was
-  // created for a surface that was too large to fit in a texture.
-  // We'll need to figure out if we can work with a partial upload
-  // or downsample in software.
-
-  Matrix transform = mTransform;
-  Matrix invTransform = transform = aMatrix * transform;
-  if (!invTransform.Invert()) {
-    // Singular transform, nothing to be drawn.
-    return nullptr;
-  }
-
-  Rect rect(0, 0, mSize.width, mSize.height);
-
-  // Calculate the rectangle of the source mapped to our surface.
-  rect = invTransform.TransformBounds(rect);
-  rect.RoundOut();
-
-  IntSize size = aSurface->GetSize();
-
-  Rect uploadRect(0, 0, size.width, size.height);
-
-  // Limit the uploadRect as much as possible without supporting discontiguous uploads 
-  //
-  //                               region we will paint from
-  //   uploadRect
-  //   .---------------.              .---------------.         resulting uploadRect
-  //   |               |rect          |               |
-  //   |          .---------.         .----.     .----.          .---------------.
-  //   |          |         |  ---->  |    |     |    |   ---->  |               |
-  //   |          '---------'         '----'     '----'          '---------------'
-  //   '---------------'              '---------------'
-  //
-  //
-
-  if (uploadRect.Contains(rect)) {
-    // Extend mode is irrelevant, the displayed rect is completely contained
-    // by the source bitmap.
-    uploadRect = rect;
-  } else if (aExtendMode == EXTEND_CLAMP && uploadRect.Intersects(rect)) {
-    // Calculate the rectangle on the source bitmap that touches our
-    // surface, and upload that, for EXTEND_CLAMP we can actually guarantee
-    // correct behaviour in this case.
-    uploadRect = uploadRect.Intersect(rect);
-
-    // We now proceed to check if we can limit at least one dimension of the
-    // upload rect safely without looking at extend mode.
-  } else if (rect.x >= 0 && rect.XMost() < size.width) {
-    uploadRect.x = rect.x;
-    uploadRect.width = rect.width;
-  } else if (rect.y >= 0 && rect.YMost() < size.height) {
-    uploadRect.y = rect.y;
-    uploadRect.height = rect.height;
-  }
-
-
-  int stride = aSurface->Stride();
-
-  if (uploadRect.width <= mRT->GetMaximumBitmapSize() &&
-      uploadRect.height <= mRT->GetMaximumBitmapSize()) {
-
-    // A partial upload will suffice.
-    mRT->CreateBitmap(D2D1::SizeU(uint32_t(uploadRect.width), uint32_t(uploadRect.height)),
-                      aSurface->GetData() + int(uploadRect.x) * 4 + int(uploadRect.y) * stride,
-                      stride,
-                      D2D1::BitmapProperties(D2DPixelFormat(aSurface->GetFormat())),
-                      byRef(bitmap));
-
-    aMatrix.Translate(uploadRect.x, uploadRect.y);
-
-    return bitmap;
-  } else {
-    int Bpp = BytesPerPixel(aSurface->GetFormat());
-
-    if (Bpp != 4) {
-      // This shouldn't actually happen in practice!
-      MOZ_ASSERT(false);
-      return nullptr;
-    }
-
-    ImageHalfScaler scaler(aSurface->GetData(), stride, size);
-
-    // Calculate the maximum width/height of the image post transform.
-    Point topRight = transform * Point(size.width, 0);
-    Point topLeft = transform * Point(0, 0);
-    Point bottomRight = transform * Point(size.width, size.height);
-    Point bottomLeft = transform * Point(0, size.height);
-    
-    IntSize scaleSize;
-
-    scaleSize.width = max(Distance(topRight, topLeft), Distance(bottomRight, bottomLeft));
-    scaleSize.height = max(Distance(topRight, bottomRight), Distance(topLeft, bottomLeft));
-
-    if (unsigned(scaleSize.width) > mRT->GetMaximumBitmapSize()) {
-      // Ok, in this case we'd really want a downscale of a part of the bitmap,
-      // perhaps we can do this later but for simplicity let's do something
-      // different here and assume it's good enough, this should be rare!
-      scaleSize.width = 4095;
-    }
-    if (unsigned(scaleSize.height) > mRT->GetMaximumBitmapSize()) {
-      scaleSize.height = 4095;
-    }
-
-    scaler.ScaleForSize(scaleSize);
-
-    IntSize newSize = scaler.GetSize();
-    
-    mRT->CreateBitmap(D2D1::SizeU(newSize.width, newSize.height),
-                      scaler.GetScaledData(), scaler.GetStride(),
-                      D2D1::BitmapProperties(D2DPixelFormat(aSurface->GetFormat())),
-                      byRef(bitmap));
-
-    aMatrix.Scale(size.width / newSize.width, size.height / newSize.height);
-    return bitmap;
-  }
-}
-
 void
 DrawTargetD2D::SetupEffectForRadialGradient(const RadialGradientPattern *aPattern)
 {
@@ -2572,6 +2554,15 @@ DrawTargetD2D::factory()
   return mFactory;
 }
 
+void
+DrawTargetD2D::CleanupD2D()
+{
+  if (mFactory) {
+    mFactory->Release();
+    mFactory = nullptr;
+  }
+}
+
 IDWriteFactory*
 DrawTargetD2D::GetDWriteFactory()
 {
@@ -2600,30 +2591,47 @@ DrawTargetD2D::GetDWriteFactory()
 }
 
 void
+DrawTargetD2D::SetScissorToRect(IntRect *aRect)
+{
+  D3D10_RECT rect;
+  if (aRect) {
+    rect.left = aRect->x;
+    rect.right = aRect->XMost();
+    rect.top = aRect->y;
+    rect.bottom = aRect->YMost();
+  } else {
+    rect.left = rect.top = INT32_MIN;
+    rect.right = rect.bottom = INT32_MAX;
+  }
+
+  mDevice->RSSetScissorRects(1, &rect);
+}
+
+void
 DrawTargetD2D::PushD2DLayer(ID2D1RenderTarget *aRT, ID2D1Geometry *aGeometry, ID2D1Layer *aLayer, const D2D1_MATRIX_3X2_F &aTransform)
 {
   D2D1_LAYER_OPTIONS options = D2D1_LAYER_OPTIONS_NONE;
   D2D1_LAYER_OPTIONS1 options1 =  D2D1_LAYER_OPTIONS1_NONE;
 
-  if (mFormat == FORMAT_B8G8R8X8) {
+  if (aRT->GetPixelFormat().alphaMode == D2D1_ALPHA_MODE_IGNORE) {
     options = D2D1_LAYER_OPTIONS_INITIALIZE_FOR_CLEARTYPE;
     options1 = D2D1_LAYER_OPTIONS1_IGNORE_ALPHA | D2D1_LAYER_OPTIONS1_INITIALIZE_FROM_BACKGROUND;
   }
 
-  RefPtr<ID2D1DeviceContext> dc;
+	RefPtr<ID2D1DeviceContext> dc;
 	HRESULT hr = aRT->QueryInterface(IID_ID2D1DeviceContext, (void**)((ID2D1DeviceContext**)byRef(dc)));
 
-  if (FAILED(hr)) {
-    aRT->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), aGeometry,
-                                         D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, aTransform,
-                                         1.0, nullptr, options),
-                   aLayer);
-  } else {
-     dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), aGeometry,
-  	                                     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, aTransform,
-  	                                     1.0, nullptr, options1),
-                   aLayer);
-  }
+	if (FAILED(hr)) {
+	    aRT->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), aGeometry,
+				                                   D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, aTransform,
+				                                   1.0, nullptr, options),
+				             aLayer);
+	} else {
+	    dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), aGeometry,
+				                                   D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, aTransform,
+				                                   1.0, nullptr, options1),
+				            aLayer);
+	}
 }
 
 }

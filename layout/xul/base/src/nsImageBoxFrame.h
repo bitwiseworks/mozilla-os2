@@ -5,33 +5,30 @@
 #ifndef nsImageBoxFrame_h___
 #define nsImageBoxFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsLeafBoxFrame.h"
 
 #include "imgILoader.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
-#include "nsStubImageDecoderObserver.h"
+#include "imgINotificationObserver.h"
+#include "imgIOnloadBlocker.h"
 
+class imgRequestProxy;
 class nsImageBoxFrame;
 
-class nsImageBoxListener : public nsStubImageDecoderObserver
+class nsDisplayXULImage;
+
+class nsImageBoxListener : public imgINotificationObserver,
+                           public imgIOnloadBlocker
 {
 public:
   nsImageBoxListener();
   virtual ~nsImageBoxListener();
 
   NS_DECL_ISUPPORTS
-  // imgIDecoderObserver (override nsStubImageDecoderObserver)
-  NS_IMETHOD OnStartContainer(imgIRequest *request, imgIContainer *image);
-  NS_IMETHOD OnStopContainer(imgIRequest *request, imgIContainer *image);
-  NS_IMETHOD OnStopDecode(imgIRequest *request, nsresult status,
-                          const PRUnichar *statusArg);
-  NS_IMETHOD OnImageIsAnimated(imgIRequest* aRequest);
-
-  // imgIContainerObserver (override nsStubImageDecoderObserver)
-  NS_IMETHOD FrameChanged(imgIRequest *aRequest,
-                          imgIContainer *aContainer,
-                          const nsIntRect *aDirtyRect);
+  NS_DECL_IMGINOTIFICATIONOBSERVER
+  NS_DECL_IMGIONLOADBLOCKER
 
   void SetFrame(nsImageBoxFrame *frame) { mFrame = frame; }
 
@@ -42,30 +39,35 @@ private:
 class nsImageBoxFrame : public nsLeafBoxFrame
 {
 public:
+  typedef mozilla::layers::LayerManager LayerManager;
+
+  friend class nsDisplayXULImage;
   NS_DECL_FRAMEARENA_HELPERS
 
-  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState);
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState);
-  virtual nscoord GetBoxAscent(nsBoxLayoutState& aBoxLayoutState);
-  virtual void MarkIntrinsicWidthsDirty();
+  virtual nsSize GetPrefSize(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
+  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
+  virtual nscoord GetBoxAscent(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
+  virtual void MarkIntrinsicWidthsDirty() MOZ_OVERRIDE;
+
+  nsresult Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData);
 
   friend nsIFrame* NS_NewImageBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  NS_IMETHOD  Init(nsIContent*      aContent,
-                   nsIFrame*        aParent,
-                   nsIFrame*        asPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        asPrevInFlow) MOZ_OVERRIDE;
 
   NS_IMETHOD AttributeChanged(int32_t aNameSpaceID,
                               nsIAtom* aAttribute,
-                              int32_t aModType);
+                              int32_t aModType) MOZ_OVERRIDE;
 
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot);
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
-  virtual nsIAtom* GetType() const;
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const;
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   /** 
@@ -81,20 +83,9 @@ public:
    */
   void UpdateLoadFlags();
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
-
-  NS_IMETHOD OnStartContainer(imgIRequest *request, imgIContainer *image);
-  NS_IMETHOD OnStopContainer(imgIRequest *request, imgIContainer *image);
-  NS_IMETHOD OnStopDecode(imgIRequest *request,
-                          nsresult status,
-                          const PRUnichar *statusArg);
-  NS_IMETHOD OnImageIsAnimated(imgIRequest* aRequest);
-
-  NS_IMETHOD FrameChanged(imgIRequest *aRequest,
-                          imgIContainer *aContainer,
-                          const nsIntRect *aDirtyRect);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   virtual ~nsImageBoxFrame();
 
@@ -102,12 +93,18 @@ public:
                    const nsRect& aDirtyRect,
                    nsPoint aPt, uint32_t aFlags);
 
+  already_AddRefed<mozilla::layers::ImageContainer> GetContainer(LayerManager* aManager);
 protected:
   nsImageBoxFrame(nsIPresShell* aShell, nsStyleContext* aContext);
 
   virtual void GetImageSize();
 
 private:
+  nsresult OnStartContainer(imgIRequest *request, imgIContainer *image);
+  nsresult OnStopDecode(imgIRequest *request);
+  nsresult OnStopRequest(imgIRequest *request, nsresult status);
+  nsresult OnImageIsAnimated(imgIRequest* aRequest);
+  nsresult FrameChanged(imgIRequest *aRequest);
 
   nsRect mSubRect; ///< If set, indicates that only the portion of the image specified by the rect should be used.
   nsSize mIntrinsicSize;
@@ -117,13 +114,43 @@ private:
   // registered with the refresh driver.
   bool mRequestRegistered;
 
-  nsCOMPtr<imgIRequest> mImageRequest;
-  nsCOMPtr<imgIDecoderObserver> mListener;
+  nsRefPtr<imgRequestProxy> mImageRequest;
+  nsCOMPtr<imgINotificationObserver> mListener;
 
   int32_t mLoadFlags;
 
   bool mUseSrcAttr; ///< Whether or not the image src comes from an attribute.
   bool mSuppressStyleCheck;
+  bool mFireEventOnDecode;
 }; // class nsImageBoxFrame
+
+class nsDisplayXULImage : public nsDisplayImageContainer {
+public:
+  nsDisplayXULImage(nsDisplayListBuilder* aBuilder,
+                    nsImageBoxFrame* aFrame) :
+    nsDisplayImageContainer(aBuilder, aFrame) {
+    MOZ_COUNT_CTOR(nsDisplayXULImage);
+  }
+#ifdef NS_BUILD_REFCNT_LOGGING
+  virtual ~nsDisplayXULImage() {
+    MOZ_COUNT_DTOR(nsDisplayXULImage);
+  }
+#endif
+
+  virtual already_AddRefed<ImageContainer> GetContainer(LayerManager* aManager,
+                                                        nsDisplayListBuilder* aBuilder) MOZ_OVERRIDE;
+  virtual void ConfigureLayer(ImageLayer* aLayer, const nsIntPoint& aOffset) MOZ_OVERRIDE;
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE
+  {
+    *aSnap = true;
+    return nsRect(ToReferenceFrame(), Frame()->GetSize());
+  }
+
+  // Doesn't handle HitTest because nsLeafBoxFrame already creates an
+  // event receiver for us
+  virtual void Paint(nsDisplayListBuilder* aBuilder,
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
+  NS_DISPLAY_DECL_NAME("XULImage", TYPE_XUL_IMAGE)
+};
 
 #endif /* nsImageBoxFrame_h___ */

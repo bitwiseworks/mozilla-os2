@@ -8,6 +8,8 @@
 #include <emmintrin.h>
 #include "nscore.h"
 #include "nsAlgorithm.h"
+#include "nsTextFragmentImpl.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace SSE2 {
@@ -23,24 +25,16 @@ int32_t
 FirstNon8Bit(const PRUnichar *str, const PRUnichar *end)
 {
   const uint32_t numUnicharsPerVector = 8;
-
-#if PR_BYTES_PER_WORD == 4
-  const size_t mask = 0xff00ff00;
-  const uint32_t numUnicharsPerWord = 2;
-#elif PR_BYTES_PER_WORD == 8
-  const size_t mask = 0xff00ff00ff00ff00;
-  const uint32_t numUnicharsPerWord = 4;
-#else
-#error Unknown platform!
-#endif
-
+  typedef Non8BitParameters<sizeof(size_t)> p;
+  const size_t mask = p::mask();
+  const uint32_t numUnicharsPerWord = p::numUnicharsPerWord();
   const int32_t len = end - str;
   int32_t i = 0;
 
   // Align ourselves to a 16-byte boundary, as required by _mm_load_si128
   // (i.e. MOVDQA).
   int32_t alignLen =
-    NS_MIN(len, int32_t(((-NS_PTR_TO_INT32(str)) & 0xf) / sizeof(PRUnichar)));
+    std::min(len, int32_t(((-NS_PTR_TO_INT32(str)) & 0xf) / sizeof(PRUnichar)));
   for (; i < alignLen; i++) {
     if (str[i] > 255)
       return i;

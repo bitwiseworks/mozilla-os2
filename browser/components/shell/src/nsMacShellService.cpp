@@ -162,7 +162,7 @@ nsMacShellService::SetDesktopBackground(nsIDOMElement* aElement,
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
-  nsCAutoString fileName;
+  nsAutoCString fileName;
   imageURL->GetFileName(fileName);
   nsCOMPtr<nsIProperties> fileLocator
     (do_GetService("@mozilla.org/file/directory_service;1", &rv));
@@ -193,7 +193,7 @@ nsMacShellService::SetDesktopBackground(nsIDOMElement* aElement,
   wbp->SetProgressListener(this);
 
   return wbp->SaveURI(imageURI, nullptr, docURI, nullptr, nullptr,
-                      mBackgroundFile);
+                      mBackgroundFile, content->OwnerDoc()->GetLoadContext());
 }
 
 NS_IMETHODIMP
@@ -249,7 +249,7 @@ nsMacShellService::OnStateChange(nsIWebProgress* aWebProgress,
     if (!exists)
       return NS_OK;
 
-    nsCAutoString nativePath;
+    nsAutoCString nativePath;
     mBackgroundFile->GetNativePath(nativePath);
 
     AEDesc tAEDesc = { typeNull, nil };

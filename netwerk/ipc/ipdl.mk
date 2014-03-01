@@ -4,5 +4,7 @@
 
 IPDLSRCS =          \
   PNecko.ipdl       \
+  PRemoteOpenFile.ipdl \
+  NeckoChannelParams.ipdlh \
   $(NULL)
 

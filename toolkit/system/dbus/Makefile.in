@@ -9,10 +9,6 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = dbus
-LIBRARY_NAME = dbusservice
-GRE_MODULE = 1
-#EXPORT_LIBRARY = 1
 IS_COMPONENT = 1
 FORCE_SHARED_LIB = 1
 
@@ -23,13 +19,6 @@ EXTRA_DSO_LDOPTS = \
 	$(MOZ_DBUS_GLIB_LIBS) \
 	$(NULL)
                 
-CPPSRCS =   \
-  nsDBusModule.cpp             \
-  nsDBusService.cpp            \
-  nsNetworkManagerListener.cpp \
-  $(NULL)
-
 include $(topsrcdir)/config/rules.mk
 
 CXXFLAGS += $(TK_CFLAGS) $(MOZ_DBUS_GLIB_CFLAGS)
-CXXFLAGS := $(subst -pedantic,,$(CXXFLAGS))

@@ -42,6 +42,23 @@ onconnect = function(e) {
         // start
         apiPort.postMessage({topic: 'social.reload-worker'});
         break;
+      case "test-notification-create":
+        apiPort.postMessage({topic: 'social.notification-create',
+                             data: data});
+        testerPort.postMessage({topic: 'did-notification-create'});
+        break;
+      case "test-indexeddb-create":
+        var request = indexedDB.open("workerdb", 1);
+        request.onerror = function(event) {
+          port.postMessage({topic: 'social.indexeddb-result', data: { result: "error" }});
+        };
+        request.onsuccess = function(event) {
+          // Do something with request.result!
+          var db = request.result;
+          db.close();
+          port.postMessage({topic: 'social.indexeddb-result', data: { result: "ok" }});
+        };
+        break;
     }
   }
   // used for "test-reload-worker"

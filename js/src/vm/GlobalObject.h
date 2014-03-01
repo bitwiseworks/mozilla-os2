@@ -1,34 +1,31 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef GlobalObject_h___
-#define GlobalObject_h___
+#ifndef vm_GlobalObject_h
+#define vm_GlobalObject_h
 
-#include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
 
 #include "jsarray.h"
 #include "jsbool.h"
 #include "jsexn.h"
 #include "jsfun.h"
-#include "jsiter.h"
 #include "jsnum.h"
 
+#include "builtin/RegExp.h"
 #include "js/Vector.h"
 
-#include "builtin/RegExp.h"
+extern JSObject *
+js_InitObjectClass(JSContext *cx, js::HandleObject obj);
 
 extern JSObject *
-js_InitObjectClass(JSContext *cx, JSObject *obj);
+js_InitFunctionClass(JSContext *cx, js::HandleObject obj);
 
 extern JSObject *
-js_InitFunctionClass(JSContext *cx, JSObject *obj);
-
-extern JSObject *
-js_InitTypedArrayClasses(JSContext *cx, JSObject *obj);
+js_InitTypedArrayClasses(JSContext *cx, js::HandleObject obj);
 
 namespace js {
 
@@ -48,11 +45,10 @@ class Debugger;
  *   for the corresponding JSProtoKey offset from 2 * JSProto_LIMIT.
  * [3 * JSProto_LIMIT, RESERVED_SLOTS)
  *   Various one-off values: ES5 13.2.3's [[ThrowTypeError]], RegExp statics,
- *   the Namespace object for E4X's function::, the original eval for this
- *   global object (implementing |var eval = otherWindow.eval; eval(...)| as an
- *   indirect eval), a bit indicating whether this object has been cleared
- *   (see JS_ClearScope), and a cache for whether eval is allowed (per the
- *   global's Content Security Policy).
+ *   the original eval for this global object (implementing |var eval =
+ *   otherWindow.eval; eval(...)| as an indirect eval), a bit indicating
+ *   whether this object has been cleared (see JS_ClearScope), and a cache for
+ *   whether eval is allowed (per the global's Content Security Policy).
  *
  * The first two ranges are necessary to implement js::FindClassObject,
  * FindClassPrototype, and spec language speaking in terms of "the original
@@ -70,8 +66,7 @@ class GlobalObject : public JSObject
     static const unsigned STANDARD_CLASS_SLOTS  = JSProto_LIMIT * 3;
 
     /* Various function values needed by the engine. */
-    static const unsigned BOOLEAN_VALUEOF         = STANDARD_CLASS_SLOTS;
-    static const unsigned EVAL                    = BOOLEAN_VALUEOF + 1;
+    static const unsigned EVAL                    = STANDARD_CLASS_SLOTS;
     static const unsigned CREATE_DATAVIEW_FOR_THIS = EVAL + 1;
     static const unsigned THROWTYPEERROR          = CREATE_DATAVIEW_FOR_THIS + 1;
     static const unsigned PROTO_GETTER            = THROWTYPEERROR + 1;
@@ -95,11 +90,13 @@ class GlobalObject : public JSObject
     static const unsigned GENERATOR_PROTO         = ELEMENT_ITERATOR_PROTO + 1;
     static const unsigned MAP_ITERATOR_PROTO      = GENERATOR_PROTO + 1;
     static const unsigned SET_ITERATOR_PROTO      = MAP_ITERATOR_PROTO + 1;
-    static const unsigned REGEXP_STATICS          = SET_ITERATOR_PROTO + 1;
+    static const unsigned COLLATOR_PROTO          = SET_ITERATOR_PROTO + 1;
+    static const unsigned NUMBER_FORMAT_PROTO     = COLLATOR_PROTO + 1;
+    static const unsigned DATE_TIME_FORMAT_PROTO  = NUMBER_FORMAT_PROTO + 1;
+    static const unsigned REGEXP_STATICS          = DATE_TIME_FORMAT_PROTO + 1;
     static const unsigned FUNCTION_NS             = REGEXP_STATICS + 1;
     static const unsigned RUNTIME_CODEGEN_ENABLED = FUNCTION_NS + 1;
-    static const unsigned FLAGS                   = RUNTIME_CODEGEN_ENABLED + 1;
-    static const unsigned DEBUGGERS               = FLAGS + 1;
+    static const unsigned DEBUGGERS               = RUNTIME_CODEGEN_ENABLED + 1;
     static const unsigned INTRINSICS              = DEBUGGERS + 1;
 
     /* Total reserved-slot count for global objects. */
@@ -114,15 +111,10 @@ class GlobalObject : public JSObject
         JS_STATIC_ASSERT(JSCLASS_GLOBAL_SLOT_COUNT == RESERVED_SLOTS);
     }
 
-    static const int32_t FLAGS_CLEARED = 0x1;
-
-    inline void setFlags(int32_t flags);
-    inline void initFlags(int32_t flags);
-
     friend JSObject *
-    ::js_InitObjectClass(JSContext *cx, JSObject *obj);
+    ::js_InitObjectClass(JSContext *cx, js::HandleObject);
     friend JSObject *
-    ::js_InitFunctionClass(JSContext *cx, JSObject *obj);
+    ::js_InitFunctionClass(JSContext *cx, js::HandleObject);
 
     /* Initialize the Function and Object classes.  Must only be called once! */
     JSObject *
@@ -201,7 +193,6 @@ class GlobalObject : public JSObject
 
   public:
     /* XXX Privatize me! */
-    inline void setBooleanValueOf(Handle<JSFunction*> valueOfFun);
     inline void setCreateDataViewForThis(Handle<JSFunction*> fun);
 
     template<typename T>
@@ -316,13 +307,24 @@ class GlobalObject : public JSObject
         return &self->getPrototype(key).toObject();
     }
 
-    JSObject *getIteratorPrototype() {
-        return &getPrototype(JSProto_Iterator).toObject();
+    JSObject *getOrCreateIntlObject(JSContext *cx) {
+        return getOrCreateObject(cx, JSProto_Intl, initIntlObject);
     }
 
-    JSObject *getIntrinsicsHolder() {
-        JS_ASSERT(!getSlotRef(INTRINSICS).isUndefined());
-        return &getSlotRef(INTRINSICS).toObject();
+    JSObject *getOrCreateCollatorPrototype(JSContext *cx) {
+        return getOrCreateObject(cx, COLLATOR_PROTO, initCollatorProto);
+    }
+
+    JSObject *getOrCreateNumberFormatPrototype(JSContext *cx) {
+        return getOrCreateObject(cx, NUMBER_FORMAT_PROTO, initNumberFormatProto);
+    }
+
+    JSObject *getOrCreateDateTimeFormatPrototype(JSContext *cx) {
+        return getOrCreateObject(cx, DATE_TIME_FORMAT_PROTO, initDateTimeFormatProto);
+    }
+
+    JSObject *getIteratorPrototype() {
+        return &getPrototype(JSProto_Iterator).toObject();
     }
 
   private:
@@ -368,36 +370,30 @@ class GlobalObject : public JSObject
         return &self->getPrototype(JSProto_DataView).toObject();
     }
 
-    bool hasIntrinsicFunction(JSContext *cx, PropertyName *name) {
-        RootedObject holder(cx, &getSlotRef(INTRINSICS).toObject());
-        Value fun = NullValue();
-        return HasDataProperty(cx, holder, NameToId(name), &fun);
+    JSObject *intrinsicsHolder() {
+        JS_ASSERT(!getSlotRef(INTRINSICS).isUndefined());
+        return &getSlotRef(INTRINSICS).toObject();
     }
 
-    bool getIntrinsicValue(JSContext *cx, PropertyName *name, Value *vp) {
-        RootedObject holder(cx, &getSlotRef(INTRINSICS).toObject());
-        jsid id = NameToId(name);
-        if (HasDataProperty(cx, holder, id, vp))
+    bool getIntrinsicValue(JSContext *cx, HandlePropertyName name, MutableHandleValue value) {
+        RootedObject holder(cx, intrinsicsHolder());
+        RootedId id(cx, NameToId(name));
+        if (HasDataProperty(cx, holder, id, value.address()))
             return true;
-        bool ok = cx->runtime->cloneSelfHostedValueById(cx, id, holder, vp);
-        if (!ok)
+        if (!cx->runtime()->cloneSelfHostedValue(cx, name, value))
             return false;
-
-        ok = JS_DefinePropertyById(cx, holder, id, *vp, NULL, NULL, 0);
+        mozilla::DebugOnly<bool> ok = JS_DefinePropertyById(cx, holder, id, value, NULL, NULL, 0);
         JS_ASSERT(ok);
         return true;
     }
+
+    inline bool setIntrinsicValue(JSContext *cx, PropertyName *name, HandleValue value);
 
     inline RegExpStatics *getRegExpStatics() const;
 
     JSObject *getThrowTypeError() const {
         JS_ASSERT(functionObjectClassesInitialized());
         return &getSlot(THROWTYPEERROR).toObject();
-    }
-
-    Value booleanValueOf() const {
-        JS_ASSERT(booleanClassInitialized());
-        return getSlot(BOOLEAN_VALUEOF);
     }
 
     Value createDataViewForThis() const {
@@ -413,20 +409,12 @@ class GlobalObject : public JSObject
         return getSlot(PROTO_GETTER);
     }
 
-    void clear(JSContext *cx);
-
-    bool isCleared() const {
-        return getSlot(FLAGS).toInt32() & FLAGS_CLEARED;
-    }
-
-    bool isRuntimeCodeGenEnabled(JSContext *cx);
+    static bool isRuntimeCodeGenEnabled(JSContext *cx, Handle<GlobalObject*> global);
 
     const Value &getOriginalEval() const {
         JS_ASSERT(getSlot(EVAL).isObject());
         return getSlot(EVAL);
     }
-
-    bool getFunctionNamespace(JSContext *cx, Value *vp);
 
     // Implemented in jsiter.cpp.
     static bool initIteratorClasses(JSContext *cx, Handle<GlobalObject*> global);
@@ -434,6 +422,12 @@ class GlobalObject : public JSObject
     // Implemented in builtin/MapObject.cpp.
     static bool initMapIteratorProto(JSContext *cx, Handle<GlobalObject*> global);
     static bool initSetIteratorProto(JSContext *cx, Handle<GlobalObject*> global);
+
+    // Implemented in Intl.cpp.
+    static bool initIntlObject(JSContext *cx, Handle<GlobalObject*> global);
+    static bool initCollatorProto(JSContext *cx, Handle<GlobalObject*> global);
+    static bool initNumberFormatProto(JSContext *cx, Handle<GlobalObject*> global);
+    static bool initDateTimeFormatProto(JSContext *cx, Handle<GlobalObject*> global);
 
     static bool initStandardClasses(JSContext *cx, Handle<GlobalObject*> global);
 
@@ -474,17 +468,11 @@ typedef HashSet<GlobalObject *, DefaultHasher<GlobalObject *>, SystemAllocPolicy
 
 } // namespace js
 
+template<>
 inline bool
-JSObject::isGlobal() const
+JSObject::is<js::GlobalObject>() const
 {
     return !!(js::GetObjectClass(const_cast<JSObject*>(this))->flags & JSCLASS_IS_GLOBAL);
 }
 
-js::GlobalObject &
-JSObject::asGlobal()
-{
-    JS_ASSERT(isGlobal());
-    return *static_cast<js::GlobalObject *>(this);
-}
-
-#endif /* GlobalObject_h___ */
+#endif /* vm_GlobalObject_h */

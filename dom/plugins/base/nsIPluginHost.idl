@@ -12,17 +12,22 @@
   "@mozilla.org/plugin/host;1"
 %}
 
-[scriptable, uuid(fdb56ce3-89ac-4293-be64-9f4be88004cc)]
+[scriptable, uuid(f89e7679-0adf-4a30-bda9-1afe1ee270d6)]
+interface nsIPluginPlayPreviewInfo : nsISupports
+{
+  readonly attribute AUTF8String mimeType;
+  readonly attribute boolean     ignoreCTP;
+  readonly attribute AUTF8String redirectURL;
+};
+
+[scriptable, uuid(e8fe94f0-b877-46d0-931a-090967fb1e83)]
 interface nsIPluginHost : nsISupports
 {
   /**
    * Causes the plugins directory to be searched again for new plugin 
    * libraries.
-   *
-   * @param reloadPages - indicates whether currently visible pages should 
-   * also be reloaded
    */
-  void reloadPlugins(in boolean reloadPages);
+  void reloadPlugins();
 
   void getPluginTags([optional] out unsigned long aPluginCount,
     [retval, array, size_is(aPluginCount)] out nsIPluginTag aResults);
@@ -76,15 +81,40 @@ interface nsIPluginHost : nsISupports
   /**
    * Registers the play preview plugin mode for specific mime type
    *
-   * @param mimeType - specified mime type
+   * @param mimeType: specifies plugin mime type.
+   * @param ignoreCTP: if true, the play preview ignores CTP rules, e.g.
+                       whitelisted websites, will not notify about plugin
+                       presence in the address bar.
+   * @param redirectURL: specifies url for the overlay iframe
    */
-  void registerPlayPreviewMimeType(in AUTF8String mimeType);
+  void registerPlayPreviewMimeType(in AUTF8String mimeType,
+                                   [optional] in boolean ignoreCTP,
+                                   [optional] in AUTF8String redirectURL);
 
   void unregisterPlayPreviewMimeType(in AUTF8String mimeType);
+
+  nsIPluginPlayPreviewInfo getPlayPreviewInfo(in AUTF8String mimeType);
+
+  ACString getPermissionStringForType(in AUTF8String mimeType);
+
+  /**
+   * Get the nsIPluginTag for this MIME type. This method works with both
+   * enabled and disabled/blocklisted plugins, but an enabled plugin will
+   * always be returned if available.
+   *
+   * @throws NS_ERROR_NOT_AVAILABLE if no plugin is available for this MIME
+   *         type.
+   */
+  nsIPluginTag getPluginTagForType(in AUTF8String mimeType);
+
+  /**
+   * Get the nsIPluginTag state for this MIME type.
+   */
+  unsigned long getStateForType(in AUTF8String mimeType);
+
+  /**
+   * Get the blocklist state for a MIME type.
+   */
+  uint32_t getBlocklistStateForType(in string aMimeType);
 };
 
-[scriptable, uuid(1cf52b41-454e-4ec1-a3b7-969386ce97c2)]
-interface nsIPluginHost2 : nsIPluginHost
-{
-  bool isPluginClickToPlayForType(in AUTF8String mimeType);
-};

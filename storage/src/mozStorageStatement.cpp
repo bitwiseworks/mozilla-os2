@@ -23,11 +23,10 @@
 #include "mozStorageStatementParams.h"
 #include "mozStorageStatementRow.h"
 #include "mozStorageStatement.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 #include "prlog.h"
 
-#include "mozilla/FunctionTimer.h"
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gStorageLog;
@@ -338,7 +337,7 @@ Statement::Clone(mozIStorageStatement **_statement)
   nsRefPtr<Statement> statement(new Statement());
   NS_ENSURE_TRUE(statement, NS_ERROR_OUT_OF_MEMORY);
 
-  nsCAutoString sql(::sqlite3_sql(mDBStatement));
+  nsAutoCString sql(::sqlite3_sql(mDBStatement));
   nsresult rv = statement->initialize(mDBConnection, sql);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -422,7 +421,7 @@ Statement::GetParameterName(uint32_t aParamIndex,
                                                    aParamIndex + 1);
   if (name == NULL) {
     // this thing had no name, so fake one
-    nsCAutoString name(":");
+    nsAutoCString name(":");
     name.AppendInt(aParamIndex);
     _name.Assign(name);
   }
@@ -442,7 +441,7 @@ Statement::GetParameterIndex(const nsACString &aName,
 
   // We do not accept any forms of names other than ":name", but we need to add
   // the colon for SQLite.
-  nsCAutoString name(":");
+  nsAutoCString name(":");
   name.Append(aName);
   int ind = ::sqlite3_bind_parameter_index(mDBStatement, name.get());
   if (ind  == 0) // Named parameter not found.
@@ -553,12 +552,9 @@ Statement::Execute()
 NS_IMETHODIMP
 Statement::ExecuteStep(bool *_moreResults)
 {
-  SAMPLE_LABEL("storage", "Statement::ExecuteStep");
+  PROFILER_LABEL("storage", "Statement::ExecuteStep");
   if (!mDBStatement)
     return NS_ERROR_NOT_INITIALIZED;
-
-  NS_TIME_FUNCTION_MIN_FMT(5, "mozIStorageStatement::ExecuteStep(%s) (0x%p)",
-                           mDBConnection->getFilename().get(), mDBStatement);
 
   // Bind any parameters first before executing.
   if (mParamsArray) {
@@ -584,7 +580,7 @@ Statement::ExecuteStep(bool *_moreResults)
 
 #ifdef PR_LOGGING
   if (srv != SQLITE_ROW && srv != SQLITE_DONE) {
-      nsCAutoString errStr;
+      nsAutoCString errStr;
       (void)mDBConnection->GetLastErrorString(errStr);
       PR_LOG(gStorageLog, PR_LOG_DEBUG,
              ("Statement::ExecuteStep error: %s", errStr.get()));

@@ -9,7 +9,6 @@
 
 #include "nsCOMPtr.h"
 
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMEventListener.h"
 #include "nsITransferable.h"
 
@@ -71,7 +70,7 @@ public:
   virtual ~nsContentAreaDragDropDataProvider() {}
 
   nsresult SaveURIToFile(nsAString& inSourceURIString,
-                         nsIFile* inDestFile);
+                         nsIFile* inDestFile, bool isPrivate);
 };
 
 

@@ -25,6 +25,7 @@
 #include "nsGkAtoms.h"
 #include "nsGUIEvent.h"
 #include "nsCRT.h"
+#include "nsBaseWidget.h"
 
 #include "nsIDocument.h"
 #include "nsIContent.h"
@@ -35,20 +36,20 @@
 #include "nsIDOMElement.h"
 #include "nsBindingManager.h"
 #include "nsIServiceManager.h"
+#include "nsXULPopupManager.h"
+#include "nsContentUtils.h"
+#include "nsCxPusher.h"
 
 #include "jsapi.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
 #include "nsIXPConnect.h"
 
-// externs defined in nsChildView.mm
-extern nsIRollupListener * gRollupListener;
-extern nsIWidget         * gRollupWidget;
-
 static bool gConstructingMenu = false;
 static bool gMenuMethodsSwizzled = false;
 
 int32_t nsMenuX::sIndexingMenuLevel = 0;
+using mozilla::AutoPushJSContext;
 
 
 //
@@ -107,8 +108,7 @@ nsMenuX::nsMenuX()
     // SCTGRLIndex class) is loaded on demand, whenever the user first opens
     // a menu (which normally hasn't happened yet).  So we need to load it
     // here explicitly.
-    if (nsCocoaFeatures::OnSnowLeopardOrLater())
-      dlopen("/System/Library/PrivateFrameworks/Shortcut.framework/Shortcut", RTLD_LAZY);
+    dlopen("/System/Library/PrivateFrameworks/Shortcut.framework/Shortcut", RTLD_LAZY);
     Class SCTGRLIndexClass = ::NSClassFromString(@"SCTGRLIndex");
     nsToolkit::SwizzleMethods(SCTGRLIndexClass, @selector(indexMenuBarDynamically),
                               @selector(nsMenuX_SCTGRLIndex_indexMenuBarDynamically));
@@ -412,12 +412,12 @@ void nsMenuX::MenuConstruct()
       do_GetService(nsIXPConnect::GetCID(), &rv);
     if (NS_SUCCEEDED(rv)) {
       nsIDocument* ownerDoc = menuPopup->OwnerDoc();
-      nsIScriptGlobalObject* sgo;
-      if (ownerDoc && (sgo = ownerDoc->GetScriptGlobalObject())) {
+      nsCOMPtr<nsIScriptGlobalObject> sgo;
+      if (ownerDoc && (sgo = do_QueryInterface(ownerDoc->GetWindow()))) {
         nsCOMPtr<nsIScriptContext> scriptContext = sgo->GetContext();
         JSObject* global = sgo->GetGlobalJSObject();
         if (scriptContext && global) {
-          JSContext* cx = (JSContext*)scriptContext->GetNativeContext();
+          AutoPushJSContext cx(scriptContext->GetNativeContext());
           if (cx) {
             nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
             xpconnect->WrapNative(cx, global,
@@ -573,7 +573,7 @@ bool nsMenuX::OnOpen()
     return false;
 
   // If the open is going to succeed we need to walk our menu items, checking to
-  // see if any of them have a command attribute. If so, several apptributes
+  // see if any of them have a command attribute. If so, several attributes
   // must potentially be updated.
 
   // Get new popup content first since it might have changed as a result of the
@@ -582,56 +582,9 @@ bool nsMenuX::OnOpen()
   if (!popupContent)
     return true;
 
-  nsCOMPtr<nsIDOMDocument> domDoc(do_QueryInterface(popupContent->GetDocument()));
-  if (!domDoc)
-    return true;
-
-  uint32_t count = popupContent->GetChildCount();
-  for (uint32_t i = 0; i < count; i++) {
-    nsIContent *grandChild = popupContent->GetChildAt(i);
-    if (grandChild->Tag() == nsGkAtoms::menuitem) {
-      // See if we have a command attribute.
-      nsAutoString command;
-      grandChild->GetAttr(kNameSpaceID_None, nsGkAtoms::command, command);
-      if (!command.IsEmpty()) {
-        // We do! Look it up in our document
-        nsCOMPtr<nsIDOMElement> commandElt;
-        domDoc->GetElementById(command, getter_AddRefs(commandElt));
-        nsCOMPtr<nsIContent> commandContent(do_QueryInterface(commandElt));
-        
-        if (commandContent) {
-          nsAutoString commandDisabled, menuDisabled;
-          commandContent->GetAttr(kNameSpaceID_None, nsGkAtoms::disabled, commandDisabled);
-          grandChild->GetAttr(kNameSpaceID_None, nsGkAtoms::disabled, menuDisabled);
-          if (!commandDisabled.Equals(menuDisabled)) {
-            // The menu's disabled state needs to be updated to match the command.
-            if (commandDisabled.IsEmpty()) 
-              grandChild->UnsetAttr(kNameSpaceID_None, nsGkAtoms::disabled, true);
-            else
-              grandChild->SetAttr(kNameSpaceID_None, nsGkAtoms::disabled, commandDisabled, true);
-          }
-          
-          // The menu's value and checked states need to be updated to match the command.
-          // Note that (unlike the disabled state) if the command has *no* value for either, we
-          // assume the menu is supplying its own.
-          nsAutoString commandChecked, menuChecked;
-          commandContent->GetAttr(kNameSpaceID_None, nsGkAtoms::checked, commandChecked);
-          grandChild->GetAttr(kNameSpaceID_None, nsGkAtoms::checked, menuChecked);
-          if (!commandChecked.Equals(menuChecked)) {
-            if (!commandChecked.IsEmpty()) 
-              grandChild->SetAttr(kNameSpaceID_None, nsGkAtoms::checked, commandChecked, true);
-          }
-          
-          nsAutoString commandValue, menuValue;
-          commandContent->GetAttr(kNameSpaceID_None, nsGkAtoms::label, commandValue);
-          grandChild->GetAttr(kNameSpaceID_None, nsGkAtoms::label, menuValue);
-          if (!commandValue.Equals(menuValue)) {
-            if (!commandValue.IsEmpty()) 
-              grandChild->SetAttr(kNameSpaceID_None, nsGkAtoms::label, commandValue, true);
-          }
-        }
-      }
-    }
+  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+  if (pm) {
+    pm->UpdateMenuItems(popupContent);
   }
 
   return true;
@@ -873,10 +826,14 @@ nsresult nsMenuX::SetupIcon()
   if (nsMenuX::sIndexingMenuLevel > 0)
     return;
 
-  if (gRollupListener && gRollupWidget) {
-    gRollupListener->Rollup(0);
-    [menu cancelTracking];
-    return;
+  nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  if (rollupListener) {
+    nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
+    if (rollupWidget) {
+      rollupListener->Rollup(0, nullptr);
+      [menu cancelTracking];
+      return;
+    }
   }
   mGeckoMenu->MenuOpened();
 }

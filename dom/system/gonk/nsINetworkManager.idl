@@ -7,15 +7,14 @@
 /**
  * Information about networks that is exposed to network manager API consumers.
  */
-[scriptable, uuid(49cc227c-3fe7-40a2-bdb5-55e9af797fde)]
+[scriptable, uuid(d70b9d95-87d5-4ce9-aff7-4323dac79b07)]
 interface nsINetworkInterface : nsISupports
 {
   const long NETWORK_STATE_UNKNOWN = -1;
   const long NETWORK_STATE_CONNECTING = 0;
   const long NETWORK_STATE_CONNECTED = 1;
-  const long NETWORK_STATE_SUSPENDED = 2;
-  const long NETWORK_STATE_DISCONNECTING = 3;
-  const long NETWORK_STATE_DISCONNECTED = 4;
+  const long NETWORK_STATE_DISCONNECTING = 2;
+  const long NETWORK_STATE_DISCONNECTED = 3;
 
   /**
    * Current network state, one of the NETWORK_STATE_* constants.
@@ -28,6 +27,7 @@ interface nsINetworkInterface : nsISupports
   const long NETWORK_TYPE_WIFI        = 0;
   const long NETWORK_TYPE_MOBILE      = 1;
   const long NETWORK_TYPE_MOBILE_MMS  = 2;
+  const long NETWORK_TYPE_MOBILE_SUPL = 3;
 
   /**
    * Network type. One of the NETWORK_TYPE_* constants.
@@ -86,10 +86,32 @@ interface nsINetworkInterface : nsISupports
 
 };
 
+[scriptable, function, uuid(91824160-fb25-11e1-a21f-0800200c9a66)]
+interface nsIWifiTetheringCallback : nsISupports
+{
+  /**
+   * Callback function used to report status to WifiManager.
+   *
+   * @param error
+   *        An error message if the operation wasn't successful,
+   *        or `null` if it was.
+   */
+  void wifiTetheringEnabledChange(in jsval error);
+};
+
+[scriptable, function, uuid(e079aa2a-ec0a-4bbd-b1a4-d81a9faae464)]
+interface nsINetworkStatsCallback : nsISupports
+{
+  void networkStatsAvailable(in boolean success,
+                             in unsigned long rxBytes,
+                             in unsigned long txBytes,
+                             in jsval date);
+};
+
 /**
  * Manage network interfaces.
  */
-[scriptable, uuid(3bc29392-2fba-11e1-80fd-0010183a41af)]
+[scriptable, uuid(f39a0fb6-2752-47d2-943e-a0cdd3e43494)]
 interface nsINetworkManager : nsISupports
 {
   /**
@@ -156,5 +178,34 @@ interface nsINetworkManager : nsISupports
    *        a previous override is canceled.
    */
   long overrideActive(in nsINetworkInterface network);
+
+  /**
+   * Enable or disable Wifi Tethering
+   *
+   * @param enabled
+   *        Boolean that indicates whether tethering should be enabled (true) or disabled (false).
+   * @param network
+   *        The Wifi network interface with at least name of network interface.
+   * @param config
+   *        The Wifi Tethering configuration from settings db.
+   * @param callback
+   *        Callback function used to report status to WifiManager.
+   */
+  void setWifiTethering(in boolean enabled,
+                        in nsINetworkInterface networkInterface,
+                        in jsval config,
+                        in nsIWifiTetheringCallback callback);
+
+  /**
+   * Retrieve network interface stats.
+   *
+   * @param networkName
+   *        Select the Network interface to request estats.
+   *
+   * @param callback
+   *        Callback to notify result and provide stats, connectionType
+   *        and the date when stats are retrieved
+   */
+  void getNetworkInterfaceStats(in DOMString networkName, in nsINetworkStatsCallback callback);
 
 };

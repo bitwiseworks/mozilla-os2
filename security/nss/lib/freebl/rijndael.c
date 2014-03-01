@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* $Id: rijndael.c,v 1.30 2013/01/25 18:02:53 rrelyea%redhat.com Exp $ */
 
 #ifdef FREEBL_NO_DEPEND
 #include "stubs.h"
@@ -20,8 +19,15 @@
 #include "gcm.h"
 
 #if USE_HW_AES
+#include "intel-gcm.h"
 #include "intel-aes.h"
 #include "mpi.h"
+
+static int has_intel_aes = 0;
+static int has_intel_avx = 0;
+static int has_intel_clmul = 0;
+static PRBool use_hw_aes = PR_FALSE;
+static PRBool use_hw_gcm = PR_FALSE;
 #endif
 
 /*
@@ -960,6 +966,25 @@ AESContext * AES_AllocateContext(void)
 }
 
 
+#if USE_HW_AES
+/*
+ * Adapted from the example code in "How to detect New Instruction support in
+ * the 4th generation Intel Core processor family" by Max Locktyukhin.
+ */
+static PRBool
+check_xcr0_ymm()
+{
+    PRUint32 xcr0;
+#if defined(_MSC_VER)
+    xcr0 = (PRUint32)_xgetbv(0);  /* Requires VS2010 SP1 or later. */
+#else
+    __asm__ ("xgetbv" : "=a" (xcr0) : "c" (0) : "%edx");
+#endif
+    /* Check if xmm and ymm state are enabled in XCR0. */
+    return (xcr0 & 6) == 6;
+}
+#endif
+
 /*
 ** Initialize a new AES context suitable for AES encryption/decryption in
 ** the ECB or CBC mode.
@@ -970,10 +995,6 @@ aes_InitContext(AESContext *cx, const unsigned char *key, unsigned int keysize,
 	        const unsigned char *iv, int mode, unsigned int encrypt,
 	        unsigned int blocksize)
 {
-#if USE_HW_AES
-    static int has_intel_aes;
-    PRBool use_hw_aes = PR_FALSE;
-#endif
     unsigned int Nk;
     /* According to Rijndael AES Proposal, section 12.1, block and key
      * lengths between 128 and 256 bits are supported, as long as the
@@ -1009,12 +1030,23 @@ aes_InitContext(AESContext *cx, const unsigned char *key, unsigned int keysize,
 	if (disable_hw_aes == NULL) {
 	    freebl_cpuid(1, &eax, &ebx, &ecx, &edx);
 	    has_intel_aes = (ecx & (1 << 25)) != 0 ? 1 : -1;
+	    has_intel_clmul = (ecx & (1 << 1)) != 0 ? 1 : -1;
+	    if ((ecx & (1 << 27)) != 0 && (ecx & (1 << 28)) != 0 &&
+		check_xcr0_ymm()) {
+		has_intel_avx = 1;
+	    } else {
+		has_intel_avx = -1;
+	    }
 	} else {
 	    has_intel_aes = -1;
+	    has_intel_avx = -1;
+	    has_intel_clmul = -1;
 	}
     }
     use_hw_aes = (PRBool)
 		(has_intel_aes > 0 && (keysize % 8) == 0 && blocksize == 16);
+    use_hw_gcm = (PRBool)
+		(use_hw_aes && has_intel_avx>0 && has_intel_clmul>0);
 #endif
     /* Nb = (block size in bits) / 32 */
     cx->Nb = blocksize / 4;
@@ -1120,11 +1152,22 @@ AES_InitContext(AESContext *cx, const unsigned char *key, unsigned int keysize,
 	cx->isBlock = PR_FALSE;
 	break;
     case NSS_AES_GCM:
+#if USE_HW_AES
+	if(use_hw_gcm) {
+        	cx->worker_cx = intel_AES_GCM_CreateContext(cx, cx->worker, iv, blocksize);
+		cx->worker = (freeblCipherFunc)
+			(encrypt ? intel_AES_GCM_EncryptUpdate : intel_AES_GCM_DecryptUpdate);
+		cx->destroy = (freeblDestroyFunc) intel_AES_GCM_DestroyContext;
+		cx->isBlock = PR_FALSE;
+    	} else
+#endif
+	{
 	cx->worker_cx = GCM_CreateContext(cx, cx->worker, iv, blocksize);
 	cx->worker = (freeblCipherFunc)
 			(encrypt ? GCM_EncryptUpdate : GCM_DecryptUpdate);
 	cx->destroy = (freeblDestroyFunc) GCM_DestroyContext;
 	cx->isBlock = PR_FALSE;
+	}
 	break;
     case NSS_AES_CTR:
 	cx->worker_cx = CTR_CreateContext(cx, cx->worker, iv, blocksize);
@@ -1200,7 +1243,7 @@ AES_Encrypt(AESContext *cx, unsigned char *output,
 {
     int blocksize;
     /* Check args */
-    if (cx == NULL || output == NULL || input == NULL) {
+    if (cx == NULL || output == NULL || (input == NULL && inputLen != 0)) {
 	PORT_SetError(SEC_ERROR_INVALID_ARGS);
 	return SECFailure;
     }
@@ -1231,7 +1274,7 @@ AES_Decrypt(AESContext *cx, unsigned char *output,
 {
     int blocksize;
     /* Check args */
-    if (cx == NULL || output == NULL || input == NULL) {
+    if (cx == NULL || output == NULL || (input == NULL && inputLen != 0)) {
 	PORT_SetError(SEC_ERROR_INVALID_ARGS);
 	return SECFailure;
     }

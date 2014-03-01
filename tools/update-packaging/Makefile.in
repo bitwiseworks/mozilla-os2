@@ -11,6 +11,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
+STANDALONE_MAKEFILE := 1
+
 # input location for the build, usually $(DIST)
 # set this to $(DIST)/l10n-stage per override for L10n builds
 PACKAGE_BASE_DIR	= $(DIST)
@@ -35,7 +37,7 @@ endif
 MAR_BIN	= $(LIBXUL_DIST)/host/bin/mar$(HOST_BIN_SUFFIX)
 MBSDIFF_BIN	= $(LIBXUL_DIST)/host/bin/mbsdiff$(HOST_BIN_SUFFIX)
 
-.DEFAULT_GOAL := full-update
+OVERRIDE_DEFAULT_GOAL := full-update
 full-update:: complete-patch
 
 ifeq ($(OS_TARGET), WINNT)

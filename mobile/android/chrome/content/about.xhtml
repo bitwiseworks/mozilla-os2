@@ -18,7 +18,7 @@
   <meta name="viewport" content="width=480; initial-scale=.6667; user-scalable=no"/>
   <title>&aboutPage.title;</title>
   <link rel="stylesheet" href="chrome://browser/skin/aboutPage.css" type="text/css"/>
-  <link rel="icon" type="image/png" href="chrome://branding/content/favicon32.png" />
+  <link rel="icon" type="image/png" sizes="64x64" href="chrome://branding/content/favicon64.png" />
 </head>
 
 <body dir="&locale.dir;">
@@ -28,18 +28,29 @@
   </div>
 
   <div id="banner">
-    <div id="logo"></div>
+    <div id="logo"/>
 #ifdef MOZ_UPDATER
     <div id="updateBox">
       <a id="updateLink" href="" onclick="checkForUpdates();">&aboutPage.checkForUpdates.link;</a>
       <span id="update-message-checking">&aboutPage.checkForUpdates.checking;</span>
       <span id="update-message-none">&aboutPage.checkForUpdates.none;</span>
-      <span id="update-message-found">&aboutPage.checkForUpdates.found;</span>
+      <span id="update-message-found" onclick="downloadUpdate()">&aboutPage.checkForUpdates.available2;</span>
+      <span id="update-message-downloading">&aboutPage.checkForUpdates.downloading;</span>
+      <span id="update-message-downloaded" onclick="installUpdate()">&aboutPage.checkForUpdates.downloaded2;</span>
     </div>
 #endif
-    <div id="aboutTelemetry" hidden="true">
-      <p id="telemetry">&aboutPage.warningVersion;&aboutPage.telemetryStart;<a href="http://www.mozilla.org/">&aboutPage.telemetryMozillaLink;</a>&aboutPage.telemetryEnd;</p>
+
+    <div id="messages">
+      <p id="distributionAbout" hidden="true"/>
+      <p id="distributionID" hidden="true"/>
+      <p id="telemetry" hidden="true">
+        &aboutPage.warningVersion;
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+        &aboutPage.telemetryStart;<a href="http://www.mozilla.org/">&aboutPage.telemetryMozillaLink;</a>&aboutPage.telemetryEnd;
+#endif
+      </p>
     </div>
+
   </div>
 
     <ul id="aboutLinks">
@@ -74,7 +85,25 @@
         versionPara.appendChild(br);
         let date = document.createTextNode("(" + buildDate + ")");
         versionPara.appendChild(date);
-        document.getElementById("aboutTelemetry").hidden = false;
+        document.getElementById("telemetry").hidden = false;
+      }
+
+      // Include the Distribution information if available
+      try {
+        let distroId = Services.prefs.getCharPref("distribution.id");
+        if (distroId) {
+          let distroVersion = Services.prefs.getCharPref("distribution.version");
+          let distroIdField = document.getElementById("distributionID");
+          distroIdField.textContent = distroId + " - " + distroVersion;
+          distroIdField.hidden = false;
+
+          let distroAbout = Services.prefs.getComplexValue("distribution.about", Ci.nsISupportsString);
+          let distroField = document.getElementById("distributionAbout");
+          distroField.textContent = distroAbout;
+          distroField.hidden = false;
+        }
+      } catch (e) {
+        // Pref is unset
       }
 
       // get URLs from prefs
@@ -98,7 +127,6 @@
 
 #ifdef MOZ_UPDATER
       let Updater = {
-        isChecking: false,
         update: null,
 
         init: function() {
@@ -107,7 +135,7 @@
 
         observe: function(aSubject, aTopic, aData) {
           if (aTopic == "Update:CheckResult") {
-            showUpdateMessage(aData == "true");
+            showUpdateMessage(aData);
           }
         },
       };
@@ -115,46 +143,73 @@
       Updater.init();
 
       function checkForUpdates() {
-        Updater.isChecking = true;
         showCheckingMessage();
 
         let bridge = Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge);
-        bridge.handleGeckoMessage(JSON.stringify({
-          gecko: {
-            type: "Update:Check",
-          }
-        }));
+        bridge.handleGeckoMessage(JSON.stringify({ type: "Update:Check" }));
+      }
+
+      function downloadUpdate() {
+        let bridge = Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge);
+        bridge.handleGeckoMessage(JSON.stringify({ type: "Update:Download" }));
+      }
+
+      function installUpdate() {
+        showCheckAction();
+
+        let bridge = Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge);
+        bridge.handleGeckoMessage(JSON.stringify({ type: "Update:Install" }));
       }
 
       let updateLink = document.getElementById("updateLink");
       let checkingSpan = document.getElementById("update-message-checking");
       let noneSpan = document.getElementById("update-message-none");
       let foundSpan = document.getElementById("update-message-found");
+      let downloadingSpan = document.getElementById("update-message-downloading");
+      let downloadedSpan = document.getElementById("update-message-downloaded");
+
+      function showCheckAction() {
+        checkingSpan.style.display = "none";
+        noneSpan.style.display = "none";
+        foundSpan.style.display = "none";
+        downloadingSpan.style.display = "none";
+        downloadedSpan.style.display = "none";
+        updateLink.style.display = "block";
+      }
 
       function showCheckingMessage() {
         updateLink.style.display = "none";
         noneSpan.style.display = "none";
         foundSpan.style.display = "none";
+        downloadingSpan.style.display = "none";
+        downloadedSpan.style.display = "none";
         checkingSpan.style.display = "block";
       }
 
-      function showUpdateMessage(aHasUpdate) {
+      function showUpdateMessage(aResult) {
         updateLink.style.display = "none";
         checkingSpan.style.display = "none";
-        if (aHasUpdate) {
-          noneSpan.style.display = "none";
-          foundSpan.style.display = "block";
-        } else {
-          foundSpan.style.display = "none";
-          noneSpan.style.display = "block";
-        }
+        noneSpan.style.display = "none";
+        foundSpan.style.display = "none";
+        downloadingSpan.style.display = "none";
+        downloadedSpan.style.display = "none";
 
-        setTimeout(function() {
-          noneSpan.style.display = "none";
-          foundSpan.style.display = "none";
-          checkingSpan.style.display = "none";
-          updateLink.style.display = "block";
-        }, 2000);
+        // the aResult values come from mobile/android/base/UpdateServiceHelper.java
+        switch (aResult) {
+        case "NOT_AVAILABLE":
+          noneSpan.style.display = "block";
+          setTimeout(showCheckAction, 2000);
+          break;
+        case "AVAILABLE":
+          foundSpan.style.display = "block";
+          break;
+        case "DOWNLOADING":
+          downloadingSpan.style.display = "block";
+          break;
+        case "DOWNLOADED":
+          downloadedSpan.style.display = "block";
+          break;
+        }
       }
 #endif
     ]]></script>

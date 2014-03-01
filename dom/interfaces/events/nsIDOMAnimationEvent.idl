@@ -11,13 +11,9 @@
  * http://dev.w3.org/csswg/css3-animations/#animation-events-
  */
 
-[scriptable, builtinclass, uuid(ecb06edb-8e90-43ce-8f4b-3d1021222e3a)]
+[scriptable, builtinclass, uuid(b1bea1bc-689b-4e07-8cbc-ef342725f9a6)]
 interface nsIDOMAnimationEvent : nsIDOMEvent {
   readonly attribute DOMString          animationName;
   readonly attribute float              elapsedTime;
-  void               initAnimationEvent(in DOMString typeArg,
-                                        in boolean canBubbleArg,
-                                        in boolean cancelableArg,
-                                        in DOMString propertyNameArg,
-                                        in float elapsedTimeArg);
+  readonly attribute DOMString          pseudoElement;
 };

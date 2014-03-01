@@ -14,14 +14,14 @@
 #include "nsContentDLF.h"
 #include "nsContentUtils.h"
 #include "nsCSSAnonBoxes.h"
+#include "mozilla/css/ErrorReporter.h"
 #include "nsCSSKeywords.h"
 #include "nsCSSParser.h"
 #include "nsCSSProps.h"
 #include "nsCSSPseudoClasses.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSRendering.h"
-#include "nsCSSScanner.h"
-#include "nsDOMAttribute.h"
+#include "mozilla/dom/Attr.h"
 #include "nsDOMClassInfo.h"
 #include "nsEventListenerManager.h"
 #include "nsFrame.h"
@@ -41,7 +41,6 @@
 #include "nsXBLWindowKeyHandler.h"
 #include "nsXBLService.h"
 #include "txMozillaXSLTProcessor.h"
-#include "nsDOMStorage.h"
 #include "nsTreeSanitizer.h"
 #include "nsCellMap.h"
 #include "nsTextFrameTextRunCache.h"
@@ -52,13 +51,17 @@
 #include "nsHTMLDNSPrefetch.h"
 #include "nsHtml5Module.h"
 #include "nsFocusManager.h"
-#include "nsFrameList.h"
 #include "nsListControlFrame.h"
-#include "nsHTMLInputElement.h"
+#include "mozilla/dom/HTMLInputElement.h"
+#include "SVGElementFactory.h"
 #include "nsSVGUtils.h"
 #include "nsMathMLAtoms.h"
 #include "nsMathMLOperators.h"
 #include "Navigator.h"
+#include "DOMStorageObserver.h"
+#include "DisplayItemClip.h"
+
+#include "AudioChannelService.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -72,22 +75,31 @@
 #include "nsHTMLEditor.h"
 #include "nsTextServicesDocument.h"
 
-#ifdef MOZ_MEDIA
-#include "nsMediaDecoder.h"
-#include "nsHTMLMediaElement.h"
+#ifdef MOZ_WEBSPEECH
+#include "nsSynthVoiceRegistry.h"
 #endif
 
 #ifdef MOZ_MEDIA_PLUGINS
-#include "nsMediaPluginHost.h"
+#include "MediaPluginHost.h"
 #endif
 
-#ifdef MOZ_SYDNEYAUDIO
-#include "nsAudioStream.h"
+#ifdef MOZ_WMF
+#include "WMFDecoder.h"
+#endif
+
+#ifdef MOZ_GSTREAMER
+#include "GStreamerFormatHelper.h"
+#endif
+
+#include "AudioStream.h"
+
+#ifdef MOZ_WIDGET_GONK
+#include "nsVolumeService.h"
+using namespace mozilla::system;
 #endif
 
 #include "nsError.h"
 
-#include "nsCycleCollector.h"
 #include "nsJSEnvironment.h"
 #include "nsContentSink.h"
 #include "nsFrameMessageManager.h"
@@ -97,13 +109,20 @@
 #include "nsEditorSpellCheck.h"
 #include "nsWindowMemoryReporter.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/ipc/ProcessPriorityManager.h"
+#include "mozilla/ProcessPriorityManager.h"
+#include "nsPermissionManager.h"
+#include "nsCookieService.h"
+#include "nsApplicationCacheService.h"
+#include "mozilla/dom/time/DateCacheCleaner.h"
+#include "nsIMEStateManager.h"
+#include "nsDocument.h"
 
-extern void NS_ShutdownChainItemPool();
+extern void NS_ShutdownEventTargetChainItemRecyclePool();
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::ipc;
+using namespace mozilla::dom::time;
 
 nsrefcnt nsLayoutStatics::sLayoutStaticRefcnt = 0;
 
@@ -178,8 +197,6 @@ nsLayoutStatics::Initialize()
     return rv;
   }
 
-  inDOMView::InitAtoms();
-
 #endif
 
   nsMathMLOperators::AddRefTable();
@@ -190,7 +207,7 @@ nsLayoutStatics::Initialize()
 #ifdef DEBUG
   nsFrame::DisplayReflowStartup();
 #endif
-  nsDOMAttribute::Initialize();
+  Attr::Initialize();
 
   rv = txMozillaXSLTProcessor::Startup();
   if (NS_FAILED(rv)) {
@@ -198,9 +215,9 @@ nsLayoutStatics::Initialize()
     return rv;
   }
 
-  rv = nsDOMStorageManager::Initialize();
+  rv = DOMStorageObserver::Init();
   if (NS_FAILED(rv)) {
-    NS_ERROR("Could not initialize nsDOMStorageManager");
+    NS_ERROR("Could not initialize DOMStorageObserver");
     return rv;
   }
 
@@ -230,9 +247,7 @@ nsLayoutStatics::Initialize()
     return rv;
   }
 
-#ifdef MOZ_SYDNEYAUDIO
-  nsAudioStream::InitLibrary();
-#endif
+  AudioStream::InitLibrary();
 
   nsContentSink::InitializeStatics();
   nsHtml5Module::InitializeStatics();
@@ -242,15 +257,20 @@ nsLayoutStatics::Initialize()
 
   nsCORSListenerProxy::Startup();
 
-  nsFrameList::Init();
-
   NS_SealStaticAtomTable();
 
   nsWindowMemoryReporter::Init();
 
+  SVGElementFactory::Init();
   nsSVGUtils::Init();
 
-  InitProcessPriorityManager();
+  ProcessPriorityManager::Init();
+
+  nsPermissionManager::AppClearDataObserverInit();
+  nsCookieService::AppClearDataObserverInit();
+  nsApplicationCacheService::AppClearDataObserverInit();
+
+  InitializeDateCacheCleaner();
 
   return NS_OK;
 }
@@ -266,10 +286,11 @@ nsLayoutStatics::Shutdown()
 #ifdef MOZ_XUL
   nsXULPopupManager::Shutdown();
 #endif
-  nsDOMStorageManager::Shutdown();
+  DOMStorageObserver::Shutdown();
   txMozillaXSLTProcessor::Shutdown();
-  nsDOMAttribute::Shutdown();
+  Attr::Shutdown();
   nsEventListenerManager::Shutdown();
+  nsIMEStateManager::Shutdown();
   nsComputedDOMStyle::Shutdown();
   nsCSSParser::Shutdown();
   nsCSSRuleProcessor::Shutdown();
@@ -296,18 +317,18 @@ nsLayoutStatics::Shutdown()
   nsSprocketLayout::Shutdown();
 #endif
 
+  SVGElementFactory::Shutdown();
   nsMathMLOperators::ReleaseTable();
 
   nsFloatManager::Shutdown();
   nsImageFrame::ReleaseGlobals();
 
-  nsCSSScanner::ReleaseGlobals();
+  mozilla::css::ErrorReporter::ReleaseGlobals();
 
   nsTextFragment::Shutdown();
 
   nsAttrValue::Shutdown();
   nsContentUtils::Shutdown();
-  nsNodeInfo::ClearCache();
   nsLayoutStylesheetCache::Shutdown();
   NS_NameSpaceManagerShutdown();
 
@@ -321,15 +342,29 @@ nsLayoutStatics::Shutdown()
   FrameLayerBuilder::Shutdown();
 
 #ifdef MOZ_MEDIA_PLUGINS
-  nsMediaPluginHost::Shutdown();  
+  MediaPluginHost::Shutdown();
 #endif
 
-#ifdef MOZ_SYDNEYAUDIO
-  nsAudioStream::ShutdownLibrary();
+#ifdef MOZ_GSTREAMER
+  GStreamerFormatHelper::Shutdown();
+#endif
+
+  AudioStream::ShutdownLibrary();
+
+#ifdef MOZ_WMF
+  WMFDecoder::UnloadDLLs();
+#endif
+
+#ifdef MOZ_WIDGET_GONK
+  nsVolumeService::Shutdown();
+#endif
+
+#ifdef MOZ_WEBSPEECH
+  nsSynthVoiceRegistry::Shutdown();
 #endif
 
   nsCORSListenerProxy::Shutdown();
-  
+
   nsIPresShell::ReleaseStatics();
 
   nsTreeSanitizer::ReleaseStatics();
@@ -338,17 +373,22 @@ nsLayoutStatics::Shutdown()
 
   nsRegion::ShutdownStatic();
 
-  NS_ShutdownChainItemPool();
+  NS_ShutdownEventTargetChainItemRecyclePool();
 
-  nsFrameList::Shutdown();
-
-  nsHTMLInputElement::DestroyUploadLastDir();
+  HTMLInputElement::DestroyUploadLastDir();
 
   nsLayoutUtils::Shutdown();
 
   nsHyphenationManager::Shutdown();
-  nsEditorSpellCheck::ShutDown();
   nsDOMMutationObserver::Shutdown();
 
+  AudioChannelService::Shutdown();
+
   ContentParent::ShutDown();
+
+  nsRefreshDriver::Shutdown();
+
+  DisplayItemClip::Shutdown();
+
+  nsDocument::XPCOMShutdown();
 }

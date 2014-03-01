@@ -5,20 +5,19 @@
 "use strict";
 
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
-
   var iframe1 = document.createElement('iframe');
-  iframe1.mozbrowser = true;
+  SpecialPowers.wrap(iframe1).mozbrowser = true;
   document.body.appendChild(iframe1);
 
   // iframe2 is a red herring; we modify its title but don't listen for
   // titlechanges; we want to make sure that its titlechange events aren't
   // picked up by the listener on iframe1.
   var iframe2 = document.createElement('iframe');
-  iframe2.mozbrowser = true;
+  SpecialPowers.wrap(iframe2).mozbrowser = true;
   document.body.appendChild(iframe2);
 
   // iframe3 is another red herring.  It's not a mozbrowser, so we shouldn't
@@ -66,6 +65,4 @@ function runTest() {
   iframe3.src = 'data:text/html,<html><head><title>SHOULD NOT GET EVENT</title></head><body></body></html>';
 }
 
-addEventListener('load', function() { SimpleTest.executeSoon(runTest); });
-
-
+addEventListener('testready', runTest);

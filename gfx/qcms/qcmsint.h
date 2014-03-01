@@ -273,4 +273,54 @@ void qcms_transform_data_rgba_out_lut_sse1(qcms_transform *transform,
                                           unsigned char *dest,
                                           size_t length);
 
+void qcms_transform_data_rgb_out_lut_altivec(qcms_transform *transform,
+                                             unsigned char *src,
+                                             unsigned char *dest,
+                                             size_t length);
+void qcms_transform_data_rgba_out_lut_altivec(qcms_transform *transform,
+                                              unsigned char *src,
+                                              unsigned char *dest,
+                                              size_t length);
+
 extern qcms_bool qcms_supports_iccv4;
+
+#ifdef _MSC_VER
+
+long __cdecl _InterlockedIncrement(long volatile *);
+long __cdecl _InterlockedDecrement(long volatile *);
+#pragma intrinsic(_InterlockedIncrement)
+#pragma intrinsic(_InterlockedDecrement)
+
+#define qcms_atomic_increment(x) _InterlockedIncrement((long volatile *)&x)
+#define qcms_atomic_decrement(x) _InterlockedDecrement((long volatile*)&x)
+
+#else
+
+#define qcms_atomic_increment(x) __sync_add_and_fetch(&x, 1)
+#define qcms_atomic_decrement(x) __sync_sub_and_fetch(&x, 1)
+
+#endif
+
+
+#ifdef NATIVE_OUTPUT
+# define RGB_OUTPUT_COMPONENTS 4
+# define RGBA_OUTPUT_COMPONENTS 4
+# ifdef IS_LITTLE_ENDIAN
+#  define OUTPUT_A_INDEX 3
+#  define OUTPUT_R_INDEX 2
+#  define OUTPUT_G_INDEX 1
+#  define OUTPUT_B_INDEX 0
+# else
+#  define OUTPUT_A_INDEX 0
+#  define OUTPUT_R_INDEX 1
+#  define OUTPUT_G_INDEX 2
+#  define OUTPUT_B_INDEX 3
+# endif
+#else
+# define RGB_OUTPUT_COMPONENTS 3
+# define RGBA_OUTPUT_COMPONENTS 4
+# define OUTPUT_R_INDEX 0
+# define OUTPUT_G_INDEX 1
+# define OUTPUT_B_INDEX 2
+# define OUTPUT_A_INDEX 3
+#endif

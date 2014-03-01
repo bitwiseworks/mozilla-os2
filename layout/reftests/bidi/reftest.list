@@ -1,3 +1,4 @@
+include dirAuto/reftest.list
 == bdi-element.html bdi-element-ref.html
 == bidi-000.html bidi-000-ref.html
 == bidi-001.html bidi-001-ref.html
@@ -12,12 +13,12 @@ random-if(cocoaWidget) == bidi-006.html bidi-006-ref.html # bug 734313
 random-if(cocoaWidget) == bidi-006-j.html bidi-006-ref.html # bug 734313
 == bidiSVG-01.svg bidiSVG-01-ref.svg
 == bidiSVG-02.svg bidiSVG-02-ref.svg
-== bidiSVG-03.svg bidiSVG-03-ref.svg
-== bidiSVG-04.svg bidiSVG-04-ref.svg
+pref(svg.text.css-frames.enabled,true) == bidiSVG-03.svg bidiSVG-03-ref.svg
+pref(svg.text.css-frames.enabled,true) == bidiSVG-04.svg bidiSVG-04-ref.svg
 == bidiSVG-05.svg bidiSVG-05-ref.svg
-== bidiMirroring.svg bidiMirroring-ref.svg
-random-if(layersGPUAccelerated) == visualmarquee.html marquee-ref.html
-random-if(layersGPUAccelerated) == logicalmarquee.html marquee-ref.html
+random-if(/^Windows\x20NT\x205\.1/.test(http.oscpu)) HTTP(..) == bidiMirroring.svg bidiMirroring-ref.svg
+fuzzy-if(Android,9,134) random-if(layersGPUAccelerated) == visualmarquee.html marquee-ref.html
+fuzzy-if(Android,9,134) random-if(layersGPUAccelerated) == logicalmarquee.html marquee-ref.html
 == visualmarquee.html logicalmarquee.html
 # test for glyph mirroring in right-to-left text
 == mirroring-01.html mirroring-01-ref.html
@@ -36,7 +37,7 @@ random-if(cocoaWidget) == mirroring-02.html mirroring-02-ref.html
 == unicode-bidi-anonymous-002.html unicode-bidi-anonymous-002-ref.html
 fails == unicode-bidi-isolate-basic.html unicode-bidi-isolate-basic-ref.html # bug 712600
 fails == unicode-bidi-isolate-aharon.html unicode-bidi-isolate-aharon-ref.html # bug 712600
-fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == unicode-bidi-plaintext.html unicode-bidi-plaintext-ref.html # sub-pixel AA
+fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia,73,1) == unicode-bidi-plaintext.html unicode-bidi-plaintext-ref.html
 == unicode-bidi-plaintext-textarea-1.html unicode-bidi-plaintext-textarea-ref.html
 == unicode-bidi-plaintext-textarea-2.html unicode-bidi-plaintext-textarea-ref.html
 == unicode-bidi-plaintext-textarea-3.html unicode-bidi-plaintext-textarea-ref.html
@@ -48,11 +49,22 @@ random-if(cocoaWidget) == with-first-letter-2b.html with-first-letter-2-ref.html
 == 83958-1a.html 83958-1-ref.html
 == 83958-1b.html 83958-1-ref.html
 == 83958-1c.html 83958-1-ref.html
-fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == 83958-2a.html 83958-2-ref.html # bug 696671
-fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == 83958-2b.html 83958-2-ref.html # bug 696671
-fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == 83958-2c.html 83958-2-ref.html # bug 696671
+fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia,111,7) == 83958-2a.html 83958-2-ref.html
+fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia,111,7) == 83958-2b.html 83958-2-ref.html
+fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia,111,7) == 83958-2c.html 83958-2-ref.html
 == 115921-1.html 115921-1-ref.html
 == 115921-2.html 115921-2-ref.html
+== 151407-1.html 151407-1-ref.html
+== 151407-1a.html 151407-1-ref.html
+== 151407-2-ltr.html 151407-2-ltr-ref.html
+== 151407-2-rtl.html 151407-2-rtl-ref.html
+== 151407-2-auto.html 151407-2-auto-ref.html
+== 151407-2-empty.html 151407-2-empty-ref.html
+== 151407-2-foopy.html 151407-2-empty-ref.html
+== 151407-3-ltr.html 151407-3-ltr-ref.html
+== 151407-3-rtl.html 151407-3-rtl-ref.html
+== 151407-3-auto.html 151407-3-auto-ref.html
+== 151407-3-foopy.html 151407-3-empty-ref.html
 == 229367-1.html 229367-1-ref.html
 == 229367-2.html 229367-2-ref.html
 == 229367-3.html 229367-3-ref.html
@@ -64,7 +76,7 @@ fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azur
 == 263359-3.html 263359-3-ref.html
 == 263359-4.html 263359-4-ref.html
 random-if(winWidget) == 267459-1.html 267459-1-ref.html # depends on windows version, see bug 590101
-fails-if(Android) == 267459-2.html 267459-2-ref.html # bug 650567
+== 267459-2.html 267459-2-ref.html
 == 299065-1.html 299065-1-ref.html
 random-if(winWidget) == 305643-1.html 305643-1-ref.html # depends on windows version, see bug 590101
 == 332655-1.html 332655-1-ref.html
@@ -99,14 +111,14 @@ random-if(winWidget) == 305643-1.html 305643-1-ref.html # depends on windows ver
 == 612843-1.html 612843-1-ref.html
 == 613149-1a.html 613149-1-ref.html
 == 613149-1b.html 613149-1-ref.html
-fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == 613149-2a.html 613149-2-ref.html # bug 696672
-fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == 613149-2b.html 613149-2-ref.html # bug 696672
+fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia,36,2) == 613149-2a.html 613149-2-ref.html
+fuzzy-if(Android,24,1) fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia,36,2) == 613149-2b.html 613149-2-ref.html
 == 613157-1.html 613157-1-ref.html
-fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia) == 613157-2.html 613157-2-ref.html # bug 696673
+fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azureSkia,255,6) == 613157-2.html 613157-2-ref.html
 == 662288-1.html 662288-1-ref.html
 == 670226-1.html 670226-1-ref.html
 == 676245-1.html 676245-1-ref.html
-== 698291-1.html 698291-1-ref.html
+skip-if(B2G) == 698291-1.html 698291-1-ref.html
 == 698706-1.html 698706-1-ref.html
 == 704837-1.html 704837-1-ref.html
 == 712600-1.html 712600-1-ref.html
@@ -116,7 +128,7 @@ fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azur
 == 718236-1.html 718236-1-ref.html
 == 718236-2.html 718236-2-ref.html
 == 718236-3.html 718236-3-ref.html
-== 726420-1.html 726420-1-ref.html
+skip-if(B2G) == 726420-1.html 726420-1-ref.html
 == 726460-1.html 726460-1-ref.html
 == 729047-1.html 729047-1-ref.html
 == 730562-1.html 730562-1-ref.html
@@ -124,6 +136,5 @@ fails-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)&&!layersGPUAccelerated&&!azur
 == 746987-2.html 746987-2-ref.html
 == 746987-3.html 746987-3-ref.html
 == 746987-4.html 746987-4-ref.html
-== 779003-1.html 779003-1-ref.html
 == 779003-1.html 779003-1-ref.html
 == 779003-1-dynamic.html 779003-1-ref.html

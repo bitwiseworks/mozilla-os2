@@ -44,7 +44,6 @@
 #include "nsStringFwd.h"
 #include "nsUnicharUtils.h"
 #include "nscore.h"
-#include "prtypes.h"
 
 class nsIDOMEventListener;
 class nsISelection;
@@ -249,7 +248,7 @@ nsHTMLEditor::DeleteRefToAnonymousNode(nsIDOMElement* aElement,
       content->UnbindFromTree();
     }
   }
-}  
+}
 
 // The following method is mostly called by a selection listener. When a
 // selection change is notified, the method is called to check if resizing

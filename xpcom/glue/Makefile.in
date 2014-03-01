@@ -13,27 +13,10 @@ include $(srcdir)/objs.mk
 
 EXTRA_DEPS += $(srcdir)/objs.mk
 
-DIRS            = standalone nomozalloc
-
-# On win we build two glue libs - glue linked to crt dlls here and in staticruntime we build
-# a statically linked glue lib.
-ifeq ($(OS_ARCH),WINNT)
-DIRS += staticruntime
-endif
-
-MODULE		= xpcom
-LIBRARY_NAME	= xpcomglue_s
 DIST_INSTALL	= 1
 
 LOCAL_INCLUDES	= \
 		-I$(srcdir)/../build \
-		$(NULL)
-
-CPPSRCS		= \
-		$(XPCOM_GLUE_SRC_LCPPSRCS) \
-		$(XPCOM_GLUENS_SRC_LCPPSRCS) \
-		nsStringAPI.cpp \
-		GenericModule.cpp \
 		$(NULL)
 
 SDK_HEADERS = \
@@ -61,6 +44,7 @@ SDK_HEADERS = \
 		nsISupportsUtils.h \
 		nsIWeakReferenceUtils.h \
 		nsInterfaceHashtable.h \
+		nsJSThingHashtable.h \
 		nsMemory.h \
 		nsQuickSort.h \
 		nsRefPtrHashtable.h \
@@ -69,6 +53,7 @@ SDK_HEADERS = \
 		nsStringGlue.h \
 		nsTArray.h \
 		nsTArray-inl.h \
+		nsTArrayForwardDeclare.h \
 		nsTHashtable.h \
 		nsTObserverArray.h \
 		nsTWeakRef.h \
@@ -79,38 +64,6 @@ SDK_HEADERS = \
 		nsWeakReference.h \
 		pldhash.h \
 		$(NULL)
-
-EXPORTS_NAMESPACES = mozilla mozilla/threads
-
-EXPORTS = \
-		nsThreadUtils.h \
-		nsTPriorityQueue.h \
-		nsProxyRelease.h \
-		nsXPTCUtils.h \
-		nsCycleCollectorUtils.h \
-		$(NULL)
-
-EXPORTS_mozilla = \
-  AppData.h \
-  AutoRestore.h \
-  BlockingResourceBase.h \
-  CondVar.h \
-  DeadlockDetector.h \
-  FileUtils.h \
-  GenericFactory.h \
-  IntentionalCrash.h \
-  Monitor.h \
-  Mutex.h \
-  ReentrantMonitor.h \
-  SSE.h \
-  arm.h \
-  unused.h \
-  Observer.h \
-  $(NULL)
-
-EXPORTS_mozilla/threads = \
-  nsThreadIDs.h \
-  $(NULL)
 
 SDK_LIBRARY     =                        \
 		$(LIB_PREFIX)xpcomglue_s.$(LIB_SUFFIX) \

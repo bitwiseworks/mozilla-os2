@@ -37,20 +37,11 @@ class HelperBase : public nsIRunnable
   friend class IDBRequest;
 
 public:
-  enum ChildProcessSendResult
-  {
-    Success_Sent = 0,
-    Success_NotSent,
-    Error
-  };
-
-  virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) = 0;
 
   virtual nsresult GetResultCode() = 0;
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) = 0;
+                                    JS::MutableHandle<JS::Value> aVal) = 0;
 
   IDBRequest* GetRequest() const
   {
@@ -70,7 +61,7 @@ protected:
    */
   nsresult WrapNative(JSContext* aCx,
                       nsISupports* aNative,
-                      jsval* aResult);
+                      JS::MutableHandle<JS::Value> aResult);
 
   /**
    * Gives the subclass a chance to release any objects that must be released
@@ -116,12 +107,17 @@ public:
 
   static IDBTransaction* GetCurrentTransaction();
 
-  bool HasTransaction()
+  bool HasTransaction() const
+  {
+    return !!mTransaction;
+  }
+
+  IDBTransaction* GetTransaction() const
   {
     return mTransaction;
   }
 
-  nsISupports* GetSource()
+  nsISupports* GetSource() const
   {
     return mRequest ? mRequest->Source() : nullptr;
   }
@@ -130,6 +126,25 @@ public:
   {
     return mResultCode;
   }
+
+  enum ChildProcessSendResult
+  {
+    // The result was successfully sent to the child process
+    Success_Sent = 0,
+
+    // The result was not sent, because this is not an out-of-process request.
+    Success_NotSent,
+
+    // The result was not sent, because the actor has been disconnected
+    // (if the child process has shut down or crashed).
+    Success_ActorDisconnected,
+
+    // An error occurred.
+    Error
+  };
+
+  ChildProcessSendResult
+  MaybeSendResponseToChildProcess(nsresult aResultCode);
 
   virtual nsresult OnParentProcessRequestComplete(
                                            const ResponseValue& aResponseValue);
@@ -163,7 +178,8 @@ protected:
    * OnSuccess is called.  A subclass can override this to fire an event other
    * than "success" at the request.
    */
-  virtual already_AddRefed<nsDOMEvent> CreateSuccessEvent();
+  virtual already_AddRefed<nsIDOMEvent> CreateSuccessEvent(
+    mozilla::dom::EventTarget* aOwner);
 
   /**
    * This callback is run on the main thread if DoDatabaseWork returned NS_OK.
@@ -185,7 +201,7 @@ protected:
    * accesses the result property of the request.
    */
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   /**
    * Gives the subclass a chance to release any objects that must be released
@@ -197,15 +213,23 @@ protected:
   /**
    * Helper to make a JS array object out of an array of clone buffers.
    */
-  static nsresult ConvertCloneReadInfosToArray(
+  static nsresult ConvertToArrayAndCleanup(
                                 JSContext* aCx,
                                 nsTArray<StructuredCloneReadInfo>& aReadInfos,
-                                jsval* aResult);
+                                JS::MutableHandle<JS::Value> aResult);
 
   /**
    * This should only be called by AutoSetCurrentTransaction.
    */
   static void SetCurrentTransaction(IDBTransaction* aTransaction);
+
+  /**
+   * Allows the subclass to send its results to the child process.  Will only
+   * be called if all of the IPC infrastructure is available (there is an
+   * actor, the child is stil alive and hasn't begun shutting down).
+   */
+  virtual ChildProcessSendResult
+  SendResponseToChildProcess(nsresult aResultCode) = 0;
 
 protected:
   nsRefPtr<IDBDatabase> mDatabase;
@@ -217,20 +241,19 @@ private:
   bool mDispatched;
 };
 
-NS_STACK_CLASS
-class StackBasedEventTarget : public nsIEventTarget
+class MOZ_STACK_CLASS StackBasedEventTarget : public nsIEventTarget
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
 };
 
-class MainThreadEventTarget : public StackBasedEventTarget
+class MOZ_STACK_CLASS ImmediateRunEventTarget : public StackBasedEventTarget
 {
 public:
   NS_DECL_NSIEVENTTARGET
 };
 
-class NoDispatchEventTarget : public StackBasedEventTarget
+class MOZ_STACK_CLASS NoDispatchEventTarget : public StackBasedEventTarget
 {
 public:
   NS_DECL_NSIEVENTTARGET

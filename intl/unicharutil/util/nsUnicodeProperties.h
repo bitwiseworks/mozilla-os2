@@ -6,7 +6,6 @@
 #ifndef NS_UNICODEPROPERTIES_H
 #define NS_UNICODEPROPERTIES_H
 
-#include "prtypes.h"
 #include "nsBidiUtils.h"
 #include "nsIUGenCategory.h"
 #include "nsUnicodeScriptCodes.h"
@@ -90,6 +89,8 @@ enum HanVariantType {
 };
 
 HanVariantType GetHanVariant(uint32_t aCh);
+
+uint32_t GetFullWidth(uint32_t aCh);
 
 bool IsClusterExtender(uint32_t aCh, uint8_t aCategory);
 

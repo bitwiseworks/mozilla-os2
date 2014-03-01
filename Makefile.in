@@ -17,49 +17,11 @@ $(error GNU Make 3.80 or higher is required)
 endif
 endif
 
+export TOPLEVEL_BUILD := 1
+
 include $(DEPTH)/config/autoconf.mk
 
 default::
-
-TIERS += base
-
-#
-# tier "base" - basic setup
-#
-tier_base_dirs = \
-  config \
-  build \
-  probes \
-  mfbt \
-  $(NULL)
-
-ifndef LIBXUL_SDK
-ifeq (android,$(MOZ_WIDGET_TOOLKIT))
-tier_base_dirs += \
-  other-licenses/android \
-  $(NULL)
-endif
-ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
-tier_base_dirs += \
-  other-licenses/android \
-  $(NULL)
-endif
-
-ifdef MOZ_MEMORY
-tier_base_dirs += memory/mozjemalloc
-ifdef MOZ_JEMALLOC
-tier_base_dirs += memory/jemalloc
-endif
-tier_base_dirs += memory/build
-endif
-ifndef MOZ_NATIVE_ZLIB
-tier_base_dirs += modules/zlib
-endif
-tier_base_dirs += \
-  mozglue \
-  memory/mozalloc \
-  $(NULL)
-endif
 
 ifdef COMPILE_ENVIRONMENT
 include $(topsrcdir)/$(MOZ_BUILD_APP)/build.mk
@@ -69,19 +31,29 @@ endif
 include $(topsrcdir)/config/config.mk
 
 GARBAGE_DIRS += dist _javagen _profile _tests staticlib
-DIST_GARBAGE = config.cache config.log config.status config-defs.h \
+DIST_GARBAGE = config.cache config.log config.status* config-defs.h \
    config/autoconf.mk \
    unallmakefiles mozilla-config.h \
    netwerk/necko-config.h xpcom/xpcom-config.h xpcom/xpcom-private.h \
    $(topsrcdir)/.mozconfig.mk $(topsrcdir)/.mozconfig.out
 
-default alldep all:: $(topsrcdir)/configure config.status
+ifndef MOZ_PROFILE_USE
+# We need to explicitly put backend.RecursiveMakeBackend.built here
+# otherwise the rule in rules.mk doesn't run early enough.
+default alldep all:: CLOBBER $(topsrcdir)/configure config.status backend.RecursiveMakeBackend.built
 	$(RM) -r $(DIST)/sdk
 	$(RM) -r $(DIST)/include
 	$(RM) -r $(DIST)/private
 	$(RM) -r $(DIST)/public
-	$(RM) $(DIST)/chrome.manifest
+	$(RM) -r $(DIST)/bin
 	$(RM) -r _tests
+endif
+
+CLOBBER: $(topsrcdir)/CLOBBER
+	@echo "STOP!  The CLOBBER file has changed."
+	@echo "Please run the build through a sanctioned build wrapper, such as"
+	@echo "'mach build' or client.mk."
+	@exit 1
 
 $(topsrcdir)/configure: $(topsrcdir)/configure.in
 	@echo "STOP!  configure.in has changed, and your configure is out of date."
@@ -154,13 +126,6 @@ SYMBOL_INDEX_NAME = \
 
 buildsymbols:
 ifdef MOZ_CRASHREPORTER
-ifdef USE_ELF_HACK
-    ifeq (mobile,$(MOZ_BUILD_APP))
-		$(MAKE) -C mobile/xul/installer elfhack
-    else
-		$(MAKE) -C $(MOZ_BUILD_APP)/installer elfhack
-    endif
-endif
 	echo building symbol store
 	$(RM) -r $(DIST)/crashreporter-symbols
 	$(RM) "$(DIST)/$(SYMBOL_ARCHIVE_BASENAME).zip"
@@ -168,21 +133,20 @@ endif
 	OBJCOPY="$(OBJCOPY)" \
 	$(PYTHON) $(topsrcdir)/toolkit/crashreporter/tools/symbolstore.py \
 	  $(MAKE_SYM_STORE_ARGS)                                          \
-	  --exclude="*test*" --exclude="*Test*"                           \
 	  $(foreach dir,$(SYM_STORE_SOURCE_DIRS),-s $(dir))               \
 	  $(DUMP_SYMS_BIN)                                                \
 	  $(DIST)/crashreporter-symbols                                   \
-	  $(MAKE_SYM_STORE_PATH) >                                        \
+	  $(MAKE_SYM_STORE_PATH) | grep -iv test >                        \
 	  $(DIST)/crashreporter-symbols/$(SYMBOL_INDEX_NAME)
 	echo packing symbols
 	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
 	cd $(DIST)/crashreporter-symbols && \
-          zip -r9D "../$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip" .
+          zip -r9D "../$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip" . -x "*test*" -x "*Test*"
 	cd $(DIST)/crashreporter-symbols && \
 	grep "sym" $(SYMBOL_INDEX_NAME) > $(SYMBOL_INDEX_NAME).tmp && \
 	  mv $(SYMBOL_INDEX_NAME).tmp $(SYMBOL_INDEX_NAME)
 	cd $(DIST)/crashreporter-symbols && \
-          zip -r9D "../$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip" . -i "*.sym" -i "*.txt"
+          zip -r9D "../$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip" . -i "*.sym" -i "*.txt"  -x "*test*" -x "*Test*"
 endif # MOZ_CRASHREPORTER
 
 uploadsymbols:
@@ -211,10 +175,6 @@ maybe_clobber_profiledbuild:
 	find $(DIST)/$(MOZ_APP_NAME) -name "*.pgc" -exec mv {} $(DIST)/bin \;
 endif
 
-# put in our default gdbinit so that the gdb debugging experience is happier.
-libs:: .gdbinit
-	$(INSTALL) $< $(DIST)/bin
-
 .PHONY: maybe_clobber_profiledbuild
 
 # Look for R_386_PC32 relocations in shared libs, these
@@ -225,3 +185,10 @@ scheck::
 endif
 
 js/src/Makefile: subsrcdir := js/src
+
+ifdef ENABLE_TESTS
+# Incorporate static tier directories into tests. This should be incorporated
+# into moz.build files someday.
+check::
+	$(call SUBMAKE,$@,js/src)
+endif

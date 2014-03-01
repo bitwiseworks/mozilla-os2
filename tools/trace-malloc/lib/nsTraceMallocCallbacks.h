@@ -9,9 +9,12 @@
 #ifndef NSTRACEMALLOCCALLBACKS_H
 #define NSTRACEMALLOCCALLBACKS_H
 
+#include "mozilla/StandardInteger.h"
 #include <stdlib.h>
 
-PR_BEGIN_EXTERN_C
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Used by backtrace. */
 typedef struct stack_buffer_info {
@@ -26,7 +29,7 @@ struct tm_thread {
      * This counter suppresses tracing, in case any tracing code needs
      * to malloc.
      */
-    uint32 suppress_tracing;
+    uint32_t suppress_tracing;
 
     /* buffer for backtrace, below */
     stack_buffer_info backtrace_buf;
@@ -54,6 +57,8 @@ void dhw_orig_free(void*);
 
 #endif /* defined(XP_WIN32) */
 
-PR_END_EXTERN_C
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* !defined(NSTRACEMALLOCCALLBACKS_H) */

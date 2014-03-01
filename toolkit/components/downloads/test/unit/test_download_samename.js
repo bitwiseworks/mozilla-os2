@@ -41,9 +41,13 @@ let DownloadListener = {
       // pause the download if requested
       if (this.set.doPause) {
         let dl = aSubject.QueryInterface(Ci.nsIDownload);
-        downloadUtils.downloadManager.pauseDownload(dl.id);
-        do_timeout(1000, function() {
-          downloadUtils.downloadManager.resumeDownload(dl.id);
+        // Don't pause immediately, otherwise the external helper app handler
+        // won't be able to assign a permanent file name.
+        do_execute_soon(function() {
+          downloadUtils.downloadManager.pauseDownload(dl.id);
+          do_timeout(1000, function() {
+            downloadUtils.downloadManager.resumeDownload(dl.id);
+          });
         });
       }
     } else if (aTopic == "dl-done") {
@@ -90,6 +94,17 @@ let DownloadListener = {
 function runNextTest()
 {
   if (currentTest == tests.length) {
+    for each (var file in DownloadListener.prevFiles) {
+      try {
+        file.remove(false);
+      } catch (ex) {
+        try {
+          do_report_unexpected_exception(ex, "while removing " + file.path);
+        } catch (ex if ex == Components.results.NS_ERROR_ABORT) {
+          /* swallow */
+        }
+      }
+    }
     httpserver.stop(do_test_finished);
     return;
   }

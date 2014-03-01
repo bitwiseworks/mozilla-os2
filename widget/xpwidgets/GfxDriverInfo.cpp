@@ -4,7 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "GfxDriverInfo.h"
+
 #include "nsIGfxInfo.h"
+#include "nsTArray.h"
 
 using namespace mozilla::widget;
 
@@ -163,6 +165,9 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id)
       APPEND_DEVICE(0x010a); /* IntelSandyBridge_7 */
       APPEND_DEVICE(0x0080); /* IntelIvyBridge */
       break;
+    case IntelMobileHDGraphics:
+      APPEND_DEVICE(0x0046); /* IntelMobileHDGraphics */
+      break;
     case NvidiaBlockD3D9Layers:
       // Glitches whilst scrolling (see bugs 612007, 644787, 645872)
       APPEND_DEVICE(0x00f3); /* NV43 [GeForce 6200 (TM)] */
@@ -233,6 +238,7 @@ const nsAString& GfxDriverInfo::GetDeviceVendor(DeviceVendor id)
     DECLARE_VENDOR_ID(VendorNVIDIA, "0x10de");
     DECLARE_VENDOR_ID(VendorAMD, "0x1022");
     DECLARE_VENDOR_ID(VendorATI, "0x1002");
+    DECLARE_VENDOR_ID(VendorMicrosoft, "0x1414");
     // Suppress a warning.
     DECLARE_VENDOR_ID(DeviceVendorMax, "");
   }

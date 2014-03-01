@@ -7,9 +7,9 @@ package org.mozilla.gecko.gfx;
 
 import org.mozilla.gecko.util.FloatUtils;
 
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.graphics.Region;
 
 import java.nio.FloatBuffer;
 import java.util.concurrent.locks.ReentrantLock;
@@ -22,7 +22,6 @@ public abstract class Layer {
 
     protected Rect mPosition;
     protected float mResolution;
-    protected boolean mUsesDefaultProgram = true;
 
     public Layer() {
         this(null);
@@ -66,15 +65,6 @@ public abstract class Layer {
     /** Given the intrinsic size of the layer, returns the pixel boundaries of the layer rect. */
     protected RectF getBounds(RenderContext context) {
         return RectUtils.scale(new RectF(mPosition), context.zoomFactor / mResolution);
-    }
-
-    /**
-     * Returns the region of the layer that is considered valid. The default
-     * implementation of this will return the bounds of the layer, but this
-     * may be overridden.
-     */
-    public Region getValidRegion(RenderContext context) {
-        return new Region(RectUtils.round(getBounds(context)));
     }
 
     /**
@@ -133,10 +123,6 @@ public abstract class Layer {
         mNewResolution = newResolution;
     }
 
-    public boolean usesDefaultProgram() {
-        return mUsesDefaultProgram;
-    }
-
     /**
      * Subclasses may override this method to perform custom layer updates. This will be called
      * with the transaction lock held. Subclass implementations of this method must call the
@@ -154,19 +140,54 @@ public abstract class Layer {
         }
     }
 
+    /**
+     * This function fills in the provided <tt>dest</tt> array with values to render a texture.
+     * The array is filled with 4 sets of {x, y, z, texture_x, texture_y} values (so 20 values
+     * in total) corresponding to the corners of the rect.
+     */
+    protected final void fillRectCoordBuffer(float[] dest, RectF rect, float viewWidth, float viewHeight,
+                                             Rect cropRect, float texWidth, float texHeight) {
+        //x, y, z, texture_x, texture_y
+        dest[0] = rect.left / viewWidth;
+        dest[1] = rect.bottom / viewHeight;
+        dest[2] = 0;
+        dest[3] = cropRect.left / texWidth;
+        dest[4] = cropRect.top / texHeight;
+
+        dest[5] = rect.left / viewWidth;
+        dest[6] = rect.top / viewHeight;
+        dest[7] = 0;
+        dest[8] = cropRect.left / texWidth;
+        dest[9] = cropRect.bottom / texHeight;
+
+        dest[10] = rect.right / viewWidth;
+        dest[11] = rect.bottom / viewHeight;
+        dest[12] = 0;
+        dest[13] = cropRect.right / texWidth;
+        dest[14] = cropRect.top / texHeight;
+
+        dest[15] = rect.right / viewWidth;
+        dest[16] = rect.top / viewHeight;
+        dest[17] = 0;
+        dest[18] = cropRect.right / texWidth;
+        dest[19] = cropRect.bottom / texHeight;
+    }
+
     public static class RenderContext {
         public final RectF viewport;
         public final RectF pageRect;
         public final float zoomFactor;
+        public final PointF offset;
         public final int positionHandle;
         public final int textureHandle;
         public final FloatBuffer coordBuffer;
 
-        public RenderContext(RectF aViewport, RectF aPageRect, float aZoomFactor,
+        public RenderContext(RectF aViewport, RectF aPageRect, float aZoomFactor, PointF aOffset,
                              int aPositionHandle, int aTextureHandle, FloatBuffer aCoordBuffer) {
             viewport = aViewport;
             pageRect = aPageRect;
             zoomFactor = aZoomFactor;
+            offset = aOffset;
             positionHandle = aPositionHandle;
             textureHandle = aTextureHandle;
             coordBuffer = aCoordBuffer;
@@ -178,7 +199,8 @@ public abstract class Layer {
             }
             return RectUtils.fuzzyEquals(viewport, other.viewport)
                 && RectUtils.fuzzyEquals(pageRect, other.pageRect)
-                && FloatUtils.fuzzyEquals(zoomFactor, other.zoomFactor);
+                && FloatUtils.fuzzyEquals(zoomFactor, other.zoomFactor)
+                && FloatUtils.fuzzyEquals(offset, other.offset);
         }
     }
 }

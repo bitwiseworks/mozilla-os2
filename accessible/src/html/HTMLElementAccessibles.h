@@ -20,7 +20,7 @@ class HTMLHRAccessible : public LeafAccessible
 public:
 
   HTMLHRAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-    LeafAccessible(aContent, aDoc) {};
+    LeafAccessible(aContent, aDoc) {}
 
   // Accessible
   virtual a11y::role NativeRole();
@@ -32,14 +32,16 @@ public:
 class HTMLBRAccessible : public LeafAccessible
 {
 public:
-
   HTMLBRAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-    LeafAccessible(aContent, aDoc) {};
+    LeafAccessible(aContent, aDoc) {}
 
   // Accessible
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
+
+protected:
+  // Accessible
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
 };
 
 /**
@@ -50,13 +52,15 @@ class HTMLLabelAccessible : public HyperTextAccessibleWrap
 public:
 
   HTMLLabelAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-    HyperTextAccessibleWrap(aContent, aDoc) {};
+    HyperTextAccessibleWrap(aContent, aDoc) {}
 
   NS_DECL_ISUPPORTS_INHERITED
 
   // Accessible
-  virtual nsresult GetNameInternal(nsAString& aName);
   virtual a11y::role NativeRole();
+
+protected:
+  virtual ENameValueFlag NativeName(nsString& aName) MOZ_OVERRIDE;
 };
 
 /**
@@ -67,13 +71,13 @@ class HTMLOutputAccessible : public HyperTextAccessibleWrap
 public:
 
   HTMLOutputAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-    HyperTextAccessibleWrap(aContent, aDoc) {};
+    HyperTextAccessibleWrap(aContent, aDoc) {}
 
   NS_DECL_ISUPPORTS_INHERITED
 
   // Accessible
   virtual a11y::role NativeRole();
-  virtual nsresult GetAttributesInternal(nsIPersistentProperties* aAttributes);
+  virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
   virtual Relation RelationByType(uint32_t aType);
 };
 

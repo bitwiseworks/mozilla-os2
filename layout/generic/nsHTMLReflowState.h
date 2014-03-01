@@ -12,7 +12,8 @@
 #include "nsStyleCoord.h"
 #include "nsStyleStructInlines.h"
 #include "nsIFrame.h"
-#include "mozilla/AutoRestore.h"
+#include "mozilla/Assertions.h"
+#include <algorithm>
 
 class nsPresContext;
 class nsRenderingContext;
@@ -29,6 +30,15 @@ struct nsStylePadding;
 struct nsStyleText;
 struct nsHypotheticalBox;
 
+
+/**
+ * @return aValue clamped to [aMinValue, aMaxValue].
+ *
+ * @note This function needs to handle aMinValue > aMaxValue. In that case,
+ *       aMinValue is returned.
+ * @see http://www.w3.org/TR/CSS21/visudet.html#min-max-widths
+ * @see http://www.w3.org/TR/CSS21/visudet.html#min-max-heights
+ */
 template <class NumericType>
 NumericType
 NS_CSS_MINMAX(NumericType aValue, NumericType aMinValue, NumericType aMaxValue)
@@ -135,12 +145,19 @@ public:
   {
   }
 
+  // NOTE: If we ever want to use nsCSSOffsetState for a flex item or a grid
+  // item, we need to make it take the containing-block height as well as the
+  // width, since flex items and grid items resolve vertical percent margins
+  // and padding against the containing-block height, rather than its width.
   nsCSSOffsetState(nsIFrame *aFrame, nsRenderingContext *aRenderingContext,
                    nscoord aContainingBlockWidth)
     : frame(aFrame)
     , rendContext(aRenderingContext)
   {
-    InitOffsets(aContainingBlockWidth, frame->GetType());
+    MOZ_ASSERT(!aFrame->IsFlexItem(),
+               "We're about to resolve vertical percent margin & padding "
+               "values against CB width, which is incorrect for flex items");
+    InitOffsets(aContainingBlockWidth, aContainingBlockWidth, frame->GetType());
   }
 
 #ifdef DEBUG
@@ -148,7 +165,8 @@ public:
   // to the display-reflow infrastructure.
   static void* DisplayInitOffsetsEnter(nsIFrame* aFrame,
                                        nsCSSOffsetState* aState,
-                                       nscoord aCBWidth,
+                                       nscoord aHorizontalPercentBasis,
+                                       nscoord aVerticalPercentBasis,
                                        const nsMargin* aBorder,
                                        const nsMargin* aPadding);
   static void DisplayInitOffsetsExit(nsIFrame* aFrame,
@@ -160,20 +178,39 @@ private:
   /**
    * Computes margin values from the specified margin style information, and
    * fills in the mComputedMargin member.
-   * @return true if the margin is dependent on the containing block width
+   *
+   * @param aHorizontalPercentBasis
+   *    Length to use for resolving percentage margin values in the horizontal
+   *    axis. Usually the containing block width.
+   * @param aVerticalPercentBasis
+   *    Length to use for resolving percentage margin values in the vertical
+   *    axis.  Usually the containing block width, per CSS21 sec 8.3, but may
+   *    be the containing block *height*, e.g. in CSS3 Flexbox and Grid.
+   * @return true if the margin is dependent on the containing block size.
    */
-  bool ComputeMargin(nscoord aContainingBlockWidth);
+  bool ComputeMargin(nscoord aHorizontalPercentBasis,
+                     nscoord aVerticalPercentBasis);
   
   /**
    * Computes padding values from the specified padding style information, and
    * fills in the mComputedPadding member.
-   * @return true if the padding is dependent on the containing block width
+   *
+   * @param aHorizontalPercentBasis
+   *    Length to use for resolving percentage padding values in the horizontal
+   *    axis. Usually the containing block width.
+   * @param aVerticalPercentBasis
+   *    Length to use for resolving percentage padding values in the vertical
+   *    axis.  Usually the containing block width, per CSS21 sec 8.4, but may
+   *    be the containing block *height* in e.g. CSS3 Flexbox and Grid.
+   * @return true if the padding is dependent on the containing block size.
    */
-   bool ComputePadding(nscoord aContainingBlockWidth, nsIAtom* aFrameType);
+   bool ComputePadding(nscoord aHorizontalPercentBasis,
+                       nscoord aVerticalPercentBasis, nsIAtom* aFrameType);
 
 protected:
 
-  void InitOffsets(nscoord aContainingBlockWidth,
+  void InitOffsets(nscoord aHorizontalPercentBasis,
+                   nscoord aVerticalPercentBasis,
                    nsIAtom* aFrameType,
                    const nsMargin *aBorder = nullptr,
                    const nsMargin *aPadding = nullptr);
@@ -329,7 +366,6 @@ public:
                                      // page?  When true, we force something
                                      // that's too tall for a page/column to
                                      // fit anyway to avoid infinite loops.
-    uint16_t mBlinks:1;              // Keep track of text-decoration: blink
     uint16_t mHasClearance:1;        // Block has clearance
     uint16_t mAssumingHScrollbar:1;  // parent frame is an nsIScrollableFrame and it
                                      // is assuming a horizontal scrollbar
@@ -349,9 +385,18 @@ public:
     uint16_t mHeightDependsOnAncestorCell:1;   // Does frame height depend on
                                                // an ancestor table-cell?
     uint16_t mIsColumnBalancing:1;   // nsColumnSetFrame is balancing columns
+    uint16_t mIsFlexContainerMeasuringHeight:1; // nsFlexContainerFrame is
+                                                // reflowing this child to
+                                                // measure its intrinsic height.
     uint16_t mDummyParentReflowState:1; // a "fake" reflow state made
                                         // in order to be the parent
                                         // of a real one
+    uint16_t mMustReflowPlaceholders:1; // Should this frame reflow its place-
+                                        // holder children? If the available
+                                        // height of this frame didn't change,
+                                        // but its in a paginated environment
+                                        // (e.g. columns), it should always
+                                        // reflow its placeholder children.
   } mFlags;
 
   // Note: The copy constructor is written by the compiler automatically. You
@@ -431,9 +476,9 @@ public:
    */
   nscoord ApplyMinMaxWidth(nscoord aWidth) const {
     if (NS_UNCONSTRAINEDSIZE != mComputedMaxWidth) {
-      aWidth = NS_MIN(aWidth, mComputedMaxWidth);
+      aWidth = std::min(aWidth, mComputedMaxWidth);
     }
-    return NS_MAX(aWidth, mComputedMinWidth);
+    return std::max(aWidth, mComputedMinWidth);
   }
   /**
    * Apply the mComputed(Min/Max)Height constraints to the content
@@ -441,9 +486,9 @@ public:
    */
   nscoord ApplyMinMaxHeight(nscoord aHeight) const {
     if (NS_UNCONSTRAINEDSIZE != mComputedMaxHeight) {
-      aHeight = NS_MIN(aHeight, mComputedMaxHeight);
+      aHeight = std::min(aHeight, mComputedMaxHeight);
     }
-    return NS_MAX(aHeight, mComputedMinHeight);
+    return std::max(aHeight, mComputedMinHeight);
   }
 
   bool ShouldReflowAllKids() const {
@@ -480,6 +525,13 @@ public:
   bool WillReflowAgainForClearance() const {
     return mDiscoveredClearance && *mDiscoveredClearance;
   }
+
+  // Compute the offsets for a relative position element
+  static void ComputeRelativeOffsets(uint8_t aCBDirection,
+                                     nsIFrame* aFrame,
+                                     nscoord aContainingBlockWidth,
+                                     nscoord aContainingBlockHeight,
+                                     nsMargin& aComputedOffsets);
 
 #ifdef DEBUG
   // Reflow trace methods.  Defined in nsFrame.cpp so they have access
@@ -534,11 +586,6 @@ protected:
                                nscoord aContainingBlockWidth,
                                nscoord aContainingBlockHeight,
                                nsIAtom* aFrameType);
-
-  void ComputeRelativeOffsets(const nsHTMLReflowState* cbrs,
-                              nscoord aContainingBlockWidth,
-                              nscoord aContainingBlockHeight,
-                              nsPresContext* aPresContext);
 
   // Calculates the computed values for the 'min-Width', 'max-Width',
   // 'min-Height', and 'max-Height' properties, and stores them in the assorted

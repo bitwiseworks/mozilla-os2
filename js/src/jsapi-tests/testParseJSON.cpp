@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -40,60 +40,84 @@ class AutoInflatedString {
 template<size_t N> JSFlatString *
 NewString(JSContext *cx, const jschar (&chars)[N])
 {
-    return js_NewStringCopyN(cx, chars, N);
+    return js_NewStringCopyN<CanGC>(cx, chars, N);
 }
 
 BEGIN_TEST(testParseJSON_success)
 {
     // Primitives
-    CHECK(TryParse(cx, "true", JSVAL_TRUE));
-    CHECK(TryParse(cx, "false", JSVAL_FALSE));
-    CHECK(TryParse(cx, "null", JSVAL_NULL));
-    CHECK(TryParse(cx, "0", INT_TO_JSVAL(0)));
-    CHECK(TryParse(cx, "1", INT_TO_JSVAL(1)));
-    CHECK(TryParse(cx, "-1", INT_TO_JSVAL(-1)));
-    CHECK(TryParse(cx, "1", DOUBLE_TO_JSVAL(1)));
-    CHECK(TryParse(cx, "1.75", DOUBLE_TO_JSVAL(1.75)));
-    CHECK(TryParse(cx, "9e9", DOUBLE_TO_JSVAL(9e9)));
-    CHECK(TryParse(cx, "9e99999", DOUBLE_TO_JSVAL(std::numeric_limits<double>::infinity())));
+    JS::RootedValue expected(cx);
+    expected = JSVAL_TRUE;
+    CHECK(TryParse(cx, "true", expected));
+
+    expected = JSVAL_FALSE;
+    CHECK(TryParse(cx, "false", expected));
+
+    expected = JSVAL_NULL;
+    CHECK(TryParse(cx, "null", expected));
+
+    expected = INT_TO_JSVAL(0);
+    CHECK(TryParse(cx, "0", expected));
+
+    expected = INT_TO_JSVAL(1);
+    CHECK(TryParse(cx, "1", expected));
+
+    expected = INT_TO_JSVAL(-1);
+    CHECK(TryParse(cx, "-1", expected));
+
+    expected = DOUBLE_TO_JSVAL(1);
+    CHECK(TryParse(cx, "1", expected));
+
+    expected = DOUBLE_TO_JSVAL(1.75);
+    CHECK(TryParse(cx, "1.75", expected));
+
+    expected = DOUBLE_TO_JSVAL(9e9);
+    CHECK(TryParse(cx, "9e9", expected));
+
+    expected = DOUBLE_TO_JSVAL(std::numeric_limits<double>::infinity());
+    CHECK(TryParse(cx, "9e99999", expected));
 
     JS::Rooted<JSFlatString*> str(cx);
 
     const jschar emptystr[] = { '\0' };
-    str = js_NewStringCopyN(cx, emptystr, 0);
+    str = js_NewStringCopyN<CanGC>(cx, emptystr, 0);
     CHECK(str);
-    CHECK(TryParse(cx, "\"\"", STRING_TO_JSVAL(str)));
+    expected = STRING_TO_JSVAL(str);
+    CHECK(TryParse(cx, "\"\"", expected));
 
     const jschar nullstr[] = { '\0' };
     str = NewString(cx, nullstr);
     CHECK(str);
-    CHECK(TryParse(cx, "\"\\u0000\"", STRING_TO_JSVAL(str)));
+    expected = STRING_TO_JSVAL(str);
+    CHECK(TryParse(cx, "\"\\u0000\"", expected));
 
     const jschar backstr[] = { '\b' };
     str = NewString(cx, backstr);
     CHECK(str);
-    CHECK(TryParse(cx, "\"\\b\"", STRING_TO_JSVAL(str)));
-    CHECK(TryParse(cx, "\"\\u0008\"", STRING_TO_JSVAL(str)));
+    expected = STRING_TO_JSVAL(str);
+    CHECK(TryParse(cx, "\"\\b\"", expected));
+    CHECK(TryParse(cx, "\"\\u0008\"", expected));
 
     const jschar newlinestr[] = { '\n', };
     str = NewString(cx, newlinestr);
     CHECK(str);
-    CHECK(TryParse(cx, "\"\\n\"", STRING_TO_JSVAL(str)));
-    CHECK(TryParse(cx, "\"\\u000A\"", STRING_TO_JSVAL(str)));
+    expected = STRING_TO_JSVAL(str);
+    CHECK(TryParse(cx, "\"\\n\"", expected));
+    CHECK(TryParse(cx, "\"\\u000A\"", expected));
 
 
     // Arrays
     JS::RootedValue v(cx), v2(cx);
     JS::RootedObject obj(cx);
 
-    CHECK(Parse(cx, "[]", v.address()));
+    CHECK(Parse(cx, "[]", &v));
     CHECK(!JSVAL_IS_PRIMITIVE(v));
     obj = JSVAL_TO_OBJECT(v);
     CHECK(JS_IsArrayObject(cx, obj));
     CHECK(JS_GetProperty(cx, obj, "length", v2.address()));
     CHECK_SAME(v2, JSVAL_ZERO);
 
-    CHECK(Parse(cx, "[1]", v.address()));
+    CHECK(Parse(cx, "[1]", &v));
     CHECK(!JSVAL_IS_PRIMITIVE(v));
     obj = JSVAL_TO_OBJECT(v);
     CHECK(JS_IsArrayObject(cx, obj));
@@ -104,12 +128,12 @@ BEGIN_TEST(testParseJSON_success)
 
 
     // Objects
-    CHECK(Parse(cx, "{}", v.address()));
+    CHECK(Parse(cx, "{}", &v));
     CHECK(!JSVAL_IS_PRIMITIVE(v));
     obj = JSVAL_TO_OBJECT(v);
     CHECK(!JS_IsArrayObject(cx, obj));
 
-    CHECK(Parse(cx, "{ \"f\": 17 }", v.address()));
+    CHECK(Parse(cx, "{ \"f\": 17 }", &v));
     CHECK(!JSVAL_IS_PRIMITIVE(v));
     obj = JSVAL_TO_OBJECT(v);
     CHECK(!JS_IsArrayObject(cx, obj));
@@ -120,7 +144,7 @@ BEGIN_TEST(testParseJSON_success)
 }
 
 template<size_t N> inline bool
-Parse(JSContext *cx, const char (&input)[N], jsval *vp)
+Parse(JSContext *cx, const char (&input)[N], JS::MutableHandleValue vp)
 {
     AutoInflatedString str(cx);
     str = input;
@@ -129,11 +153,10 @@ Parse(JSContext *cx, const char (&input)[N], jsval *vp)
 }
 
 template<size_t N> inline bool
-TryParse(JSContext *cx, const char (&input)[N], const jsval &expectedArg)
+TryParse(JSContext *cx, const char (&input)[N], JS::HandleValue expected)
 {
     AutoInflatedString str(cx);
-    JS::RootedValue expected(cx, expectedArg);
-    jsval v;
+    RootedValue v(cx);
     str = input;
     CHECK(JS_ParseJSON(cx, str.chars(), str.length(), &v));
     CHECK_SAME(v, expected);
@@ -160,7 +183,7 @@ template<size_t N> inline bool
 Error(JSContext *cx, const char (&input)[N])
 {
     AutoInflatedString str(cx);
-    jsval dummy;
+    RootedValue dummy(cx);
     str = input;
 
     ContextPrivate p = {0, 0};

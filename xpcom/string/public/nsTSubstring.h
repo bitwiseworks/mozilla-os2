@@ -275,9 +275,10 @@ class nsTSubstring_CharT
          */
       bool NS_FASTCALL EqualsASCII( const char* data ) const;
 
-    // EqualsLiteral must ONLY be applied to an actual literal string.
-    // Do not attempt to use it with a regular char* pointer, or with a char
-    // array variable.
+    // EqualsLiteral must ONLY be applied to an actual literal string, or
+    // a char array *constant* declared without an explicit size.
+    // Do not attempt to use it with a regular char* pointer, or with a
+    // non-constant char array variable. Use EqualsASCII for them.
     // The template trick to acquire the array length at compile time without
     // using a macro is due to Corey Kosak, with much thanks.
 #ifdef NS_DISABLE_LITERAL_TEMPLATE
@@ -299,17 +300,19 @@ class nsTSubstring_CharT
         }
 #endif
 
-    // The LowerCaseEquals methods compare the lower case version of
-    // this string to some ASCII/Literal string. The ASCII string is
-    // *not* lowercased for you. If you compare to an ASCII or literal
-    // string that contains an uppercase character, it is guaranteed to
-    // return false. We will throw assertions too.
+    // The LowerCaseEquals methods compare the ASCII-lowercase version of
+    // this string (lowercasing only ASCII uppercase characters) to some
+    // ASCII/Literal string. The ASCII string is *not* lowercased for
+    // you. If you compare to an ASCII or literal string that contains an
+    // uppercase character, it is guaranteed to return false. We will
+    // throw assertions too.
       bool NS_FASTCALL LowerCaseEqualsASCII( const char* data, size_type len ) const;
       bool NS_FASTCALL LowerCaseEqualsASCII( const char* data ) const;
 
     // LowerCaseEqualsLiteral must ONLY be applied to an actual
-    // literal string.  Do not attempt to use it with a regular char*
-    // pointer, or with a char array variable. Use
+    // literal string, or a char array *constant* declared without an 
+    // explicit size.  Do not attempt to use it with a regular char*
+    // pointer, or with a non-constant char array variable. Use
     // LowerCaseEqualsASCII for them.
 #ifdef NS_DISABLE_LITERAL_TEMPLATE
       inline bool LowerCaseEqualsLiteral( const char* str ) const
@@ -359,9 +362,10 @@ class nsTSubstring_CharT
           return AssignASCII(data, strlen(data), fallible_t());
         }
 
-    // AssignLiteral must ONLY be applied to an actual literal string.
-    // Do not attempt to use it with a regular char* pointer, or with a char
-    // array variable. Use AssignASCII for those.
+    // AssignLiteral must ONLY be applied to an actual literal string, or
+    // a char array *constant* declared without an explicit size.
+    // Do not attempt to use it with a regular char* pointer, or with a 
+    // non-constant char array variable. Use AssignASCII for those.
     // There are not fallible version of these methods because they only really
     // apply to small allocations that we wouldn't want to check anyway.
 #ifdef NS_DISABLE_LITERAL_TEMPLATE
@@ -407,6 +411,7 @@ class nsTSubstring_CharT
        * codes documented in prprf.h
        */
       void AppendPrintf( const char* format, ... );
+      void AppendPrintf( const char* format, va_list ap );
       void AppendInt( int32_t aInteger )
                  { AppendPrintf( "%d", aInteger ); }
       void AppendInt( int32_t aInteger, int aRadix )
@@ -480,8 +485,11 @@ class nsTSubstring_CharT
          */
 
         /**
-         * Attempts to set the capacity to the given size, without affecting
-         * the length of the string. Also ensures that the buffer is mutable.
+         * Attempts to set the capacity to the given size in number of 
+         * characters, without affecting the length of the string.
+         * There is no need to include room for the null terminator: it is
+         * the job of the string class.
+         * Also ensures that the buffer is mutable.
          */
       void NS_FASTCALL SetCapacity( size_type newCapacity );
       bool NS_FASTCALL SetCapacity( size_type newCapacity, const fallible_t& ) NS_WARN_UNUSED_RESULT;
@@ -628,6 +636,17 @@ class nsTSubstring_CharT
       size_t SizeOfIncludingThisIfUnshared(nsMallocSizeOfFun mallocSizeOf)
         const;
 
+        /**
+         * WARNING: Only use these functions if you really know what you are
+         * doing, because they can easily lead to double-counting strings.  If
+         * you do use them, please explain clearly in a comment why it's safe
+         * and won't lead to double-counting.
+         */
+      size_t SizeOfExcludingThisEvenIfShared(nsMallocSizeOfFun mallocSizeOf)
+        const;
+      size_t SizeOfIncludingThisEvenIfShared(nsMallocSizeOfFun mallocSizeOf)
+        const;
+
     protected:
 
       friend class nsTObsoleteAStringThunk_CharT;
@@ -708,7 +727,7 @@ class nsTSubstring_CharT
       bool ReplacePrep(index_type cutStart, size_type cutLength,
                        size_type newLength) NS_WARN_UNUSED_RESULT
       {
-        cutLength = NS_MIN(cutLength, mLength - cutStart);
+        cutLength = XPCOM_MIN(cutLength, mLength - cutStart);
         uint32_t newTotalLen = mLength - cutLength + newLength;
         if (cutStart == mLength && Capacity() > newTotalLen) {
           mFlags &= ~F_VOIDED;
@@ -766,7 +785,6 @@ class nsTSubstring_CharT
         }
 
       static int AppendFunc( void* arg, const char* s, uint32_t len);
-      void AppendPrintf( const char* format, va_list ap );
 
     public:
 
@@ -852,6 +870,13 @@ bool operator==( const nsTSubstring_CharT::base_string_type& lhs, const nsTSubst
   {
     return lhs.Equals(rhs);
   }
+
+inline
+bool operator==( const nsTSubstring_CharT::base_string_type& lhs, const nsTSubstring_CharT::char_type* rhs )
+  {
+    return lhs.Equals(rhs);
+  }
+
 
 inline
 bool operator>=( const nsTSubstring_CharT::base_string_type& lhs, const nsTSubstring_CharT::base_string_type& rhs )

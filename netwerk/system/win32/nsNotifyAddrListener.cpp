@@ -13,7 +13,6 @@
 #include <netcon.h>
 #include <objbase.h>
 #include <iprtrmib.h>
-#include "prmem.h"
 #include "plstr.h"
 #include "nsThreadUtils.h"
 #include "nsIObserverService.h"
@@ -321,10 +320,6 @@ nsNotifyAddrListener::CheckICSStatus(PWCHAR aAdapterName)
 DWORD
 nsNotifyAddrListener::CheckAdaptersAddresses(void)
 {
-    static const DWORD flags =
-        GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_SKIP_ANYCAST |
-        GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
-
     ULONG len = 16384;
 
     PIP_ADAPTER_ADDRESSES addresses = (PIP_ADAPTER_ADDRESSES) malloc(len);

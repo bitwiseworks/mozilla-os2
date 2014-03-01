@@ -28,7 +28,7 @@ class  nsWatcherWindowEnumerator;
 class  nsIScriptContext;
 class  nsPromptService;
 struct JSContext;
-struct JSObject;
+class JSObject;
 struct nsWatcherWindowEntry;
 struct SizeSpec;
 
@@ -83,7 +83,6 @@ protected:
                               nsIDOMWindow **_retval);
 
   static JSContext *GetJSContextFromWindow(nsIDOMWindow *aWindow);
-  static JSContext *GetJSContextFromCallStack();
   static nsresult   URIfromURL(const char *aURL,
                                nsIDOMWindow *aParent,
                                nsIURI **aURI);

@@ -4,13 +4,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSVGViewBox.h"
-#include "nsSVGUtils.h"
 #include "prdtoa.h"
 #include "nsTextFormatter.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsMathUtils.h"
 #include "nsSMILValue.h"
+#include "SVGContentUtils.h"
 #include "SVGViewBoxSMILType.h"
+#include "nsAttrValueInlines.h"
 
 #define NUM_VIEWBOX_COMPONENTS 4
 using namespace mozilla;
@@ -23,17 +24,18 @@ nsSVGViewBoxRect::operator==(const nsSVGViewBoxRect& aOther) const
   if (&aOther == this)
     return true;
 
-  return x == aOther.x &&
-    y == aOther.y &&
-    width == aOther.width &&
-    height == aOther.height;
+  return (none && aOther.none) ||
+    (!none && !aOther.none &&
+     x == aOther.x &&
+     y == aOther.y &&
+     width == aOther.width &&
+     height == aOther.height);
 }
 
 /* Cycle collection macros for nsSVGViewBox */
 
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(nsSVGViewBox::DOMBaseVal, mSVGElement)
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(nsSVGViewBox::DOMAnimVal, mSVGElement)
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(nsSVGViewBox::DOMAnimatedRect, mSVGElement)
+NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(nsSVGViewBox::DOMBaseVal, mSVGElement)
+NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(nsSVGViewBox::DOMAnimVal, mSVGElement)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsSVGViewBox::DOMBaseVal)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsSVGViewBox::DOMBaseVal)
@@ -41,52 +43,45 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsSVGViewBox::DOMBaseVal)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsSVGViewBox::DOMAnimVal)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsSVGViewBox::DOMAnimVal)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsSVGViewBox::DOMAnimatedRect)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsSVGViewBox::DOMAnimatedRect)
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSVGViewBox::DOMBaseVal)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGRect)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGRect)
 NS_INTERFACE_MAP_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSVGViewBox::DOMAnimVal)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGRect)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGRect)
 NS_INTERFACE_MAP_END
 
-DOMCI_DATA(SVGAnimatedRect, nsSVGViewBox::DOMAnimatedRect)
+static nsSVGAttrTearoffTable<nsSVGViewBox, nsSVGViewBox::DOMBaseVal>
+  sBaseSVGViewBoxTearoffTable;
+static nsSVGAttrTearoffTable<nsSVGViewBox, nsSVGViewBox::DOMAnimVal>
+  sAnimSVGViewBoxTearoffTable;
+nsSVGAttrTearoffTable<nsSVGViewBox, dom::SVGAnimatedRect>
+  nsSVGViewBox::sSVGAnimatedRectTearoffTable;
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSVGViewBox::DOMAnimatedRect)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedRect)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAnimatedRect)
-NS_INTERFACE_MAP_END
 
 /* Implementation of nsSVGViewBox methods */
 
 void
 nsSVGViewBox::Init()
 {
-  mBaseVal = nsSVGViewBoxRect();
-  mAnimVal = nullptr;
   mHasBaseVal = false;
+  mAnimVal = nullptr;
 }
 
 void
-nsSVGViewBox::SetAnimValue(float aX, float aY, float aWidth, float aHeight,
+nsSVGViewBox::SetAnimValue(const nsSVGViewBoxRect& aRect,
                            nsSVGElement *aSVGElement)
 {
   if (!mAnimVal) {
     // it's okay if allocation fails - and no point in reporting that
-    mAnimVal = new nsSVGViewBoxRect(aX, aY, aWidth, aHeight);
+    mAnimVal = new nsSVGViewBoxRect(aRect);
   } else {
-    nsSVGViewBoxRect rect(aX, aY, aWidth, aHeight);
-    if (rect == *mAnimVal) {
+    if (aRect == *mAnimVal) {
       return;
     }
-    *mAnimVal = rect;
+    *mAnimVal = aRect;
   }
   aSVGElement->DidAnimateViewBox();
 }
@@ -95,7 +90,12 @@ void
 nsSVGViewBox::SetBaseValue(const nsSVGViewBoxRect& aRect,
                            nsSVGElement *aSVGElement)
 {
-  if (mHasBaseVal && mBaseVal == aRect) {
+  if (!mHasBaseVal || mBaseVal == aRect) {
+    // This method is used to set a single x, y, width
+    // or height value. It can't create a base value
+    // as the other components may be undefined. We record
+    // the new value though, so as not to lose data.
+    mBaseVal = aRect;
     return;
   }
 
@@ -113,6 +113,11 @@ nsSVGViewBox::SetBaseValue(const nsSVGViewBoxRect& aRect,
 static nsresult
 ToSVGViewBoxRect(const nsAString& aStr, nsSVGViewBoxRect *aViewBox)
 {
+  if (aStr.EqualsLiteral("none")) {
+    aViewBox->none = true;
+    return NS_OK;
+  }
+
   nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
     tokenizer(aStr, ',',
               nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
@@ -142,6 +147,7 @@ ToSVGViewBoxRect(const nsAString& aStr, nsSVGViewBoxRect *aViewBox)
   aViewBox->y = vals[1];
   aViewBox->width = vals[2];
   aViewBox->height = vals[3];
+  aViewBox->none = false;
 
   return NS_OK;
 }
@@ -152,28 +158,39 @@ nsSVGViewBox::SetBaseValueString(const nsAString& aValue,
                                  bool aDoSetAttr)
 {
   nsSVGViewBoxRect viewBox;
-  nsresult res = ToSVGViewBoxRect(aValue, &viewBox);
-  if (NS_SUCCEEDED(res)) {
-    nsAttrValue emptyOrOldValue;
-    if (aDoSetAttr) {
-      emptyOrOldValue = aSVGElement->WillChangeViewBox();
-    }
-    mBaseVal = nsSVGViewBoxRect(viewBox.x, viewBox.y, viewBox.width, viewBox.height);
-    mHasBaseVal = true;
 
-    if (aDoSetAttr) {
-      aSVGElement->DidChangeViewBox(emptyOrOldValue);
-    }
-    if (mAnimVal) {
-      aSVGElement->AnimationNeedsResample();
-    }
+  nsresult rv = ToSVGViewBoxRect(aValue, &viewBox);
+  if (NS_FAILED(rv)) {
+    return rv;
   }
-  return res;
+  // Comparison against mBaseVal is only valid if we currently have a base val.
+  if (mHasBaseVal && viewBox == mBaseVal) {
+    return NS_OK;
+  }
+
+  nsAttrValue emptyOrOldValue;
+  if (aDoSetAttr) {
+    emptyOrOldValue = aSVGElement->WillChangeViewBox();
+  }
+  mHasBaseVal = true;
+  mBaseVal = viewBox;
+
+  if (aDoSetAttr) {
+    aSVGElement->DidChangeViewBox(emptyOrOldValue);
+  }
+  if (mAnimVal) {
+    aSVGElement->AnimationNeedsResample();
+  }
+  return NS_OK;
 }
 
 void
 nsSVGViewBox::GetBaseValueString(nsAString& aValue) const
 {
+  if (mBaseVal.none) {
+    aValue.AssignLiteral("none");
+    return;
+  }
   PRUnichar buf[200];
   nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(PRUnichar),
                             NS_LITERAL_STRING("%g %g %g %g").get(),
@@ -182,75 +199,95 @@ nsSVGViewBox::GetBaseValueString(nsAString& aValue) const
   aValue.Assign(buf);
 }
 
-nsresult
-nsSVGViewBox::ToDOMAnimatedRect(nsIDOMSVGAnimatedRect **aResult,
-                                nsSVGElement* aSVGElement)
-{
-  *aResult = new DOMAnimatedRect(this, aSVGElement);
-  NS_ENSURE_TRUE(*aResult, NS_ERROR_OUT_OF_MEMORY);
 
-  NS_ADDREF(*aResult);
-  return NS_OK;
+already_AddRefed<dom::SVGAnimatedRect>
+nsSVGViewBox::ToSVGAnimatedRect(nsSVGElement* aSVGElement)
+{
+  nsRefPtr<dom::SVGAnimatedRect> domAnimatedRect =
+    sSVGAnimatedRectTearoffTable.GetTearoff(this);
+  if (!domAnimatedRect) {
+    domAnimatedRect = new dom::SVGAnimatedRect(this, aSVGElement);
+    sSVGAnimatedRectTearoffTable.AddTearoff(this, domAnimatedRect);
+  }
+
+  return domAnimatedRect.forget();
 }
 
-NS_IMETHODIMP
-nsSVGViewBox::DOMAnimatedRect::GetBaseVal(nsIDOMSVGRect **aResult)
+already_AddRefed<dom::SVGIRect>
+nsSVGViewBox::ToDOMBaseVal(nsSVGElement *aSVGElement)
 {
-  *aResult = new nsSVGViewBox::DOMBaseVal(mVal, mSVGElement);
-  NS_ENSURE_TRUE(*aResult, NS_ERROR_OUT_OF_MEMORY);
+  if (!mHasBaseVal || mBaseVal.none) {
+    return nullptr;
+  }
 
-  NS_ADDREF(*aResult);
-  return NS_OK;
+  nsRefPtr<DOMBaseVal> domBaseVal =
+    sBaseSVGViewBoxTearoffTable.GetTearoff(this);
+  if (!domBaseVal) {
+    domBaseVal = new DOMBaseVal(this, aSVGElement);
+    sBaseSVGViewBoxTearoffTable.AddTearoff(this, domBaseVal);
+  }
+
+ return domBaseVal.forget();
 }
 
-NS_IMETHODIMP
-nsSVGViewBox::DOMAnimatedRect::GetAnimVal(nsIDOMSVGRect **aResult)
+nsSVGViewBox::DOMBaseVal::~DOMBaseVal()
 {
-  *aResult = new nsSVGViewBox::DOMAnimVal(mVal, mSVGElement);
-  NS_ENSURE_TRUE(*aResult, NS_ERROR_OUT_OF_MEMORY);
-
-  NS_ADDREF(*aResult);
-  return NS_OK;
+  sBaseSVGViewBoxTearoffTable.RemoveTearoff(mVal);
 }
 
-NS_IMETHODIMP
-nsSVGViewBox::DOMBaseVal::SetX(float aX)
+already_AddRefed<dom::SVGIRect>
+nsSVGViewBox::ToDOMAnimVal(nsSVGElement *aSVGElement)
+{
+  if ((mAnimVal && mAnimVal->none) ||
+      (!mAnimVal && (!mHasBaseVal || mBaseVal.none))) {
+    return nullptr;
+  }
+
+  nsRefPtr<DOMAnimVal> domAnimVal =
+    sAnimSVGViewBoxTearoffTable.GetTearoff(this);
+  if (!domAnimVal) {
+    domAnimVal = new DOMAnimVal(this, aSVGElement);
+    sAnimSVGViewBoxTearoffTable.AddTearoff(this, domAnimVal);
+  }
+
+  return domAnimVal.forget();
+}
+
+nsSVGViewBox::DOMAnimVal::~DOMAnimVal()
+{
+  sAnimSVGViewBoxTearoffTable.RemoveTearoff(mVal);
+}
+
+void
+nsSVGViewBox::DOMBaseVal::SetX(float aX, ErrorResult& aRv)
 {
   nsSVGViewBoxRect rect = mVal->GetBaseValue();
   rect.x = aX;
-  mVal->SetBaseValue(rect.x, rect.y, rect.width, rect.height,
-                     mSVGElement);
-  return NS_OK;
+  mVal->SetBaseValue(rect, mSVGElement);
 }
 
-NS_IMETHODIMP
-nsSVGViewBox::DOMBaseVal::SetY(float aY)
+void
+nsSVGViewBox::DOMBaseVal::SetY(float aY, ErrorResult& aRv)
 {
   nsSVGViewBoxRect rect = mVal->GetBaseValue();
   rect.y = aY;
-  mVal->SetBaseValue(rect.x, rect.y, rect.width, rect.height,
-                     mSVGElement);
-  return NS_OK;
+  mVal->SetBaseValue(rect, mSVGElement);
 }
 
-NS_IMETHODIMP
-nsSVGViewBox::DOMBaseVal::SetWidth(float aWidth)
+void
+nsSVGViewBox::DOMBaseVal::SetWidth(float aWidth, ErrorResult& aRv)
 {
   nsSVGViewBoxRect rect = mVal->GetBaseValue();
   rect.width = aWidth;
-  mVal->SetBaseValue(rect.x, rect.y, rect.width, rect.height,
-                     mSVGElement);
-  return NS_OK;
+  mVal->SetBaseValue(rect, mSVGElement);
 }
 
-NS_IMETHODIMP
-nsSVGViewBox::DOMBaseVal::SetHeight(float aHeight)
+void
+nsSVGViewBox::DOMBaseVal::SetHeight(float aHeight, ErrorResult& aRv)
 {
   nsSVGViewBoxRect rect = mVal->GetBaseValue();
   rect.height = aHeight;
-  mVal->SetBaseValue(rect.x, rect.y, rect.width, rect.height,
-                     mSVGElement);
-  return NS_OK;
+  mVal->SetBaseValue(rect, mSVGElement);
 }
 
 nsISMILAttr*
@@ -262,7 +299,7 @@ nsSVGViewBox::ToSMILAttr(nsSVGElement *aSVGElement)
 nsresult
 nsSVGViewBox::SMILViewBox
             ::ValueFromString(const nsAString& aStr,
-                              const nsISMILAnimationElement* /*aSrcElement*/,
+                              const dom::SVGAnimationElement* /*aSrcElement*/,
                               nsSMILValue& aValue,
                               bool& aPreventCachingOfSandwich) const
 {
@@ -303,7 +340,7 @@ nsSVGViewBox::SMILViewBox::SetAnimValue(const nsSMILValue& aValue)
                "Unexpected type to assign animated value");
   if (aValue.mType == &SVGViewBoxSMILType::sSingleton) {
     nsSVGViewBoxRect &vb = *static_cast<nsSVGViewBoxRect*>(aValue.mU.mPtr);
-    mVal->SetAnimValue(vb.x, vb.y, vb.width, vb.height, mSVGElement);
+    mVal->SetAnimValue(vb, mSVGElement);
   }
   return NS_OK;
 }

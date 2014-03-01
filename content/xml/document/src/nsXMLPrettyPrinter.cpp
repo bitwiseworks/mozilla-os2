@@ -18,8 +18,12 @@
 #include "mozilla/dom/Element.h"
 #include "nsIDOMDocumentFragment.h"
 #include "nsBindingManager.h"
+#include "nsXBLService.h"
 #include "nsIScriptSecurityManager.h"
 #include "mozilla/Preferences.h"
+#include "nsVariant.h"
+#include "nsIDOMCustomEvent.h"
+#include "GeneratedEvents.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -115,39 +119,58 @@ nsXMLPrettyPrinter::PrettyPrint(nsIDocument* aDocument,
                                           getter_AddRefs(resultFragment));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // Add the binding
-    nsCOMPtr<nsIDOMDocumentXBL> xblDoc = do_QueryInterface(aDocument);
-    NS_ASSERTION(xblDoc, "xml document doesn't implement nsIDOMDocumentXBL");
-    NS_ENSURE_TRUE(xblDoc, NS_ERROR_FAILURE);
+    //
+    // Apply the prettprint XBL binding.
+    //
+    // We take some shortcuts here. In particular, we don't bother invoking the
+    // contstructor (since the binding has no constructor), and we don't bother
+    // calling LoadBindingDocument because it's a chrome:// URI and thus will get
+    // sync loaded no matter what.
+    //
 
+    // Grab the XBL service.
+    nsXBLService* xblService = nsXBLService::GetInstance();
+    NS_ENSURE_TRUE(xblService, NS_ERROR_NOT_AVAILABLE);
+
+    // Compute the binding URI.
     nsCOMPtr<nsIURI> bindingUri;
     rv = NS_NewURI(getter_AddRefs(bindingUri),
         NS_LITERAL_STRING("chrome://global/content/xml/XMLPrettyPrint.xml#prettyprint"));
     NS_ENSURE_SUCCESS(rv, rv);
-    
-    nsCOMPtr<nsIPrincipal> sysPrincipal;
-    nsContentUtils::GetSecurityManager()->
-        GetSystemPrincipal(getter_AddRefs(sysPrincipal));
-    aDocument->BindingManager()->LoadBindingDocument(aDocument, bindingUri,
-                                                     sysPrincipal);
 
+    // Compute the bound element.
     nsCOMPtr<nsIContent> rootCont = aDocument->GetRootElement();
     NS_ENSURE_TRUE(rootCont, NS_ERROR_UNEXPECTED);
 
-    rv = aDocument->BindingManager()->AddLayeredBinding(rootCont, bindingUri,
-                                                        sysPrincipal);
+    // Grab the system principal.
+    nsCOMPtr<nsIPrincipal> sysPrincipal;
+    nsContentUtils::GetSecurityManager()->
+        GetSystemPrincipal(getter_AddRefs(sysPrincipal));
+
+    // Load the bindings.
+    nsRefPtr<nsXBLBinding> unused;
+    bool ignored;
+    rv = xblService->LoadBindings(rootCont, bindingUri, sysPrincipal,
+                                  getter_AddRefs(unused), &ignored);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // Hand the result document to the binding
-    nsCOMPtr<nsIObserver> binding;
-    aDocument->BindingManager()->GetBindingImplementation(rootCont,
-                                              NS_GET_IID(nsIObserver),
-                                              (void**)getter_AddRefs(binding));
-    NS_ASSERTION(binding, "Prettyprint binding doesn't implement nsIObserver");
-    NS_ENSURE_TRUE(binding, NS_ERROR_UNEXPECTED);
-    
-    rv = binding->Observe(resultFragment, "prettyprint-dom-created",
-                          EmptyString().get());
+    // Fire an event at the bound element to pass it |resultFragment|.
+    nsCOMPtr<nsIDOMEvent> domEvent;
+    rv = NS_NewDOMCustomEvent(getter_AddRefs(domEvent), rootCont,
+                              nullptr, nullptr);
+    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIDOMCustomEvent> customEvent = do_QueryInterface(domEvent);
+    MOZ_ASSERT(customEvent);
+    nsCOMPtr<nsIWritableVariant> resultFragmentVariant = new nsVariant();
+    rv = resultFragmentVariant->SetAsISupports(resultFragment);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = customEvent->InitCustomEvent(NS_LITERAL_STRING("prettyprint-dom-created"),
+                                      /* bubbles = */ false, /* cancelable = */ false,
+                                      /* detail = */ resultFragmentVariant);
+    NS_ENSURE_SUCCESS(rv, rv);
+    customEvent->SetTrusted(true);
+    bool dummy;
+    rv = rootCont->DispatchEvent(domEvent, &dummy);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Observe the document so we know when to switch to "normal" view
@@ -178,14 +201,10 @@ void
 nsXMLPrettyPrinter::Unhook()
 {
     mDocument->RemoveObserver(this);
-    nsCOMPtr<nsIDOMDocument> document = do_QueryInterface(mDocument);
-    nsCOMPtr<nsIDOMElement> rootElem;
-    document->GetDocumentElement(getter_AddRefs(rootElem));
+    nsCOMPtr<Element> element = mDocument->GetDocumentElement();
 
-    if (rootElem) {
-        nsCOMPtr<nsIDOMDocumentXBL> xblDoc = do_QueryInterface(mDocument);
-        xblDoc->RemoveBinding(rootElem,
-                              NS_LITERAL_STRING("chrome://global/content/xml/XMLPrettyPrint.xml#prettyprint"));
+    if (element) {
+        mDocument->BindingManager()->ClearBinding(element);
     }
 
     mDocument = nullptr;

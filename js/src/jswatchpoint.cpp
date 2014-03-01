@@ -1,14 +1,17 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsatom.h"
 #include "jswatchpoint.h"
+
+#include "jsatom.h"
+#include "jscompartment.h"
 
 #include "gc/Marking.h"
 
+#include "jsgcinlines.h"
 #include "jsobjinlines.h"
 
 using namespace js;
@@ -49,18 +52,27 @@ WatchpointMap::init()
     return map.init();
 }
 
+#ifdef JSGC_GENERATIONAL
+void
+Mark(JSTracer *trc, WatchKey *key, const char *name)
+{
+    MarkId(trc, &key->id, "WatchKey id");
+    MarkObject(trc, &key->object, "WatchKey id");
+}
+#endif
+
 static void
-WatchpointWriteBarrierPost(JSCompartment *comp, WatchpointMap::Map *map, const WatchKey &key,
+WatchpointWriteBarrierPost(JSRuntime *rt, WatchpointMap::Map *map, const WatchKey &key,
                            const Watchpoint &val)
 {
 #ifdef JSGC_GENERATIONAL
-    if ((JSID_IS_OBJECT(key.id) && comp->gcNursery.isInside(JSID_TO_OBJECT(key.id))) ||
-        (JSID_IS_STRING(key.id) && comp->gcNursery.isInside(JSID_TO_STRING(key.id))) ||
-        comp->gcNursery.isInside(key.object) ||
-        comp->gcNursery.isInside(val.closure))
+    if ((JSID_IS_OBJECT(key.id) && IsInsideNursery(rt, JSID_TO_OBJECT(key.id))) ||
+        (JSID_IS_STRING(key.id) && IsInsideNursery(rt, JSID_TO_STRING(key.id))) ||
+        IsInsideNursery(rt, key.object) ||
+        IsInsideNursery(rt, val.closure))
     {
         typedef HashKeyRef<WatchpointMap::Map, WatchKey> WatchKeyRef;
-        comp->gcStoreBuffer.putGeneric(WatchKeyRef(map, key));
+        rt->gcStoreBuffer.putGeneric(WatchKeyRef(map, key));
     }
 #endif
 }
@@ -82,7 +94,7 @@ WatchpointMap::watch(JSContext *cx, HandleObject obj, HandleId id,
         js_ReportOutOfMemory(cx);
         return false;
     }
-    WatchpointWriteBarrierPost(obj->compartment(), &map, WatchKey(obj, id), w);
+    WatchpointWriteBarrierPost(cx->runtime(), &map, WatchKey(obj, id), w);
     return true;
 }
 
@@ -96,7 +108,7 @@ WatchpointMap::unwatch(JSObject *obj, jsid id,
         if (closurep) {
             // Read barrier to prevent an incorrectly gray closure from escaping the
             // watchpoint. See the comment before UnmarkGrayChildren in gc/Marking.cpp
-            ExposeGCThingToActiveJS(p->value.closure, JSTRACE_OBJECT);
+            JS::ExposeGCThingToActiveJS(p->value.closure, JSTRACE_OBJECT);
             *closurep = p->value.closure;
         }
         map.remove(p);
@@ -144,22 +156,18 @@ WatchpointMap::triggerWatchpoint(JSContext *cx, HandleObject obj, HandleId id, M
 
     // Read barrier to prevent an incorrectly gray closure from escaping the
     // watchpoint. See the comment before UnmarkGrayChildren in gc/Marking.cpp
-    ExposeGCThingToActiveJS(closure, JSTRACE_OBJECT);
+    JS::ExposeGCThingToActiveJS(closure, JSTRACE_OBJECT);
 
     /* Call the handler. */
     return handler(cx, obj, id, old, vp.address(), closure);
 }
 
 bool
-WatchpointMap::markAllIteratively(JSTracer *trc)
+WatchpointMap::markCompartmentIteratively(JSCompartment *c, JSTracer *trc)
 {
-    JSRuntime *rt = trc->runtime;
-    bool mutated = false;
-    for (GCCompartmentsIter c(rt); !c.done(); c.next()) {
-        if (c->watchpointMap)
-            mutated |= c->watchpointMap->markIteratively(trc);
-    }
-    return mutated;
+    if (!c->watchpointMap)
+        return false;
+    return c->watchpointMap->markIteratively(trc);
 }
 
 bool
@@ -228,7 +236,7 @@ WatchpointMap::sweep()
     for (Map::Enum e(map); !e.empty(); e.popFront()) {
         Map::Entry &entry = e.front();
         RelocatablePtrObject obj(entry.key.object);
-        if (!IsObjectMarked(&obj)) {
+        if (IsObjectAboutToBeFinalized(&obj)) {
             JS_ASSERT(!entry.value.held);
             e.removeFront();
         } else if (obj != entry.key.object) {
@@ -241,8 +249,8 @@ void
 WatchpointMap::traceAll(WeakMapTracer *trc)
 {
     JSRuntime *rt = trc->runtime;
-    for (JSCompartment **c = rt->compartments.begin(); c != rt->compartments.end(); ++c) {
-        if (WatchpointMap *wpmap = (*c)->watchpointMap)
+    for (CompartmentsIter comp(rt); !comp.done(); comp.next()) {
+        if (WatchpointMap *wpmap = comp->watchpointMap)
             wpmap->trace(trc);
     }
 }

@@ -8,60 +8,17 @@ topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
 
-FAIL_ON_WARNINGS = 1
-
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkconcvs_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY  = 1
-
-EXPORTS = \
-	CustomQS_Canvas.h \
-	CustomQS_Canvas2D.h \
-	CustomQS_WebGL.h \
-	WebGLContext.h \
-	$(NULL)
-
-EXPORTS_NAMESPACES = mozilla/dom
-
-EXPORTS_mozilla/dom = \
-  ImageData.h \
-  $(NULL)
-
-CPPSRCS	= \
-	CanvasImageCache.cpp \
-	CanvasUtils.cpp \
-	nsCanvasRenderingContext2D.cpp \
-	nsCanvasRenderingContext2DAzure.cpp \
-	DocumentRendererParent.cpp \
-	DocumentRendererChild.cpp \
-	ImageData.cpp \
-	$(NULL)
+FAIL_ON_WARNINGS = 1
 
 ifdef MOZ_WEBGL
-
-CPPSRCS += \
-	WebGLContext.cpp \
-	WebGLContextGL.cpp \
-	WebGLContextUtils.cpp \
-	WebGLContextReporter.cpp \
-	WebGLContextValidate.cpp \
-	WebGLExtensionStandardDerivatives.cpp \
-	WebGLExtensionTextureFilterAnisotropic.cpp \
-	WebGLExtensionLoseContext.cpp \
-	WebGLTexelConversions.cpp \
-	WebGLExtensionCompressedTextureS3TC.cpp \
-	WebGLExtensionDepthTexture.cpp \
+LOCAL_INCLUDES += \
+	-I$(topsrcdir)/js/xpconnect/wrappers \
 	$(NULL)
-
-DEFINES += -DUSE_ANGLE
-USE_ANGLE=1
-
-else
-
-CPPSRCS += WebGLContextNotSupported.cpp
-
 endif
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
@@ -80,6 +37,7 @@ INCLUDES	+= \
 		-I$(srcdir)/../../html/content/src \
 		-I$(srcdir)/../../../js/xpconnect/src \
 		-I$(srcdir)/../../../dom/base \
+		-I$(topsrcdir)/content/xul/content/src \
 		$(NULL)
 
 DEFINES += -D_IMPL_NS_LAYOUT

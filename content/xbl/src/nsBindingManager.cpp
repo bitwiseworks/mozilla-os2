@@ -16,12 +16,11 @@
 #include "nsIContent.h"
 #include "nsIDOMElement.h"
 #include "nsIDocument.h"
-#include "mozilla/FunctionTimer.h"
 #include "nsContentUtils.h"
 #include "nsIPresShell.h"
 #include "nsIXMLContentSink.h"
 #include "nsContentCID.h"
-#include "nsXMLDocument.h"
+#include "mozilla/dom/XMLDocument.h"
 #include "nsIStreamListener.h"
 
 #include "nsXBLBinding.h"
@@ -42,9 +41,14 @@
 
 #include "nsIScriptContext.h"
 #include "nsBindingManager.h"
+#include "xpcpublic.h"
+#include "jswrapper.h"
+#include "nsCxPusher.h"
 
 #include "nsThreadUtils.h"
-#include "dombindings.h"
+#include "mozilla/dom/NodeListBinding.h"
+
+using namespace mozilla;
 
 // ==================================================================
 // = nsAnonymousContentList 
@@ -71,17 +75,17 @@ public:
   {
     return mContent;
   }
+  virtual nsIContent* Item(uint32_t aIndex);
 
   int32_t GetInsertionPointCount() { return mElements->Length(); }
 
   nsXBLInsertionPoint* GetInsertionPointAt(int32_t i) { return static_cast<nsXBLInsertionPoint*>(mElements->ElementAt(i)); }
   void RemoveInsertionPointAt(int32_t i) { mElements->RemoveElementAt(i); }
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap)
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE
   {
-    return mozilla::dom::oldproxybindings::NodeList::create(cx, scope, this,
-                                                   triedToWrap);
+    return mozilla::dom::NodeListBinding::Wrap(cx, scope, this);
   }
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ANONYMOUS_CONTENT_LIST_IID)
@@ -111,36 +115,28 @@ nsAnonymousContentList::~nsAnonymousContentList()
   delete mElements;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsAnonymousContentList)
-
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsAnonymousContentList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsAnonymousContentList)
 
 NS_INTERFACE_TABLE_HEAD(nsAnonymousContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsAnonymousContentList)
-    NS_INTERFACE_TABLE_ENTRY(nsAnonymousContentList, nsINodeList)
-    NS_INTERFACE_TABLE_ENTRY(nsAnonymousContentList, nsIDOMNodeList)
-    NS_INTERFACE_TABLE_ENTRY(nsAnonymousContentList, nsAnonymousContentList)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NodeList)
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsAnonymousContentList)
+  NS_INTERFACE_TABLE3(nsAnonymousContentList, nsINodeList, nsIDOMNodeList,
+                      nsAnonymousContentList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsAnonymousContentList)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsAnonymousContentList)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mContent)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mContent)
   tmp->mElements->Clear();
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsAnonymousContentList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mContent)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContent)
   {
     int32_t i, count = tmp->mElements->Length();
     for (i = 0; i < count; ++i) {
-      NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_MEMBER(mElements->ElementAt(i),
-                                                      nsXBLInsertionPoint);
+      NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElements->ElementAt(i));
     }
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
@@ -168,7 +164,7 @@ nsAnonymousContentList::GetLength(uint32_t* aLength)
 NS_IMETHODIMP    
 nsAnonymousContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 {
-  nsINode* item = GetNodeAt(aIndex);
+  nsINode* item = Item(aIndex);
   if (!item)
     return NS_ERROR_FAILURE;
 
@@ -176,7 +172,7 @@ nsAnonymousContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 }
 
 nsIContent*
-nsAnonymousContentList::GetNodeAt(uint32_t aIndex)
+nsAnonymousContentList::Item(uint32_t aIndex)
 {
   int32_t cnt = mElements->Length();
   uint32_t pointCount = 0;
@@ -379,7 +375,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsBindingManager)
     PL_DHashTableFinish(&(tmp->mWrapperTable));
   tmp->mWrapperTable.ops = nullptr;
 
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSTARRAY(mAttachedStack)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAttachedStack)
 
   if (tmp->mProcessAttachedQueueEvent) {
     tmp->mProcessAttachedQueueEvent->Revoke();
@@ -417,13 +413,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsBindingManager)
       tmp->mDocumentTable.EnumerateRead(&DocumentInfoHashtableTraverser, &cb);
   if (tmp->mLoadingDocTable.IsInitialized())
       tmp->mLoadingDocTable.EnumerateRead(&LoadingDocHashtableTraverser, &cb);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSTARRAY_MEMBER(mAttachedStack,
-                                                    nsXBLBinding)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAttachedStack)
   // No need to traverse mProcessAttachedQueueEvent, since it'll just
   // fire at some point or become revoke and drop its ref to us.
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsBindingManager)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsBindingManager)
   NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
@@ -686,7 +679,7 @@ nsBindingManager::GetContentListFor(nsIContent* aContent)
   }
 
   if (!result) {
-    result = aContent->GetChildNodesList();
+    result = aContent->ChildNodes();
   }
 
   return result;
@@ -842,29 +835,7 @@ nsBindingManager::GetSingleInsertionPoint(nsIContent* aParent,
 }
 
 nsresult
-nsBindingManager::AddLayeredBinding(nsIContent* aContent, nsIURI* aURL,
-                                    nsIPrincipal* aOriginPrincipal)
-{
-  // First we need to load our binding.
-  nsXBLService* xblService = nsXBLService::GetInstance();
-  if (!xblService)
-    return NS_ERROR_FAILURE;
-
-  // Load the bindings.
-  nsRefPtr<nsXBLBinding> binding;
-  bool dummy;
-  xblService->LoadBindings(aContent, aURL, aOriginPrincipal, true,
-                           getter_AddRefs(binding), &dummy);
-  if (binding) {
-    AddToAttachedQueue(binding);
-    ProcessAttachedQueue();
-  }
-
-  return NS_OK;
-}
-
-nsresult
-nsBindingManager::RemoveLayeredBinding(nsIContent* aContent, nsIURI* aURL)
+nsBindingManager::ClearBinding(nsIContent* aContent)
 {
   // Hold a ref to the binding so it won't die when we remove it from our table
   nsRefPtr<nsXBLBinding> binding = GetBinding(aContent);
@@ -875,11 +846,6 @@ nsBindingManager::RemoveLayeredBinding(nsIContent* aContent, nsIURI* aURL)
 
   // For now we can only handle removing a binding if it's the only one
   NS_ENSURE_FALSE(binding->GetBaseBinding(), NS_ERROR_FAILURE);
-
-  // Make sure that the binding has the URI that is requested to be removed
-  if (!binding->PrototypeBinding()->CompareBindingURI(aURL)) {
-    return NS_OK;
-  }
 
   // Make sure it isn't a style binding
   if (binding->IsStyleBinding()) {
@@ -995,8 +961,6 @@ nsBindingManager::ProcessAttachedQueue(uint32_t aSkipSize)
 {
   if (mProcessingAttachedStack || mAttachedStack.Length() <= aSkipSize)
     return;
-
-  NS_TIME_FUNCTION;
 
   mProcessingAttachedStack = true;
 
@@ -1123,7 +1087,7 @@ MarkForDeath(nsISupports *aKey, nsXBLBinding *aBinding, void* aClosure)
   if (aBinding->MarkedForDeath())
     return PL_DHASH_NEXT; // Already marked for death.
 
-  nsCAutoString path;
+  nsAutoCString path;
   aBinding->PrototypeBinding()->DocURI()->GetPath(path);
 
   if (!strncmp(path.get(), "/skin", 5))
@@ -1210,7 +1174,8 @@ nsBindingManager::GetBindingImplementation(nsIContent* aContent, REFNSIID aIID,
 
       nsIDocument* doc = aContent->OwnerDoc();
 
-      nsIScriptGlobalObject *global = doc->GetScriptGlobalObject();
+      nsCOMPtr<nsIScriptGlobalObject> global =
+        do_QueryInterface(doc->GetWindow());
       if (!global)
         return NS_NOINTERFACE;
 
@@ -1218,26 +1183,29 @@ nsBindingManager::GetBindingImplementation(nsIContent* aContent, REFNSIID aIID,
       if (!context)
         return NS_NOINTERFACE;
 
-      JSContext* jscontext = context->GetNativeContext();
-      if (!jscontext)
+      AutoPushJSContext cx(context->GetNativeContext());
+      if (!cx)
         return NS_NOINTERFACE;
 
       nsIXPConnect *xpConnect = nsContentUtils::XPConnect();
 
-      nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
-      xpConnect->GetWrappedNativeOfNativeObject(jscontext,
-                                                global->GetGlobalJSObject(),
-                                                aContent,
-                                                NS_GET_IID(nsISupports),
-                                                getter_AddRefs(wrapper));
-      NS_ENSURE_TRUE(wrapper, NS_NOINTERFACE);
-
-      JSObject* jsobj = nullptr;
-
-      wrapper->GetJSObject(&jsobj);
+      JS::Rooted<JSObject*> jsobj(cx, aContent->GetWrapper());
       NS_ENSURE_TRUE(jsobj, NS_NOINTERFACE);
 
-      nsresult rv = xpConnect->WrapJSAggregatedToNative(aContent, jscontext,
+      // If we're using an XBL scope, we need to use the Xray view to the bound
+      // content in order to view the full array of methods defined in the
+      // binding, some of which may not be exposed on the prototype of
+      // untrusted content.
+      //
+      // If there's no separate XBL scope, we'll end up with the global of the
+      // reflector, and this will all be a no-op.
+      JS::Rooted<JSObject*> xblScope(cx, xpc::GetXBLScope(cx, jsobj));
+      JSAutoCompartment ac(cx, xblScope);
+      bool ok = JS_WrapObject(cx, jsobj.address());
+      NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
+      MOZ_ASSERT_IF(js::IsWrapper(jsobj), xpc::IsXrayWrapper(jsobj));
+
+      nsresult rv = xpConnect->WrapJSAggregatedToNative(aContent, cx,
                                                         jsobj, aIID, aResult);
       if (NS_FAILED(rv))
         return rv;
@@ -1259,7 +1227,7 @@ nsBindingManager::GetBindingImplementation(nsIContent* aContent, REFNSIID aIID,
 
 nsresult
 nsBindingManager::WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc,
-                            RuleProcessorData* aData,
+                            ElementDependentRuleProcessorData* aData,
                             bool* aCutOffInheritance)
 {
   *aCutOffInheritance = false;
@@ -1324,7 +1292,7 @@ EnumRuleProcessors(nsISupports *aKey, nsXBLBinding *aBinding, void* aClosure)
 
 struct WalkAllRulesData {
   nsIStyleRuleProcessor::EnumFunc mFunc;
-  RuleProcessorData* mData;
+  ElementDependentRuleProcessorData* mData;
 };
 
 static PLDHashOperator
@@ -1341,7 +1309,7 @@ EnumWalkAllRules(nsPtrHashKey<nsIStyleRuleProcessor> *aKey, void* aClosure)
 
 void
 nsBindingManager::WalkAllRules(nsIStyleRuleProcessor::EnumFunc aFunc,
-                               RuleProcessorData* aData)
+                               ElementDependentRuleProcessorData* aData)
 {
   if (!mBindingTable.IsInitialized())
     return;
@@ -1721,8 +1689,7 @@ nsBindingManager::Traverse(nsIContent *aContent,
   if (binding) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "[via binding manager] mBindingTable key");
     cb.NoteXPCOMChild(aContent);
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_PTR(binding, nsXBLBinding,
-                                  "[via binding manager] mBindingTable value")
+    CycleCollectionNoteChild(cb, binding, "[via binding manager] mBindingTable value");
   }
   if (mContentListTable.ops &&
       (value = LookupObject(mContentListTable, aContent))) {

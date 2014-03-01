@@ -33,7 +33,7 @@ SVGAnimatedNumberList::SetBaseValueString(const nsAString& aValue)
   }
 
   // We don't need to call DidChange* here - we're only called by
-  // nsSVGElement::ParseAttribute under nsGenericElement::SetAttr,
+  // nsSVGElement::ParseAttribute under Element::SetAttr,
   // which takes care of notifying.
 
   mIsBaseSet = true;
@@ -128,7 +128,7 @@ SVGAnimatedNumberList::ToSMILAttr(nsSVGElement *aSVGElement,
 nsresult
 SVGAnimatedNumberList::
   SMILAnimatedNumberList::ValueFromString(const nsAString& aStr,
-                               const nsISMILAnimationElement* /*aSrcElement*/,
+                               const dom::SVGAnimationElement* /*aSrcElement*/,
                                nsSMILValue& aValue,
                                bool& aPreventCachingOfSandwich) const
 {

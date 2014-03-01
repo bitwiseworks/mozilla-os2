@@ -13,8 +13,6 @@ include $(DEPTH)/config/autoconf.mk
 # shouldn't get 755 perms need $(IFLAGS1) for either way of calling nsinstall.
 NSDISTMODE = copy
 
-PROGRAM = webapprt-stub$(BIN_SUFFIX)
-
 CMMSRCS = webapprt.mm
 
 # Don't create a dependency on mozglue, which is impossible (difficult?)
@@ -33,6 +31,8 @@ STL_FLAGS=
 LIBS = \
   $(XPCOM_STANDALONE_GLUE_LDOPTS) \
   $(NULL)
+
+PROGRAMS_DEST = $(DIST)/bin
 
 include $(topsrcdir)/config/rules.mk
 

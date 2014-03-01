@@ -7,6 +7,12 @@ let gSyncProfile;
 
 gSyncProfile = do_get_profile();
 
+// Init FormHistoryStartup and pretend we opened a profile.
+let fhs = Cc["@mozilla.org/satchel/form-history-startup;1"]
+            .getService(Ci.nsIObserver);
+fhs.observe(null, "profile-after-change", null);
+
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 // Make sure to provide the right OS so crypto loads the right binaries
@@ -54,7 +60,7 @@ function addResourceAlias() {
   const resProt = Services.io.getProtocolHandler("resource")
                           .QueryInterface(Ci.nsIResProtocolHandler);
   for each (let s in ["common", "sync", "crypto"]) {
-    let uri = Services.io.newURI("resource:///modules/services-" + s + "/", null,
+    let uri = Services.io.newURI("resource://gre/modules/services-" + s + "/", null,
                                  null);
     resProt.setSubstitution("services-" + s, uri);
   }

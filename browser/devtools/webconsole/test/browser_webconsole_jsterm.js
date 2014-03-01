@@ -111,10 +111,10 @@ function testJSTerm(hud)
 
   let foundTab = null;
   waitForSuccess({
-    name: "help tab opened",
+    name: "help tabs opened",
     validatorFn: function()
     {
-      let newTabOpen = gBrowser.tabs.length == tabs + 1;
+      let newTabOpen = gBrowser.tabs.length == tabs + 3;
       if (!newTabOpen) {
         return false;
       }
@@ -124,7 +124,9 @@ function testJSTerm(hud)
     },
     successFn: function()
     {
-      gBrowser.removeTab(foundTab);
+      gBrowser.removeTab(gBrowser.tabs[gBrowser.tabs.length - 1]);
+      gBrowser.removeTab(gBrowser.tabs[gBrowser.tabs.length - 1]);
+      gBrowser.removeTab(gBrowser.tabs[gBrowser.tabs.length - 1]);
       nextTest();
     },
     failureFn: nextTest,
@@ -133,7 +135,7 @@ function testJSTerm(hud)
 
   jsterm.clearOutput();
   jsterm.execute("pprint({b:2, a:1})");
-  checkResult("a: 1\n  b: 2", "pprint()", 1);
+  checkResult('"  b: 2\n  a: 1"', "pprint()", 1);
   yield;
 
   // check instanceof correctness, bug 599940
@@ -169,14 +171,14 @@ function testJSTerm(hud)
   // bug 614561
   jsterm.clearOutput();
   jsterm.execute("pprint('hi')");
-  checkResult('0: "h"\n  1: "i"', "pprint('hi')", 1);
+  checkResult('"  0: "h"\n  1: "i""', "pprint('hi')", 1);
   yield;
 
   // check that pprint(function) shows function source, bug 618344
   jsterm.clearOutput();
   jsterm.execute("pprint(print)");
   checkResult(function(nodes) {
-    return nodes[0].textContent.indexOf("aJSTerm.") > -1;
+    return nodes[0].textContent.indexOf("aOwner.helperResult") > -1;
   }, "pprint(function) shows source", 1);
   yield;
 

@@ -6,9 +6,8 @@
 #include "gfxDWriteFonts.h"
 #include "gfxDWriteShaper.h"
 #include "gfxHarfBuzzShaper.h"
-#ifdef MOZ_GRAPHITE
+#include <algorithm>
 #include "gfxGraphiteShaper.h"
-#endif
 #include "gfxDWriteFontList.h"
 #include "gfxContext.h"
 #include <dwrite.h>
@@ -20,6 +19,7 @@
 // Chosen this as to resemble DWrite's own oblique face style.
 #define OBLIQUE_SKEW_FACTOR 0.3
 
+using namespace mozilla;
 using namespace mozilla::gfx;
 
 // This is also in gfxGDIFont.cpp. Would be nice to put it somewhere common,
@@ -107,11 +107,9 @@ gfxDWriteFont::gfxDWriteFont(gfxFontEntry *aFontEntry,
 
     ComputeMetrics(anAAOption);
 
-#ifdef MOZ_GRAPHITE
     if (FontCanSupportGraphite()) {
         mGraphiteShaper = new gfxGraphiteShaper(this);
     }
-#endif
 
     if (FontCanSupportHarfBuzz()) {
         mHarfBuzzShaper = new gfxHarfBuzzShaper(this);
@@ -154,7 +152,10 @@ gfxDWriteFont::GetFakeMetricsForArialBlack(DWRITE_FONT_METRICS *aFontMetrics)
     gfxFontStyle style(mStyle);
     style.weight = 700;
     bool needsBold;
-    gfxFontEntry *fe = mFontEntry->Family()->FindFontForStyle(style, needsBold);
+
+    gfxFontEntry* fe =
+        gfxPlatformFontList::PlatformFontList()->
+            FindFontForFamily(NS_LITERAL_STRING("Arial"), &style, needsBold);
     if (!fe || fe == mFontEntry) {
         return false;
     }
@@ -172,7 +173,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
     DWRITE_FONT_METRICS fontMetrics;
     if (!(mFontEntry->Weight() == 900 &&
           !mFontEntry->IsUserFont() &&
-          mFontEntry->FamilyName().EqualsLiteral("Arial") &&
+          mFontEntry->Name().EqualsLiteral("Arial Black") &&
           GetFakeMetricsForArialBlack(&fontMetrics)))
     {
         mFontFace->GetMetrics(&fontMetrics);
@@ -229,27 +230,19 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
     mMetrics->maxAdvance = mAdjustedSize;
 
     // try to get the true maxAdvance value from 'hhea'
-    uint8_t *tableData;
-    uint32_t len;
-    void *tableContext = NULL;
-    BOOL exists;
-    HRESULT hr =
-        mFontFace->TryGetFontTable(DWRITE_MAKE_OPENTYPE_TAG('h', 'h', 'e', 'a'),
-                                   (const void**)&tableData,
-                                   &len,
-                                   &tableContext,
-                                   &exists);
-    if (SUCCEEDED(hr)) {
-        if (exists && len >= sizeof(mozilla::HheaTable)) {
-            const mozilla::HheaTable* hhea =
-                reinterpret_cast<const mozilla::HheaTable*>(tableData);
+    gfxFontEntry::AutoTable hheaTable(GetFontEntry(),
+                                      TRUETYPE_TAG('h','h','e','a'));
+    if (hheaTable) {
+        uint32_t len;
+        const HheaTable* hhea =
+            reinterpret_cast<const HheaTable*>(hb_blob_get_data(hheaTable, &len));
+        if (len >= sizeof(HheaTable)) {
             mMetrics->maxAdvance =
                 uint16_t(hhea->advanceWidthMax) * mFUnitsConvFactor;
         }
-        mFontFace->ReleaseFontTable(tableContext);
     }
 
-    mMetrics->internalLeading = NS_MAX(mMetrics->maxHeight - mMetrics->emHeight, 0.0);
+    mMetrics->internalLeading = std::max(mMetrics->maxHeight - mMetrics->emHeight, 0.0);
     mMetrics->externalLeading = ceil(fontMetrics.lineGap * mFUnitsConvFactor);
 
     UINT16 glyph = (uint16_t)GetSpaceGlyph();
@@ -259,22 +252,19 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
     // if the table is not available or if using hinted/pixel-snapped widths
     if (mUseSubpixelPositions) {
         mMetrics->aveCharWidth = 0;
-        hr = mFontFace->TryGetFontTable(DWRITE_MAKE_OPENTYPE_TAG('O', 'S', '/', '2'),
-                                        (const void**)&tableData,
-                                        &len,
-                                        &tableContext,
-                                        &exists);
-        if (SUCCEEDED(hr)) {
-            if (exists && len >= 4) {
+        gfxFontEntry::AutoTable os2Table(GetFontEntry(),
+                                         TRUETYPE_TAG('O','S','/','2'));
+        if (os2Table) {
+            uint32_t len;
+            const OS2Table* os2 =
+                reinterpret_cast<const OS2Table*>(hb_blob_get_data(os2Table, &len));
+            if (len >= 4) {
                 // Not checking against sizeof(mozilla::OS2Table) here because older
                 // versions of the table have different sizes; we only need the first
                 // two 16-bit fields here.
-                const mozilla::OS2Table* os2 =
-                    reinterpret_cast<const mozilla::OS2Table*>(tableData);
                 mMetrics->aveCharWidth =
                     int16_t(os2->xAvgCharWidth) * mFUnitsConvFactor;
             }
-            mFontFace->ReleaseFontTable(tableContext);
         }
     }
 
@@ -485,7 +475,7 @@ gfxDWriteFont::GetSpaceGlyph()
 bool
 gfxDWriteFont::SetupCairoFont(gfxContext *aContext)
 {
-    cairo_scaled_font_t *scaledFont = CairoScaledFont();
+    cairo_scaled_font_t *scaledFont = GetCairoScaledFont();
     if (cairo_scaled_font_status(scaledFont) != CAIRO_STATUS_SUCCESS) {
         // Don't cairo_set_scaled_font as that would propagate the error to
         // the cairo_t, precluding any further drawing.
@@ -522,7 +512,7 @@ gfxDWriteFont::CairoFontFace()
 
 
 cairo_scaled_font_t *
-gfxDWriteFont::CairoScaledFont()
+gfxDWriteFont::GetCairoScaledFont()
 {
     if (!mScaledFont) {
         cairo_matrix_t sizeMatrix;
@@ -599,60 +589,6 @@ gfxDWriteFont::Measure(gfxTextRun *aTextRun,
     }
 
     return metrics;
-}
-
-// Access to font tables packaged in hb_blob_t form
-
-// object attached to the Harfbuzz blob, used to release
-// the table when the blob is destroyed
-class FontTableRec {
-public:
-    FontTableRec(IDWriteFontFace *aFontFace, void *aContext)
-        : mFontFace(aFontFace), mContext(aContext)
-    { }
-
-    ~FontTableRec() {
-        mFontFace->ReleaseFontTable(mContext);
-    }
-
-private:
-    IDWriteFontFace *mFontFace;
-    void            *mContext;
-};
-
-/*static*/ void
-gfxDWriteFont::DestroyBlobFunc(void* aUserData)
-{
-    FontTableRec *ftr = static_cast<FontTableRec*>(aUserData);
-    delete ftr;
-}
-
-hb_blob_t *
-gfxDWriteFont::GetFontTable(uint32_t aTag)
-{
-    const void *data;
-    UINT32      size;
-    void       *context;
-    BOOL        exists;
-    HRESULT hr = mFontFace->TryGetFontTable(NS_SWAP32(aTag),
-                                            &data, &size, &context, &exists);
-    if (SUCCEEDED(hr) && exists) {
-        FontTableRec *ftr = new FontTableRec(mFontFace, context);
-        return hb_blob_create(static_cast<const char*>(data), size,
-                              HB_MEMORY_MODE_READONLY,
-                              ftr, DestroyBlobFunc);
-    }
-
-    if (mFontEntry->IsUserFont() && !mFontEntry->IsLocalUserFont()) {
-        // for downloaded fonts, there may be layout tables cached in the entry
-        // even though they're absent from the sanitized platform font
-        hb_blob_t *blob;
-        if (mFontEntry->GetExistingFontTable(aTag, &blob)) {
-            return blob;
-        }
-    }
-
-    return nullptr;
 }
 
 bool
@@ -746,4 +682,30 @@ gfxDWriteFont::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
 {
     aSizes->mFontInstances += aMallocSizeOf(this);
     SizeOfExcludingThis(aMallocSizeOf, aSizes);
+}
+
+TemporaryRef<ScaledFont>
+gfxDWriteFont::GetScaledFont(mozilla::gfx::DrawTarget *aTarget)
+{
+  bool wantCairo = aTarget->GetType() == BACKEND_CAIRO;
+  if (mAzureScaledFont && mAzureScaledFontIsCairo == wantCairo) {
+    return mAzureScaledFont;
+  }
+
+  NativeFont nativeFont;
+  nativeFont.mType = NATIVE_FONT_DWRITE_FONT_FACE;
+  nativeFont.mFont = GetFontFace();
+
+  if (wantCairo) {
+    mAzureScaledFont = Factory::CreateScaledFontWithCairo(nativeFont,
+                                                        GetAdjustedSize(),
+                                                        GetCairoScaledFont());
+  } else {
+    mAzureScaledFont = Factory::CreateScaledFontForNativeFont(nativeFont,
+                                                            GetAdjustedSize());
+  }
+
+  mAzureScaledFontIsCairo = wantCairo;
+
+  return mAzureScaledFont;
 }

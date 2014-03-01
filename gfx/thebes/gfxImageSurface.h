@@ -24,7 +24,7 @@ class SourceSurface;
  * purpose is for storing read-only images and using it as a source surface,
  * but it can also be drawn to.
  */
-class THEBES_API gfxImageSurface : public gfxASurface {
+class gfxImageSurface : public gfxASurface {
 public:
     /**
      * Construct an image surface around an existing buffer of image data.
@@ -46,6 +46,25 @@ public:
      * @see gfxImageFormat
      */
     gfxImageSurface(const gfxIntSize& size, gfxImageFormat format, bool aClear = true);
+
+    /**
+     * Construct an image surface, with a specified stride and allowing the
+     * allocation of more memory than required for the storage of the surface
+     * itself.  When aStride and aMinimalAllocation are <=0, this constructor
+     * is the equivalent of the preceeding one.
+     *
+     * @param format Format of the data
+     * @param aSize The size of the buffer
+     * @param aStride The stride of the buffer - if <=0, use ComputeStride()
+     * @param aMinimalAllocation Allocate at least this many bytes.  If smaller
+     *        than width * stride, or width*stride <=0, this value is ignored.
+     * @param aClear 
+     *
+     * @see gfxImageFormat
+     */
+    gfxImageSurface(const gfxIntSize& aSize, gfxImageFormat aFormat,
+                    long aStride, int32_t aMinimalAllocation, bool aClear);
+
     gfxImageSurface(cairo_surface_t *csurf);
 
     virtual ~gfxImageSurface();
@@ -92,14 +111,28 @@ public:
     virtual void MovePixels(const nsIntRect& aSourceRect,
                             const nsIntPoint& aDestTopLeft) MOZ_OVERRIDE;
 
+    static long ComputeStride(const gfxIntSize&, gfxImageFormat);
+
+    virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+        MOZ_OVERRIDE;
+    virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+        MOZ_OVERRIDE;
+    virtual bool SizeOfIsMeasured() const MOZ_OVERRIDE;
+
 protected:
     gfxImageSurface();
     void InitWithData(unsigned char *aData, const gfxIntSize& aSize,
                       long aStride, gfxImageFormat aFormat);
+    /**
+     * See the parameters to the matching constructor.  This should only
+     * be called once, in the constructor, which has already set mSize
+     * and mFormat.
+     */
+    void AllocateAndInit(long aStride, int32_t aMinimalAllocation, bool aClear);
     void InitFromSurface(cairo_surface_t *csurf);
+
     long ComputeStride() const { return ComputeStride(mSize, mFormat); }
 
-    static long ComputeStride(const gfxIntSize&, gfxImageFormat);
 
     void MakeInvalid();
 
@@ -110,7 +143,7 @@ protected:
     long mStride;
 };
 
-class THEBES_API gfxSubimageSurface : public gfxImageSurface {
+class gfxSubimageSurface : public gfxImageSurface {
 protected:
     friend class gfxImageSurface;
     gfxSubimageSurface(gfxImageSurface* aParent,

@@ -57,9 +57,13 @@ public:
   NS_IMETHOD ThemeChanged();
   bool ThemeSupportsWidget(nsPresContext* aPresContext, nsIFrame* aFrame, uint8_t aWidgetType);
   bool WidgetIsContainer(uint8_t aWidgetType);
-  bool ThemeDrawsFocusForWidget(nsPresContext* aPresContext, nsIFrame* aFrame, uint8_t aWidgetType);
+  bool ThemeDrawsFocusForWidget(uint8_t aWidgetType) MOZ_OVERRIDE;
   bool ThemeNeedsComboboxDropmarker();
   virtual Transparency GetWidgetTransparency(nsIFrame* aFrame, uint8_t aWidgetType);
+
+  void DrawProgress(CGContextRef context, const HIRect& inBoxRect,
+                    bool inIsIndeterminate, bool inIsHorizontal,
+                    double inValue, double inMaxValue, nsIFrame* aFrame);
 
 protected:  
 
@@ -68,17 +72,10 @@ protected:
   CGRect SeparatorAdjustedRect(CGRect aRect, nsIFrame* aLeft,
                                nsIFrame* aCurrent, nsIFrame* aRight);
 
-  // Helpers for progressbar.
-  double GetProgressValue(nsIFrame* aFrame);
-  double GetProgressMaxValue(nsIFrame* aFrame);
-
   // HITheme drawing routines
   void DrawFrame(CGContextRef context, HIThemeFrameKind inKind,
                  const HIRect& inBoxRect, bool inReadOnly,
                  nsEventStates inState);
-  void DrawProgress(CGContextRef context, const HIRect& inBoxRect,
-                    bool inIsIndeterminate, bool inIsHorizontal,
-                    double inValue, double inMaxValue, nsIFrame* aFrame);
   void DrawMeter(CGContextRef context, const HIRect& inBoxRect,
                  nsIFrame* aFrame);
   void DrawSegment(CGContextRef cgContext, const HIRect& inBoxRect,
@@ -111,6 +108,8 @@ protected:
                           NSWindow* aWindow);
   void DrawStatusBar(CGContextRef cgContext, const HIRect& inBoxRect,
                      nsIFrame *aFrame);
+  void DrawNativeTitlebar(CGContextRef aContext, CGRect aTitlebarRect,
+                          CGFloat aUnifiedHeight, BOOL aIsMain);
   void DrawResizer(CGContextRef cgContext, const HIRect& aRect, nsIFrame *aFrame);
 
   // Scrollbars

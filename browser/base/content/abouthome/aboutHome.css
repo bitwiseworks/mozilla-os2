@@ -19,7 +19,7 @@ body {
   width: 100%;
   height: 100%;
   background-image: url(chrome://browser/content/abouthome/noise.png),
-                    -moz-linear-gradient(hsla(0,0%,100%,.7), hsla(0,0%,100%,.4));
+                    linear-gradient(hsla(0,0%,100%,.7), hsla(0,0%,100%,.4));
 }
 
 input,
@@ -42,9 +42,13 @@ a {
 }
 
 #brandLogo {
-  height: 154px;
-  width: 154px;
-  margin: 22px 0 31px;
+  height: 192px;
+  width: 192px;
+  margin: 22px auto 31px;
+  background-image: url("chrome://branding/content/about-logo.png");
+  background-size: 192px auto;
+  background-position: center center;
+  background-repeat: no-repeat;
 }
 
 #searchForm,
@@ -63,10 +67,15 @@ a {
   -moz-padding-end: 8px;
 }
 
+#searchLogoContainer[hidden] {
+  display: none;
+}
+
 #searchEngineLogo {
   display: inline-block;
   height: 28px;
   width: 70px;
+  min-width: 70px;
 }
 
 #searchText {
@@ -92,7 +101,7 @@ a {
 
 #searchSubmit {
   -moz-margin-start: -1px;
-  background: -moz-linear-gradient(hsla(0,0%,100%,.8), hsla(0,0%,100%,.1)) padding-box;
+  background: linear-gradient(hsla(0,0%,100%,.8), hsla(0,0%,100%,.1)) padding-box;
   padding: 0 9px;
   border: 1px solid;
   border-color: hsla(210,54%,20%,.15) hsla(210,54%,20%,.17) hsla(210,54%,20%,.2);
@@ -118,14 +127,14 @@ a {
 
 #searchText:focus + #searchSubmit,
 #searchText[autofocus] + #searchSubmit {
-  background-image: -moz-linear-gradient(#4cb1ff, #1793e5);
+  background-image: linear-gradient(#4cb1ff, #1793e5);
   box-shadow: 0 1px 0 hsla(0,0%,100%,.2) inset,
               0 0 0 1px hsla(0,0%,100%,.1) inset,
               0 1px 0 hsla(210,54%,20%,.03);
 }
 
 #searchText + #searchSubmit:hover {
-  background-image: -moz-linear-gradient(#66bdff, #0d9eff);
+  background-image: linear-gradient(#66bdff, #0d9eff);
   box-shadow: 0 1px 0 hsla(0,0%,100%,.2) inset,
               0 0 0 1px hsla(0,0%,100%,.1) inset,
               0 1px 0 hsla(210,54%,20%,.03),
@@ -139,7 +148,8 @@ a {
 }
 
 #defaultSnippet1,
-#defaultSnippet2 {
+#defaultSnippet2,
+#rightsSnippet {
   display: block;
   min-height: 38px;
   background: 30px center no-repeat;
@@ -147,8 +157,13 @@ a {
   -moz-padding-start: 79px;
 }
 
+#rightsSnippet[hidden] {
+  display: none;
+}
+
 #defaultSnippet1:-moz-dir(rtl),
-#defaultSnippet2:-moz-dir(rtl) {
+#defaultSnippet2:-moz-dir(rtl),
+#rightsSnippet:-moz-dir(rtl) {
   background-position: right 30px center;
 }
 
@@ -222,7 +237,7 @@ body[narrow] #launcher[session] > .launchButton {
 }
 
 .launchButton:hover:active {
-  background-image: -moz-linear-gradient(hsla(211,79%,6%,.02), hsla(211,79%,6%,.05));
+  background-image: linear-gradient(hsla(211,79%,6%,.02), hsla(211,79%,6%,.05));
   border-color: hsla(210,54%,20%,.2) hsla(210,54%,20%,.23) hsla(210,54%,20%,.25);
   box-shadow: 0 1px 1px hsla(211,79%,6%,.05) inset,
               0 0 1px hsla(211,79%,6%,.1) inset;
@@ -239,9 +254,9 @@ body[narrow] #launcher[session] > .launchButton {
   width: 3px;
   height: 116px;
   margin: 0 10px;
-  background-image: -moz-linear-gradient(hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0)),
-                    -moz-linear-gradient(hsla(211,79%,6%,0), hsla(211,79%,6%,.2), hsla(211,79%,6%,0)),
-                    -moz-linear-gradient(hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0));
+  background-image: linear-gradient(hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0)),
+                    linear-gradient(hsla(211,79%,6%,0), hsla(211,79%,6%,.2), hsla(211,79%,6%,0)),
+                    linear-gradient(hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0));
   background-position: left top, center, right bottom;
   background-size: 1px auto;
   background-repeat: no-repeat;
@@ -251,9 +266,9 @@ body[narrow] #restorePreviousSessionSeparator {
   margin: 0 auto;
   width: 512px;
   height: 3px;
-  background-image: -moz-linear-gradient(0, hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0)),
-                    -moz-linear-gradient(0, hsla(211,79%,6%,0), hsla(211,79%,6%,.2), hsla(211,79%,6%,0)),
-                    -moz-linear-gradient(0, hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0));
+  background-image: linear-gradient(to right, hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0)),
+                    linear-gradient(to right, hsla(211,79%,6%,0), hsla(211,79%,6%,.2), hsla(211,79%,6%,0)),
+                    linear-gradient(to right, hsla(0,0%,100%,0), hsla(0,0%,100%,.35), hsla(0,0%,100%,0));
   background-size: auto 1px;
 }
 
@@ -340,4 +355,77 @@ body[narrow] #restorePreviousSession::before {
   position: absolute;
   top: 12px;
   right: 12px;
+  width: 69px;
+  height: 19px;
 }
+
+/* [HiDPI]
+ * At resolutions above 1dppx, prefer downscaling the 2x Retina graphics
+ * rather than upscaling the original-size ones (bug 818940).
+ */
+@media not all and (max-resolution: 1dppx) {
+  #brandLogo {
+    background-image: url("chrome://branding/content/about-logo@2x.png");
+  }
+
+  #defaultSnippet1,
+  #defaultSnippet2,
+  #rightsSnippet {
+    background-size: 40px;
+  }
+
+  #defaultSnippet1 {
+    background-image: url("chrome://browser/content/abouthome/snippet1@2x.png");
+  }
+
+  #defaultSnippet2 {
+    background-image: url("chrome://browser/content/abouthome/snippet2@2x.png");
+  }
+
+  .launchButton::before,
+  #aboutMozilla::before {
+    transform: scale(.5);
+    transform-origin: 0 0;
+  }
+
+  #downloads::before {
+    content: url("chrome://browser/content/abouthome/downloads@2x.png");
+  }
+
+  #bookmarks::before {
+    content: url("chrome://browser/content/abouthome/bookmarks@2x.png");
+  }
+
+  #history::before {
+    content: url("chrome://browser/content/abouthome/history@2x.png");
+  }
+
+  #apps::before {
+    content: url("chrome://browser/content/abouthome/apps@2x.png");
+  }
+
+  #addons::before {
+    content: url("chrome://browser/content/abouthome/addons@2x.png");
+  }
+
+  #sync::before {
+    content: url("chrome://browser/content/abouthome/sync@2x.png");
+  }
+
+  #settings::before {
+    content: url("chrome://browser/content/abouthome/settings@2x.png");
+  }
+
+  #restorePreviousSession::before {
+    content: url("chrome://browser/content/abouthome/restore-large@2x.png");
+  }
+
+  body[narrow] #restorePreviousSession::before {
+    content: url("chrome://browser/content/abouthome/restore@2x.png");
+  }
+
+  #aboutMozilla::before {
+    content: url("chrome://browser/content/abouthome/mozilla@2x.png");
+  }
+}
+

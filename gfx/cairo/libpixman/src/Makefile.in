@@ -9,15 +9,21 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= libpixman
 LIBRARY_NAME	= mozlibpixman
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 
 ifeq ($(OS_TARGET),Android)
 MODULE_OPTIMIZE_FLAGS = -O2
 endif
 
-DEFINES += -DPIXMAN_NO_TLS
+ifdef MOZ_USE_PTHREADS
+DEFINES += -DHAVE_PTHREAD_SETSPECIFIC
+endif
+
+ifdef _MSC_VER
+DEFINES += -DPIXMAN_USE_XP_DLL_TLS_WORKAROUND
+endif
 
 # Build MMX code either with VC or with gcc-on-x86
 ifdef _MSC_VER
@@ -42,6 +48,10 @@ endif
 endif
 
 ifdef GNU_CC
+ifeq (ppc,$(findstring ppc,$(OS_TEST)))
+USE_VMX=1
+VMX_CFLAGS=-maltivec
+endif
 ifeq (86,$(findstring 86,$(OS_TEST)))
 USE_MMX=1
 MMX_CFLAGS=-mmmx -Winline
@@ -79,29 +89,34 @@ endif
 CSRCS	= \
 	pixman-access.c \
 	pixman-access-accessors.c \
+	pixman-arm.c \
 	pixman-bits-image.c \
 	pixman.c \
 	pixman-combine16.c \
 	pixman-combine32.c \
-	pixman-combine64.c \
+	pixman-combine-float.c \
 	pixman-conical-gradient.c \
-	pixman-cpu.c \
 	pixman-edge.c \
 	pixman-edge-accessors.c \
 	pixman-fast-path.c \
+	pixman-filter.c \
 	pixman-general.c \
 	pixman-gradient-walker.c \
+	pixman-glyph.c \
 	pixman-image.c \
 	pixman-implementation.c \
 	pixman-linear-gradient.c \
 	pixman-matrix.c \
+	pixman-mips.c \
 	pixman-noop.c \
+	pixman-ppc.c \
 	pixman-radial-gradient.c \
 	pixman-region16.c \
 	pixman-region32.c \
 	pixman-solid-fill.c \
 	pixman-trap.c \
 	pixman-utils.c \
+	pixman-x86.c \
 	$(NULL)
 
 ifdef USE_MMX
@@ -121,7 +136,7 @@ endif
 
 ifdef USE_ARM_SIMD_GCC
 CSRCS += pixman-arm-simd.c
-SSRCS += pixman-arm-simd-asm.S
+SSRCS += pixman-arm-simd-asm.S pixman-arm-simd-asm-scaled.S
 DEFINES += -DUSE_ARM_SIMD
 endif
 
@@ -132,8 +147,6 @@ SSRCS += pixman-arm-neon-asm-bilinear.S
 DEFINES += -DUSE_ARM_NEON
 ARM_NEON_CFLAGS = -mfpu=neon
 endif
-
-EXPORTS		= pixman.h pixman-version.h
 
 LOCAL_INCLUDES	+= -I$(srcdir) -I$(srcdir)/../../cairo/src
 
@@ -156,3 +169,10 @@ pixman-mmx.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(MMX_CFLAGS)
 pixman-sse2.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(SSE2_CFLAGS)
 
 pixman-arm-neon.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(ARM_NEON_CFLAGS)
+
+pixman-vmx.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(VMX_CFLAGS)
+
+# The ARM asm functions here don't appreciate being called by functions
+# compiled with -mapcs-frame.  See bug 832752.
+CXXFLAGS := $(filter-out -mapcs-frame,$(CXXFLAGS))
+CFLAGS := $(filter-out -mapcs-frame,$(CFLAGS))

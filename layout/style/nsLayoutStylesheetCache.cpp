@@ -8,7 +8,6 @@
 #include "nsAppDirectoryServiceDefs.h"
 #include "mozilla/css/Loader.h"
 #include "nsIFile.h"
-#include "nsLayoutCID.h"
 #include "nsIMemoryReporter.h"
 #include "nsNetUtil.h"
 #include "nsIObserverService.h"
@@ -16,8 +15,7 @@
 #include "nsIXULRuntime.h"
 #include "nsCSSStyleSheet.h"
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(LayoutStyleSheetCacheMallocSizeOf,
-                                     "layout/style-sheet-cache")
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(LayoutStyleSheetCacheMallocSizeOf)
 
 static int64_t
 GetStylesheetCacheSize()
@@ -26,7 +24,7 @@ GetStylesheetCacheSize()
            LayoutStyleSheetCacheMallocSizeOf);
 }
 
-NS_MEMORY_REPORTER_IMPLEMENT(Sheets,
+NS_MEMORY_REPORTER_IMPLEMENT(StyleSheetCache,
   "explicit/layout/style-sheet-cache",
   KIND_HEAP,
   nsIMemoryReporter::UNITS_BYTES,
@@ -161,11 +159,12 @@ nsLayoutStylesheetCache::Shutdown()
 size_t
 nsLayoutStylesheetCache::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
 {
-  if (nsLayoutStylesheetCache::gStyleCache) {
-    return nsLayoutStylesheetCache::gStyleCache->
-      SizeOfIncludingThisHelper(aMallocSizeOf);
+  if (!nsLayoutStylesheetCache::gStyleCache) {
+    return 0;
   }
-  return 0;
+
+  return nsLayoutStylesheetCache::gStyleCache->
+      SizeOfIncludingThisHelper(aMallocSizeOf);
 }
 
 size_t
@@ -226,14 +225,14 @@ nsLayoutStylesheetCache::nsLayoutStylesheetCache()
   }
   NS_ASSERTION(mFullScreenOverrideSheet, "Could not load full-screen-override.css");
 
-  mSheetsReporter = new NS_MEMORY_REPORTER_NAME(Sheets);
-  (void)::NS_RegisterMemoryReporter(mSheetsReporter);
+  mReporter = new NS_MEMORY_REPORTER_NAME(StyleSheetCache);
+  (void)::NS_RegisterMemoryReporter(mReporter);
 }
 
 nsLayoutStylesheetCache::~nsLayoutStylesheetCache()
 {
-  (void)::NS_UnregisterMemoryReporter(mSheetsReporter);
-  mSheetsReporter = nullptr;
+  (void)::NS_UnregisterMemoryReporter(mReporter);
+  mReporter = nullptr;
 }
 
 void

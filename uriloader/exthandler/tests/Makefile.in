@@ -1,4 +1,3 @@
-#
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -9,23 +8,9 @@ srcdir          = @srcdir@
 VPATH           = @srcdir@
 relativesrcdir = @relativesrcdir@
 
-DIRS += mochitest \
-        $(NULL)
-
 include $(DEPTH)/config/autoconf.mk
 
-MODULE          = test_uriloader_exthandler
-
-XPCSHELL_TESTS  = unit
-
-#FIXME/bug 575918: out-of-process xpcshell is broken on OS X
-ifneq ($(OS_ARCH),Darwin)
-XPCSHELL_TESTS += unit_ipc
-endif
-
-CPPSRCS =	\
-		WriteArgument.cpp \
-		$(NULL)
+FAIL_ON_WARNINGS = 1
 
 SIMPLE_PROGRAMS = $(CPPSRCS:.cpp=$(BIN_SUFFIX))
 
@@ -37,7 +22,7 @@ LIBS +=		\
 
 include $(topsrcdir)/config/rules.mk
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+ifdef MOZ_WIDGET_GTK
 export PERSONAL_MAILCAP=$(call core_abspath,$(srcdir))/mailcap
 endif
 

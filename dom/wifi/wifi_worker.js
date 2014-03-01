@@ -6,7 +6,7 @@
 
 "use strict";
 
-importScripts("libhardware_legacy.js", "systemlibs.js");
+importScripts("systemlibs.js", "libhardware_legacy.js");
 
 var cbuf = ctypes.char.array(4096)();
 var hwaddr = ctypes.uint8_t.array(6)();
@@ -45,11 +45,24 @@ self.onmessage = function(e) {
     var ret = libhardware_legacy.command(data.request, cbuf, len.address());
     var reply = "";
     if (!ret) {
-      var reply_len = len.value;
-      var str = cbuf.readString();
-      if (str[reply_len-1] == "\n")
-        --reply_len;
-      reply = str.substr(0, reply_len);
+      // The return value from libhardware_legacy.command is not guaranteed to
+      // be null-terminated. At the same time we want to make sure that we
+      // don't return a response with a trailing newline, so handle both cases
+      // here. Note that if we wrote 4096 characters to cbuf, we don't have to
+      // null-terminate the buffer, as ctypes has the maximum size already.
+      // Note also that len.value is an object. We can ignore the high 32 bits
+      // because we know that the maximum that it can be is 4096.
+      var reply_len = ctypes.UInt64.lo(len.value);
+      if (reply_len !== 0) {
+        if (cbuf[reply_len - 1] === 10)
+          cbuf[--reply_len] = 0;
+        else if (reply_len !== 4096)
+          cbuf[reply_len] = 0;
+
+        reply = cbuf.readStringReplaceMalformed();
+      }
+
+      // Else if reply_len was 0, use the empty reply, set above.
     }
     postMessage({ id: id, status: ret, reply: reply });
     break;
@@ -58,11 +71,15 @@ self.onmessage = function(e) {
     var event = cbuf.readString().substr(0, ret.value);
     postMessage({ id: id, event: event });
     break;
+  case "ifc_reset_connections":
+    var ret = libnetutils.ifc_reset_connections(data.ifname,
+                                                libnetutils.RESET_ALL_ADDRESSES);
+    postMessage({ id: id, status: ret });
+    break;
   case "ifc_enable":
   case "ifc_disable":
   case "ifc_remove_host_routes":
   case "ifc_remove_default_route":
-  case "ifc_reset_connections":
   case "dhcp_stop":
   case "dhcp_release_lease":
     var ret = libnetutils[cmd](data.ifname);

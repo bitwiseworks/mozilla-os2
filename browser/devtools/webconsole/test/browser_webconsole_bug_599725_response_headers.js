@@ -10,9 +10,16 @@
 
 const TEST_URI = "http://example.com/browser/browser/devtools/webconsole/test/test-bug-599725-response-headers.sjs";
 
-function performTest(lastFinishedRequest)
+let loads = 0;
+function performTest(aRequest, aConsole)
 {
-  ok(lastFinishedRequest, "page load was logged");
+  loads++;
+  ok(aRequest, "page load was logged");
+  if (loads != 2) {
+    return;
+  }
+
+  let headers = null;
 
   function readHeader(aName)
   {
@@ -24,30 +31,46 @@ function performTest(lastFinishedRequest)
     return null;
   }
 
-  let headers = lastFinishedRequest.log.entries[0].response.headers;
-  ok(headers, "we have the response headers");
-  ok(!readHeader("Content-Type"), "we do not have the Content-Type header");
-  isnot(readHeader("Content-Length"), 60, "Content-Length != 60");
+  aConsole.webConsoleClient.getResponseHeaders(aRequest.actor,
+    function (aResponse) {
+      headers = aResponse.headers;
+      ok(headers, "we have the response headers for reload");
+
+      let contentType = readHeader("Content-Type");
+      let contentLength = readHeader("Content-Length");
+
+      ok(!contentType, "we do not have the Content-Type header");
+      isnot(contentLength, 60, "Content-Length != 60");
+
+      if (contentType || contentLength == 60) {
+        console.debug("lastFinishedRequest", lastFinishedRequest,
+                      "request", lastFinishedRequest.request,
+                      "response", lastFinishedRequest.response,
+                      "updates", lastFinishedRequest.updates,
+                      "response headers", headers);
+      }
+
+      executeSoon(finishTest);
+    });
 
   HUDService.lastFinishedRequestCallback = null;
-  executeSoon(finishTest);
 }
 
 function test()
 {
-  addTab(TEST_URI);
-
-  let initialLoad = true;
+  addTab("data:text/plain;charset=utf8,hello world");
 
   browser.addEventListener("load", function onLoad() {
-    if (initialLoad) {
-      openConsole(null, function() {
-        HUDService.lastFinishedRequestCallback = performTest;
-        content.location.reload();
-      });
-      initialLoad = false;
-    } else {
-      browser.removeEventListener("load", onLoad, true);
-    }
+    browser.removeEventListener("load", onLoad, true);
+    openConsole(null, () => {
+      HUDService.lastFinishedRequestCallback = performTest;
+
+      browser.addEventListener("load", function onReload() {
+        browser.removeEventListener("load", onReload, true);
+        executeSoon(() => content.location.reload());
+      }, true);
+
+      executeSoon(() => content.location = TEST_URI);
+    });
   }, true);
 }

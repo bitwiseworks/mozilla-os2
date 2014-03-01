@@ -39,6 +39,7 @@ function run_test() {
     return;
   }
 
+  gEnvSKipUpdateDirHashing = true;
   let channel = Services.prefs.getCharPref(PREF_APP_UPDATE_CHANNEL);
   let patches = getLocalPatchString(null, null, null, null, null, "true",
                                     STATE_PENDING);
@@ -92,19 +93,13 @@ function run_test() {
   let mar = do_get_file("data/simple.mar");
   mar.copyTo(updatesRootDir, FILE_UPDATE_ARCHIVE);
 
-  // Backup the updater.ini
+  // Backup the updater.ini file if it exists by moving it. This prevents the
+  // post update executable from being launched if it is specified.
   let updaterIni = processDir.clone();
   updaterIni.append(FILE_UPDATER_INI);
-  updaterIni.moveTo(processDir, FILE_UPDATER_INI_BAK);
-  // Create a new updater.ini to avoid applications that provide a post update
-  // executable.
-  let updaterIniContents = "[Strings]\n" +
-                           "Title=Update Test\n" +
-                           "Info=Application Update XPCShell Test - " +
-                           "test_0200_general.js\n";
-  updaterIni = processDir.clone();
-  updaterIni.append(FILE_UPDATER_INI);
-  writeFile(updaterIni, updaterIniContents);
+  if (updaterIni.exists()) {
+    updaterIni.moveTo(processDir, FILE_UPDATER_INI_BAK);
+  }
 
   getUpdatesDir = function() {
     var updatesDir = processDir.clone();
@@ -146,10 +141,12 @@ function end_test() {
   resetEnvironment();
 
   let processDir = getCurrentProcessDir();
-  // Restore the backed up updater.ini
+  // Restore the backup of the updater.ini if it exists.
   let updaterIni = processDir.clone();
   updaterIni.append(FILE_UPDATER_INI_BAK);
-  updaterIni.moveTo(processDir, FILE_UPDATER_INI);
+  if (updaterIni.exists()) {
+    updaterIni.moveTo(processDir, FILE_UPDATER_INI);
+  }
 
   // Remove the files added by the update.
   let updateTestDir = getUpdateTestDir();

@@ -1,6 +1,10 @@
-/* Copyright (c) 2010-2011 Xiph.Org Foundation, Skype Limited
+/* Copyright (c) 2010-2012 IETF Trust, Xiph.Org Foundation, Skype Limited. All rights reserved.
    Written by Jean-Marc Valin and Koen Vos */
 /*
+
+   This file is extracted from RFC6716. Please see that RFC for additional
+   information.
+
    Redistribution and use in source and binary forms, with or without
    modification, are permitted provided that the following conditions
    are met:
@@ -68,14 +72,14 @@ extern "C" {
 /** @cond OPUS_INTERNAL_DOC */
 /**Export control for opus functions */
 
-#if defined(__GNUC__) && defined(OPUS_BUILD)
-# define OPUS_EXPORT __attribute__ ((visibility ("default")))
-#elif defined(WIN32)
+#if defined(WIN32)
 # ifdef OPUS_BUILD
 #   define OPUS_EXPORT __declspec(dllexport)
 # else
 #   define OPUS_EXPORT __declspec(dllimport)
 # endif
+#elif defined(__GNUC__) && defined(OPUS_BUILD)
+# define OPUS_EXPORT __attribute__ ((visibility ("default")))
 #else
 # define OPUS_EXPORT
 #endif

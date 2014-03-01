@@ -13,6 +13,10 @@
 #include "mozilla/net/WyciwygChannelChild.h"
 #include "mozilla/net/FTPChannelChild.h"
 #include "mozilla/net/WebSocketChannelChild.h"
+#include "mozilla/net/RemoteOpenFileChild.h"
+#include "mozilla/dom/network/TCPSocketChild.h"
+
+using mozilla::dom::TCPSocketChild;
 
 namespace mozilla {
 namespace net {
@@ -56,18 +60,15 @@ void NeckoChild::DestroyNeckoChild()
   }
 }
 
-PHttpChannelChild* 
-NeckoChild::AllocPHttpChannel(PBrowserChild* browser)
+PHttpChannelChild*
+NeckoChild::AllocPHttpChannel(PBrowserChild* browser,
+                              const SerializedLoadContext& loadContext,
+                              const HttpChannelCreationArgs& aOpenArgs)
 {
-  // This constructor is only used when PHttpChannel is constructed by
-  // the parent process, e.g. during a redirect.  (Normally HttpChannelChild is
-  // created by nsHttpHandler::NewProxiedChannel(), and then creates the
-  // PHttpChannel in HttpChannelChild::AsyncOpen().)
-
-  // No need to store PBrowser. It is only needed by the parent.
-  HttpChannelChild* httpChannel = new HttpChannelChild();
-  httpChannel->AddIPDLReference();
-  return httpChannel;
+  // We don't allocate here: instead we always use IPDL constructor that takes
+  // an existing HttpChildChannel
+  NS_NOTREACHED("AllocPHttpChannel should not be called on child");
+  return nullptr;
 }
 
 bool 
@@ -81,7 +82,9 @@ NeckoChild::DeallocPHttpChannel(PHttpChannelChild* channel)
 }
 
 PFTPChannelChild*
-NeckoChild::AllocPFTPChannel()
+NeckoChild::AllocPFTPChannel(PBrowserChild* aBrowser,
+                             const SerializedLoadContext& aSerialized,
+                             const FTPChannelCreationArgs& aOpenArgs)
 {
   // We don't allocate here: see FTPChannelChild::AsyncOpen()
   NS_RUNTIMEABORT("AllocPFTPChannel should not be called");
@@ -135,7 +138,8 @@ NeckoChild::DeallocPWyciwygChannel(PWyciwygChannelChild* channel)
 }
 
 PWebSocketChild*
-NeckoChild::AllocPWebSocket(PBrowserChild* browser)
+NeckoChild::AllocPWebSocket(PBrowserChild* browser,
+                            const SerializedLoadContext& aSerialized)
 {
   NS_NOTREACHED("AllocPWebSocket should not be called");
   return nullptr;
@@ -145,6 +149,42 @@ bool
 NeckoChild::DeallocPWebSocket(PWebSocketChild* child)
 {
   WebSocketChannelChild* p = static_cast<WebSocketChannelChild*>(child);
+  p->ReleaseIPDLReference();
+  return true;
+}
+
+PTCPSocketChild*
+NeckoChild::AllocPTCPSocket(const nsString& aHost,
+                            const uint16_t& aPort,
+                            const bool& useSSL,
+                            const nsString& aBinaryType,
+                            PBrowserChild* aBrowser)
+{
+  NS_NOTREACHED("AllocPTCPSocket should not be called");
+  return nullptr;
+}
+
+bool
+NeckoChild::DeallocPTCPSocket(PTCPSocketChild* child)
+{
+  TCPSocketChild* p = static_cast<TCPSocketChild*>(child);
+  p->ReleaseIPDLReference();
+  return true;
+}
+
+PRemoteOpenFileChild*
+NeckoChild::AllocPRemoteOpenFile(const URIParams&, PBrowserChild*)
+{
+  // We don't allocate here: instead we always use IPDL constructor that takes
+  // an existing RemoteOpenFileChild
+  NS_NOTREACHED("AllocPRemoteOpenFile should not be called on child");
+  return nullptr;
+}
+
+bool
+NeckoChild::DeallocPRemoteOpenFile(PRemoteOpenFileChild* aChild)
+{
+  RemoteOpenFileChild *p = static_cast<RemoteOpenFileChild*>(aChild);
   p->ReleaseIPDLReference();
   return true;
 }

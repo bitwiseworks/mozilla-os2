@@ -23,6 +23,9 @@
 #define COMPILER_EXPORT
 #endif
 
+#include "khrplatform.h"
+#include <stddef.h>
+
 //
 // This is the platform independent interface between an OGL driver
 // and the shading language compiler.
@@ -34,7 +37,7 @@ extern "C" {
 
 // Version number for shader translation API.
 // It is incremented everytime the API changes.
-#define SH_VERSION 107
+#define ANGLE_SH_VERSION 110
 
 //
 // The names of the following enums have been derived by replacing GL prefix
@@ -110,7 +113,10 @@ typedef enum {
   SH_ACTIVE_UNIFORM_MAX_LENGTH   =  0x8B87,
   SH_ACTIVE_ATTRIBUTES           =  0x8B89,
   SH_ACTIVE_ATTRIBUTE_MAX_LENGTH =  0x8B8A,
-  SH_MAPPED_NAME_MAX_LENGTH      =  0x8B8B
+  SH_MAPPED_NAME_MAX_LENGTH      =  0x6000,
+  SH_NAME_MAX_LENGTH             =  0x6001,
+  SH_HASHED_NAME_MAX_LENGTH      =  0x6002,
+  SH_HASHED_NAMES_COUNT          =  0x6003
 } ShShaderInfo;
 
 // Compile options.
@@ -145,8 +151,25 @@ typedef enum {
   SH_DEPENDENCY_GRAPH = 0x0400,
 
   // Enforce the GLSL 1.017 Appendix A section 7 packing restrictions.
-  SH_ENFORCE_PACKING_RESTRICTIONS = 0x0800
+  SH_ENFORCE_PACKING_RESTRICTIONS = 0x0800,
+
+  // This flag ensures all indirect (expression-based) array indexing
+  // is clamped to the bounds of the array. This ensures, for example,
+  // that you cannot read off the end of a uniform, whether an array
+  // vec234, or mat234 type. The ShArrayIndexClampingStrategy enum,
+  // specified in the ShBuiltInResources when constructing the
+  // compiler, selects the strategy for the clamping implementation.
+  SH_CLAMP_INDIRECT_ARRAY_BOUNDS = 0x1000
 } ShCompileOptions;
+
+// Defines alternate strategies for implementing array index clamping.
+typedef enum {
+  // Use the clamp intrinsic for array index clamping.
+  SH_CLAMP_WITH_CLAMP_INTRINSIC = 1,
+
+  // Use a user-defined function for array index clamping.
+  SH_CLAMP_WITH_USER_DEFINED_INT_CLAMP_FUNCTION
+} ShArrayIndexClampingStrategy;
 
 //
 // Driver must call this first, once, before doing any other
@@ -159,6 +182,10 @@ COMPILER_EXPORT int ShInitialize();
 // If the function succeeds, the return value is nonzero, else zero.
 //
 COMPILER_EXPORT int ShFinalize();
+
+// The 64 bits hash function. The first parameter is the input string; the
+// second parameter is the string length.
+typedef khronos_uint64_t (*ShHashFunction64)(const char*, size_t);
 
 //
 // Implementation dependent built-in resources (constants and extensions).
@@ -181,6 +208,20 @@ typedef struct
     int OES_standard_derivatives;
     int OES_EGL_image_external;
     int ARB_texture_rectangle;
+    int EXT_draw_buffers;
+
+    // Set to 1 if highp precision is supported in the fragment language.
+    // Default is 0.
+    int FragmentPrecisionHigh;
+
+    // Name Hashing.
+    // Set a 64 bit hash function to enable user-defined name hashing.
+    // Default is NULL.
+    ShHashFunction64 HashFunction;
+
+    // Selects a strategy to use when implementing array index clamping.
+    // Default is SH_CLAMP_WITH_CLAMP_INTRINSIC.
+    ShArrayIndexClampingStrategy ArrayIndexClampingStrategy;
 } ShBuiltInResources;
 
 //
@@ -244,7 +285,7 @@ COMPILER_EXPORT void ShDestruct(ShHandle handle);
 COMPILER_EXPORT int ShCompile(
     const ShHandle handle,
     const char* const shaderStrings[],
-    const int numStrings,
+    size_t numStrings,
     int compileOptions
     );
 
@@ -267,11 +308,16 @@ COMPILER_EXPORT int ShCompile(
 //                               termination character.
 // SH_MAPPED_NAME_MAX_LENGTH: the length of the mapped variable name including
 //                            the null termination character.
-// 
+// SH_NAME_MAX_LENGTH: the max length of a user-defined name including the
+//                     null termination character.
+// SH_HASHED_NAME_MAX_LENGTH: the max length of a hashed name including the
+//                            null termination character.
+// SH_HASHED_NAMES_COUNT: the number of hashed names from the latest compile.
+//
 // params: Requested parameter
 COMPILER_EXPORT void ShGetInfo(const ShHandle handle,
                                ShShaderInfo pname,
-                               int* params);
+                               size_t* params);
 
 // Returns nul-terminated information log for a compiled shader.
 // Parameters:
@@ -314,7 +360,7 @@ COMPILER_EXPORT void ShGetObjectCode(const ShHandle handle, char* objCode);
 //             mappedName are the same.
 COMPILER_EXPORT void ShGetActiveAttrib(const ShHandle handle,
                                        int index,
-                                       int* length,
+                                       size_t* length,
                                        int* size,
                                        ShDataType* type,
                                        char* name,
@@ -341,11 +387,29 @@ COMPILER_EXPORT void ShGetActiveAttrib(const ShHandle handle,
 //             mappedName are the same.
 COMPILER_EXPORT void ShGetActiveUniform(const ShHandle handle,
                                         int index,
-                                        int* length,
+                                        size_t* length,
                                         int* size,
                                         ShDataType* type,
                                         char* name,
                                         char* mappedName);
+
+// Returns information about a name hashing entry from the latest compile.
+// Parameters:
+// handle: Specifies the compiler
+// index: Specifies the index of the name hashing entry to be queried.
+// name: Returns a null terminated string containing the user defined name.
+//       It is assumed that name has enough memory to accomodate the name.
+//       The size of the buffer required to store the user defined name can
+//       be obtained by calling ShGetInfo with SH_NAME_MAX_LENGTH.
+// hashedName: Returns a null terminated string containing the hashed name of
+//             the uniform variable, It is assumed that hashedName has enough
+//             memory to accomodate the name. The size of the buffer required
+//             to store the name can be obtained by calling ShGetInfo with
+//             SH_HASHED_NAME_MAX_LENGTH.
+COMPILER_EXPORT void ShGetNameHashingEntry(const ShHandle handle,
+                                           int index,
+                                           char* name,
+                                           char* hashedName);
 
 #ifdef __cplusplus
 }

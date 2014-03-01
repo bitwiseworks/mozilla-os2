@@ -20,8 +20,8 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex,
 {
 
   typedef struct {
-    uint32 hi;
-    uint32 lo;
+    uint32_t hi;
+    uint32_t lo;
   } DU;
 
 #define PARAM_BUFFER_COUNT     16
@@ -124,7 +124,7 @@ PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex,
   return result;
 }
 
-extern "C" int SharedStub(int);
+extern "C" nsresult SharedStub(int);
 
 #define STUB_ENTRY(n)       \
 nsresult nsXPTCStubBase::Stub##n()  \

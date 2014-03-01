@@ -1,12 +1,11 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef SharedContext_inl_h__
-#define SharedContext_inl_h__
+#ifndef frontend_SharedContext_inl_h
+#define frontend_SharedContext_inl_h
 
 #include "frontend/Parser.h"
 #include "frontend/SharedContext.h"
@@ -15,30 +14,37 @@ namespace js {
 namespace frontend {
 
 inline
-SharedContext::SharedContext(JSContext *cx, JSObject *scopeChain, JSFunction *fun,
-                             FunctionBox *funbox, StrictMode::StrictModeState sms)
+SharedContext::SharedContext(JSContext *cx, bool strict)
   : context(cx),
-    fun_(cx, fun),
-    funbox_(funbox),
-    scopeChain_(cx, scopeChain),
-    cxFlags(cx),
-    strictModeState(sms)
+    anyCxFlags(),
+    strict(strict)
 {
-    JS_ASSERT((fun && !scopeChain_) || (!fun && !funbox));
-}
-
-inline bool
-SharedContext::inStrictMode()
-{
-    JS_ASSERT(strictModeState != StrictMode::UNKNOWN);
-    JS_ASSERT_IF(inFunction() && funbox(), funbox()->strictModeState == strictModeState);
-    return strictModeState == StrictMode::STRICT;
 }
 
 inline bool
 SharedContext::needStrictChecks()
 {
-    return context->hasStrictOption() || strictModeState != StrictMode::NOTSTRICT;
+    return context->hasExtraWarningsOption() || strict;
+}
+
+inline GlobalSharedContext *
+SharedContext::asGlobalSharedContext()
+{
+    JS_ASSERT(isGlobalSharedContext());
+    return static_cast<GlobalSharedContext*>(this);
+}
+
+inline ModuleBox *
+SharedContext::asModuleBox()
+{
+    JS_ASSERT(isModuleBox());
+    return static_cast<ModuleBox*>(this);
+}
+
+GlobalSharedContext::GlobalSharedContext(JSContext *cx, JSObject *scopeChain, bool strict)
+  : SharedContext(cx, strict),
+    scopeChain_(cx, scopeChain)
+{
 }
 
 } /* namespace frontend */
@@ -87,49 +93,6 @@ frontend::FinishPopStatement(ContextT *ct)
     }
 }
 
-/*
- * The function LexicalLookup searches a static binding for the given name in
- * the stack of statements enclosing the statement currently being parsed. Each
- * statement that introduces a new scope has a corresponding scope object, on
- * which the bindings for that scope are stored. LexicalLookup either returns
- * the innermost statement which has a scope object containing a binding with
- * the given name, or NULL.
- */
-template <class ContextT>
-typename ContextT::StmtInfo *
-frontend::LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename ContextT::StmtInfo *stmt)
-{
-    if (!stmt)
-        stmt = ct->topScopeStmt;
-    for (; stmt; stmt = stmt->downScope) {
-        /*
-         * With-statements introduce dynamic bindings. Since dynamic bindings
-         * can potentially override any static bindings introduced by statements
-         * further up the stack, we have to abort the search.
-         */
-        if (stmt->type == STMT_WITH)
-            break;
-
-        // Skip statements that do not introduce a new scope
-        if (!stmt->isBlockScope)
-            continue;
-
-        StaticBlockObject &blockObj = *stmt->blockObj;
-        Shape *shape = blockObj.nativeLookup(ct->sc->context, AtomToId(atom));
-        if (shape) {
-            JS_ASSERT(shape->hasShortID());
-
-            if (slotp)
-                *slotp = blockObj.stackDepth() + shape->shortid();
-            return stmt;
-        }
-    }
-
-    if (slotp)
-        *slotp = -1;
-    return stmt;
-}
-
 } // namespace js
 
-#endif // SharedContext_inl_h__
+#endif /* frontend_SharedContext_inl_h */

@@ -69,21 +69,23 @@ input {
   text-shadow: none;
 }
 
-input > .anonymous-div {
+input > .anonymous-div,
+input::-moz-placeholder {
   word-wrap: normal !important;
   /* Make the line-height equal to the available height */
   line-height: -moz-block-height;
 }
 
-/* Make sure that the location bar's alignment in RTL mode changes according
-   to the input box direction if the user switches the text direction using
-   cmd_switchTextDirection (which applies a dir attribute to the input box's
-   anonymous div. */
 @-moz-document url-prefix(chrome://) {
-  input.uri-element-right-align:-moz-locale-dir(rtl) > .anonymous-div {
+  input.uri-element-right-align:-moz-locale-dir(rtl) {
+    direction: ltr !important;
     text-align: right !important;
   }
 
+  /* Make sure that the location bar's alignment in RTL mode changes according
+     to the input box direction if the user switches the text direction using
+     cmd_switchTextDirection (which applies a dir attribute to the input box's
+     anonymous div). */
   input.uri-element-right-align:-moz-locale-dir(rtl) > .anonymous-div[dir=ltr] {
     text-align: left !important;
   }
@@ -116,12 +118,18 @@ textarea > scrollbar {
 }
 
 textarea > .anonymous-div,
-input > .anonymous-div {
+input > .anonymous-div,
+input::-moz-placeholder,
+textarea::-moz-placeholder {
   white-space: pre;
   overflow: auto;
   border: 0px !important;
-  /* The 1px horizontal padding is for parity with Win/IE */
-  padding: 0px 1px;
+  /*
+   * The 1px horizontal padding is for parity with Win/IE.
+   * We need to mark it !important to make sure it can't be changed on the
+   * placeholder.
+   */
+  padding: 0px 1px !important;
   margin: 0px;
   text-decoration: inherit;
   -moz-text-decoration-color: inherit;
@@ -140,30 +148,31 @@ input > .anonymous-div.inherit-overflow {
   overflow: inherit;
 }
 
-input:-moz-placeholder,
-textarea:-moz-placeholder {
-  color: GrayText;
+input::-moz-placeholder,
+textarea::-moz-placeholder {
+  /*
+   * Changing display to inline can leads to broken behaviour and will assert.
+   */
+  display: inline-block !important;
+
+  /*
+   * Changing resize would display a broken behaviour and will assert.
+   */
+  resize: none !important;
+
+  overflow: hidden !important;
+
+  /*
+   * The placeholder should be ignored by pointer otherwise, we might have some
+   * unexpected behavior like the resize handle not being selectable.
+   */
+  pointer-events: none !important;
+
+  opacity: 0.54;
 }
 
-input:-moz-placeholder > .anonymous-div:not(.placeholder),
-textarea:-moz-placeholder > .anonymous-div:not(.placeholder) {
-  color: -moz-FieldText;
-}
-
-input > .placeholder,
-textarea > .placeholder {
-  overflow: hidden;
-  pointer-events: none;
-  resize: none;
-}
-
-textarea > .placeholder {
-  white-space: pre-wrap;
-}
-
-input > .placeholder.hidden,
-textarea > .placeholder.hidden {
-  visibility: hidden;
+textarea::-moz-placeholder {
+  white-space: pre-wrap !important;
 }
 
 input:-moz-read-write,
@@ -196,6 +205,8 @@ select {
   text-indent: 0;
   overflow: -moz-hidden-unscrollable;
   text-shadow: none;
+  /* No text-decoration reaching inside, by default */
+  display: inline-block;
 }
 
 /* Need the "select[size][multiple]" selector to override the settings on
@@ -351,10 +362,14 @@ select:disabled:disabled /* Need the pseudo-class twice to have the specificity
                             be at least the same as select[size][multiple] above */
 {
   -moz-user-input: disabled;
-  -moz-user-focus: ignore;
   color: GrayText;
   background-color: ThreeDFace;
   cursor: inherit;
+}
+
+input:disabled > .anonymous-div,
+textarea:disabled > .anonymous-div {
+  cursor: default;
 }
 
 option:disabled,
@@ -396,29 +411,50 @@ input[type="image"]:-moz-focusring {
 
 /* file selector */
 input[type="file"] {
-  -moz-appearance: none;
+  display: inline-block;
   white-space: nowrap;
-  cursor: default;
-  -moz-binding: none;
+  overflow: hidden;
+  color: inherit;
 
-  padding: 0 !important;
-  border-style: none !important;
+  /* Revert rules which apply on all inputs. */
+  -moz-appearance: none;
+  -moz-binding: none;
+  cursor: default;
+
+  border: none;
+  background-color: transparent;
+  padding: 0;
 }
 
-input[type="file"] > input[type="text"] {
-  border-color: inherit;
-  background-color: inherit;
+input[type="file"] > xul|label {
+  min-width: 12em;
+  -moz-padding-start: 5px;
+
   color: inherit;
   font-size: inherit;
   letter-spacing: inherit;
+
+  /*
+   * Force the text to have LTR directionality. Otherwise filenames containing
+   * RTL characters will be reordered with chaotic results.
+   */
+  direction: ltr !important;
 }
 
 /* button part of file selector */
-input[type="file"] > input[type="button"] {
+input[type="file"] > button[type="button"] {
   height: inherit;
   font-size: inherit;
   letter-spacing: inherit;
   cursor: inherit;
+}
+
+/* Try to make RTL <input type='file'> look nicer. */
+/* TODO: use text-align: match-parent when bug 645642 is fixed. */
+input[type="file"]:-moz-dir(rtl) > xul|label {
+  -moz-padding-start: 0px;
+  padding-right: 5px;
+  text-align: right;
 }
 
 /* radio buttons */
@@ -545,7 +581,7 @@ button::-moz-focus-inner,
 input[type="reset"]::-moz-focus-inner,
 input[type="button"]::-moz-focus-inner,
 input[type="submit"]::-moz-focus-inner,
-input[type="file"] > input[type="button"]::-moz-focus-inner {
+input[type="file"] > button[type="button"]::-moz-focus-inner {
   padding: 0px 2px 0px 2px;
   border: 1px dotted transparent;
 }
@@ -554,7 +590,7 @@ button:-moz-focusring::-moz-focus-inner,
 input[type="reset"]:-moz-focusring::-moz-focus-inner,
 input[type="button"]:-moz-focusring::-moz-focus-inner,
 input[type="submit"]:-moz-focusring::-moz-focus-inner,
-input[type="file"] > input[type="button"]:-moz-focusring::-moz-focus-inner {
+input[type="file"] > button[type="button"]:-moz-focusring::-moz-focus-inner {
   border-color: ButtonText;
 }
 
@@ -595,21 +631,13 @@ input[type="submit"]:disabled {
   */
 textarea > .anonymous-div,
 input > .anonymous-div,
+input::-moz-placeholder,
+textarea::-moz-placeholder,
 *|*::-moz-button-content,
 *|*::-moz-display-comboboxcontrol-frame,
 optgroup:before {
   unicode-bidi: inherit;
   text-overflow: inherit;
-}
-
- /*
-  * Force the text control child of file input controls to have left-to-right
-  * directionality. Otherwise filenames containing right-to-left characters
-  * will be reordered with chaotic results.
-  */
-input[type="file"] > input[type="text"] {
-  direction: ltr !important;
-  text-align: inherit;
 }
 
 /**
@@ -651,7 +679,7 @@ progress {
 }
 
 ::-moz-progress-bar {
-  /* Block styles that would change the type of frame we construct. */
+  /* Prevent styling that would change the type of frame we construct. */
   display: inline-block ! important;
   float: none ! important;
   position: static ! important;
@@ -671,7 +699,7 @@ meter {
   display: inline-block;
   vertical-align: -0.2em;
 
-  background: -moz-linear-gradient(top, #e6e6e6, #e6e6e6, #eeeeee 20%, #cccccc 45%, #cccccc 55%);
+  background: linear-gradient(#e6e6e6, #e6e6e6, #eeeeee 20%, #cccccc 45%, #cccccc 55%);
 }
 
 ::-moz-meter-bar {
@@ -688,15 +716,114 @@ meter {
 
 :-moz-meter-optimum::-moz-meter-bar {
   /* green. */
-  background: -moz-linear-gradient(top, #ad7, #ad7, #cea 20%, #7a3 45%, #7a3 55%);
+  background: linear-gradient(#ad7, #ad7, #cea 20%, #7a3 45%, #7a3 55%);
 }
 :-moz-meter-sub-optimum::-moz-meter-bar {
   /* orange. */
-  background: -moz-linear-gradient(top, #fe7, #fe7, #ffc 20%, #db3 45%, #db3 55%);
+  background: linear-gradient(#fe7, #fe7, #ffc 20%, #db3 45%, #db3 55%);
 }
 :-moz-meter-sub-sub-optimum::-moz-meter-bar {
   /* red. */
-  background: -moz-linear-gradient(top, #f77, #f77, #fcc 20%, #d44 45%, #d44 55%);
+  background: linear-gradient(#f77, #f77, #fcc 20%, #d44 45%, #d44 55%);
+}
+
+input[type=range] {
+  -moz-appearance: range;
+  display: inline-block;
+  width: 12em;
+  height: 1.3em;
+  margin: 0 0.7em;
+  /* Override some rules that apply on all input types: */
+  cursor: default;
+  background: none;
+  border: none;
+  -moz-binding: none; /* we don't want any of platformHTMLBindings.xml#inputFields */
+  /* Prevent nsFrame::HandlePress setting mouse capture to this element. */
+  -moz-user-select: none ! important;
+}
+
+input[type=range][orient=vertical] {
+  width: 1.3em;
+  height: 12em;
+}
+
+/**
+ * Layout handles positioning of this pseudo-element specially (so that content
+ * authors can concentrate on styling the thumb without worrying about the
+ * logic to position it). Specifically the 'margin', 'top' and 'left'
+ * properties are ignored.
+ *
+ * If content authors want to have a vertical range, they will also need to
+ * set the width/height of this pseudo-element.
+ */
+input[type=range]::-moz-range-track {
+  /* Prevent styling that would change the type of frame we construct. */
+  display: inline-block !important;
+  float: none !important;
+  position: static !important;
+  border: none;
+  border-top: solid 0.1em lightgrey;
+  border-bottom: solid 0.1em lightgrey;
+  background-color: grey;
+  width: 100%;
+  height: 0.2em;
+  /* Prevent nsFrame::HandlePress setting mouse capture to this element. */
+  -moz-user-select: none ! important;
+}
+
+input[type=range][orient=vertical]::-moz-range-track {
+  border-top: none;
+  border-bottom: none;
+  border-left: solid 0.1em lightgrey;
+  border-right: solid 0.1em lightgrey;
+  width: 0.2em;
+  height: 100%;
+}
+
+/**
+ * Layout handles positioning of this pseudo-element specially (so that content
+ * authors can concentrate on styling this pseudo-element without worrying
+ * about the logic to position it). Specifically the 'margin', 'top' and 'left'
+ * properties are ignored. Additionally, if the range is horizontal, the width
+ * property is ignored, and if the range range is vertical, the height property
+ * is ignored.
+ */
+input[type=range]::-moz-range-progress {
+  /* Prevent styling that would change the type of frame we construct. */
+  display: inline-block !important;
+  float: none !important;
+  position: static !important;
+  /* Since one of width/height will be ignored, this just sets the "other"
+     dimension.
+   */
+  width: 0.2em;
+  height: 0.2em;
+  /* Prevent nsFrame::HandlePress setting mouse capture to this element. */
+  -moz-user-select: none ! important;
+}
+
+/**
+ * Layout handles positioning of this pseudo-element specially (so that content
+ * authors can concentrate on styling the thumb without worrying about the
+ * logic to position it). Specifically the 'margin', 'top' and 'left'
+ * properties are ignored.
+ */
+input[type=range]::-moz-range-thumb {
+  /* Native theming is atomic for range. Set -moz-appearance on the range
+   * to get rid of it. The thumb's -moz-appearance is fixed.
+   */
+  -moz-appearance: range-thumb !important;
+  /* Prevent styling that would change the type of frame we construct. */
+  display: inline-block !important;
+  float: none !important;
+  position: static !important;
+  width: 1em;
+  height: 1em;
+  border: 0.1em solid grey;
+  border-radius: 0.5em;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><linearGradient id='g' x2='0' y2='100%'><stop stop-color='%23ddd'/><stop offset='100%' stop-color='white'/></linearGradient><rect fill='url(%23g)' width='100%' height='100%'/></svg>");
+  /* Prevent nsFrame::HandlePress setting mouse capture to this element. */
+  -moz-user-select: none ! important;
 }
 
 %ifdef XP_OS2

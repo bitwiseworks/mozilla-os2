@@ -60,9 +60,9 @@ AccessibleWrap::GetNativeType ()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 
-  if (IsXULDeck())
+  if (IsXULTabpanels())
     return [mozPaneAccessible class];
-  
+
   roles::Role role = Role();
   switch (role) {
     case roles::PUSHBUTTON:
@@ -139,16 +139,6 @@ AccessibleWrap::HandleAccEvent(AccEvent* aEvent)
   nsresult rv = Accessible::HandleAccEvent(aEvent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return FirePlatformEvent(aEvent);
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
-}
-
-nsresult
-AccessibleWrap::FirePlatformEvent(AccEvent* aEvent)
-{
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
-
   uint32_t eventType = aEvent->GetEventType();
 
   // ignore everything but focus-changed, value-changed, caret and selection
@@ -198,14 +188,13 @@ AccessibleWrap::InvalidateChildren()
 }
 
 bool
-AccessibleWrap::AppendChild(Accessible* aAccessible)
+AccessibleWrap::InsertChildAt(uint32_t aIdx, Accessible* aAccessible)
 {
-  bool appended = Accessible::AppendChild(aAccessible);
-  
-  if (appended && mNativeObject)
+  bool inserted = Accessible::InsertChildAt(aIdx, aAccessible);
+  if (inserted && mNativeObject)
     [mNativeObject appendChild:aAccessible];
 
-  return appended;
+  return inserted;
 }
 
 bool

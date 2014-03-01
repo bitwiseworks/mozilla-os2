@@ -6,6 +6,7 @@
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "jsapi.h"
+#include "jswrapper.h"
 #include "nsCRT.h"
 #include "nsError.h"
 #include "nsXPIDLString.h"
@@ -35,9 +36,9 @@
 #include "nsIContentViewer.h"
 #include "nsIXPConnect.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsJSUtils.h"
 #include "nsThreadUtils.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptChannel.h"
 #include "nsIDocument.h"
 #include "nsIObjectInputStream.h"
@@ -45,6 +46,8 @@
 #include "nsIWritablePropertyBag2.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsSandboxFlags.h"
+
+using mozilla::AutoPushJSContext;
 
 static NS_DEFINE_CID(kJSURICID, NS_JSURI_CID);
 
@@ -165,22 +168,27 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     rv = principal->GetCsp(getter_AddRefs(csp));
     NS_ENSURE_SUCCESS(rv, rv);
     if (csp) {
-		bool allowsInline;
-		rv = csp->GetAllowsInlineScript(&allowsInline);
-		NS_ENSURE_SUCCESS(rv, rv);
+        bool allowsInline = true;
+        bool reportViolations = false;
+        rv = csp->GetAllowsInlineScript(&reportViolations, &allowsInline);
+        NS_ENSURE_SUCCESS(rv, rv);
 
-      if (!allowsInline) {
-          // gather information to log with violation report
-          nsCOMPtr<nsIURI> uri;
-          principal->GetURI(getter_AddRefs(uri));
-          nsCAutoString asciiSpec;
-          uri->GetAsciiSpec(asciiSpec);
-		  csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
-								   NS_ConvertUTF8toUTF16(asciiSpec),
-								   NS_ConvertUTF8toUTF16(mURL),
-                                   0);
+        if (reportViolations) {
+            // gather information to log with violation report
+            nsCOMPtr<nsIURI> uri;
+            principal->GetURI(getter_AddRefs(uri));
+            nsAutoCString asciiSpec;
+            uri->GetAsciiSpec(asciiSpec);
+            csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
+                                     NS_ConvertUTF8toUTF16(asciiSpec),
+                                     NS_ConvertUTF8toUTF16(mURL),
+                                     0);
+        }
+
+        //return early if inline scripts are not allowed
+        if (!allowsInline) {
           return NS_ERROR_DOM_RETVAL_UNDEFINED;
-      }
+        }
     }
 
     // Get the global object we should be running on.
@@ -210,8 +218,6 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     nsCOMPtr<nsIScriptGlobalObject> innerGlobal = do_QueryInterface(innerWin);
 
-    JSObject *globalJSObject = innerGlobal->GetGlobalJSObject();
-
     nsCOMPtr<nsIDOMWindow> domWindow(do_QueryInterface(global, &rv));
     if (NS_FAILED(rv)) {
         return NS_ERROR_FAILURE;
@@ -222,7 +228,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     if (!scriptContext)
         return NS_ERROR_FAILURE;
 
-    nsCAutoString script(mScript);
+    nsAutoCString script(mScript);
     // Unescape the script
     NS_UnescapeURL(script);
 
@@ -235,16 +241,13 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     bool useSandbox =
         (aExecutionPolicy == nsIScriptChannel::EXECUTE_IN_SANDBOX);
 
+    AutoPushJSContext cx(scriptContext->GetNativeContext());
+    JS::Rooted<JSObject*> globalJSObject(cx, innerGlobal->GetGlobalJSObject());
+
     if (!useSandbox) {
         //-- Don't outside a sandbox unless the script principal subsumes the
         //   principal of the context.
-        nsCOMPtr<nsIPrincipal> objectPrincipal;
-        rv = securityManager->
-            GetObjectPrincipal(scriptContext->GetNativeContext(),
-                               globalJSObject,
-                               getter_AddRefs(objectPrincipal));
-        if (NS_FAILED(rv))
-            return rv;
+        nsIPrincipal* objectPrincipal = nsContentUtils::GetObjectPrincipal(globalJSObject);
 
         bool subsumes;
         rv = principal->Subsumes(objectPrincipal, &subsumes);
@@ -254,11 +257,8 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         useSandbox = !subsumes;
     }
 
-    nsString result;
-    bool isUndefined;
-
+    JS::Rooted<JS::Value> v (cx, JS::UndefinedValue());
     // Finally, we have everything needed to evaluate the expression.
-
     if (useSandbox) {
         // We were asked to use a sandbox, or the channel owner isn't allowed
         // to execute in this context.  Evaluate the javascript URL in a
@@ -267,9 +267,6 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
         // First check to make sure it's OK to evaluate this script to
         // start with.  For example, script could be disabled.
-        JSContext *cx = scriptContext->GetNativeContext();
-        JSAutoRequest ar(cx);
-
         bool ok;
         rv = securityManager->CanExecuteScripts(cx, principal, &ok);
         if (NS_FAILED(rv)) {
@@ -288,57 +285,38 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         rv = xpc->CreateSandbox(cx, principal, getter_AddRefs(sandbox));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        jsval rval = JSVAL_VOID;
+        // The nsXPConnect sandbox API gives us a wrapper to the sandbox for
+        // our current compartment. Because our current context doesn't necessarily
+        // subsume that of the sandbox, we want to unwrap and enter the sandbox's
+        // compartment. It's a shame that the APIs here are so clunkly. :-(
+        JS::Rooted<JSObject*> sandboxObj(cx, sandbox->GetJSObject());
+        NS_ENSURE_STATE(sandboxObj);
+        sandboxObj = js::UncheckedUnwrap(sandboxObj);
+        JSAutoCompartment ac(cx, sandboxObj);
 
         // Push our JSContext on the context stack so the JS_ValueToString call (and
         // JS_ReportPendingException, if relevant) will use the principal of cx.
-        // Note that we do this as late as possible to make popping simpler.
-        nsCOMPtr<nsIJSContextStack> stack =
-            do_GetService("@mozilla.org/js/xpc/ContextStack;1", &rv);
-        if (NS_SUCCEEDED(rv)) {
-            rv = stack->Push(cx);
-        }
-        if (NS_FAILED(rv)) {
-            return rv;
-        }
-
-        rv = xpc->EvalInSandboxObject(NS_ConvertUTF8toUTF16(script), cx,
-                                      sandbox, true, &rval);
+        nsCxPusher pusher;
+        pusher.Push(cx);
+        rv = xpc->EvalInSandboxObject(NS_ConvertUTF8toUTF16(script),
+                                      /* filename = */ nullptr, cx,
+                                      sandboxObj, true, v.address());
 
         // Propagate and report exceptions that happened in the
         // sandbox.
         if (JS_IsExceptionPending(cx)) {
             JS_ReportPendingException(cx);
-            isUndefined = true;
-        } else {
-            isUndefined = rval == JSVAL_VOID;
         }
-
-        if (!isUndefined && NS_SUCCEEDED(rv)) {
-            NS_ASSERTION(JSVAL_IS_STRING(rval), "evalInSandbox is broken");
-
-            nsDependentJSString depStr;
-            if (!depStr.init(cx, JSVAL_TO_STRING(rval))) {
-                JS_ReportPendingException(cx);
-                isUndefined = true;
-            } else {
-                result = depStr;
-            }
-        }
-
-        stack->Pop(nullptr);
     } else {
         // No need to use the sandbox, evaluate the script directly in
         // the given scope.
+        JS::CompileOptions options(cx);
+        options.setFileAndLine(mURL.get(), 1)
+               .setVersion(JSVERSION_DEFAULT);
         rv = scriptContext->EvaluateString(NS_ConvertUTF8toUTF16(script),
-                                           globalJSObject, // obj
-                                           principal,
-                                           principal,
-                                           mURL.get(),     // url
-                                           1,              // line no
-                                           JSVERSION_DEFAULT,
-                                           &result,
-                                           &isUndefined);
+                                           globalJSObject, options,
+                                           /* aCoerceToString = */ true,
+                                           v.address());
 
         // If there's an error on cx as a result of that call, report
         // it now -- either we're just running under the event loop,
@@ -347,18 +325,25 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         // lose the error), or it might be JS that then proceeds to
         // cause an error of its own (which will also make us lose
         // this error).
-        JSContext *cx = scriptContext->GetNativeContext();
-        JSAutoRequest ar(cx);
         ::JS_ReportPendingException(cx);
     }
-    
-    if (NS_FAILED(rv)) {
-        rv = NS_ERROR_MALFORMED_URI;
+
+    // If we took the sandbox path above, v might be in the sandbox
+    // compartment.
+    if (!JS_WrapValue(cx, v.address())) {
+        return NS_ERROR_OUT_OF_MEMORY;
     }
-    else if (isUndefined) {
-        rv = NS_ERROR_DOM_RETVAL_UNDEFINED;
-    }
-    else {
+
+    if (NS_FAILED(rv) || !(v.isString() || v.isUndefined())) {
+        return NS_ERROR_MALFORMED_URI;
+    } else if (v.isUndefined()) {
+        return NS_ERROR_DOM_RETVAL_UNDEFINED;
+    } else {
+        nsDependentJSString result;
+        if (!result.init(cx, v)) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
+
         char *bytes;
         uint32_t bytesLen;
         NS_NAMED_LITERAL_CSTRING(isoCharset, "ISO-8859-1");
@@ -655,8 +640,7 @@ nsJSChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
         }
     }
 
-    mDocumentOnloadBlockedOn =
-        do_QueryInterface(mOriginalInnerWindow->GetExtantDocument());
+    mDocumentOnloadBlockedOn = mOriginalInnerWindow->GetExtantDoc();
     if (mDocumentOnloadBlockedOn) {
         // If we're a document channel, we need to actually block onload on our
         // _parent_ document.  This is because we don't actually set our
@@ -681,7 +665,7 @@ nsJSChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
     if (mIsAsync) {
         // post an event to do the rest
         method = &nsJSChannel::EvaluateScript;
-    } else {   
+    } else {
         EvaluateScript();
         if (mOpenedStreamChannel) {
             // That will handle notifying things
@@ -772,10 +756,13 @@ nsJSChannel::EvaluateScript()
     nsLoadFlags loadFlags;
     mStreamChannel->GetLoadFlags(&loadFlags);
 
-    if (loadFlags & LOAD_DOCUMENT_URI) {
-        // We're loaded as the document channel. If we go on,
-        // we'll blow away the current document. Make sure that's
-        // ok. If so, stop all pending network loads.
+    uint32_t disposition;
+    if (NS_FAILED(mStreamChannel->GetContentDisposition(&disposition)))
+        disposition = nsIChannel::DISPOSITION_INLINE;
+    if (loadFlags & LOAD_DOCUMENT_URI && disposition != nsIChannel::DISPOSITION_ATTACHMENT) {
+        // We're loaded as the document channel and not expecting to download
+        // the result. If we go on, we'll blow away the current document. Make
+        // sure that's ok. If so, stop all pending network loads.
 
         nsCOMPtr<nsIDocShell> docShell;
         NS_QueryNotificationCallbacks(mStreamChannel, docShell);
@@ -1008,9 +995,21 @@ nsJSChannel::GetContentDisposition(uint32_t *aContentDisposition)
 }
 
 NS_IMETHODIMP
+nsJSChannel::SetContentDisposition(uint32_t aContentDisposition)
+{
+    return mStreamChannel->SetContentDisposition(aContentDisposition);
+}
+
+NS_IMETHODIMP
 nsJSChannel::GetContentDispositionFilename(nsAString &aContentDispositionFilename)
 {
     return mStreamChannel->GetContentDispositionFilename(aContentDispositionFilename);
+}
+
+NS_IMETHODIMP
+nsJSChannel::SetContentDispositionFilename(const nsAString &aContentDispositionFilename)
+{
+    return mStreamChannel->SetContentDispositionFilename(aContentDispositionFilename);
 }
 
 NS_IMETHODIMP
@@ -1020,13 +1019,13 @@ nsJSChannel::GetContentDispositionHeader(nsACString &aContentDispositionHeader)
 }
 
 NS_IMETHODIMP
-nsJSChannel::GetContentLength(int32_t *aContentLength)
+nsJSChannel::GetContentLength(int64_t *aContentLength)
 {
     return mStreamChannel->GetContentLength(aContentLength);
 }
 
 NS_IMETHODIMP
-nsJSChannel::SetContentLength(int32_t aContentLength)
+nsJSChannel::SetContentLength(int64_t aContentLength)
 {
     return mStreamChannel->SetContentLength(aContentLength);
 }
@@ -1044,7 +1043,7 @@ NS_IMETHODIMP
 nsJSChannel::OnDataAvailable(nsIRequest* aRequest,
                              nsISupports* aContext, 
                              nsIInputStream* aInputStream,
-                             uint32_t aOffset,
+                             uint64_t aOffset,
                              uint32_t aCount)
 {
     NS_ENSURE_TRUE(aRequest == mStreamChannel, NS_ERROR_UNEXPECTED);
@@ -1217,7 +1216,7 @@ nsJSProtocolHandler::NewURI(const nsACString &aSpec,
     if (!aCharset || !nsCRT::strcasecmp("UTF-8", aCharset))
       rv = url->SetSpec(aSpec);
     else {
-      nsCAutoString utf8Spec;
+      nsAutoCString utf8Spec;
       rv = EnsureUTF8Spec(PromiseFlatCString(aSpec), aCharset, utf8Spec);
       if (NS_SUCCEEDED(rv)) {
         if (utf8Spec.IsEmpty())

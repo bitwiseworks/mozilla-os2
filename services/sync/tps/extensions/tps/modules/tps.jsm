@@ -11,13 +11,12 @@ let EXPORTED_SYMBOLS = ["TPS"];
 
 const {classes: CC, interfaces: CI, utils: CU} = Components;
 
-CU.import("resource://services-sync/service.js");
-CU.import("resource://services-sync/constants.js");
-CU.import("resource://services-sync/engines.js");
-CU.import("resource://services-common/async.js");
-CU.import("resource://services-sync/util.js");
 CU.import("resource://gre/modules/XPCOMUtils.jsm");
 CU.import("resource://gre/modules/Services.jsm");
+CU.import("resource://services-common/async.js");
+CU.import("resource://services-sync/constants.js");
+CU.import("resource://services-sync/main.js");
+CU.import("resource://services-sync/util.js");
 CU.import("resource://tps/addons.jsm");
 CU.import("resource://tps/bookmarks.jsm");
 CU.import("resource://tps/logger.jsm");
@@ -26,6 +25,7 @@ CU.import("resource://tps/history.jsm");
 CU.import("resource://tps/forms.jsm");
 CU.import("resource://tps/prefs.jsm");
 CU.import("resource://tps/tabs.jsm");
+CU.import("resource://tps/windows.jsm");
 
 var hh = CC["@mozilla.org/network/protocol;1?name=http"]
          .getService(CI.nsIHttpProtocolHandler);
@@ -64,8 +64,7 @@ const OBSERVER_TOPICS = ["weave:engine:start-tracking",
                          "sessionstore-windows-restored",
                          "private-browsing"];
 
-let TPS =
-{
+let TPS = {
   _waitingForSync: false,
   _isTracking: false,
   _test: null,
@@ -163,6 +162,20 @@ let TPS =
     }, this);
     Logger.close();
     this.goQuitApplication();
+  },
+
+  HandleWindows: function (aWindow, action) {
+    Logger.logInfo("executing action " + action.toUpperCase() +
+                   " on window " + JSON.stringify(aWindow));
+    switch(action) {
+      case ACTION_ADD:
+        BrowserWindows.Add(aWindow.private, function(win) {
+          Logger.logInfo("window finished loading");
+          this.FinishAsyncOperation();
+        }.bind(this));
+        break;
+    }
+    Logger.logPass("executing action " + action.toUpperCase() + " on windows");
   },
 
   HandleTabs: function (tabs, action) {
@@ -569,10 +582,10 @@ let TPS =
           names[name] = true;
         }
 
-        for each (let engine in Engines.getEnabled()) {
+        for (let engine of Weave.Service.engineManager.getEnabled()) {
           if (!(engine.name in names)) {
             Logger.logInfo("Unregistering unused engine: " + engine.name);
-            Engines.unregister(engine);
+            Weave.Service.engineManager.unregister(engine);
           }
         }
       }
@@ -669,13 +682,6 @@ let TPS =
     frame.runTestFile(mozmillfile.path, false);
   },
 
-  SetPrivateBrowsing: function TPS__SetPrivateBrowsing(options) {
-    let PBSvc = CC["@mozilla.org/privatebrowsing;1"].
-                getService(CI.nsIPrivateBrowsingService);
-    PBSvc.privateBrowsingEnabled = options;
-    Logger.logInfo("set privateBrowsingEnabled: " + options);
-  },
-
   /**
    * Synchronously wait for the named event to be observed.
    *
@@ -727,10 +733,10 @@ let TPS =
   ResetData: function ResetData() {
     this.Login(true);
 
-    Service.login();
-    Service.wipeServer();
-    Service.resetClient();
-    Service.login();
+    Weave.Service.login();
+    Weave.Service.wipeServer();
+    Weave.Service.resetClient();
+    Weave.Service.login();
 
     this.waitForTracking();
   },
@@ -748,7 +754,7 @@ let TPS =
     }
 
     if (account["serverURL"]) {
-      Service.serverURL = account["serverURL"];
+      Weave.Service.serverURL = account["serverURL"];
     }
 
     Logger.logInfo("Setting client credentials.");
@@ -757,24 +763,24 @@ let TPS =
       // a new sync account
       Weave.Svc.Prefs.set("admin-secret", account["admin-secret"]);
       let suffix = account["account-suffix"];
-      Weave.Identity.account = "tps" + suffix + "@mozilla.com";
-      Weave.Identity.basicPassword = "tps" + suffix + "tps" + suffix;
-      Weave.Identity.syncKey = Weave.Utils.generatePassphrase();
-      Service.createAccount(Weave.Identity.account,
-                            Weave.Identity.basicPassword,
+      Weave.Service.identity.account = "tps" + suffix + "@mozilla.com";
+      Weave.Service.identity.basicPassword = "tps" + suffix + "tps" + suffix;
+      Weave.Service.identity.syncKey = Weave.Utils.generatePassphrase();
+      Weave.Service.createAccount(Weave.Service.identity.account,
+                            Weave.Service.identity.basicPassword,
                             "dummy1", "dummy2");
     } else if (account["username"] && account["password"] &&
                account["passphrase"]) {
-      Weave.Identity.account = account["username"];
-      Weave.Identity.basicPassword = account["password"];
-      Weave.Identity.syncKey = account["passphrase"];
+      Weave.Service.identity.account = account["username"];
+      Weave.Service.identity.basicPassword = account["password"];
+      Weave.Service.identity.syncKey = account["passphrase"];
     } else {
       this.DumpError("Must specify admin-secret, or " +
                      "username/password/passphrase in the config file");
       return;
     }
 
-    Service.login();
+    Weave.Service.login();
     Logger.AssertEqual(Weave.Status.service, Weave.STATUS_OK, "Weave status not OK");
     Weave.Svc.Obs.notify("weave:service:setup-complete");
     this._loggedIn = true;
@@ -929,3 +935,9 @@ var Tabs = {
   }
 };
 
+var Windows = {
+  add: function Window__add(aWindow) {
+    TPS.StartAsyncOperation();
+    TPS.HandleWindows(aWindow, ACTION_ADD);
+  },
+};

@@ -45,7 +45,8 @@ nsPrintSettings::nsPrintSettings() :
   mPrintToFile(false),
   mOutputFormat(kOutputFormatNative),
   mIsInitedFromPrinter(false),
-  mIsInitedFromPrefs(false)
+  mIsInitedFromPrefs(false),
+  mPersistMarginBoxSettings(true)
 {
 
   /* member initializers and constructor code */
@@ -217,6 +218,32 @@ NS_IMETHODIMP nsPrintSettings::SetResolutionName(const PRUnichar * aResolutionNa
   return NS_OK;
 }
 
+/* attribute wstring resolution; */
+NS_IMETHODIMP nsPrintSettings::GetResolution(int32_t *aResolution)
+{
+  NS_ENSURE_ARG_POINTER(aResolution);
+  *aResolution = mResolution;
+  return NS_OK;
+}
+NS_IMETHODIMP nsPrintSettings::SetResolution(const int32_t aResolution)
+{
+  mResolution = aResolution;
+  return NS_OK;
+}
+
+/* attribute wstring duplex; */
+NS_IMETHODIMP nsPrintSettings::GetDuplex(int32_t *aDuplex)
+{
+  NS_ENSURE_ARG_POINTER(aDuplex);
+  *aDuplex = mDuplex;
+  return NS_OK;
+}
+NS_IMETHODIMP nsPrintSettings::SetDuplex(const int32_t aDuplex)
+{
+  mDuplex = aDuplex;
+  return NS_OK;
+}
+
 /* attribute boolean downloadFonts; */
 NS_IMETHODIMP nsPrintSettings::GetDownloadFonts(bool *aDownloadFonts)
 {
@@ -360,6 +387,19 @@ NS_IMETHODIMP nsPrintSettings::GetIsInitializedFromPrefs(bool *aInitializedFromP
 NS_IMETHODIMP nsPrintSettings::SetIsInitializedFromPrefs(bool aInitializedFromPrefs)
 {
   mIsInitedFromPrefs = (bool)aInitializedFromPrefs;
+  return NS_OK;
+}
+
+/* attribute boolean persistMarginBoxSettings; */
+NS_IMETHODIMP nsPrintSettings::GetPersistMarginBoxSettings(bool *aPersistMarginBoxSettings)
+{
+  NS_ENSURE_ARG_POINTER(aPersistMarginBoxSettings);
+  *aPersistMarginBoxSettings = mPersistMarginBoxSettings;
+  return NS_OK;
+}
+NS_IMETHODIMP nsPrintSettings::SetPersistMarginBoxSettings(bool aPersistMarginBoxSettings)
+{
+  mPersistMarginBoxSettings = aPersistMarginBoxSettings;
   return NS_OK;
 }
 

@@ -8,7 +8,7 @@
 
 #include "gfxASurface.h"
 
-class THEBES_API gfxOS2Surface : public gfxASurface {
+class gfxOS2Surface : public gfxASurface {
 
 public:
     // constructor for an os2Image surface -

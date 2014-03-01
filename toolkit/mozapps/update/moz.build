@@ -1,0 +1,50 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+    if CONFIG['MOZ_UPDATER']:
+        DIRS += ['common', 'updater']
+    elif CONFIG['MOZ_MAINTENANCE_SERVICE']:
+        # If only the maintenance service is installed and not
+        # the updater, then the maintenance service may still be
+        # used for other things.  We need to build update/common
+        # which the maintenance service uses.
+        DIRS += ['common']
+
+TEST_DIRS += ['test_timermanager']
+
+XPIDL_SOURCES += [
+    'nsIUpdateTimerManager.idl',
+]
+
+# Update tests require the updater binary
+if CONFIG['MOZ_UPDATER']:
+    TEST_DIRS += ['test']
+
+    if CONFIG['MOZ_MAINTENANCE_SERVICE']:
+        TEST_DIRS += ['test_svc']
+
+    XPIDL_SOURCES += [
+        'nsIUpdateService.idl',
+    ]
+
+MODULE = 'update'
+
+EXTRA_COMPONENTS += [
+    'nsUpdateTimerManager.js',
+    'nsUpdateTimerManager.manifest',
+]
+
+if CONFIG['MOZ_UPDATER']:
+    EXTRA_COMPONENTS += [
+        'nsUpdateService.manifest',
+    ]
+
+if CONFIG['MOZ_UPDATER']:
+    EXTRA_PP_COMPONENTS += [
+        'nsUpdateService.js',
+        'nsUpdateServiceStub.js',
+    ]

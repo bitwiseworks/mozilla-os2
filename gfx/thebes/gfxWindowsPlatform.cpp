@@ -36,6 +36,7 @@
 #endif
 
 #include "gfxUserFontSet.h"
+#include "nsWindowsHelpers.h"
 
 #include <string>
 
@@ -46,45 +47,27 @@ using namespace mozilla::gfx;
 #include "gfxD2DSurface.h"
 
 #include <d3d10_1.h>
-#include <dxgi.h>
 
 #include "mozilla/gfx/2D.h"
 
 #include "nsMemory.h"
 #endif
 
-/*
- * Required headers are not available in the current consumer preview Win8
- * dev kit, disabling for now.
- */
-#undef MOZ_WINSDK_TARGETVER
+#include <d3d11.h>
 
-/**
- * XXX below should be >= MOZ_NTDDI_WIN8 or such which is not defined yet
- */
-#if MOZ_WINSDK_TARGETVER > MOZ_NTDDI_WIN7
-#define ENABLE_GPU_MEM_REPORTER
-#endif
-
-#if defined CAIRO_HAS_D2D_SURFACE || defined ENABLE_GPU_MEM_REPORTER
 #include "nsIMemoryReporter.h"
-#endif
-
-#ifdef ENABLE_GPU_MEM_REPORTER
 #include <winternl.h>
-
-/**
- * XXX need to check that extern C is really needed with Win8 SDK.
- *     It was required for files I had available at push time.
- */
-extern "C" {
-#include <d3dkmthk.h>
-}
-#endif
+#include "d3dkmtQueryStatistics.h"
 
 using namespace mozilla;
 
 #ifdef CAIRO_HAS_D2D_SURFACE
+
+static const char *kFeatureLevelPref =
+  "gfx.direct3d.last_used_feature_level_idx";
+static const int kSupportedFeatureLevels[] =
+  { D3D10_FEATURE_LEVEL_10_1, D3D10_FEATURE_LEVEL_10_0,
+    D3D10_FEATURE_LEVEL_9_3 };
 
 NS_MEMORY_REPORTER_IMPLEMENT(
     D2DCache,
@@ -96,6 +79,24 @@ NS_MEMORY_REPORTER_IMPLEMENT(
 
 namespace
 {
+
+bool OncePreferenceDirect2DDisabled()
+{
+  static int preferenceValue = -1;
+  if (preferenceValue < 0) {
+    preferenceValue = Preferences::GetBool("gfx.direct2d.disabled", false);
+  }
+  return !!preferenceValue;
+}
+
+bool OncePreferenceDirect2DForceEnabled()
+{
+  static int preferenceValue = -1;
+  if (preferenceValue < 0) {
+    preferenceValue = Preferences::GetBool("gfx.direct2d.force-enabled", false);
+  }
+  return !!preferenceValue;
+}
 
 int64_t GetD2DSurfaceVramUsage() {
   cairo_device_t *device =
@@ -177,18 +178,30 @@ typedef HRESULT (WINAPI*D3D10CreateDevice1Func)(
   UINT SDKVersion,
   ID3D10Device1 **ppDevice
 );
+#endif
 
 typedef HRESULT(WINAPI*CreateDXGIFactory1Func)(
   REFIID riid,
   void **ppFactory
 );
-#endif
 
-#ifdef ENABLE_GPU_MEM_REPORTER
+typedef HRESULT (WINAPI*D3D11CreateDeviceFunc)(
+  IDXGIAdapter *pAdapter,
+  D3D_DRIVER_TYPE DriverType,
+  HMODULE Software,
+  UINT Flags,
+  D3D_FEATURE_LEVEL *pFeatureLevels,
+  UINT FeatureLevels,
+  UINT SDKVersion,
+  ID3D11Device **ppDevice,
+  D3D_FEATURE_LEVEL *pFeatureLevel,
+  ID3D11DeviceContext *ppImmediateContext
+);
+
 class GPUAdapterMultiReporter : public nsIMemoryMultiReporter {
 
     // Callers must Release the DXGIAdapter after use or risk mem-leak
-    static bool GetDXGIAdapter(__out IDXGIAdapter **DXGIAdapter)
+    static bool GetDXGIAdapter(IDXGIAdapter **DXGIAdapter)
     {
         ID3D10Device1 *D2D10Device;
         IDXGIDevice *DXGIDevice;
@@ -206,6 +219,14 @@ class GPUAdapterMultiReporter : public nsIMemoryMultiReporter {
     
 public:
     NS_DECL_ISUPPORTS
+
+    // nsIMemoryMultiReporter abstract method implementation
+    NS_IMETHOD
+    GetName(nsACString &aName)
+    {
+        aName.AssignLiteral("gpuadapter");
+        return NS_OK;
+    }
     
     // nsIMemoryMultiReporter abstract method implementation
     NS_IMETHOD
@@ -221,7 +242,7 @@ public:
         IDXGIAdapter *DXGIAdapter;
         
         HMODULE gdi32Handle;
-        PFND3DKMT_QUERYSTATISTICS queryD3DKMTStatistics;
+        PFND3DKMTQS queryD3DKMTStatistics;
         
         winVers = gfxWindowsPlatform::WindowsOSVersion(&buildNum);
         
@@ -230,35 +251,35 @@ public:
             return NS_OK;
         
         if (gdi32Handle = LoadLibrary(TEXT("gdi32.dll")))
-            queryD3DKMTStatistics = (PFND3DKMT_QUERYSTATISTICS)GetProcAddress(gdi32Handle, "D3DKMTQueryStatistics");
+            queryD3DKMTStatistics = (PFND3DKMTQS)GetProcAddress(gdi32Handle, "D3DKMTQueryStatistics");
         
         if (queryD3DKMTStatistics && GetDXGIAdapter(&DXGIAdapter)) {
             // Most of this block is understood thanks to wj32's work on Process Hacker
             
             DXGI_ADAPTER_DESC adapterDesc;
-            D3DKMT_QUERYSTATISTICS queryStatistics;
+            D3DKMTQS queryStatistics;
             
             DXGIAdapter->GetDesc(&adapterDesc);
             DXGIAdapter->Release();
             
-            memset(&queryStatistics, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-            queryStatistics.Type = D3DKMT_QUERYSTATISTICS_PROCESS;
+            memset(&queryStatistics, 0, sizeof(D3DKMTQS));
+            queryStatistics.Type = D3DKMTQS_PROCESS;
             queryStatistics.AdapterLuid = adapterDesc.AdapterLuid;
             queryStatistics.hProcess = ProcessHandle;
             if (NT_SUCCESS(queryD3DKMTStatistics(&queryStatistics))) {
-                committedBytesUsed = queryStatistics.QueryResult.ProcessInformation.SystemMemory.BytesAllocated;
+                committedBytesUsed = queryStatistics.QueryResult.ProcessInfo.SystemMemory.BytesAllocated;
             }
             
-            memset(&queryStatistics, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-            queryStatistics.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
+            memset(&queryStatistics, 0, sizeof(D3DKMTQS));
+            queryStatistics.Type = D3DKMTQS_ADAPTER;
             queryStatistics.AdapterLuid = adapterDesc.AdapterLuid;
             if (NT_SUCCESS(queryD3DKMTStatistics(&queryStatistics))) {
                 ULONG i;
-                ULONG segmentCount = queryStatistics.QueryResult.AdapterInformation.NbSegments;
+                ULONG segmentCount = queryStatistics.QueryResult.AdapterInfo.NbSegments;
                 
                 for (i = 0; i < segmentCount; i++) {
-                    memset(&queryStatistics, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-                    queryStatistics.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+                    memset(&queryStatistics, 0, sizeof(D3DKMTQS));
+                    queryStatistics.Type = D3DKMTQS_SEGMENT;
                     queryStatistics.AdapterLuid = adapterDesc.AdapterLuid;
                     queryStatistics.QuerySegment.SegmentId = i;
                     
@@ -266,24 +287,24 @@ public:
                         bool aperture;
                         
                         // SegmentInformation has a different definition in Win7 than later versions
-                        if (winVers > gfxWindowsPlatform::kWindows7)
-                            aperture = queryStatistics.QueryResult.SegmentInformation.Aperture;
+                        if (winVers < gfxWindowsPlatform::kWindows8)
+                            aperture = queryStatistics.QueryResult.SegmentInfoWin7.Aperture;
                         else
-                            aperture = queryStatistics.QueryResult.SegmentInformationV1.Aperture;
+                            aperture = queryStatistics.QueryResult.SegmentInfoWin8.Aperture;
                         
-                        memset(&queryStatistics, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-                        queryStatistics.Type = D3DKMT_QUERYSTATISTICS_PROCESS_SEGMENT;
+                        memset(&queryStatistics, 0, sizeof(D3DKMTQS));
+                        queryStatistics.Type = D3DKMTQS_PROCESS_SEGMENT;
                         queryStatistics.AdapterLuid = adapterDesc.AdapterLuid;
                         queryStatistics.hProcess = ProcessHandle;
                         queryStatistics.QueryProcessSegment.SegmentId = i;
                         if (NT_SUCCESS(queryD3DKMTStatistics(&queryStatistics))) {
                             if (aperture)
                                 sharedBytesUsed += queryStatistics.QueryResult
-                                                                  .ProcessSegmentInformation
+                                                                  .ProcessSegmentInfo
                                                                   .BytesCommitted;
                             else
                                 dedicatedBytesUsed += queryStatistics.QueryResult
-                                                                     .ProcessSegmentInformation
+                                                                     .ProcessSegmentInfo
                                                                      .BytesCommitted;
                         }
                     }
@@ -317,18 +338,8 @@ public:
 
         return NS_OK;
     }
-
-    // nsIMemoryMultiReporter abstract method implementation
-    NS_IMETHOD
-    GetExplicitNonHeap(int64_t *aExplicitNonHeap)
-    {
-        // This reporter doesn't do any non-heap measurements.
-        *aExplicitNonHeap = 0;
-        return NS_OK;
-    }
 };
 NS_IMPL_ISUPPORTS1(GPUAdapterMultiReporter, nsIMemoryMultiReporter)
-#endif // ENABLE_GPU_MEM_REPORTER
 
 static __inline void
 BuildKeyNameFromFontName(nsAString &aName)
@@ -339,6 +350,7 @@ BuildKeyNameFromFontName(nsAString &aName)
 }
 
 gfxWindowsPlatform::gfxWindowsPlatform()
+  : mD3D11DeviceInitialized(false)
 {
     mPrefFonts.Init(50);
 
@@ -364,17 +376,13 @@ gfxWindowsPlatform::gfxWindowsPlatform()
 
     UpdateRenderMode();
 
-#ifdef ENABLE_GPU_MEM_REPORTER
     mGPUAdapterMultiReporter = new GPUAdapterMultiReporter();
     NS_RegisterMemoryMultiReporter(mGPUAdapterMultiReporter);
-#endif
 }
 
 gfxWindowsPlatform::~gfxWindowsPlatform()
 {
-#ifdef ENABLE_GPU_MEM_REPORTER
     NS_UnregisterMemoryMultiReporter(mGPUAdapterMultiReporter);
-#endif
     
     ::ReleaseDC(NULL, mScreenDC);
     // not calling FT_Done_FreeType because cairo may still hold references to
@@ -385,40 +393,12 @@ gfxWindowsPlatform::~gfxWindowsPlatform()
     }
 #endif
 
+    mozilla::gfx::Factory::D2DCleanup();
+
     /* 
      * Uninitialize COM 
      */ 
     CoUninitialize();
-}
-
-/* static */ bool
-gfxWindowsPlatform::IsRunningInWindows8Metro()
-{
-  static bool alreadyChecked = false;
-  static bool isMetro = false;
-  if (alreadyChecked) {
-    return isMetro;
-  }
-
-  HMODULE user32DLL = LoadLibraryW(L"user32.dll");
-  if (!user32DLL) {
-    return false;
-  }
-
-  typedef BOOL (WINAPI* IsImmersiveProcessFunc)(HANDLE process);
-  IsImmersiveProcessFunc IsImmersiveProcessPtr = 
-    (IsImmersiveProcessFunc)GetProcAddress(user32DLL,
-                                            "IsImmersiveProcess");
-  FreeLibrary(user32DLL);
-  if (!IsImmersiveProcessPtr) {
-    // isMetro is already set to false.
-    alreadyChecked = true;
-    return false;
-  }
-
-  isMetro = IsImmersiveProcessPtr(GetCurrentProcess());
-  alreadyChecked = true;
-  return isMetro;
 }
 
 void
@@ -456,11 +436,15 @@ gfxWindowsPlatform::UpdateRenderMode()
         }
     }
 
-    d2dDisabled = Preferences::GetBool("gfx.direct2d.disabled", false);
-    d2dForceEnabled = Preferences::GetBool("gfx.direct2d.force-enabled", false);
+    // These will only be evaluated once, and any subsequent changes to
+    // the preferences will be ignored until restart.
+    d2dDisabled = OncePreferenceDirect2DDisabled();
+    d2dForceEnabled = OncePreferenceDirect2DForceEnabled();
 
+#ifdef MOZ_METRO
     // In Metro mode there is no fallback available
-    d2dForceEnabled |= IsRunningInWindows8Metro();
+    d2dForceEnabled |= IsRunningInWindowsMetro();
+#endif
 
     bool tryD2D = !d2dBlocked || d2dForceEnabled;
 
@@ -500,10 +484,10 @@ gfxWindowsPlatform::UpdateRenderMode()
                 DWRITE_FACTORY_TYPE_SHARED,
                 __uuidof(IDWriteFactory),
                 reinterpret_cast<IUnknown**>(&factory));
-            mDWriteFactory = factory;
-            factory->Release();
 
-            if (SUCCEEDED(hr)) {
+            if (SUCCEEDED(hr) && factory) {
+                mDWriteFactory = factory;
+                factory->Release();
                 hr = mDWriteFactory->CreateTextAnalyzer(
                     getter_AddRefs(mDWriteAnalyzer));
             }
@@ -516,14 +500,52 @@ gfxWindowsPlatform::UpdateRenderMode()
     }
 #endif
 
-    uint32_t backendMask = 1 << BACKEND_CAIRO;
+    uint32_t canvasMask = 1 << BACKEND_CAIRO;
+    uint32_t contentMask = 0;
     if (mRenderMode == RENDER_DIRECT2D) {
-      backendMask |= 1 << BACKEND_DIRECT2D;
+      canvasMask |= 1 << BACKEND_DIRECT2D;
+      contentMask |= 1 << BACKEND_DIRECT2D;
     } else {
-      backendMask |= 1 << BACKEND_SKIA;
+      canvasMask |= 1 << BACKEND_SKIA;
     }
-    InitCanvasBackend(backendMask);
+    InitBackendPrefs(canvasMask, contentMask);
 }
+
+#ifdef CAIRO_HAS_D2D_SURFACE
+HRESULT
+gfxWindowsPlatform::CreateDevice(nsRefPtr<IDXGIAdapter1> &adapter1,
+                                 int featureLevelIndex)
+{
+  nsModuleHandle d3d10module(LoadLibrarySystem32(L"d3d10_1.dll"));
+  if (!d3d10module)
+    return E_FAIL;
+  D3D10CreateDevice1Func createD3DDevice =
+    (D3D10CreateDevice1Func)GetProcAddress(d3d10module, "D3D10CreateDevice1");
+  if (!createD3DDevice)
+    return E_FAIL;
+
+  nsRefPtr<ID3D10Device1> device;
+  HRESULT hr =
+    createD3DDevice(adapter1, D3D10_DRIVER_TYPE_HARDWARE, NULL,
+                    D3D10_CREATE_DEVICE_BGRA_SUPPORT |
+                    D3D10_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+                    static_cast<D3D10_FEATURE_LEVEL1>(kSupportedFeatureLevels[featureLevelIndex]),
+                    D3D10_1_SDK_VERSION, getter_AddRefs(device));
+
+  // If we fail here, the DirectX version or video card probably
+  // changed.  We previously could use 10.1 but now we can't
+  // anymore.  Revert back to doing a 10.0 check first before
+  // the 10.1 check.
+  if (device) {
+    mD2DDevice = cairo_d2d_create_device_from_d3d10device(device);
+
+    // Setup a pref for future launch optimizaitons
+    Preferences::SetInt(kFeatureLevelPref, featureLevelIndex);
+  }
+
+  return device ? S_OK : hr;
+}
+#endif
 
 void
 gfxWindowsPlatform::VerifyD2DDevice(bool aAttemptForce)
@@ -540,130 +562,48 @@ gfxWindowsPlatform::VerifyD2DDevice(bool aAttemptForce)
 
     mozilla::ScopedGfxFeatureReporter reporter("D2D", aAttemptForce);
 
-    HMODULE d3d10module = LoadLibraryA("d3d10_1.dll");
-    D3D10CreateDevice1Func createD3DDevice = (D3D10CreateDevice1Func)
-        GetProcAddress(d3d10module, "D3D10CreateDevice1");
     nsRefPtr<ID3D10Device1> device;
 
-    if (createD3DDevice) {
-        HMODULE dxgiModule = LoadLibraryA("dxgi.dll");
-        CreateDXGIFactory1Func createDXGIFactory1 = (CreateDXGIFactory1Func)
-            GetProcAddress(dxgiModule, "CreateDXGIFactory1");
+    int supportedFeatureLevelsCount = ArrayLength(kSupportedFeatureLevels);
+    // If we're not running in Metro don't allow DX9.3
+    if (!IsRunningInWindowsMetro()) {
+      supportedFeatureLevelsCount--;
+    }
 
-        // Try to use a DXGI 1.1 adapter in order to share resources
-        // across processes.
-        nsRefPtr<IDXGIAdapter1> adapter1;
-        if (createDXGIFactory1) {
-            nsRefPtr<IDXGIFactory1> factory1;
-            HRESULT hr = createDXGIFactory1(__uuidof(IDXGIFactory1),
-                                            getter_AddRefs(factory1));
+    nsRefPtr<IDXGIAdapter1> adapter1 = GetDXGIAdapter();
 
-            if (FAILED(hr) || !factory1) {
-              // This seems to happen with some people running the iZ3D driver.
-              // They won't get acceleration.
-              return;
-            }
-    
-            hr = factory1->EnumAdapters1(0, getter_AddRefs(adapter1));
+    if (!adapter1) {
+      // Unable to create adapter, abort acceleration.
+      return;
+    }
 
-            if (SUCCEEDED(hr) && adapter1) {
-                hr = adapter1->CheckInterfaceSupport(__uuidof(ID3D10Device),
-                                                     nullptr);
-                if (FAILED(hr)) {
-                    // We should return and not accelerate if we don't have
-                    // D3D 10.0 support.
-                    return;
-                }
-            }
+    // It takes a lot of time (5-10% of startup time or ~100ms) to do both
+    // a createD3DDevice on D3D10_FEATURE_LEVEL_10_0.  We therefore store
+    // the last used feature level to go direct to that.
+    int featureLevelIndex = Preferences::GetInt(kFeatureLevelPref, 0);
+    if (featureLevelIndex >= supportedFeatureLevelsCount || featureLevelIndex < 0)
+      featureLevelIndex = 0;
+
+    // Start with the last used feature level, and move to lower DX versions
+    // until we find one that works.
+    HRESULT hr = E_FAIL;
+    for (int i = featureLevelIndex; i < supportedFeatureLevelsCount; i++) {
+      hr = CreateDevice(adapter1, i);
+      // If it succeeded we found the first available feature level
+      if (SUCCEEDED(hr))
+        break;
+    }
+
+    // If we succeeded in creating a device, try for a newer device
+    // that we haven't tried yet.
+    if (SUCCEEDED(hr)) {
+      for (int i = featureLevelIndex - 1; i >= 0; i--) {
+        hr = CreateDevice(adapter1, i);
+        // If it failed then we don't have new hardware
+        if (FAILED(hr)) {
+          break;
         }
-
-        // It takes a lot of time (5-10% of startup time or ~100ms) to do both
-        // a createD3DDevice on D3D10_FEATURE_LEVEL_10_0 and 
-        // D3D10_FEATURE_LEVEL_10_1.  Therefore we set a pref if we ever get
-        // 10.1 to work and we use that first if the pref is set.
-        // Going direct to a 10.1 check only takes 20-30ms.
-        // The initialization of hr doesn't matter here because it will get
-        // overwritten whether or not the preference is set.
-        //   - If the preferD3D10_1 pref is set it gets overwritten immediately.
-        //   - If the preferD3D10_1 pref is not set, the if condition after
-        //     the one that follows us immediately will short circuit before 
-        //     checking FAILED(hr) and will again get overwritten immediately.
-        // We initialize it here just so it does not appear to be an
-        // uninitialized value.
-        HRESULT hr = E_FAIL;
-        bool preferD3D10_1 = 
-          Preferences::GetBool("gfx.direct3d.prefer_10_1", false);
-        if (preferD3D10_1) {
-            hr = createD3DDevice(
-                  adapter1, 
-                  D3D10_DRIVER_TYPE_HARDWARE,
-                  NULL,
-                  D3D10_CREATE_DEVICE_BGRA_SUPPORT |
-                  D3D10_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
-                  D3D10_FEATURE_LEVEL_10_1,
-                  D3D10_1_SDK_VERSION,
-                  getter_AddRefs(device));
-
-            // If we fail here, the DirectX version or video card probably
-            // changed.  We previously could use 10.1 but now we can't
-            // anymore.  Revert back to doing a 10.0 check first before
-            // the 10.1 check.
-            if (FAILED(hr)) {
-                Preferences::SetBool("gfx.direct3d.prefer_10_1", false);
-            } else {
-                mD2DDevice = cairo_d2d_create_device_from_d3d10device(device);
-            }
-        }
-
-        if (!preferD3D10_1 || FAILED(hr)) {
-            // If preferD3D10_1 is set and 10.1 failed, fall back to 10.0.
-            // if preferD3D10_1 is not yet set, then first try to create
-            // a 10.0 D3D device, then try to see if 10.1 works.
-            nsRefPtr<ID3D10Device1> device1;
-            hr = createD3DDevice(
-                  adapter1, 
-                  D3D10_DRIVER_TYPE_HARDWARE,
-                  NULL,
-                  D3D10_CREATE_DEVICE_BGRA_SUPPORT |
-                  D3D10_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
-                  D3D10_FEATURE_LEVEL_10_0,
-                  D3D10_1_SDK_VERSION,
-                  getter_AddRefs(device1));
-
-            if (SUCCEEDED(hr)) {
-                device = device1;
-                if (preferD3D10_1) {
-                  mD2DDevice = 
-                    cairo_d2d_create_device_from_d3d10device(device);
-                }
-            }
-        }
-
-        // If preferD3D10_1 is not yet set and 10.0 succeeded
-        if (!preferD3D10_1 && SUCCEEDED(hr)) {
-            // We have 10.0, let's try 10.1.  This second check will only
-            // ever be done once if it succeeds.  After that an option
-            // will be set to prefer using 10.1 before trying 10.0.
-            // In the case that 10.1 fails, it won't be a long operation
-            // like it is when 10.1 succeeds, so we don't need to optimize
-            // the case where 10.1 is not supported, but 10.0 is supported.
-            nsRefPtr<ID3D10Device1> device1;
-            hr = createD3DDevice(
-                  adapter1, 
-                  D3D10_DRIVER_TYPE_HARDWARE,
-                  NULL,
-                  D3D10_CREATE_DEVICE_BGRA_SUPPORT |
-                  D3D10_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
-                  D3D10_FEATURE_LEVEL_10_1,
-                  D3D10_1_SDK_VERSION,
-                  getter_AddRefs(device1));
-
-            if (SUCCEEDED(hr)) {
-                device = device1;
-                Preferences::SetBool("gfx.direct3d.prefer_10_1", true);
-            }
-            mD2DDevice = cairo_d2d_create_device_from_d3d10device(device);
-        }
+      }
     }
 
     if (!mD2DDevice && aAttemptForce) {
@@ -758,7 +698,9 @@ gfxWindowsPlatform::CreateOffscreenImageSurface(const gfxIntSize& aSize,
 {
 #ifdef CAIRO_HAS_D2D_SURFACE
     if (mRenderMode == RENDER_DIRECT2D) {
-        return new gfxImageSurface(aSize, OptimalFormatForContent(aContentType));
+        nsRefPtr<gfxASurface> surface =
+          new gfxImageSurface(aSize, OptimalFormatForContent(aContentType));
+        return surface.forget();
     }
 #endif
 
@@ -770,7 +712,7 @@ gfxWindowsPlatform::CreateOffscreenImageSurface(const gfxIntSize& aSize,
     return surface.forget();
 }
 
-RefPtr<ScaledFont>
+TemporaryRef<ScaledFont>
 gfxWindowsPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 {
     if (aFont->GetType() == gfxFont::FONT_TYPE_DWRITE) {
@@ -1509,8 +1451,89 @@ gfxWindowsPlatform::SetupClearTypeParams()
 #endif
 }
 
+ID3D11Device*
+gfxWindowsPlatform::GetD3D11Device()
+{
+  if (mD3D11DeviceInitialized) {
+    return mD3D11Device;
+  }
+
+  mD3D11DeviceInitialized = true;
+
+  nsModuleHandle d3d11Module(LoadLibrarySystem32(L"d3d11.dll"));
+  D3D11CreateDeviceFunc d3d11CreateDevice = (D3D11CreateDeviceFunc)
+    GetProcAddress(d3d11Module, "D3D11CreateDevice");
+
+  if (!d3d11CreateDevice) {
+    return nullptr;
+  }
+
+  D3D_FEATURE_LEVEL featureLevels[] = {
+    D3D_FEATURE_LEVEL_11_1,
+    D3D_FEATURE_LEVEL_11_0,
+    D3D_FEATURE_LEVEL_10_1,
+    D3D_FEATURE_LEVEL_10_0,
+    D3D_FEATURE_LEVEL_9_3
+  };
+
+  RefPtr<IDXGIAdapter1> adapter = GetDXGIAdapter();
+
+  if (!adapter) {
+    return nullptr;
+  }
+
+  HRESULT hr = d3d11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, NULL,
+                                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                                 featureLevels, sizeof(featureLevels) / sizeof(D3D_FEATURE_LEVEL),
+                                 D3D11_SDK_VERSION, byRef(mD3D11Device), nullptr, nullptr);
+
+  // We leak these everywhere and we need them our entire runtime anyway, let's
+  // leak it here as well.
+  d3d11Module.disown();
+
+  return mD3D11Device;
+}
+
 bool
 gfxWindowsPlatform::IsOptimus()
 {
   return GetModuleHandleA("nvumdshim.dll");
+}
+
+IDXGIAdapter1*
+gfxWindowsPlatform::GetDXGIAdapter()
+{
+  if (mAdapter) {
+    return mAdapter;
+  }
+
+  nsModuleHandle dxgiModule(LoadLibrarySystem32(L"dxgi.dll"));
+  CreateDXGIFactory1Func createDXGIFactory1 = (CreateDXGIFactory1Func)
+    GetProcAddress(dxgiModule, "CreateDXGIFactory1");
+
+  // Try to use a DXGI 1.1 adapter in order to share resources
+  // across processes.
+  if (createDXGIFactory1) {
+    nsRefPtr<IDXGIFactory1> factory1;
+    HRESULT hr = createDXGIFactory1(__uuidof(IDXGIFactory1),
+                                    getter_AddRefs(factory1));
+
+    if (FAILED(hr) || !factory1) {
+      // This seems to happen with some people running the iZ3D driver.
+      // They won't get acceleration.
+      return nullptr;
+    }
+
+    hr = factory1->EnumAdapters1(0, byRef(mAdapter));
+    if (FAILED(hr)) {
+      // We should return and not accelerate if we can't obtain
+      // an adapter.
+      return nullptr;
+    }
+  }
+
+  // We leak this module everywhere, we might as well do so here as well.
+  dxgiModule.disown();
+
+  return mAdapter;
 }

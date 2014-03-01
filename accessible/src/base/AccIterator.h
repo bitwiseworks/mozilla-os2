@@ -4,13 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsAccIterator_h_
-#define nsAccIterator_h_
+#ifndef mozilla_a11y_AccIterator_h__
+#define mozilla_a11y_AccIterator_h__
 
-#include "nsAccessibilityService.h"
-#include "filters.h"
-#include "nscore.h"
 #include "DocAccessible.h"
+#include "Filters.h"
+#include "nsAccessibilityService.h"
+
+namespace mozilla {
+namespace a11y {
 
 /**
  * AccIterable is a basic interface for iterators over accessibles.
@@ -22,7 +24,7 @@ public:
   virtual Accessible* Next() = 0;
 
 private:
-  friend class mozilla::a11y::Relation;
+  friend class Relation;
   nsAutoPtr<AccIterable> mNextIter;
 };
 
@@ -33,24 +35,7 @@ private:
 class AccIterator : public AccIterable
 {
 public:
-  /**
-   * Used to define iteration type.
-   */
-  enum IterationType {
-    /**
-     * Navigation happens through direct children.
-     */
-    eFlatNav,
-
-    /**
-     * Navigation through subtree excluding iterator root; if the accessible
-     * complies with filter, iterator ignores its children.
-     */
-    eTreeNav
-  };
-
-  AccIterator(Accessible* aRoot, filters::FilterFuncPtr aFilterFunc,
-              IterationType aIterationType = eFlatNav);
+  AccIterator(Accessible* aRoot, filters::FilterFuncPtr aFilterFunc);
   virtual ~AccIterator();
 
   /**
@@ -70,12 +55,11 @@ private:
 
     Accessible* mParent;
     int32_t mIndex;
-    IteratorState *mParentState;
+    IteratorState* mParentState;
   };
 
   filters::FilterFuncPtr mFilterFunc;
-  bool mIsDeep;
-  IteratorState *mState;
+  IteratorState* mState;
 };
 
 
@@ -281,5 +265,55 @@ private:
 
   nsRefPtr<Accessible> mAcc;
 };
+
+
+/**
+ * Used to iterate items of the given item container.
+ */
+class ItemIterator : public AccIterable
+{
+public:
+  ItemIterator(Accessible* aItemContainer) :
+    mContainer(aItemContainer), mAnchor(nullptr) { }
+  virtual ~ItemIterator() { }
+
+  virtual Accessible* Next();
+
+private:
+  ItemIterator() MOZ_DELETE;
+  ItemIterator(const ItemIterator&) MOZ_DELETE;
+  ItemIterator& operator = (const ItemIterator&) MOZ_DELETE;
+
+  Accessible* mContainer;
+  Accessible* mAnchor;
+};
+
+
+/**
+ * Used to iterate through XUL tree items of the same level.
+ */
+class XULTreeItemIterator : public AccIterable
+{
+public:
+  XULTreeItemIterator(XULTreeAccessible* aXULTree, nsITreeView* aTreeView,
+                      int32_t aRowIdx);
+  virtual ~XULTreeItemIterator() { }
+
+  virtual Accessible* Next();
+
+private:
+  XULTreeItemIterator() MOZ_DELETE;
+  XULTreeItemIterator(const XULTreeItemIterator&) MOZ_DELETE;
+  XULTreeItemIterator& operator = (const XULTreeItemIterator&) MOZ_DELETE;
+
+  XULTreeAccessible* mXULTree;
+  nsITreeView* mTreeView;
+  int32_t mRowCount;
+  int32_t mContainerLevel;
+  int32_t mCurrRowIdx;
+};
+
+} // namespace a11y
+} // namespace mozilla
 
 #endif

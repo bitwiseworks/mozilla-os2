@@ -58,7 +58,7 @@ const unsigned char kRemoteVersion[] = "5.1";
 #endif
 
 // Minimize the roundtrips to the X server by getting all the atoms at once
-static char *XAtomNames[] = {
+static const char *XAtomNames[] = {
   MOZILLA_VERSION_PROP,
   MOZILLA_LOCK_PROP,
   MOZILLA_COMMAND_PROP,
@@ -88,7 +88,7 @@ FindExtensionParameterInCommand(const char* aParameterName,
                                 char aSeparator,
                                 nsACString* aValue)
 {
-  nsCAutoString searchFor;
+  nsAutoCString searchFor;
   searchFor.Append(aSeparator);
   searchFor.Append(aParameterName);
   searchFor.Append('=');
@@ -257,7 +257,7 @@ nsXRemoteService::HandleCommand(char* aCommand, nsIDOMWindow* aWindow,
   // 1) Make sure that it looks remotely valid with parens
   // 2) Treat ping() immediately and specially
 
-  nsCAutoString command(aCommand);
+  nsAutoCString command(aCommand);
   int32_t p1, p2;
   p1 = command.FindChar('(');
   p2 = command.FindChar(')');
@@ -271,13 +271,13 @@ nsXRemoteService::HandleCommand(char* aCommand, nsIDOMWindow* aWindow,
   ToLowerCase(command);
 
   if (!command.EqualsLiteral("ping")) {
-    nsCAutoString desktopStartupID;
+    nsAutoCString desktopStartupID;
     nsDependentCString cmd(aCommand);
     FindExtensionParameterInCommand("DESKTOP_STARTUP_ID",
                                     cmd, '\n',
                                     &desktopStartupID);
 
-    char* argv[3] = {"dummyappname", "-remote", aCommand};
+    const char* argv[3] = {"dummyappname", "-remote", aCommand};
     rv = cmdline->Init(3, argv, nullptr, nsICommandLine::STATE_REMOTE_EXPLICIT);
     if (NS_FAILED(rv))
       return "509 internal error";
@@ -324,7 +324,7 @@ nsXRemoteService::HandleCommandLine(char* aBuffer, nsIDOMWindow* aWindow,
   if (NS_FAILED(rv))
     return "509 internal error";
 
-  nsCAutoString desktopStartupID;
+  nsAutoCString desktopStartupID;
 
   char **argv = (char**) malloc(sizeof(char*) * argc);
   if (!argv) return "509 internal error";
@@ -372,8 +372,8 @@ nsXRemoteService::EnsureAtoms(void)
   if (sMozVersionAtom)
     return;
 
-  XInternAtoms(mozilla::DefaultXDisplay(), XAtomNames, ArrayLength(XAtomNames),
-               False, XAtoms);
+  XInternAtoms(mozilla::DefaultXDisplay(), const_cast<char**>(XAtomNames),
+               ArrayLength(XAtomNames), False, XAtoms);
 
   int i = 0;
   sMozVersionAtom     = XAtoms[i++];

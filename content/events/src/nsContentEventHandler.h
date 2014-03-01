@@ -11,14 +11,15 @@
 
 #include "nsISelection.h"
 #include "nsRange.h"
-#include "nsIContent.h"
 #include "nsIDOMTreeWalker.h"
 
-class nsPresContext;
+class nsCaret;
+class nsIContent;
 class nsIPresShell;
+class nsPresContext;
 class nsQueryContentEvent;
 class nsSelectionEvent;
-class nsCaret;
+
 struct nsRect;
 
 /*
@@ -29,7 +30,7 @@ struct nsRect;
  *   This class answers to NS_QUERY_* events from actual contents.
  */
 
-class NS_STACK_CLASS nsContentEventHandler {
+class MOZ_STACK_CLASS nsContentEventHandler {
 public:
   nsContentEventHandler(nsPresContext *aPresContext);
 
@@ -80,6 +81,9 @@ public:
   static nsresult GetFlatTextOffsetOfRange(nsIContent* aRootContent,
                                            nsRange* aRange,
                                            uint32_t* aOffset);
+  // Get the native text length of a content node excluding any children
+  static uint32_t GetNativeTextLength(nsIContent* aContent,
+                                      uint32_t aMaxLength = UINT32_MAX);
 protected:
   // Make the DOM range from the offset of FlatText and the text length.
   // If aExpandToClusterBoundaries is true, the start offset and the end one are

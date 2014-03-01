@@ -6,12 +6,12 @@
 
 #include "FileRequest.h"
 
-#include "nsIJSContextStack.h"
-
+#include "DOMFileRequest.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsEventDispatcher.h"
 #include "nsError.h"
-#include "nsDOMProgressEvent.h"
+#include "nsIDOMProgressEvent.h"
 #include "nsDOMClassInfoID.h"
 #include "FileHelper.h"
 #include "LockedFile.h"
@@ -19,7 +19,7 @@
 USING_FILE_NAMESPACE
 
 FileRequest::FileRequest(nsIDOMWindow* aWindow)
-: DOMRequest(aWindow), mIsFileRequest(true)
+  : DOMRequest(aWindow)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 }
@@ -37,9 +37,13 @@ FileRequest::Create(nsIDOMWindow* aOwner,
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsRefPtr<FileRequest> request = new FileRequest(aOwner);
+  nsRefPtr<FileRequest> request;
+  if (aIsFileRequest) {
+    request = new DOMFileRequest(aOwner);
+  } else {
+    request = new FileRequest(aOwner);
+  }
   request->mLockedFile = aLockedFile;
-  request->mIsFileRequest = aIsFileRequest;
 
   return request.forget();
 }
@@ -68,21 +72,20 @@ FileRequest::NotifyHelperCompleted(FileHelper* aFileHelper)
   }
 
   // Otherwise we need to get the result from the helper.
-  jsval result;
-
   nsIScriptContext* sc = GetContextForEventHandlers(&rv);
   NS_ENSURE_STATE(sc);
 
-  JSContext* cx = sc->GetNativeContext();
+  AutoPushJSContext cx(sc->GetNativeContext());
   NS_ASSERTION(cx, "Failed to get a context!");
 
-  JSObject* global = sc->GetNativeGlobal();
+  JS::Rooted<JS::Value> result(cx);
+
+  JS::Rooted<JSObject*> global(cx, sc->GetNativeGlobal());
   NS_ASSERTION(global, "Failed to get global object!");
 
-  JSAutoRequest ar(cx);
   JSAutoCompartment ac(cx, global);
 
-  rv = aFileHelper->GetSuccessResult(cx, &result);
+  rv = aFileHelper->GetSuccessResult(cx, result.address());
   if (NS_FAILED(rv)) {
     NS_WARNING("GetSuccessResult failed!");
   }
@@ -97,43 +100,14 @@ FileRequest::NotifyHelperCompleted(FileHelper* aFileHelper)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-FileRequest::GetLockedFile(nsIDOMLockedFile** aLockedFile)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  nsCOMPtr<nsIDOMLockedFile> lockedFile(mLockedFile);
-  lockedFile.forget(aLockedFile);
-  return NS_OK;
-}
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(FileRequest)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(FileRequest, DOMRequest)
-  // Don't need NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS because
-  // nsDOMEventTargetHelper does it for us.
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(progress)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mLockedFile,
-                                                       nsIDOMLockedFile)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(FileRequest, DOMRequest)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(progress)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mLockedFile)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(FileRequest, DOMRequest,
+                                     mLockedFile)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(FileRequest)
-  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIDOMFileRequest, mIsFileRequest)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO_CONDITIONAL(FileRequest, mIsFileRequest)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO_CONDITIONAL(DOMRequest, !mIsFileRequest)
 NS_INTERFACE_MAP_END_INHERITING(DOMRequest)
 
 NS_IMPL_ADDREF_INHERITED(FileRequest, DOMRequest)
 NS_IMPL_RELEASE_INHERITED(FileRequest, DOMRequest)
-
-DOMCI_DATA(FileRequest, FileRequest)
-
-NS_IMPL_EVENT_HANDLER(FileRequest, progress)
 
 void
 FileRequest::FireProgressEvent(uint64_t aLoaded, uint64_t aTotal)
@@ -142,32 +116,20 @@ FileRequest::FireProgressEvent(uint64_t aLoaded, uint64_t aTotal)
     return;
   }
 
-  nsRefPtr<nsDOMProgressEvent> event = new nsDOMProgressEvent(nullptr, nullptr);
-  nsresult rv = event->InitProgressEvent(NS_LITERAL_STRING("progress"),
-                                         false, false, false, aLoaded, aTotal);
+  nsCOMPtr<nsIDOMEvent> event;
+  nsresult rv = NS_NewDOMProgressEvent(getter_AddRefs(event), this,
+                                       nullptr, nullptr);
   if (NS_FAILED(rv)) {
     return;
   }
 
-  rv = event->SetTrusted(true);
+  nsCOMPtr<nsIDOMProgressEvent> progress = do_QueryInterface(event);
+  MOZ_ASSERT(progress);
+  rv = progress->InitProgressEvent(NS_LITERAL_STRING("progress"), false, false,
+                                   false, aLoaded, aTotal);
   if (NS_FAILED(rv)) {
     return;
   }
 
-  bool dummy;
-  rv = DispatchEvent(static_cast<nsIDOMProgressEvent*>(event), &dummy);
-  if (NS_FAILED(rv)) {
-    return;
-  }
-}
-
-void
-FileRequest::RootResultVal()
-{
-  NS_ASSERTION(!mRooted, "Don't call me if already rooted!");
-  nsXPCOMCycleCollectionParticipant *participant;
-  CallQueryInterface(this, &participant);
-  nsContentUtils::HoldJSObjects(NS_CYCLE_COLLECTION_UPCAST(this, DOMRequest),
-                                participant);
-  mRooted = true;
+  DispatchTrustedEvent(event);
 }

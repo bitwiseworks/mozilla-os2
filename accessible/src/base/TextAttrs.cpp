@@ -5,6 +5,7 @@
 
 #include "TextAttrs.h"
 
+#include "Accessible-inl.h"
 #include "HyperTextAccessibleWrap.h"
 #include "nsAccUtils.h"
 #include "nsCoreUtils.h"
@@ -83,6 +84,9 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
   // "language" text attribute
   LangTextAttr langTextAttr(mHyperTextAcc, hyperTextElm, offsetNode);
 
+  // "aria-invalid" text attribute
+  InvalidTextAttr invalidTextAttr(hyperTextElm, offsetNode);
+
   // "background-color" text attribute
   BGColorTextAttr bgColorTextAttr(rootFrame, frame);
 
@@ -113,6 +117,7 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
   TextAttr* attrArray[] =
   {
     &langTextAttr,
+    &invalidTextAttr,
     &bgColorTextAttr,
     &colorTextAttr,
     &fontFamilyTextAttr,
@@ -226,6 +231,88 @@ TextAttrsMgr::LangTextAttr::
   nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::language, aValue);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// InvalidTextAttr
+////////////////////////////////////////////////////////////////////////////////
+
+TextAttrsMgr::InvalidTextAttr::
+  InvalidTextAttr(nsIContent* aRootElm, nsIContent* aElm) :
+  TTextAttr<uint32_t>(!aElm), mRootElm(aRootElm)
+{
+  mIsRootDefined = GetValue(mRootElm, &mRootNativeValue);
+  if (aElm)
+    mIsDefined = GetValue(aElm, &mNativeValue);
+}
+
+bool
+TextAttrsMgr::InvalidTextAttr::
+  GetValueFor(Accessible* aAccessible, uint32_t* aValue)
+{
+  nsIContent* elm = nsCoreUtils::GetDOMElementFor(aAccessible->GetContent());
+  return elm ? GetValue(elm, aValue) : false;
+}
+
+void
+TextAttrsMgr::InvalidTextAttr::
+  ExposeValue(nsIPersistentProperties* aAttributes, const uint32_t& aValue)
+{
+  switch (aValue) {
+    case eFalse:
+      nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::invalid,
+                             NS_LITERAL_STRING("false"));
+      break;
+
+    case eGrammar:
+      nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::invalid,
+                             NS_LITERAL_STRING("grammar"));
+      break;
+
+    case eSpelling:
+      nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::invalid,
+                             NS_LITERAL_STRING("spelling"));
+      break;
+
+    case eTrue:
+      nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::invalid,
+                             NS_LITERAL_STRING("true"));
+      break;
+  }
+}
+
+bool
+TextAttrsMgr::InvalidTextAttr::
+  GetValue(nsIContent* aElm, uint32_t* aValue)
+{
+  nsIContent* elm = aElm;
+  do {
+    if (nsAccUtils::HasDefinedARIAToken(elm, nsGkAtoms::aria_invalid)) {
+      static nsIContent::AttrValuesArray tokens[] =
+        { &nsGkAtoms::_false, &nsGkAtoms::grammar, &nsGkAtoms::spelling,
+          nullptr };
+
+      int32_t idx = elm->FindAttrValueIn(kNameSpaceID_None,
+                                         nsGkAtoms::aria_invalid, tokens,
+                                         eCaseMatters);
+      switch (idx) {
+        case 0:
+          *aValue = eFalse;
+          return true;
+        case 1:
+          *aValue = eGrammar;
+          return true;
+        case 2:
+          *aValue = eSpelling;
+          return true;
+        default:
+          *aValue = eTrue;
+          return true;
+      }
+    }
+  } while ((elm = elm->GetParent()) && elm != mRootElm);
+
+  return false;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // BGColorTextAttr
@@ -263,7 +350,7 @@ bool
 TextAttrsMgr::BGColorTextAttr::
   GetColor(nsIFrame* aFrame, nscolor* aColor)
 {
-  const nsStyleBackground* styleBackground = aFrame->GetStyleBackground();
+  const nsStyleBackground* styleBackground = aFrame->StyleBackground();
 
   if (NS_GET_A(styleBackground->mBackgroundColor) > 0) {
     *aColor = styleBackground->mBackgroundColor;
@@ -294,11 +381,11 @@ TextAttrsMgr::ColorTextAttr::
   ColorTextAttr(nsIFrame* aRootFrame, nsIFrame* aFrame) :
   TTextAttr<nscolor>(!aFrame)
 {
-  mRootNativeValue = aRootFrame->GetStyleColor()->mColor;
+  mRootNativeValue = aRootFrame->StyleColor()->mColor;
   mIsRootDefined = true;
 
   if (aFrame) {
-    mNativeValue = aFrame->GetStyleColor()->mColor;
+    mNativeValue = aFrame->StyleColor()->mColor;
     mIsDefined = true;
   }
 }
@@ -310,7 +397,7 @@ TextAttrsMgr::ColorTextAttr::
   nsIContent* elm = nsCoreUtils::GetDOMElementFor(aAccessible->GetContent());
   nsIFrame* frame = elm->GetPrimaryFrame();
   if (frame) {
-    *aValue = frame->GetStyleColor()->mColor;
+    *aValue = frame->StyleColor()->mColor;
     return true;
   }
 
@@ -382,11 +469,11 @@ TextAttrsMgr::FontSizeTextAttr::
 {
   mDC = aRootFrame->PresContext()->DeviceContext();
 
-  mRootNativeValue = aRootFrame->GetStyleFont()->mSize;
+  mRootNativeValue = aRootFrame->StyleFont()->mSize;
   mIsRootDefined = true;
 
   if (aFrame) {
-    mNativeValue = aFrame->GetStyleFont()->mSize;
+    mNativeValue = aFrame->StyleFont()->mSize;
     mIsDefined = true;
   }
 }
@@ -398,7 +485,7 @@ TextAttrsMgr::FontSizeTextAttr::
   nsIContent* content = nsCoreUtils::GetDOMElementFor(aAccessible->GetContent());
   nsIFrame* frame = content->GetPrimaryFrame();
   if (frame) {
-    *aValue = frame->GetStyleFont()->mSize;
+    *aValue = frame->StyleFont()->mSize;
     return true;
   }
 
@@ -438,11 +525,11 @@ TextAttrsMgr::FontStyleTextAttr::
   FontStyleTextAttr(nsIFrame* aRootFrame, nsIFrame* aFrame) :
   TTextAttr<nscoord>(!aFrame)
 {
-  mRootNativeValue = aRootFrame->GetStyleFont()->mFont.style;
+  mRootNativeValue = aRootFrame->StyleFont()->mFont.style;
   mIsRootDefined = true;
 
   if (aFrame) {
-    mNativeValue = aFrame->GetStyleFont()->mFont.style;
+    mNativeValue = aFrame->StyleFont()->mFont.style;
     mIsDefined = true;
   }
 }
@@ -454,7 +541,7 @@ TextAttrsMgr::FontStyleTextAttr::
   nsIContent* elm = nsCoreUtils::GetDOMElementFor(aAccessible->GetContent());
   nsIFrame* frame = elm->GetPrimaryFrame();
   if (frame) {
-    *aValue = frame->GetStyleFont()->mFont.style;
+    *aValue = frame->StyleFont()->mFont.style;
     return true;
   }
 
@@ -588,13 +675,13 @@ TextAttrsMgr::AutoGeneratedTextAttr::
 TextAttrsMgr::TextDecorValue::
   TextDecorValue(nsIFrame* aFrame)
 {
-  const nsStyleTextReset* textReset = aFrame->GetStyleTextReset();
+  const nsStyleTextReset* textReset = aFrame->StyleTextReset();
   mStyle = textReset->GetDecorationStyle();
 
   bool isForegroundColor = false;
   textReset->GetDecorationColor(mColor, isForegroundColor);
   if (isForegroundColor)
-    mColor = aFrame->GetStyleColor()->mColor;
+    mColor = aFrame->StyleColor()->mColor;
 
   mLine = textReset->mTextDecorationLine &
     (NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE |
@@ -720,7 +807,7 @@ TextAttrsMgr::TextPosValue
 TextAttrsMgr::TextPosTextAttr::
   GetTextPosValue(nsIFrame* aFrame) const
 {
-  const nsStyleCoord& styleCoord = aFrame->GetStyleTextReset()->mVerticalAlign;
+  const nsStyleCoord& styleCoord = aFrame->StyleTextReset()->mVerticalAlign;
   switch (styleCoord.GetUnit()) {
     case eStyleUnit_Enumerated:
       switch (styleCoord.GetIntValue()) {

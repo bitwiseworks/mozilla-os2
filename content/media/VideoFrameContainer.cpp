@@ -6,7 +6,7 @@
 
 #include "VideoFrameContainer.h"
 
-#include "nsHTMLMediaElement.h"
+#include "mozilla/dom/HTMLMediaElement.h"
 #include "nsIFrame.h"
 #include "nsDisplayList.h"
 #include "nsSVGEffects.h"
@@ -16,7 +16,7 @@ using namespace mozilla::layers;
 
 namespace mozilla {
 
-VideoFrameContainer::VideoFrameContainer(nsHTMLMediaElement* aElement,
+VideoFrameContainer::VideoFrameContainer(dom::HTMLMediaElement* aElement,
                                          already_AddRefed<ImageContainer> aContainer)
   : mElement(aElement),
     mImageContainer(aContainer), mMutex("nsVideoFrameContainer"),
@@ -46,13 +46,53 @@ void VideoFrameContainer::SetCurrentFrame(const gfxIntSize& aIntrinsicSize,
   if (!lastPaintTime.IsNull() && !mPaintTarget.IsNull()) {
     mPaintDelay = lastPaintTime - mPaintTarget;
   }
+
+  // When using the OMX decoder, destruction of the current image can indirectly
+  //  block on main thread I/O. If we let this happen while holding onto
+  //  |mImageContainer|'s lock, then when the main thread then tries to
+  //  composite it can then block on |mImageContainer|'s lock, causing a
+  //  deadlock. We use this hack to defer the destruction of the current image
+  //  until it is safe.
+  nsRefPtr<Image> kungFuDeathGrip;
+  kungFuDeathGrip = mImageContainer->LockCurrentImage();
+  mImageContainer->UnlockCurrentImage();
+
   mImageContainer->SetCurrentImage(aImage);
   gfxIntSize newFrameSize = mImageContainer->GetCurrentSize();
   if (oldFrameSize != newFrameSize) {
     mImageSizeChanged = true;
+    mNeedInvalidation = true;
   }
 
   mPaintTarget = aTargetTime;
+}
+
+void VideoFrameContainer::Reset()
+{
+  ClearCurrentFrame(true);
+  Invalidate();
+  mIntrinsicSize = gfxIntSize(-1, -1);
+  mPaintDelay = mozilla::TimeDuration();
+  mPaintTarget = mozilla::TimeStamp();
+  mImageContainer->ResetPaintCount();
+}
+
+void VideoFrameContainer::ClearCurrentFrame(bool aResetSize)
+{
+  MutexAutoLock lock(mMutex);
+
+  // See comment in SetCurrentFrame for the reasoning behind
+  // using a kungFuDeathGrip here.
+  nsRefPtr<Image> kungFuDeathGrip;
+  kungFuDeathGrip = mImageContainer->LockCurrentImage();
+  mImageContainer->UnlockCurrentImage();
+
+  mImageContainer->SetCurrentImage(nullptr);
+  mImageSizeChanged = aResetSize;
+
+  // We removed the current image so we will have to invalidate once
+  // again to setup the ImageContainer <-> Compositor pair.
+  mNeedInvalidation = true;
 }
 
 ImageContainer* VideoFrameContainer::GetImageContainer() {
@@ -73,7 +113,11 @@ void VideoFrameContainer::Invalidate()
   if (!mNeedInvalidation) {
     return;
   }
-  if (mImageContainer && mImageContainer->IsAsync()) {
+
+  if (mImageContainer &&
+      mImageContainer->IsAsync() &&
+      mImageContainer->HasCurrentImage() &&
+      !mIntrinsicSizeChanged) {
     mNeedInvalidation = false;
   }
 
@@ -107,11 +151,10 @@ void VideoFrameContainer::Invalidate()
   }
 
   if (frame) {
-    nsRect contentRect = frame->GetContentRect() - frame->GetPosition();
     if (invalidateFrame) {
-      frame->Invalidate(contentRect);
+      frame->InvalidateFrame();
     } else {
-      frame->InvalidateLayer(contentRect, nsDisplayItem::TYPE_VIDEO);
+      frame->InvalidateLayer(nsDisplayItem::TYPE_VIDEO);
     }
   }
 

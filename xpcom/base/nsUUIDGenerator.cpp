@@ -100,7 +100,7 @@ nsUUIDGenerator::GenerateUUIDInPlace(nsID* id)
 
 #if defined(XP_WIN)
     HRESULT hr = CoCreateGuid((GUID*)id);
-    if (NS_FAILED(hr))
+    if (FAILED(hr))
         return NS_ERROR_FAILURE;
 #elif defined(XP_MACOSX)
     CFUUIDRef uuid = CFUUIDCreate(kCFAllocatorDefault);
@@ -124,7 +124,7 @@ nsUUIDGenerator::GenerateUUIDInPlace(nsID* id)
     while (bytesLeft > 0) {
 #ifdef ANDROID
         long rval = arc4random();
-        const int mRBytes = 4;
+        const size_t mRBytes = 4;
 #else
         long rval = random();
 #endif

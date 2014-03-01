@@ -1,5 +1,7 @@
 IPDLSRCS =					\
-  PTestBlockChild.ipdl				\
+  PTestActorPunning.ipdl			\
+  PTestActorPunningPunned.ipdl			\
+  PTestActorPunningSub.ipdl			\
   PTestBridgeMain.ipdl				\
   PTestBridgeSub.ipdl				\
   PTestBridgeMainSub.ipdl			\
@@ -47,4 +49,9 @@ IPDLSRCS =					\
   PTestSysVShmem.ipdl				\
   PTestBadActor.ipdl                            \
   PTestBadActorSub.ipdl                         \
+  PTestUrgency.ipdl \
+  PTestIndirectProtocolParam.ipdlh	        \
+  PTestIndirectProtocolParamManage.ipdl         \
+  PTestIndirectProtocolParamFirst.ipdl	        \
+  PTestIndirectProtocolParamSecond.ipdl	        \
   $(NULL)

@@ -17,8 +17,7 @@
     </resources>
     <implementation>
 
-      <field name="_scrollAmount">6</field>
-      <property name="scrollAmount">
+      <property name="scrollAmount" exposeToUntrustedContent="true">
         <getter>
           <![CDATA[
           var val = parseInt(this.getAttribute("scrollamount"));
@@ -34,8 +33,7 @@
         </setter>
       </property>
 
-      <field name="_scrollDelay">85</field>
-      <property name="scrollDelay">
+      <property name="scrollDelay" exposeToUntrustedContent="true">
         <getter>
           <![CDATA[
           var val = parseInt(this.getAttribute("scrolldelay"));
@@ -51,7 +49,7 @@
         </setter>
       </property>
 
-      <property name="trueSpeed">
+      <property name="trueSpeed" exposeToUntrustedContent="true">
         <getter>
           <![CDATA[
           if (!this.hasAttribute("truespeed"))
@@ -70,7 +68,7 @@
         </setter>
       </property>
 
-      <property name="direction">
+      <property name="direction" exposeToUntrustedContent="true">
         <getter>
           return this.getAttribute("direction");
         </getter>
@@ -79,9 +77,7 @@
         </setter>
       </property>
 
-      <field name="_direction">"left"</field>
-
-      <property name="behavior">
+      <property name="behavior" exposeToUntrustedContent="true">
         <getter>
           return this._behavior;
         </getter>
@@ -90,9 +86,8 @@
         </setter>
       </property>
 
-      <field name="_behavior">"scroll"</field>
 
-      <property name="loop">
+      <property name="loop" exposeToUntrustedContent="true">
         <getter>
           <![CDATA[
           var val = parseInt(this.getAttribute('loop'));
@@ -108,9 +103,8 @@
         </setter>
       </property>
 
-      <field name="_loop">-1</field>
 
-      <property name="onstart">
+      <property name="onstart" exposeToUntrustedContent="true">
         <getter>
           return this.getAttribute("onstart");
         </getter>
@@ -120,9 +114,7 @@
         </setter>
       </property>
 
-      <field name="_onstart"></field>
-
-      <property name="onfinish">
+      <property name="onfinish" exposeToUntrustedContent="true">
         <getter>
           return this.getAttribute("onfinish");
         </getter>
@@ -132,9 +124,7 @@
         </setter>
       </property>
 
-      <field name="_onfinish"></field>
-
-      <property name="onbounce">
+      <property name="onbounce" exposeToUntrustedContent="true">
         <getter>
           return this.getAttribute("onbounce");
         </getter>
@@ -144,17 +134,6 @@
         </setter>
       </property>
 
-      <field name="_onbounce"></field>
-
-      <field name="dirsign">1</field>
-      <field name="startAt">0</field>
-      <field name="stopAt">0</field>
-      <field name="newPosition">0</field>
-      <field name="runId">0</field>
-
-      <field name="originalHeight">0</field>
-      <field name="startNewDirection">true</field>
-
       <property name="outerDiv"
         onget="return document.getAnonymousNodes(this)[0]"
       />
@@ -163,12 +142,12 @@
         onget="return document.getAnonymousElementByAttribute(this, 'class', 'innerDiv');"
       />
 
-      <property name="height"
+      <property name="height" exposeToUntrustedContent="true"
         onget="return this.getAttribute('height');"
         onset="this.setAttribute('height', val);"
       />
 
-      <property name="width"
+      <property name="width" exposeToUntrustedContent="true"
         onget="return this.getAttribute('width');"
         onset="this.setAttribute('width', val);"
       />
@@ -280,7 +259,13 @@
             case "string":
               if (!aIgnoreNextCall) {
                 try {
-                  this["_on" + aName] = new Function("event", aValue);
+                  // Work around bug 872772 by wrapping the cross-compartment-
+                  // wrapped function in a function from this scope.
+                  //
+                  // NB: Make sure to wrap the constructor in parentheses to
+                  // deal with the weird precedence of |new| in JS.
+                  var contentFn = new (XPCNativeWrapper.unwrap(window).Function)("event", aValue);
+                  this["_on" + aName] = function(e) { return contentFn.call(this, e); };
                 }
                 catch(e) {
                   return false;
@@ -318,7 +303,7 @@
         </body>
       </method>
 
-      <method name="start">
+      <method name="start" exposeToUntrustedContent="true">
         <body>
         <![CDATA[
           if (this.runId == 0) {
@@ -331,7 +316,7 @@
         </body>
       </method>
 
-      <method name="stop">
+      <method name="stop" exposeToUntrustedContent="true">
         <body>
         <![CDATA[
           if (this.runId != 0) {
@@ -510,6 +495,20 @@
 
       <constructor>
         <![CDATA[
+          // Set up state.
+          this._scrollAmount = 6;
+          this._scrollDelay = 85;
+          this._direction = "left";
+          this._behavior = "scroll";
+          this._loop = -1;
+          this.dirsign = 1;
+          this.startAt = 0;
+          this.stopAt = 0;
+          this.newPosition = 0;
+          this.runId = 0;
+          this.originalHeight = 0;
+          this.startNewDirection = true;
+
           // hack needed to fix js error, see bug 386470
           var myThis = this;
           var lambda = function myScopeFunction() { if (myThis.init) myThis.init(); }

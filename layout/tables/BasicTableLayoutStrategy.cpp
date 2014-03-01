@@ -15,6 +15,7 @@
 #include "nsLayoutUtils.h"
 #include "nsGkAtoms.h"
 #include "SpanningCellSorter.h"
+#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::layout;
@@ -80,7 +81,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
              nsIFrame *aFrame, bool aIsCell)
 {
     nscoord minCoord, prefCoord;
-    const nsStylePosition *stylePos = aFrame->GetStylePosition();
+    const nsStylePosition *stylePos = aFrame->StylePosition();
     bool isQuirks = aFrame->PresContext()->CompatibilityMode() ==
                     eCompatibility_NavQuirks;
     nscoord boxSizingToBorderEdge = 0;
@@ -137,10 +138,11 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
 
     const nsStyleCoord &width = stylePos->mWidth;
     nsStyleUnit unit = width.GetUnit();
-    // NOTE: We're ignoring calc() units here, for lack of a sensible
-    // idea for what to do with them.  This means calc() is basically
-    // handled like 'auto' for table cells and columns.
-    if (unit == eStyleUnit_Coord) {
+    // NOTE: We're ignoring calc() units with percentages here, for lack of a
+    // sensible idea for what to do with them.  This means calc() with
+    // percentages is basically handled like 'auto' for table cells and
+    // columns.
+    if (width.ConvertsToLength()) {
         hasSpecifiedWidth = true;
         // Note: since ComputeWidthValue was designed to return content-box
         // width, it will (in some cases) subtract the box-sizing edges.
@@ -158,7 +160,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
                                           nsGkAtoms::nowrap)) {
             minCoord = w;
         }
-        prefCoord = NS_MAX(w, minCoord);
+        prefCoord = std::max(w, minCoord);
     } else if (unit == eStyleUnit_Percent) {
         prefPercent = width.GetPercentValue();
     } else if (unit == eStyleUnit_Enumerated && aIsCell) {
@@ -192,7 +194,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
     unit = maxWidth.GetUnit();
     // XXX To really implement 'max-width' well, we'd need to store
     // it separately on the columns.
-    if (unit == eStyleUnit_Coord || unit == eStyleUnit_Enumerated) {
+    if (maxWidth.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
         nscoord w =
             nsLayoutUtils::ComputeWidthValue(aRenderingContext, aFrame,
                                              0, 0, 0, maxWidth);
@@ -205,7 +207,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
         if (p < prefPercent)
             prefPercent = p;
     }
-    // treat calc() on max-width just like 'none'.
+    // treat calc() with percentages on max-width just like 'none'.
 
     nsStyleCoord minWidth(stylePos->mMinWidth);
     if (minWidth.GetUnit() == eStyleUnit_Enumerated) {
@@ -218,7 +220,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
                                  eStyleUnit_Enumerated);
     }
     unit = minWidth.GetUnit();
-    if (unit == eStyleUnit_Coord || unit == eStyleUnit_Enumerated) {
+    if (minWidth.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
         nscoord w =
             nsLayoutUtils::ComputeWidthValue(aRenderingContext, aFrame,
                                              0, 0, 0, minWidth);
@@ -231,7 +233,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
         if (p > prefPercent)
             prefPercent = p;
     }
-    // treat calc() on min-width just like '0'.
+    // treat calc() with percentages on min-width just like '0'.
 
     // XXX Should col frame have border/padding considered?
     if (aIsCell) {
@@ -560,6 +562,7 @@ BasicTableLayoutStrategy::DistributePctWidthToColumns(float aSpanPrefPct,
     // and to reduce aSpanPrefPct by columns that already have % width
 
     int32_t scol, scol_end;
+    nsTableCellMap *cellMap = mTableFrame->GetCellMap();
     for (scol = aFirstCol, scol_end = aFirstCol + aColCount;
          scol < scol_end; ++scol) {
         nsTableColFrame *scolFrame = mTableFrame->GetColFrame(scol);
@@ -570,7 +573,9 @@ BasicTableLayoutStrategy::DistributePctWidthToColumns(float aSpanPrefPct,
         float scolPct = scolFrame->GetPrefPercent();
         if (scolPct == 0.0f) {
             nonPctTotalPrefWidth += scolFrame->GetPrefCoord();
-            ++nonPctColCount;
+            if (cellMap->GetNumCellsOriginatingInCol(scol) > 0) {
+                ++nonPctColCount;
+            }
         } else {
             aSpanPrefPct -= scolPct;
         }
@@ -607,18 +612,22 @@ BasicTableLayoutStrategy::DistributePctWidthToColumns(float aSpanPrefPct,
                 allocatedPct = aSpanPrefPct *
                     (float(scolFrame->GetPrefCoord()) /
                      float(nonPctTotalPrefWidth));
-            } else {
+            } else if (cellMap->GetNumCellsOriginatingInCol(scol) > 0) {
                 // distribute equally when all pref widths are 0
                 allocatedPct = aSpanPrefPct / float(nonPctColCount);
+            } else {
+                allocatedPct = 0.0f;
             }
             // Allocate the percent
             scolFrame->AddSpanPrefPercent(allocatedPct);
-            
+
             // To avoid accumulating rounding error from division,
             // subtract this column's values from the totals.
             aSpanPrefPct -= allocatedPct;
             nonPctTotalPrefWidth -= scolFrame->GetPrefCoord();
-            --nonPctColCount;
+            if (cellMap->GetNumCellsOriginatingInCol(scol) > 0) {
+                --nonPctColCount;
+            }
 
             if (!aSpanPrefPct) {
                 // No more span-percent-width to distribute --> we're done.
@@ -700,10 +709,10 @@ BasicTableLayoutStrategy::DistributeWidthToColumns(nscoord aWidth,
      *   percent width have nonzero pref width, in proportion to pref
      *   width [total_flex_pref]
      *
-     *   b. (NOTE: this case is for BTLS_FINAL_WIDTH only) otherwise, if
-     *   any columns without a specified coordinate width or percent
-     *   width, but with cells originating in them have zero pref width,
-     *   equally between these [numNonSpecZeroWidthCols]
+     *   b. otherwise, if any columns without a specified coordinate
+     *   width or percent width, but with cells originating in them,
+     *   have zero pref width, equally between these
+     *   [numNonSpecZeroWidthCols]
      *
      *   c. otherwise, if any columns without percent width have nonzero
      *   pref width, in proportion to pref width [total_fixed_pref]
@@ -761,8 +770,7 @@ BasicTableLayoutStrategy::DistributeWidthToColumns(nscoord aWidth,
                 total_fixed_pref = NSCoordSaturatingAdd(total_fixed_pref, 
                                                         pref_width);
             } else if (pref_width == 0) {
-                if (aWidthType == BTLS_FINAL_WIDTH &&
-                    cellMap->GetNumCellsOriginatingInCol(col) > 0) {
+                if (cellMap->GetNumCellsOriginatingInCol(col) > 0) {
                     ++numNonSpecZeroWidthCols;
                 }
             } else {
@@ -823,9 +831,6 @@ BasicTableLayoutStrategy::DistributeWidthToColumns(nscoord aWidth,
             l2t = FLEX_FLEX_LARGE;
             basis.c = total_flex_pref;
         } else if (numNonSpecZeroWidthCols > 0) {
-            NS_ASSERTION(aWidthType == BTLS_FINAL_WIDTH,
-                         "numNonSpecZeroWidthCols should only "
-                         "be set when we're setting final width.");
             l2t = FLEX_FLEX_LARGE_ZERO;
             basis.c = numNonSpecZeroWidthCols;
         } else if (total_fixed_pref > 0) {
@@ -955,9 +960,6 @@ BasicTableLayoutStrategy::DistributeWidthToColumns(nscoord aWidth,
                 }
                 break;
             case FLEX_FLEX_LARGE_ZERO:
-                NS_ASSERTION(aWidthType == BTLS_FINAL_WIDTH,
-                             "FLEX_FLEX_LARGE_ZERO only should be hit "
-                             "when we're setting final width.");
                 if (pct == 0.0f &&
                     !colFrame->GetHasSpecifiedCoord() &&
                     cellMap->GetNumCellsOriginatingInCol(col) > 0) {

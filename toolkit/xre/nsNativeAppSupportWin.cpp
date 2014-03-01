@@ -17,7 +17,6 @@
 #include "nsIDOMChromeWindow.h"
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
-#include "nsISupportsArray.h"
 #include "nsIWindowWatcher.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -34,7 +33,6 @@
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIDOMLocation.h"
-#include "nsIJSContextStack.h"
 #include "nsIWebNavigation.h"
 #include "nsIWindowMediator.h"
 #include "nsNativeCharsetUtils.h"
@@ -48,6 +46,8 @@
 #include <io.h>
 #include <direct.h>
 #include <fcntl.h>
+
+using namespace mozilla;
 
 static HWND hwndForDOMWindow( nsISupports * );
 
@@ -332,22 +332,6 @@ NS_IMPL_RELEASE_INHERITED(nsNativeAppSupportWin, nsNativeAppSupportBase)
 
 void
 nsNativeAppSupportWin::CheckConsole() {
-    // Try to attach console to the parent process.
-    // It will succeed when the parent process is a command line,
-    // so that stdio will be displayed in it.
-    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
-        // Change std handles to refer to new console handles. Before doing so,
-        // ensure that stdout/stderr haven't been redirected to a valid file
-        if (_fileno(stdout) == -1 || _get_osfhandle(fileno(stdout)) == -1)
-            freopen("CONOUT$", "w", stdout);
-        // There isn't any `CONERR$`, so that we merge stderr into CONOUT$
-        // http://msdn.microsoft.com/en-us/library/windows/desktop/ms683231%28v=vs.85%29.aspx
-        if (_fileno(stderr) == -1 || _get_osfhandle(fileno(stderr)) == -1)
-            freopen("CONOUT$", "w", stderr);
-        if (_fileno(stdin) == -1 || _get_osfhandle(fileno(stdin)) == -1)
-            freopen("CONIN$", "r", stdin);
-    }
-
     for ( int i = 1; i < gArgc; i++ ) {
         if ( strcmp( "-console", gArgv[i] ) == 0
              ||
@@ -408,8 +392,27 @@ nsNativeAppSupportWin::CheckConsole() {
 
             --gArgc;
 
-            // Don't bother doing this more than once.
-            break;
+        } else if ( strcmp( "-attach-console", gArgv[i] ) == 0
+                    ||
+                    strcmp( "/attach-console", gArgv[i] ) == 0 ) {
+            // Try to attach console to the parent process.
+            // It will succeed when the parent process is a command line,
+            // so that stdio will be displayed in it.
+            if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+                // Change std handles to refer to new console handles.
+                // Before doing so, ensure that stdout/stderr haven't been
+                // redirected to a valid file
+                if (_fileno(stdout) == -1 ||
+                    _get_osfhandle(fileno(stdout)) == -1)
+                    freopen("CONOUT$", "w", stdout);
+                // Merge stderr into CONOUT$ since there isn't any `CONERR$`.
+                // http://msdn.microsoft.com/en-us/library/windows/desktop/ms683231%28v=vs.85%29.aspx
+                if (_fileno(stderr) == -1 ||
+                    _get_osfhandle(fileno(stderr)) == -1)
+                    freopen("CONOUT$", "w", stderr);
+                if (_fileno(stdin) == -1 || _get_osfhandle(fileno(stdin)) == -1)
+                    freopen("CONIN$", "r", stdin);
+            }
         }
     }
 
@@ -1030,10 +1033,10 @@ nsNativeAppSupportWin::HandleDDENotification( UINT uType,       // transaction t
 
                         // Use a string buffer for the output data, first
                         // save a quote.
-                        nsCAutoString   outpt( NS_LITERAL_CSTRING("\"") );
+                        nsAutoCString   outpt( NS_LITERAL_CSTRING("\"") );
                         // Now copy the URL converting the Unicode string
                         // to a single-byte ASCII string
-                        nsCAutoString tmpNativeStr;
+                        nsAutoCString tmpNativeStr;
                         NS_CopyUnicodeToNative( url, tmpNativeStr );
                         outpt.Append( tmpNativeStr );
                         // Add the "," used to separate the URL and the page
@@ -1262,7 +1265,7 @@ nsNativeAppSupportWin::HandleCommandLine(const char* aCmdLineString,
     int between, quoted, bSlashCount;
     int argc;
     const char *p;
-    nsCAutoString arg;
+    nsAutoCString arg;
 
     nsCOMPtr<nsICommandLineRunner> cmdLine
         (do_CreateInstance("@mozilla.org/toolkit/command-line;1"));
@@ -1449,50 +1452,6 @@ HWND hwndForDOMWindow( nsISupports *window ) {
 
     return (HWND)( ppWidget->GetNativeData( NS_NATIVE_WIDGET ) );
 }
-
-static const char sJSStackContractID[] = "@mozilla.org/js/xpc/ContextStack;1";
-
-class SafeJSContext {
-public:
-  SafeJSContext();
-  ~SafeJSContext();
-
-  nsresult   Push();
-  JSContext *get() { return mContext; }
-
-protected:
-  nsCOMPtr<nsIThreadJSContextStack>  mService;
-  JSContext                         *mContext;
-};
-
-SafeJSContext::SafeJSContext() : mContext(nullptr) {
-}
-
-SafeJSContext::~SafeJSContext() {
-  JSContext *cx;
-  nsresult   rv;
-
-  if(mContext) {
-    rv = mService->Pop(&cx);
-    NS_ASSERTION(NS_SUCCEEDED(rv) && cx == mContext, "JSContext push/pop mismatch");
-  }
-}
-
-nsresult SafeJSContext::Push() {
-  if (mContext) // only once
-    return NS_ERROR_FAILURE;
-
-  mService = do_GetService(sJSStackContractID);
-  if (mService) {
-    JSContext* cx = mService->GetSafeJSContext();
-    if (cx && NS_SUCCEEDED(mService->Push(cx))) {
-      // Save cx in mContext to indicate need to pop.
-      mContext = cx;
-    }
-  }
-  return mContext ? NS_OK : NS_ERROR_FAILURE;
-}
-
 
 nsresult
 nsNativeAppSupportWin::OpenBrowserWindow()

@@ -9,18 +9,11 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = dom
-LIBRARY_NAME   = jsdompermission_s
-
-XPIDL_MODULE   = dom_permission
-GRE_MODULE     = 1
-
-EXTRA_JS_MODULES =   \
-  PermissionPromptHelper.jsm \
+DISABLED_EXTRA_COMPONENTS =        \
+  PermissionSettings.js       \
+  PermissionSettings.manifest \
+  PermissionPromptService.js \
+  PermissionPromptService.manifest \
   $(NULL)
 
-include $(topsrcdir)/config/config.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
-
-DEFINES += -D_IMPL_NS_LAYOUT

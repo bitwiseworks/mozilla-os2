@@ -15,12 +15,13 @@ namespace mozilla {
 namespace gfx {
 
 SourceSurfaceSkia::SourceSurfaceSkia()
-  : mDrawTarget(nullptr)
+  : mDrawTarget(nullptr), mLocked(false)
 {
 }
 
 SourceSurfaceSkia::~SourceSurfaceSkia()
 {
+  MaybeUnlock();
   MarkIndependent();
 }
 
@@ -36,6 +37,23 @@ SourceSurfaceSkia::GetFormat() const
   return mFormat;
 }
 
+bool
+SourceSurfaceSkia::InitFromCanvas(SkCanvas* aCanvas,
+                                  SurfaceFormat aFormat,
+                                  DrawTargetSkia* aOwner)
+{
+  SkISize size = aCanvas->getDeviceSize();
+
+  mBitmap = (SkBitmap)aCanvas->getDevice()->accessBitmap(false);
+  mFormat = aFormat;
+
+  mSize = IntSize(size.fWidth, size.fHeight);
+  mStride = mBitmap.rowBytes();
+  mDrawTarget = aOwner;
+
+  return true;
+}
+
 bool 
 SourceSurfaceSkia::InitFromData(unsigned char* aData,
                                 const IntSize &aSize,
@@ -49,47 +67,40 @@ SourceSurfaceSkia::InitFromData(unsigned char* aData,
   if (!temp.copyTo(&mBitmap, GfxFormatToSkiaConfig(aFormat))) {
     return false;
   }
-  
+
+  if (aFormat == FORMAT_B8G8R8X8) {
+    mBitmap.lockPixels();
+    // We have to manually set the A channel to be 255 as Skia doesn't understand BGRX
+    ConvertBGRXToBGRA(reinterpret_cast<unsigned char*>(mBitmap.getPixels()), aSize, aStride);
+    mBitmap.unlockPixels();
+    mBitmap.notifyPixelsChanged();
+    mBitmap.setIsOpaque(true);
+  }
+
   mSize = aSize;
   mFormat = aFormat;
   mStride = aStride;
   return true;
 }
 
-bool
-SourceSurfaceSkia::InitWithBitmap(const SkBitmap& aBitmap,
-                                  SurfaceFormat aFormat,
-                                  DrawTargetSkia* aOwner)
-{
-  mFormat = aFormat;
-  mSize = IntSize(aBitmap.width(), aBitmap.height());
-
-  if (aOwner) {
-    mBitmap = aBitmap;
-    mStride = aBitmap.rowBytes();
-    mDrawTarget = aOwner;
-    return true;
-  } else if (aBitmap.copyTo(&mBitmap, aBitmap.getConfig())) {
-    mStride = mBitmap.rowBytes();
-    return true;
-  }
-  return false;
-}
-
 unsigned char*
 SourceSurfaceSkia::GetData()
 {
-  mBitmap.lockPixels();
-  unsigned char *pixels = (unsigned char *)mBitmap.getPixels();
-  mBitmap.unlockPixels();
-  return pixels;
+  if (!mLocked) {
+    mBitmap.lockPixels();
+    mLocked = true;
+  }
 
+  unsigned char *pixels = (unsigned char *)mBitmap.getPixels();
+  return pixels;
 }
 
 void
 SourceSurfaceSkia::DrawTargetWillChange()
 {
   if (mDrawTarget) {
+    MaybeUnlock();
+
     mDrawTarget = nullptr;
     SkBitmap temp = mBitmap;
     mBitmap.reset();
@@ -109,6 +120,15 @@ SourceSurfaceSkia::MarkIndependent()
   if (mDrawTarget) {
     mDrawTarget->RemoveSnapshot(this);
     mDrawTarget = nullptr;
+  }
+}
+
+void
+SourceSurfaceSkia::MaybeUnlock()
+{
+  if (mLocked) {
+    mBitmap.unlockPixels();
+    mLocked = false;
   }
 }
 

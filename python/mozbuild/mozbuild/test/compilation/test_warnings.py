@@ -2,19 +2,24 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import os.path
+import os
 import unittest
 
-from tempfile import NamedTemporaryFile
+from mozfile.mozfile import NamedTemporaryFile
 
 from mozbuild.compilation.warnings import CompilerWarning
 from mozbuild.compilation.warnings import WarningsCollector
 from mozbuild.compilation.warnings import WarningsDatabase
 
+from mozunit import main
 
 CLANG_TESTS = [
     ('foobar.cpp:123:10: warning: you messed up [-Wfoo]',
-     'foobar.cpp', 123, 10, 'you messed up', '-Wfoo')
+     'foobar.cpp', 123, 10, 'you messed up', '-Wfoo'),
+    ("c_locale_dummy.c:457:1: warning: (near initialization for "
+     "'full_wmonthname[0]') [-Wpointer-sign]",
+     'c_locale_dummy.c', 457, 1,
+     "(near initialization for 'full_wmonthname[0]')", '-Wpointer-sign')
 ]
 
 MSVC_TESTS = [
@@ -76,6 +81,47 @@ class TestCompilerWarning(unittest.TestCase):
 
         self.assertEqual(w1, w2)
 
+    def test_comparison(self):
+        w1 = CompilerWarning()
+        w2 = CompilerWarning()
+
+        w1['filename'] = '/aaa.c'
+        w1['line'] = 5
+        w1['column'] = 5
+
+        w2['filename'] = '/bbb.c'
+        w2['line'] = 5
+        w2['column'] = 5
+
+        self.assertLess(w1, w2)
+        self.assertGreater(w2, w1)
+        self.assertGreaterEqual(w2, w1)
+
+        w2['filename'] = '/aaa.c'
+        w2['line'] = 4
+        w2['column'] = 6
+
+        self.assertLess(w2, w1)
+        self.assertGreater(w1, w2)
+        self.assertGreaterEqual(w1, w2)
+
+        w2['filename'] = '/aaa.c'
+        w2['line'] = 5
+        w2['column'] = 10
+
+        self.assertLess(w1, w2)
+        self.assertGreater(w2, w1)
+        self.assertGreaterEqual(w2, w1)
+
+        w2['filename'] = '/aaa.c'
+        w2['line'] = 5
+        w2['column'] = 5
+
+        self.assertLessEqual(w1, w2)
+        self.assertLessEqual(w2, w1)
+        self.assertGreaterEqual(w2, w1)
+        self.assertGreaterEqual(w1, w2)
+
 class TestWarningsParsing(unittest.TestCase):
     def test_clang_parsing(self):
         for source, filename, line, column, message, flag in CLANG_TESTS:
@@ -97,7 +143,7 @@ class TestWarningsParsing(unittest.TestCase):
 
             self.assertIsNotNone(warning)
 
-            self.assertEqual(warning['filename'], filename)
+            self.assertEqual(warning['filename'], os.path.normpath(filename))
             self.assertEqual(warning['line'], line)
             self.assertEqual(warning['flag'], flag)
             self.assertEqual(warning['message'], message)
@@ -108,7 +154,7 @@ class TestWarningsDatabase(unittest.TestCase):
 
         self.assertEqual(len(db), 0)
 
-        for i in xrange(10):
+        for i in range(10):
             db.insert(get_warning(), compute_hash=False)
 
         self.assertEqual(len(db), 10)
@@ -120,7 +166,7 @@ class TestWarningsDatabase(unittest.TestCase):
         """Ensure that hashing files on insert works."""
         db = WarningsDatabase()
 
-        temp = NamedTemporaryFile()
+        temp = NamedTemporaryFile(mode='wt')
         temp.write('x' * 100)
         temp.flush()
 
@@ -143,8 +189,8 @@ class TestWarningsDatabase(unittest.TestCase):
         db = WarningsDatabase()
 
         source_files = []
-        for i in xrange(1, 21):
-            temp = NamedTemporaryFile()
+        for i in range(1, 21):
+            temp = NamedTemporaryFile(mode='wt')
             temp.write('x' * (100 * i))
             temp.flush()
 
@@ -180,7 +226,7 @@ class TestWarningsDatabase(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertEqual(warnings[0]['column'], w['column'])
 
-        # If we delete the source file, calling prune should call the warnings
+        # If we delete the source file, calling prune should cause the warnings
         # to go away.
         old_filename = source_files[0].name
         del source_files[0]
@@ -189,3 +235,7 @@ class TestWarningsDatabase(unittest.TestCase):
 
         db.prune()
         self.assertEqual(len(db), 19)
+
+
+if __name__ == '__main__':
+    main()

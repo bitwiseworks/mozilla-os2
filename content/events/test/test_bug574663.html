@@ -51,9 +51,14 @@ function runTest() {
       [true, false],
       [true, true],
     ];
+
+    // grab the refresh driver, since we want to make sure
+    // async scrolls happen in deterministic time
+    winUtils.advanceTimeAndRefresh(1000);
+
     function nextTest() {
-      netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
       if (!outstandingTests.length) {
+        winUtils.restoreNormalRefresh();
         win.close();
         clearPrefs();
         SimpleTest.finish();
@@ -62,27 +67,30 @@ function runTest() {
 
       let [ctrlKey, isMomentum] = outstandingTests.shift();
       let scrollTopBefore = scrollbox.scrollTop;
-      let zoomFactorBefore = winUtils.screenPixelsPerCSSPixel;
+      let zoomFactorBefore = winUtils.fullZoom;
+
       sendTouchpadScrollMotion(scrollbox, 1, ctrlKey, isMomentum);
+      winUtils.advanceTimeAndRefresh(1000); // force scrolling to happen
 
       setTimeout(function () {
-        netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
         if (!ctrlKey) {
           let postfix = isMomentum ? ", even after releasing the touchpad" : "";
           // Normal scroll: scroll
-          is(winUtils.screenPixelsPerCSSPixel, zoomFactorBefore, "Normal scrolling shouldn't change zoom" + postfix);
+          is(winUtils.fullZoom, zoomFactorBefore, "Normal scrolling shouldn't change zoom" + postfix);
           isnot(scrollbox.scrollTop, scrollTopBefore, "Normal scrolling should scroll" + postfix);
         } else {
           if (!isMomentum) {
-            isnot(winUtils.screenPixelsPerCSSPixel, zoomFactorBefore, "Ctrl-scrolling should zoom while the user is touching the touchpad");
+            isnot(winUtils.fullZoom, zoomFactorBefore, "Ctrl-scrolling should zoom while the user is touching the touchpad");
             is(scrollbox.scrollTop, scrollTopBefore, "Ctrl-scrolling shouldn't scroll while the user is touching the touchpad");
           } else {
-            is(winUtils.screenPixelsPerCSSPixel, zoomFactorBefore, "Momentum scrolling shouldn't zoom, even when pressing Ctrl");
+            is(winUtils.fullZoom, zoomFactorBefore, "Momentum scrolling shouldn't zoom, even when pressing Ctrl");
             isnot(scrollbox.scrollTop, scrollTopBefore, "Momentum scrolling should scroll, even when pressing Ctrl");
           }
         }
         // Revert the effect.
         sendTouchpadScrollMotion(scrollbox, -1, ctrlKey, isMomentum);
+        winUtils.advanceTimeAndRefresh(1000); // force scrolling to happen
+
         setTimeout(nextTest, 20);
       }, 20);
     }
@@ -92,27 +100,20 @@ function runTest() {
 
 function initPrefs()
 {
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-  var prefSvc = Components.classes["@mozilla.org/preferences-service;1"].
-                  getService(Components.interfaces.nsIPrefBranch);
-  prefSvc.setBoolPref("general.smoothScroll", false);
+  SpecialPowers.setBoolPref("general.smoothScroll", false);
   // Disables the app level scroll acceleration
-  prefSvc.setIntPref("mousewheel.acceleration.start", -1);
-  prefSvc.setBoolPref("mousewheel.system_scroll_override_on_root_content.enabled", false);
+  SpecialPowers.setIntPref("mousewheel.acceleration.start", -1);
+  SpecialPowers.setBoolPref("mousewheel.system_scroll_override_on_root_content.enabled", false);
   // Enable zooming for ctrl-scrolling
-  prefSvc.setIntPref("mousewheel.with_control.action", 3);
+  SpecialPowers.setIntPref("mousewheel.with_control.action", 3);
 }
 
 function clearPrefs()
 {
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-  var prefSvc = Components.classes["@mozilla.org/preferences-service;1"].
-                  getService(Components.interfaces.nsIPrefBranch);
-
-  prefSvc.clearUserPref("general.smoothScroll");
-  prefSvc.clearUserPref("mousewheel.acceleration.start");
-  prefSvc.clearUserPref("mousewheel.system_scroll_override_on_root_content.enabled");
-  prefSvc.clearUserPref("mousewheel.with_control.action");
+  SpecialPowers.clearUserPref("general.smoothScroll");
+  SpecialPowers.clearUserPref("mousewheel.acceleration.start");
+  SpecialPowers.clearUserPref("mousewheel.system_scroll_override_on_root_content.enabled");
+  SpecialPowers.clearUserPref("mousewheel.with_control.action");
 }
 
 window.onload = function () {

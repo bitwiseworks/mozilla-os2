@@ -9,9 +9,7 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = prompter
-
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
     nsPrompter.js \
     nsPrompter.manifest \
     $(NULL)

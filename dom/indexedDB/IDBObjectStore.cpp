@@ -9,14 +9,15 @@
 #include "IDBObjectStore.h"
 
 #include "mozilla/dom/ipc/nsIRemoteBlob.h"
-#include "nsIJSContextStack.h"
 #include "nsIOutputStream.h"
 
 #include "jsfriendapi.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/FileHandleBinding.h"
 #include "mozilla/dom/StructuredCloneTags.h"
 #include "mozilla/dom/ipc/Blob.h"
+#include "mozilla/dom/quota/FileStreams.h"
 #include "mozilla/storage.h"
 #include "nsContentUtils.h"
 #include "nsDOMClassInfo.h"
@@ -27,10 +28,8 @@
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "snappy/snappy.h"
-#include "test_quota.h"
 
 #include "AsyncConnectionHelper.h"
-#include "FileStream.h"
 #include "IDBCursor.h"
 #include "IDBEvents.h"
 #include "IDBFileHandle.h"
@@ -40,6 +39,7 @@
 #include "DatabaseInfo.h"
 #include "DictionaryHelpers.h"
 #include "KeyPath.h"
+#include "ProfilerHelpers.h"
 
 #include "ipc/IndexedDBChild.h"
 #include "ipc/IndexedDBParent.h"
@@ -51,6 +51,30 @@
 USING_INDEXEDDB_NAMESPACE
 using namespace mozilla::dom;
 using namespace mozilla::dom::indexedDB::ipc;
+using mozilla::dom::quota::FileOutputStream;
+
+BEGIN_INDEXEDDB_NAMESPACE
+
+struct FileHandleData
+{
+  nsString type;
+  nsString name;
+};
+
+struct BlobOrFileData
+{
+  BlobOrFileData()
+  : tag(0), size(0), lastModifiedDate(UINT64_MAX)
+  { }
+
+  uint32_t tag;
+  uint64_t size;
+  nsString type;
+  nsString name;
+  uint64_t lastModifiedDate;
+};
+
+END_INDEXEDDB_NAMESPACE
 
 namespace {
 
@@ -111,7 +135,7 @@ public:
                                             MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult OnSuccess() MOZ_OVERRIDE;
 
@@ -147,7 +171,7 @@ public:
                                   MOZ_OVERRIDE;
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual void ReleaseMainThreadObjects() MOZ_OVERRIDE;
 
@@ -155,7 +179,7 @@ public:
   PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
@@ -191,7 +215,7 @@ public:
                                   MOZ_OVERRIDE;
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual void ReleaseMainThreadObjects() MOZ_OVERRIDE;
 
@@ -199,7 +223,7 @@ public:
   PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
@@ -228,13 +252,13 @@ public:
                                   MOZ_OVERRIDE;
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual nsresult
   PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
@@ -257,7 +281,7 @@ public:
   PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
@@ -285,7 +309,7 @@ public:
                                   MOZ_OVERRIDE;
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual void ReleaseMainThreadObjects() MOZ_OVERRIDE;
 
@@ -293,7 +317,7 @@ public:
   PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
@@ -391,7 +415,7 @@ public:
                                   MOZ_OVERRIDE;
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual void ReleaseMainThreadObjects() MOZ_OVERRIDE;
 
@@ -399,7 +423,7 @@ public:
   PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
@@ -430,7 +454,7 @@ public:
                                   MOZ_OVERRIDE;
 
   virtual nsresult GetSuccessResult(JSContext* aCx,
-                                    jsval* aVal) MOZ_OVERRIDE;
+                                    JS::MutableHandle<JS::Value> aVal) MOZ_OVERRIDE;
 
   virtual void ReleaseMainThreadObjects() MOZ_OVERRIDE;
 
@@ -438,7 +462,7 @@ public:
   PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams) MOZ_OVERRIDE;
 
   virtual ChildProcessSendResult
-  MaybeSendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
+  SendResponseToChildProcess(nsresult aResultCode) MOZ_OVERRIDE;
 
   virtual nsresult
   UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
@@ -449,8 +473,7 @@ private:
   uint64_t mCount;
 };
 
-NS_STACK_CLASS
-class AutoRemoveIndex
+class MOZ_STACK_CLASS AutoRemoveIndex
 {
 public:
   AutoRemoveIndex(ObjectStoreInfo* aObjectStoreInfo,
@@ -487,7 +510,7 @@ class ThreadLocalJSRuntime
   JSObject* mGlobal;
 
   static JSClass sGlobalClass;
-  static const unsigned sRuntimeHeapSize = 256 * 1024;
+  static const unsigned sRuntimeHeapSize = 768 * 1024;
 
   ThreadLocalJSRuntime()
   : mRuntime(NULL), mContext(NULL), mGlobal(NULL)
@@ -497,8 +520,14 @@ class ThreadLocalJSRuntime
 
   nsresult Init()
   {
-    mRuntime = JS_NewRuntime(sRuntimeHeapSize);
+    mRuntime = JS_NewRuntime(sRuntimeHeapSize, JS_NO_HELPER_THREADS);
     NS_ENSURE_TRUE(mRuntime, NS_ERROR_OUT_OF_MEMORY);
+
+    /*
+     * Not setting this will cause JS_CHECK_RECURSION to report false
+     * positives
+     */
+    JS_SetNativeStackQuota(mRuntime, 128 * sizeof(size_t) * 1024); 
 
     mContext = JS_NewContext(mRuntime, 0);
     NS_ENSURE_TRUE(mContext, NS_ERROR_OUT_OF_MEMORY);
@@ -531,6 +560,11 @@ class ThreadLocalJSRuntime
     return mContext;
   }
 
+  JSObject *Global() const
+  {
+    return mGlobal;
+  }
+
   ~ThreadLocalJSRuntime()
   {
     MOZ_COUNT_DTOR(ThreadLocalJSRuntime);
@@ -548,25 +582,25 @@ class ThreadLocalJSRuntime
 JSClass ThreadLocalJSRuntime::sGlobalClass = {
   "IndexedDBTransactionThreadGlobal",
   JSCLASS_GLOBAL_FLAGS,
-  JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
 };
 
 inline
 already_AddRefed<IDBRequest>
-GenerateRequest(IDBObjectStore* aObjectStore, JSContext* aCx)
+GenerateRequest(IDBObjectStore* aObjectStore)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   IDBDatabase* database = aObjectStore->Transaction()->Database();
   return IDBRequest::Create(aObjectStore, database,
-                            aObjectStore->Transaction(), aCx);
+                            aObjectStore->Transaction());
 }
 
-struct GetAddInfoClosure
+struct MOZ_STACK_CLASS GetAddInfoClosure
 {
   IDBObjectStore* mThis;
   StructuredCloneWriteInfo& mCloneWriteInfo;
-  jsval mValue;
+  JS::Handle<JS::Value> mValue;
 };
 
 nsresult
@@ -577,8 +611,7 @@ GetAddInfoCallback(JSContext* aCx, void* aClosure)
   data->mCloneWriteInfo.mOffsetToKeyProp = 0;
   data->mCloneWriteInfo.mTransaction = data->mThis->Transaction();
 
-  if (!IDBObjectStore::SerializeValue(aCx, data->mCloneWriteInfo,
-                                      data->mValue)) {
+  if (!IDBObjectStore::SerializeValue(aCx, data->mCloneWriteInfo, data->mValue)) {
     return NS_ERROR_DOM_DATA_CLONE_ERR;
   }
 
@@ -604,12 +637,14 @@ ActorFromRemoteBlob(nsIDOMBlob* aBlob)
 
 inline
 bool
-ResolveMysteryBlob(nsIDOMBlob* aBlob, const nsString& aName,
-                   const nsString& aContentType, uint64_t aSize)
+ResolveMysteryFile(nsIDOMBlob* aBlob, const nsString& aName,
+                   const nsString& aContentType, uint64_t aSize,
+                   uint64_t aLastModifiedDate)
 {
   BlobChild* actor = ActorFromRemoteBlob(aBlob);
   if (actor) {
-    return actor->SetMysteryBlobInfo(aName, aContentType, aSize);
+    return actor->SetMysteryBlobInfo(aName, aContentType,
+                                     aSize, aLastModifiedDate);
   }
   return true;
 }
@@ -626,11 +661,197 @@ ResolveMysteryBlob(nsIDOMBlob* aBlob, const nsString& aContentType,
   return true;
 }
 
+class MainThreadDeserializationTraits
+{
+public:
+  static JSObject* CreateAndWrapFileHandle(JSContext* aCx,
+                                           IDBDatabase* aDatabase,
+                                           StructuredCloneFile& aFile,
+                                           const FileHandleData& aData)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    nsRefPtr<FileInfo>& fileInfo = aFile.mFileInfo;
+
+    nsRefPtr<IDBFileHandle> fileHandle = IDBFileHandle::Create(aDatabase,
+      aData.name, aData.type, fileInfo.forget());
+
+    JS::Rooted<JS::Value> wrappedFileHandle(aCx);
+    JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+    nsresult rv =
+      nsContentUtils::WrapNative(aCx, global,
+                                 static_cast<nsIDOMFileHandle*>(fileHandle),
+                                 &NS_GET_IID(nsIDOMFileHandle),
+                                 wrappedFileHandle.address());
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Failed to wrap native!");
+      return nullptr;
+    }
+
+    return JSVAL_TO_OBJECT(wrappedFileHandle);
+  }
+
+  static JSObject* CreateAndWrapBlobOrFile(JSContext* aCx,
+                                           IDBDatabase* aDatabase,
+                                           StructuredCloneFile& aFile,
+                                           const BlobOrFileData& aData)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    MOZ_ASSERT(aData.tag == SCTAG_DOM_FILE ||
+               aData.tag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
+               aData.tag == SCTAG_DOM_BLOB);
+
+    nsresult rv = NS_OK;
+
+    nsRefPtr<FileInfo>& fileInfo = aFile.mFileInfo;
+
+    nsCOMPtr<nsIFile> nativeFile;
+    if (!aFile.mFile) {
+      FileManager* fileManager = aDatabase->Manager();
+        NS_ASSERTION(fileManager, "This should never be null!");
+
+      nsCOMPtr<nsIFile> directory = fileManager->GetDirectory();
+      if (!directory) {
+        NS_WARNING("Failed to get directory!");
+        return nullptr;
+      }
+
+      nativeFile = fileManager->GetFileForId(directory, fileInfo->Id());
+      if (!nativeFile) {
+        NS_WARNING("Failed to get file!");
+        return nullptr;
+      }
+    }
+
+    if (aData.tag == SCTAG_DOM_BLOB) {
+      nsCOMPtr<nsIDOMBlob> domBlob;
+      if (aFile.mFile) {
+        if (!ResolveMysteryBlob(aFile.mFile, aData.type, aData.size)) {
+          return nullptr;
+        }
+        domBlob = aFile.mFile;
+      }
+      else {
+        domBlob = new nsDOMFileFile(aData.type, aData.size, nativeFile,
+                                    fileInfo);
+      }
+
+      JS::Rooted<JS::Value> wrappedBlob(aCx);
+      JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+      rv = nsContentUtils::WrapNative(aCx, global, domBlob,
+                                      &NS_GET_IID(nsIDOMBlob),
+                                      wrappedBlob.address());
+      if (NS_FAILED(rv)) {
+        NS_WARNING("Failed to wrap native!");
+        return nullptr;
+      }
+
+      return JSVAL_TO_OBJECT(wrappedBlob);
+    }
+
+    nsCOMPtr<nsIDOMFile> domFile;
+    if (aFile.mFile) {
+      if (!ResolveMysteryFile(aFile.mFile, aData.name, aData.type, aData.size,
+                              aData.lastModifiedDate)) {
+        return nullptr;
+      }
+      domFile = do_QueryInterface(aFile.mFile);
+      NS_ASSERTION(domFile, "This should never fail!");
+    }
+    else {
+      domFile = new nsDOMFileFile(aData.name, aData.type, aData.size,
+                                  nativeFile, fileInfo);
+    }
+
+    JS::Rooted<JS::Value> wrappedFile(aCx);
+    JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+    rv = nsContentUtils::WrapNative(aCx, global, domFile,
+                                    &NS_GET_IID(nsIDOMFile),
+                                    wrappedFile.address());
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Failed to wrap native!");
+      return nullptr;
+    }
+
+    return JSVAL_TO_OBJECT(wrappedFile);
+  }
+};
+
+
+class CreateIndexDeserializationTraits
+{
+public:
+  static JSObject* CreateAndWrapFileHandle(JSContext* aCx,
+                                           IDBDatabase* aDatabase,
+                                           StructuredCloneFile& aFile,
+                                           const FileHandleData& aData)
+  {
+    // FileHandle can't be used in index creation, so just make a dummy object.
+    return JS_NewObject(aCx, nullptr, nullptr, nullptr);
+  }
+
+  static JSObject* CreateAndWrapBlobOrFile(JSContext* aCx,
+                                           IDBDatabase* aDatabase,
+                                           StructuredCloneFile& aFile,
+                                           const BlobOrFileData& aData)
+  {
+    MOZ_ASSERT(aData.tag == SCTAG_DOM_FILE ||
+               aData.tag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
+               aData.tag == SCTAG_DOM_BLOB);
+
+    // The following properties are available for use in index creation
+    //   Blob.size
+    //   Blob.type
+    //   File.name
+    //   File.lastModifiedDate
+
+    JS::Rooted<JSObject*> obj(aCx,
+      JS_NewObject(aCx, nullptr, nullptr, nullptr));
+    if (!obj) {
+      NS_WARNING("Failed to create object!");
+      return nullptr;
+    }
+
+    // Technically these props go on the proto, but this detail won't change
+    // the results of index creation.
+
+    JS::Rooted<JSString*> type(aCx,
+      JS_NewUCStringCopyN(aCx, aData.type.get(), aData.type.Length()));
+    if (!type ||
+        !JS_DefineProperty(aCx, obj, "size",
+                           JS_NumberValue((double)aData.size),
+                           nullptr, nullptr, 0) ||
+        !JS_DefineProperty(aCx, obj, "type", STRING_TO_JSVAL(type),
+                           nullptr, nullptr, 0)) {
+      return nullptr;
+    }
+
+    if (aData.tag == SCTAG_DOM_BLOB) {
+      return obj;
+    }
+
+    JS::Rooted<JSString*> name(aCx,
+      JS_NewUCStringCopyN(aCx, aData.name.get(), aData.name.Length()));
+    JS::Rooted<JSObject*> date(aCx,
+      JS_NewDateObjectMsec(aCx, aData.lastModifiedDate));
+    if (!name || !date ||
+        !JS_DefineProperty(aCx, obj, "name", STRING_TO_JSVAL(name),
+                           nullptr, nullptr, 0) ||
+        !JS_DefineProperty(aCx, obj, "lastModifiedDate", OBJECT_TO_JSVAL(date),
+                           nullptr, nullptr, 0)) {
+      return nullptr;
+    }
+
+    return obj;
+  }
+};
+
 } // anonymous namespace
 
 JSClass IDBObjectStore::sDummyPropJSClass = {
   "dummy", 0,
-  JS_PropertyStub,  JS_PropertyStub,
+  JS_PropertyStub,  JS_DeletePropertyStub,
   JS_PropertyStub,  JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub,
   JS_ConvertStub
@@ -689,7 +910,7 @@ IDBObjectStore::AppendIndexUpdateInfo(
                                     bool aUnique,
                                     bool aMultiEntry,
                                     JSContext* aCx,
-                                    jsval aVal,
+                                    JS::Handle<JS::Value> aVal,
                                     nsTArray<IndexUpdateInfo>& aUpdateInfoArray)
 {
   nsresult rv;
@@ -715,22 +936,22 @@ IDBObjectStore::AppendIndexUpdateInfo(
     return NS_OK;
   }
 
-  JS::Value val;
-  if (NS_FAILED(aKeyPath.ExtractKeyAsJSVal(aCx, aVal, &val))) {
+  JS::Rooted<JS::Value> val(aCx);
+  if (NS_FAILED(aKeyPath.ExtractKeyAsJSVal(aCx, aVal, val.address()))) {
     return NS_OK;
   }
 
   if (!JSVAL_IS_PRIMITIVE(val) &&
       JS_IsArrayObject(aCx, JSVAL_TO_OBJECT(val))) {
-    JSObject* array = JSVAL_TO_OBJECT(val);
+    JS::Rooted<JSObject*> array(aCx, JSVAL_TO_OBJECT(val));
     uint32_t arrayLength;
     if (!JS_GetArrayLength(aCx, array, &arrayLength)) {
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
     for (uint32_t arrayIndex = 0; arrayIndex < arrayLength; arrayIndex++) {
-      jsval arrayItem;
-      if (!JS_GetElement(aCx, array, arrayIndex, &arrayItem)) {
+      JS::Rooted<JS::Value> arrayItem(aCx);
+      if (!JS_GetElement(aCx, array, arrayIndex, arrayItem.address())) {
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
 
@@ -773,49 +994,61 @@ IDBObjectStore::UpdateIndexes(IDBTransaction* aTransaction,
                               int64_t aObjectDataId,
                               const nsTArray<IndexUpdateInfo>& aUpdateInfoArray)
 {
-  nsCOMPtr<mozIStorageStatement> stmt;
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "IDBObjectStore::UpdateIndexes");
+
   nsresult rv;
 
-  NS_ASSERTION(aObjectDataId != LL_MININT, "Bad objectData id!");
+  NS_ASSERTION(aObjectDataId != INT64_MIN, "Bad objectData id!");
 
   NS_NAMED_LITERAL_CSTRING(objectDataId, "object_data_id");
 
   if (aOverwrite) {
-    stmt = aTransaction->GetCachedStatement(
-      "DELETE FROM unique_index_data "
-      "WHERE object_data_id = :object_data_id; "
-      "DELETE FROM index_data "
-      "WHERE object_data_id = :object_data_id");
-    NS_ENSURE_TRUE(stmt, NS_ERROR_FAILURE);
+    nsCOMPtr<mozIStorageStatement> deleteStmt =
+      aTransaction->GetCachedStatement(
+        "DELETE FROM unique_index_data "
+        "WHERE object_data_id = :object_data_id; "
+        "DELETE FROM index_data "
+        "WHERE object_data_id = :object_data_id");
+    NS_ENSURE_TRUE(deleteStmt, NS_ERROR_FAILURE);
 
-    mozStorageStatementScoper scoper(stmt);
+    mozStorageStatementScoper scoper(deleteStmt);
 
-    rv = stmt->BindInt64ByName(objectDataId, aObjectDataId);
+    rv = deleteStmt->BindInt64ByName(objectDataId, aObjectDataId);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = stmt->Execute();
+    rv = deleteStmt->Execute();
     NS_ENSURE_SUCCESS(rv, rv);
   }
+
+  // Avoid lots of hash lookups for objectStores with lots of indexes by lazily
+  // holding the necessary statements on the stack outside the loop.
+  nsCOMPtr<mozIStorageStatement> insertUniqueStmt;
+  nsCOMPtr<mozIStorageStatement> insertStmt;
 
   uint32_t infoCount = aUpdateInfoArray.Length();
   for (uint32_t i = 0; i < infoCount; i++) {
     const IndexUpdateInfo& updateInfo = aUpdateInfoArray[i];
 
-    // Insert new values.
+    nsCOMPtr<mozIStorageStatement>& stmt =
+      updateInfo.indexUnique ? insertUniqueStmt : insertStmt;
 
-    stmt = updateInfo.indexUnique ?
-      aTransaction->GetCachedStatement(
-        "INSERT INTO unique_index_data "
-          "(index_id, object_data_id, object_data_key, value) "
-        "VALUES (:index_id, :object_data_id, :object_data_key, :value)") :
-      aTransaction->GetCachedStatement(
-        "INSERT OR IGNORE INTO index_data ("
-          "index_id, object_data_id, object_data_key, value) "
-        "VALUES (:index_id, :object_data_id, :object_data_key, :value)");
-
+    if (!stmt) {
+      stmt = updateInfo.indexUnique ?
+        aTransaction->GetCachedStatement(
+          "INSERT INTO unique_index_data "
+            "(index_id, object_data_id, object_data_key, value) "
+          "VALUES (:index_id, :object_data_id, :object_data_key, :value)") :
+        aTransaction->GetCachedStatement(
+          "INSERT OR IGNORE INTO index_data ("
+            "index_id, object_data_id, object_data_key, value) "
+          "VALUES (:index_id, :object_data_id, :object_data_key, :value)");
+    }
     NS_ENSURE_TRUE(stmt, NS_ERROR_FAILURE);
 
-    mozStorageStatementScoper scoper4(stmt);
+    mozStorageStatementScoper scoper(stmt);
 
     rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("index_id"),
                                updateInfo.indexId);
@@ -866,6 +1099,12 @@ IDBObjectStore::GetStructuredCloneReadInfoFromStatement(
                                            IDBDatabase* aDatabase,
                                            StructuredCloneReadInfo& aInfo)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB",
+                 "IDBObjectStore::GetStructuredCloneReadInfoFromStatement");
+
 #ifdef DEBUG
   {
     int32_t type;
@@ -985,7 +1224,7 @@ IDBObjectStore::ClearStructuredCloneBuffer(JSAutoStructuredCloneBuffer& aBuffer)
 bool
 IDBObjectStore::DeserializeValue(JSContext* aCx,
                                  StructuredCloneReadInfo& aCloneReadInfo,
-                                 jsval* aValue)
+                                 JS::MutableHandle<JS::Value> aValue)
 {
   NS_ASSERTION(NS_IsMainThread(),
                "Should only be deserializing on the main thread!");
@@ -994,26 +1233,26 @@ IDBObjectStore::DeserializeValue(JSContext* aCx,
   JSAutoStructuredCloneBuffer& buffer = aCloneReadInfo.mCloneBuffer;
 
   if (!buffer.data()) {
-    *aValue = JSVAL_VOID;
+    aValue.setUndefined();
     return true;
   }
 
   JSAutoRequest ar(aCx);
 
   JSStructuredCloneCallbacks callbacks = {
-    IDBObjectStore::StructuredCloneReadCallback,
+    IDBObjectStore::StructuredCloneReadCallback<MainThreadDeserializationTraits>,
     nullptr,
     nullptr
   };
 
-  return buffer.read(aCx, aValue, &callbacks, &aCloneReadInfo);
+  return buffer.read(aCx, aValue.address(), &callbacks, &aCloneReadInfo);
 }
 
 // static
 bool
 IDBObjectStore::SerializeValue(JSContext* aCx,
                                StructuredCloneWriteInfo& aCloneWriteInfo,
-                               jsval aValue)
+                               JS::Handle<JS::Value> aValue)
 {
   NS_ASSERTION(NS_IsMainThread(),
                "Should only be serializing on the main thread!");
@@ -1073,7 +1312,7 @@ StructuredCloneReadString(JSStructuredCloneReader* aReader,
   }
   length = SwapBytes(length);
 
-  if (!EnsureStringLength(aString, length)) {
+  if (!aString.SetLength(length, mozilla::fallible_t())) {
     NS_WARNING("Out of memory?");
     return false;
   }
@@ -1088,6 +1327,87 @@ StructuredCloneReadString(JSStructuredCloneReader* aReader,
 }
 
 // static
+bool
+IDBObjectStore::ReadFileHandle(JSStructuredCloneReader* aReader,
+                               FileHandleData* aRetval)
+{
+  MOZ_STATIC_ASSERT(SCTAG_DOM_FILEHANDLE == 0xFFFF8004,
+                    "Update me!");
+  MOZ_ASSERT(aReader && aRetval);
+
+  nsCString type;
+  if (!StructuredCloneReadString(aReader, type)) {
+    return false;
+  }
+  CopyUTF8toUTF16(type, aRetval->type);
+
+  nsCString name;
+  if (!StructuredCloneReadString(aReader, name)) {
+    return false;
+  }
+  CopyUTF8toUTF16(name, aRetval->name);
+
+  return true;
+}
+
+// static
+bool
+IDBObjectStore::ReadBlobOrFile(JSStructuredCloneReader* aReader,
+                               uint32_t aTag,
+                               BlobOrFileData* aRetval)
+{
+  MOZ_STATIC_ASSERT(SCTAG_DOM_BLOB == 0xFFFF8001 &&
+                    SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE == 0xFFFF8002 &&
+                    SCTAG_DOM_FILE == 0xFFFF8005,
+                    "Update me!");
+  MOZ_ASSERT(aReader && aRetval);
+  MOZ_ASSERT(aTag == SCTAG_DOM_FILE ||
+             aTag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
+             aTag == SCTAG_DOM_BLOB);
+
+  aRetval->tag = aTag;
+
+  // If it's not a FileHandle, it's a Blob or a File.
+  uint64_t size;
+  if (!JS_ReadBytes(aReader, &size, sizeof(uint64_t))) {
+    NS_WARNING("Failed to read size!");
+    return false;
+  }
+  aRetval->size = SwapBytes(size);
+
+  nsCString type;
+  if (!StructuredCloneReadString(aReader, type)) {
+    return false;
+  }
+  CopyUTF8toUTF16(type, aRetval->type);
+
+  // Blobs are done.
+  if (aTag == SCTAG_DOM_BLOB) {
+    return true;
+  }
+
+  NS_ASSERTION(aTag == SCTAG_DOM_FILE ||
+               aTag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE, "Huh?!");
+
+  uint64_t lastModifiedDate = UINT64_MAX;
+  if (aTag != SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE &&
+      !JS_ReadBytes(aReader, &lastModifiedDate, sizeof(lastModifiedDate))) {
+    NS_WARNING("Failed to read lastModifiedDate");
+    return false;
+  }
+  aRetval->lastModifiedDate = lastModifiedDate;
+
+  nsCString name;
+  if (!StructuredCloneReadString(aReader, name)) {
+    return false;
+  }
+  CopyUTF8toUTF16(name, aRetval->name);
+
+  return true;
+}
+
+// static
+template <class DeserializationTraits>
 JSObject*
 IDBObjectStore::StructuredCloneReadCallback(JSContext* aCx,
                                             JSStructuredCloneReader* aReader,
@@ -1095,7 +1415,18 @@ IDBObjectStore::StructuredCloneReadCallback(JSContext* aCx,
                                             uint32_t aData,
                                             void* aClosure)
 {
-  if (aTag == SCTAG_DOM_FILEHANDLE || aTag == SCTAG_DOM_BLOB ||
+  // We need to statically assert that our tag values are what we expect
+  // so that if people accidentally change them they notice.
+  MOZ_STATIC_ASSERT(SCTAG_DOM_BLOB == 0xFFFF8001 &&
+                    SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE == 0xFFFF8002 &&
+                    SCTAG_DOM_FILEHANDLE == 0xFFFF8004 &&
+                    SCTAG_DOM_FILE == 0xFFFF8005,
+                    "You changed our structured clone tag values and just ate "
+                    "everyone's IndexedDB data.  I hope you are happy.");
+
+  if (aTag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
+      aTag == SCTAG_DOM_FILEHANDLE ||
+      aTag == SCTAG_DOM_BLOB ||
       aTag == SCTAG_DOM_FILE) {
     StructuredCloneReadInfo* cloneReadInfo =
       reinterpret_cast<StructuredCloneReadInfo*>(aClosure);
@@ -1105,128 +1436,26 @@ IDBObjectStore::StructuredCloneReadCallback(JSContext* aCx,
       return nullptr;
     }
 
-    nsresult rv;
-
     StructuredCloneFile& file = cloneReadInfo->mFiles[aData];
-    nsRefPtr<FileInfo>& fileInfo = file.mFileInfo;
     IDBDatabase* database = cloneReadInfo->mDatabase;
 
     if (aTag == SCTAG_DOM_FILEHANDLE) {
-      nsCString type;
-      if (!StructuredCloneReadString(aReader, type)) {
-        return nullptr;
-      }
-      NS_ConvertUTF8toUTF16 convType(type);
-
-      nsCString name;
-      if (!StructuredCloneReadString(aReader, name)) {
-        return nullptr;
-      }
-      NS_ConvertUTF8toUTF16 convName(name);
-
-      nsRefPtr<IDBFileHandle> fileHandle = IDBFileHandle::Create(database,
-        convName, convType, fileInfo.forget());
-
-      jsval wrappedFileHandle;
-      rv =
-        nsContentUtils::WrapNative(aCx, JS_GetGlobalForScopeChain(aCx),
-                                   static_cast<nsIDOMFileHandle*>(fileHandle),
-                                   &NS_GET_IID(nsIDOMFileHandle),
-                                   &wrappedFileHandle);
-      if (NS_FAILED(rv)) {
-        NS_WARNING("Failed to wrap native!");
+      FileHandleData data;
+      if (!ReadFileHandle(aReader, &data)) {
         return nullptr;
       }
 
-      return JSVAL_TO_OBJECT(wrappedFileHandle);
+      return DeserializationTraits::CreateAndWrapFileHandle(aCx, database,
+                                                            file, data);
     }
 
-    uint64_t size;
-    if (!JS_ReadBytes(aReader, &size, sizeof(uint64_t))) {
-      NS_WARNING("Failed to read size!");
-      return nullptr;
-    }
-    size = SwapBytes(size);
-
-    nsCString type;
-    if (!StructuredCloneReadString(aReader, type)) {
-      return nullptr;
-    }
-    NS_ConvertUTF8toUTF16 convType(type);
-
-    nsCOMPtr<nsIFile> nativeFile;
-    if (!file.mFile) {
-      FileManager* fileManager = database->Manager();
-        NS_ASSERTION(fileManager, "This should never be null!");
-
-      nsCOMPtr<nsIFile> directory = fileManager->GetDirectory();
-      if (!directory) {
-        NS_WARNING("Failed to get directory!");
-        return nullptr;
-      }
-
-      nativeFile = fileManager->GetFileForId(directory, fileInfo->Id());
-      if (!nativeFile) {
-        NS_WARNING("Failed to get file!");
-        return nullptr;
-      }
-    }
-
-    if (aTag == SCTAG_DOM_BLOB) {
-      nsCOMPtr<nsIDOMBlob> domBlob;
-      if (file.mFile) {
-        if (!ResolveMysteryBlob(file.mFile, convType, size)) {
-          return nullptr;
-        }
-        domBlob = file.mFile;
-      }
-      else {
-        domBlob = new nsDOMFileFile(convType, size, nativeFile, fileInfo);
-      }
-
-      jsval wrappedBlob;
-       rv =
-        nsContentUtils::WrapNative(aCx, JS_GetGlobalForScopeChain(aCx), domBlob,
-                                   &NS_GET_IID(nsIDOMBlob), &wrappedBlob);
-      if (NS_FAILED(rv)) {
-        NS_WARNING("Failed to wrap native!");
-        return nullptr;
-      }
-
-      return JSVAL_TO_OBJECT(wrappedBlob);
-    }
-
-    NS_ASSERTION(aTag == SCTAG_DOM_FILE, "Huh?!");
-
-    nsCString name;
-    if (!StructuredCloneReadString(aReader, name)) {
-      return nullptr;
-    }
-    NS_ConvertUTF8toUTF16 convName(name);
-
-    nsCOMPtr<nsIDOMFile> domFile;
-    if (file.mFile) {
-      if (!ResolveMysteryBlob(file.mFile, convName, convType, size)) {
-        return nullptr;
-      }
-      domFile = do_QueryInterface(file.mFile);
-      NS_ASSERTION(domFile, "This should never fail!");
-    }
-    else {
-      domFile = new nsDOMFileFile(convName, convType, size, nativeFile,
-                                  fileInfo);
-    }
-
-    jsval wrappedFile;
-    rv =
-      nsContentUtils::WrapNative(aCx, JS_GetGlobalForScopeChain(aCx), domFile,
-                                 &NS_GET_IID(nsIDOMFile), &wrappedFile);
-    if (NS_FAILED(rv)) {
-      NS_WARNING("Failed to wrap native!");
+    BlobOrFileData data;
+    if (!ReadBlobOrFile(aReader, aTag, &data)) {
       return nullptr;
     }
 
-    return JSVAL_TO_OBJECT(wrappedFile);
+    return DeserializationTraits::CreateAndWrapBlobOrFile(aCx, database,
+                                                          file, data);
   }
 
   const JSStructuredCloneCallbacks* runtimeCallbacks =
@@ -1243,7 +1472,7 @@ IDBObjectStore::StructuredCloneReadCallback(JSContext* aCx,
 JSBool
 IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
                                              JSStructuredCloneWriter* aWriter,
-                                             JSObject* aObj,
+                                             JS::Handle<JSObject*> aObj,
                                              void* aClosure)
 {
   StructuredCloneWriteInfo* cloneWriteInfo =
@@ -1258,15 +1487,46 @@ IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
     return JS_WriteBytes(aWriter, &value, sizeof(value));
   }
 
+  IDBTransaction* transaction = cloneWriteInfo->mTransaction;
+  FileManager* fileManager = transaction->Database()->Manager();
+
+  file::FileHandle* fileHandle = nullptr;
+  if (NS_SUCCEEDED(UnwrapObject<file::FileHandle>(aCx, aObj, fileHandle))) {
+    nsRefPtr<FileInfo> fileInfo = fileHandle->GetFileInfo();
+
+    // Throw when trying to store non IDB file handles or IDB file handles
+    // across databases.
+    if (!fileInfo || fileInfo->Manager() != fileManager) {
+      return false;
+    }
+
+    NS_ConvertUTF16toUTF8 convType(fileHandle->Type());
+    uint32_t convTypeLength = SwapBytes(convType.Length());
+
+    NS_ConvertUTF16toUTF8 convName(fileHandle->Name());
+    uint32_t convNameLength = SwapBytes(convName.Length());
+
+    if (!JS_WriteUint32Pair(aWriter, SCTAG_DOM_FILEHANDLE,
+                            cloneWriteInfo->mFiles.Length()) ||
+        !JS_WriteBytes(aWriter, &convTypeLength, sizeof(uint32_t)) ||
+        !JS_WriteBytes(aWriter, convType.get(), convType.Length()) ||
+        !JS_WriteBytes(aWriter, &convNameLength, sizeof(uint32_t)) ||
+        !JS_WriteBytes(aWriter, convName.get(), convName.Length())) {
+      return false;
+    }
+
+    StructuredCloneFile* file = cloneWriteInfo->mFiles.AppendElement();
+    file->mFileInfo = fileInfo.forget();
+
+    return true;
+  }
+
   nsCOMPtr<nsIXPConnectWrappedNative> wrappedNative;
   nsContentUtils::XPConnect()->
     GetWrappedNativeOfJSObject(aCx, aObj, getter_AddRefs(wrappedNative));
 
   if (wrappedNative) {
     nsISupports* supports = wrappedNative->Native();
-
-    IDBTransaction* transaction = cloneWriteInfo->mTransaction;
-    FileManager* fileManager = transaction->Database()->Manager();
 
     nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(supports);
     if (blob) {
@@ -1320,6 +1580,14 @@ IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
       }
 
       if (file) {
+        uint64_t lastModifiedDate = 0;
+        if (NS_FAILED(file->GetMozLastModifiedDate(&lastModifiedDate))) {
+          NS_WARNING("Failed to get last modified date!");
+          return false;
+        }
+
+        lastModifiedDate = SwapBytes(lastModifiedDate);
+
         nsString name;
         if (NS_FAILED(file->GetName(name))) {
           NS_WARNING("Failed to get name!");
@@ -1328,7 +1596,8 @@ IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
         NS_ConvertUTF16toUTF8 convName(name);
         uint32_t convNameLength = SwapBytes(convName.Length());
 
-        if (!JS_WriteBytes(aWriter, &convNameLength, sizeof(convNameLength)) ||
+        if (!JS_WriteBytes(aWriter, &lastModifiedDate, sizeof(lastModifiedDate)) || 
+            !JS_WriteBytes(aWriter, &convNameLength, sizeof(convNameLength)) ||
             !JS_WriteBytes(aWriter, convName.get(), convName.Length())) {
           return false;
         }
@@ -1338,47 +1607,6 @@ IDBObjectStore::StructuredCloneWriteCallback(JSContext* aCx,
       cloneFile->mFile = blob.forget();
       cloneFile->mFileInfo = fileInfo.forget();
       cloneFile->mInputStream = inputStream.forget();
-
-      return true;
-    }
-
-    nsCOMPtr<nsIDOMFileHandle> fileHandle = do_QueryInterface(supports);
-    if (fileHandle) {
-      nsRefPtr<FileInfo> fileInfo = fileHandle->GetFileInfo();
-
-      // Throw when trying to store non IDB file handles or IDB file handles
-      // across databases.
-      if (!fileInfo || fileInfo->Manager() != fileManager) {
-        return false;
-      }
-
-      nsString type;
-      if (NS_FAILED(fileHandle->GetType(type))) {
-        NS_WARNING("Failed to get type!");
-        return false;
-      }
-      NS_ConvertUTF16toUTF8 convType(type);
-      uint32_t convTypeLength = SwapBytes(convType.Length());
-
-      nsString name;
-      if (NS_FAILED(fileHandle->GetName(name))) {
-        NS_WARNING("Failed to get name!");
-        return false;
-      }
-      NS_ConvertUTF16toUTF8 convName(name);
-      uint32_t convNameLength = SwapBytes(convName.Length());
-
-      if (!JS_WriteUint32Pair(aWriter, SCTAG_DOM_FILEHANDLE,
-                              cloneWriteInfo->mFiles.Length()) ||
-          !JS_WriteBytes(aWriter, &convTypeLength, sizeof(uint32_t)) ||
-          !JS_WriteBytes(aWriter, convType.get(), convType.Length()) ||
-          !JS_WriteBytes(aWriter, &convNameLength, sizeof(uint32_t)) ||
-          !JS_WriteBytes(aWriter, convName.get(), convName.Length())) {
-        return false;
-      }
-
-      StructuredCloneFile* file = cloneWriteInfo->mFiles.AppendElement();
-      file->mFileInfo = fileInfo.forget();
 
       return true;
     }
@@ -1476,11 +1704,14 @@ IDBObjectStore::ConvertBlobsToActors(
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
 
-      nsCOMPtr<nsIDOMBlob> blob = new nsDOMFileFile(nativeFile);
+      nsCOMPtr<nsIDOMBlob> blob = new nsDOMFileFile(nativeFile, file.mFileInfo);
 
       BlobParent* actor =
         aContentParent->GetOrCreateActorForBlob(blob);
-      NS_ASSERTION(actor, "This should never fail without aborting!");
+      if (!actor) {
+        // This can only fail if the child has crashed.
+        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+      }
 
       aActors.AppendElement(actor);
     }
@@ -1490,7 +1721,7 @@ IDBObjectStore::ConvertBlobsToActors(
 }
 
 IDBObjectStore::IDBObjectStore()
-: mId(LL_MININT),
+: mId(INT64_MIN),
   mKeyPath(0),
   mCachedKeyPath(JSVAL_VOID),
   mRooted(false),
@@ -1512,14 +1743,15 @@ IDBObjectStore::~IDBObjectStore()
   }
 
   if (mRooted) {
+    mCachedKeyPath = JSVAL_VOID;
     NS_DROP_JS_OBJECTS(this, IDBObjectStore);
   }
 }
 
 nsresult
 IDBObjectStore::GetAddInfo(JSContext* aCx,
-                           jsval aValue,
-                           jsval aKeyVal,
+                           JS::Handle<JS::Value> aValue,
+                           JS::Handle<JS::Value> aKeyVal,
                            StructuredCloneWriteInfo& aCloneWriteInfo,
                            Key& aKey,
                            nsTArray<IndexUpdateInfo>& aUpdateInfoArray)
@@ -1599,19 +1831,21 @@ IDBObjectStore::AddOrPut(const jsval& aValue,
     return NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR;
   }
 
-  jsval keyval = (aOptionalArgCount >= 1) ? aKey : JSVAL_VOID;
+  JS::Rooted<JS::Value> keyval(aCx,
+    (aOptionalArgCount >= 1) ? aKey : JSVAL_VOID);
 
   StructuredCloneWriteInfo cloneWriteInfo;
   Key key;
   nsTArray<IndexUpdateInfo> updateInfo;
 
-  nsresult rv = GetAddInfo(aCx, aValue, keyval, cloneWriteInfo, key,
+  JS::Rooted<JS::Value> value(aCx, aValue);
+  nsresult rv = GetAddInfo(aCx, value, keyval, cloneWriteInfo, key,
                            updateInfo);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, aCx);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsRefPtr<AddHelper> helper =
@@ -1620,6 +1854,29 @@ IDBObjectStore::AddOrPut(const jsval& aValue,
 
   rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+#ifdef IDB_PROFILER_USE_MARKS
+  if (aOverwrite) {
+    IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                      "database(%s).transaction(%s).objectStore(%s).%s(%s)",
+                      "IDBRequest[%llu] MT IDBObjectStore.put()",
+                      request->GetSerialNumber(),
+                      IDB_PROFILER_STRING(Transaction()->Database()),
+                      IDB_PROFILER_STRING(Transaction()),
+                      IDB_PROFILER_STRING(this),
+                      key.IsUnset() ? "" : IDB_PROFILER_STRING(key));
+  }
+  else {
+    IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                      "database(%s).transaction(%s).objectStore(%s).add(%s)",
+                      "IDBRequest[%llu] MT IDBObjectStore.add()",
+                      request->GetSerialNumber(),
+                      IDB_PROFILER_STRING(Transaction()->Database()),
+                      IDB_PROFILER_STRING(Transaction()),
+                      IDB_PROFILER_STRING(this),
+                      key.IsUnset() ? "" : IDB_PROFILER_STRING(key));
+  }
+#endif
 
   request.forget(_retval);
   return NS_OK;
@@ -1645,7 +1902,7 @@ IDBObjectStore::AddOrPutInternal(
     return NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR;
   }
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, nullptr);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   StructuredCloneWriteInfo cloneWriteInfo;
@@ -1707,6 +1964,29 @@ IDBObjectStore::AddOrPutInternal(
   nsresult rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
+#ifdef IDB_PROFILER_USE_MARKS
+  if (aOverwrite) {
+    IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                      "database(%s).transaction(%s).objectStore(%s).%s(%s)",
+                      "IDBRequest[%llu] MT IDBObjectStore.put()",
+                      request->GetSerialNumber(),
+                      IDB_PROFILER_STRING(Transaction()->Database()),
+                      IDB_PROFILER_STRING(Transaction()),
+                      IDB_PROFILER_STRING(this),
+                      key.IsUnset() ? "" : IDB_PROFILER_STRING(key));
+  }
+  else {
+    IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                      "database(%s).transaction(%s).objectStore(%s).add(%s)",
+                      "IDBRequest[%llu] MT IDBObjectStore.add()",
+                      request->GetSerialNumber(),
+                      IDB_PROFILER_STRING(Transaction()->Database()),
+                      IDB_PROFILER_STRING(Transaction()),
+                      IDB_PROFILER_STRING(this),
+                      key.IsUnset() ? "" : IDB_PROFILER_STRING(key));
+  }
+#endif
+
   request.forget(_retval);
   return NS_OK;
 }
@@ -1723,7 +2003,7 @@ IDBObjectStore::GetInternal(IDBKeyRange* aKeyRange,
     return NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR;
   }
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, aCx);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsRefPtr<GetHelper> helper =
@@ -1731,6 +2011,14 @@ IDBObjectStore::GetInternal(IDBKeyRange* aKeyRange,
 
   nsresult rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s).get(%s)",
+                    "IDBRequest[%llu] MT IDBObjectStore.get()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange));
 
   request.forget(_retval);
   return NS_OK;
@@ -1748,7 +2036,7 @@ IDBObjectStore::GetAllInternal(IDBKeyRange* aKeyRange,
     return NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR;
   }
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, aCx);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsRefPtr<GetAllHelper> helper =
@@ -1756,6 +2044,16 @@ IDBObjectStore::GetAllInternal(IDBKeyRange* aKeyRange,
 
   nsresult rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s)."
+                    "getAll(%s, %lu)",
+                    "IDBRequest[%llu] MT IDBObjectStore.getAll()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange),
+                    aLimit);
 
   request.forget(_retval);
   return NS_OK;
@@ -1777,7 +2075,7 @@ IDBObjectStore::DeleteInternal(IDBKeyRange* aKeyRange,
     return NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR;
   }
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, aCx);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsRefPtr<DeleteHelper> helper =
@@ -1785,6 +2083,14 @@ IDBObjectStore::DeleteInternal(IDBKeyRange* aKeyRange,
 
   nsresult rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s).delete(%s)",
+                    "IDBRequest[%llu] MT IDBObjectStore.delete()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange));
 
   request.forget(_retval);
   return NS_OK;
@@ -1804,13 +2110,21 @@ IDBObjectStore::ClearInternal(JSContext* aCx,
     return NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR;
   }
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, aCx);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsRefPtr<ClearHelper> helper(new ClearHelper(mTransaction, request, this));
 
   nsresult rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s).clear()",
+                    "IDBRequest[%llu] MT IDBObjectStore.clear()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this));
 
   request.forget(_retval);
   return NS_OK;
@@ -1827,13 +2141,21 @@ IDBObjectStore::CountInternal(IDBKeyRange* aKeyRange,
     return NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR;
   }
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, aCx);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsRefPtr<CountHelper> helper =
     new CountHelper(mTransaction, request, this, aKeyRange);
   nsresult rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s).count(%s)",
+                    "IDBRequest[%llu] MT IDBObjectStore.count()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange));
 
   request.forget(_retval);
   return NS_OK;
@@ -1854,7 +2176,7 @@ IDBObjectStore::OpenCursorInternal(IDBKeyRange* aKeyRange,
   IDBCursor::Direction direction =
     static_cast<IDBCursor::Direction>(aDirection);
 
-  nsRefPtr<IDBRequest> request = GenerateRequest(this, aCx);
+  nsRefPtr<IDBRequest> request = GenerateRequest(this);
   NS_ENSURE_TRUE(request, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   nsRefPtr<OpenCursorHelper> helper =
@@ -1862,6 +2184,16 @@ IDBObjectStore::OpenCursorInternal(IDBKeyRange* aKeyRange,
 
   nsresult rv = helper->DispatchToTransactionPool();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+
+  IDB_PROFILER_MARK("IndexedDB Request %llu: "
+                    "database(%s).transaction(%s).objectStore(%s)."
+                    "openCursor(%s, %s)",
+                    "IDBRequest[%llu] MT IDBObjectStore.openCursor()",
+                    request->GetSerialNumber(),
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(aKeyRange),
+                    IDB_PROFILER_STRING(direction));
 
   request.forget(_retval);
   return NS_OK;
@@ -1944,6 +2276,14 @@ IDBObjectStore::CreateIndexInternal(const IndexInfo& aInfo,
 
   autoRemove.forget();
 
+  IDB_PROFILER_MARK("IndexedDB Pseudo-request: "
+                    "database(%s).transaction(%s).objectStore(%s)."
+                    "createIndex(%s)",
+                    "MT IDBObjectStore.createIndex()",
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this), IDB_PROFILER_STRING(index));
+
   index.forget(_retval);
   return NS_OK;
 }
@@ -1994,16 +2334,13 @@ IDBObjectStore::IndexInternal(const nsAString& aName,
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBObjectStore)
-
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBObjectStore)
   NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedKeyPath)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBObjectStore)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mTransaction,
-                                                       nsIDOMEventTarget)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransaction)
 
   for (uint32_t i = 0; i < tmp->mCreatedIndexes.Length(); i++) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mCreatedIndexes[i]");
@@ -2055,7 +2392,7 @@ IDBObjectStore::GetKeyPath(JSContext* aCx,
     return NS_OK;
   }
 
-  nsresult rv = GetKeyPath().ToJSVal(aCx, &mCachedKeyPath);
+  nsresult rv = GetKeyPath().ToJSVal(aCx, mCachedKeyPath);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (JSVAL_IS_GCTHING(mCachedKeyPath)) {
@@ -2162,7 +2499,7 @@ IDBObjectStore::GetAll(const jsval& aKey,
   }
 
   if (aOptionalArgCount < 2 || aLimit == 0) {
-    aLimit = PR_UINT32_MAX;
+    aLimit = UINT32_MAX;
   }
 
   nsRefPtr<IDBRequest> request;
@@ -2355,7 +2692,7 @@ IDBObjectStore::CreateIndex(const nsAString& aName,
 #endif
 
   nsresult rv;
-  mozilla::dom::IDBIndexParameters params;
+  mozilla::idl::IDBIndexParameters params;
 
   // Get optional arguments.
   if (!JSVAL_IS_VOID(aOptions) && !JSVAL_IS_NULL(aOptions)) {
@@ -2366,7 +2703,7 @@ IDBObjectStore::CreateIndex(const nsAString& aName,
   }
 
   if (params.multiEntry && keyPath.IsArray()) {
-    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
 
   DatabaseInfo* databaseInfo = mTransaction->DBInfo();
@@ -2455,6 +2792,15 @@ IDBObjectStore::DeleteIndex(const nsAString& aName)
     }
   }
 
+  IDB_PROFILER_MARK("IndexedDB Pseudo-request: "
+                    "database(%s).transaction(%s).objectStore(%s)."
+                    "deleteIndex(\"%s\")",
+                    "MT IDBObjectStore.deleteIndex()",
+                    IDB_PROFILER_STRING(Transaction()->Database()),
+                    IDB_PROFILER_STRING(Transaction()),
+                    IDB_PROFILER_STRING(this),
+                    NS_ConvertUTF16toUTF8(aName).get());
+
   return NS_OK;
 }
 
@@ -2489,28 +2835,36 @@ IDBObjectStore::Count(const jsval& aKey,
 inline nsresult
 CopyData(nsIInputStream* aInputStream, nsIOutputStream* aOutputStream)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "CopyData");
+
   nsresult rv;
 
   do {
     char copyBuffer[FILE_COPY_BUFFER_SIZE];
 
     uint32_t numRead;
-    rv = aInputStream->Read(copyBuffer, FILE_COPY_BUFFER_SIZE, &numRead);
-    NS_ENSURE_SUCCESS(rv, rv);
+    rv = aInputStream->Read(copyBuffer, sizeof(copyBuffer), &numRead);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-    if (numRead <= 0) {
+    if (!numRead) {
       break;
     }
 
     uint32_t numWrite;
     rv = aOutputStream->Write(copyBuffer, numRead, &numWrite);
-    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-    NS_ENSURE_TRUE(numWrite == numRead, NS_ERROR_FAILURE);
+    if (numWrite < numRead) {
+      // Must have hit the quota limit.
+      return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+    }
   } while (true);
 
   rv = aOutputStream->Flush();
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   return NS_OK;
 }
@@ -2525,8 +2879,18 @@ ObjectStoreHelper::ReleaseMainThreadObjects()
 nsresult
 ObjectStoreHelper::Dispatch(nsIEventTarget* aDatabaseThread)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "ObjectStoreHelper::Dispatch");
+
   if (IndexedDatabaseManager::IsMainProcess()) {
     return AsyncConnectionHelper::Dispatch(aDatabaseThread);
+  }
+
+  // If we've been invalidated then there's no point sending anything to the
+  // parent process.
+  if (mObjectStore->Transaction()->Database()->IsInvalidated()) {
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   IndexedDBObjectStoreChild* objectStoreActor = mObjectStore->GetActorChild();
@@ -2563,9 +2927,8 @@ NoRequestObjectStoreHelper::UnpackResponseFromParentProcess(
   return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
 }
 
-HelperBase::ChildProcessSendResult
-NoRequestObjectStoreHelper::MaybeSendResponseToChildProcess(
-                                                           nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+NoRequestObjectStoreHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   return Success_NotSent;
@@ -2588,7 +2951,16 @@ NoRequestObjectStoreHelper::OnError()
 nsresult
 AddHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(aConnection, "Passed a null connection!");
+
+  PROFILER_LABEL("IndexedDB", "AddHelper::DoDatabaseWork");
+
+  if (IndexedDatabaseManager::InLowDiskSpaceMode()) {
+    NS_WARNING("Refusing to add more data because disk space is low!");
+    return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+  }
 
   nsresult rv;
   bool keyUnset = mKey.IsUnset();
@@ -2708,12 +3080,12 @@ AddHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
         nativeFile = fileManager->GetFileForId(directory, id);
         NS_ENSURE_TRUE(nativeFile, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-        nsRefPtr<FileStream> outputStream = new FileStream();
-        rv = outputStream->Init(nativeFile, NS_LITERAL_STRING("wb"), 0);
-        NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        nsRefPtr<FileOutputStream> outputStream = FileOutputStream::Create(
+          mObjectStore->Transaction()->Database()->Origin(), nativeFile);
+        NS_ENSURE_TRUE(outputStream, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
         rv = CopyData(inputStream, outputStream);
-        NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        NS_ENSURE_SUCCESS(rv, rv);
 
         cloneFile.mFile->AddFileInfo(fileInfo);
       }
@@ -2761,7 +3133,7 @@ AddHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
 nsresult
 AddHelper::GetSuccessResult(JSContext* aCx,
-                            jsval* aVal)
+                            JS::MutableHandle<JS::Value> aVal)
 {
   NS_ASSERTION(!mKey.IsUnset(), "Badness!");
 
@@ -2780,6 +3152,12 @@ AddHelper::ReleaseMainThreadObjects()
 nsresult
 AddHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "AddHelper::PackArgumentsForParentProcess");
+
   AddPutParams commonParams;
   commonParams.cloneInfo() = mCloneWriteInfo;
   commonParams.key() = mKey;
@@ -2804,8 +3182,9 @@ AddHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 
       BlobChild* actor =
         contentChild->GetOrCreateActorForBlob(file.mFile);
-      NS_ASSERTION(actor, "This should never fail without aborting!");
-
+      if (!actor) {
+        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+      }
       blobsChild.AppendElement(actor);
     }
   }
@@ -2824,16 +3203,17 @@ AddHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
   return NS_OK;
 }
 
-HelperBase::ChildProcessSendResult
-AddHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+AddHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "AddHelper::SendResponseToChildProcess");
+
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  if (!actor) {
-    return Success_NotSent;
-  }
+  NS_ASSERTION(actor, "How did we get this far without an actor?");
 
   ResponseValue response;
   if (NS_FAILED(aResultCode)) {
@@ -2850,7 +3230,7 @@ AddHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
     response = addResponse;
   }
 
-  if (!actor->Send__delete__(actor, response)) {
+  if (!actor->SendResponse(response)) {
     return Error;
   }
 
@@ -2874,7 +3254,11 @@ AddHelper::UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
 nsresult
 GetHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(mKeyRange, "Must have a key range here!");
+
+  PROFILER_LABEL("IndexedDB", "GetHelper::DoDatabaseWork [IDBObjectStore.cpp]");
 
   nsCString keyRangeClause;
   mKeyRange->GetBindingClause(NS_LITERAL_CSTRING("key_value"), keyRangeClause);
@@ -2912,7 +3296,7 @@ GetHelper::DoDatabaseWork(mozIStorageConnection* /* aConnection */)
 
 nsresult
 GetHelper::GetSuccessResult(JSContext* aCx,
-                            jsval* aVal)
+                            JS::MutableHandle<JS::Value> aVal)
 {
   bool result = IDBObjectStore::DeserializeValue(aCx, mCloneReadInfo, aVal);
 
@@ -2933,7 +3317,13 @@ GetHelper::ReleaseMainThreadObjects()
 nsresult
 GetHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(mKeyRange, "This should never be null!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "GetHelper::PackArgumentsForParentProcess "
+                             "[IDBObjectStore.cpp]");
 
   FIXME_Bug_521898_objectstore::GetParams params;
 
@@ -2943,16 +3333,18 @@ GetHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
   return NS_OK;
 }
 
-HelperBase::ChildProcessSendResult
-GetHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+GetHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "GetHelper::SendResponseToChildProcess "
+                             "[IDBObjectStore.cpp]");
+
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  if (!actor) {
-    return Success_NotSent;
-  }
+  NS_ASSERTION(actor, "How did we get this far without an actor?");
 
   InfallibleTArray<PBlobParent*> blobsParent;
 
@@ -2973,7 +3365,7 @@ GetHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
                                            blobsParent);
     if (NS_FAILED(aResultCode)) {
       NS_WARNING("ConvertBlobsToActors failed!");
-  }
+    }
   }
 
   ResponseValue response;
@@ -2987,7 +3379,7 @@ GetHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
     response = getResponse;
   }
 
-  if (!actor->Send__delete__(actor, response)) {
+  if (!actor->SendResponse(response)) {
     return Error;
   }
 
@@ -3020,7 +3412,11 @@ GetHelper::UnpackResponseFromParentProcess(const ResponseValue& aResponseValue)
 nsresult
 DeleteHelper::DoDatabaseWork(mozIStorageConnection* /*aConnection */)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(mKeyRange, "Must have a key range here!");
+
+  PROFILER_LABEL("IndexedDB", "DeleteHelper::DoDatabaseWork");
 
   nsCString keyRangeClause;
   mKeyRange->GetBindingClause(NS_LITERAL_CSTRING("key_value"), keyRangeClause);
@@ -3051,16 +3447,21 @@ DeleteHelper::DoDatabaseWork(mozIStorageConnection* /*aConnection */)
 
 nsresult
 DeleteHelper::GetSuccessResult(JSContext* aCx,
-                               jsval* aVal)
+                               JS::MutableHandle<JS::Value> aVal)
 {
-  *aVal = JSVAL_VOID;
+  aVal.setUndefined();
   return NS_OK;
 }
 
 nsresult
 DeleteHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(mKeyRange, "This should never be null!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "DeleteHelper::PackArgumentsForParentProcess");
 
   DeleteParams params;
 
@@ -3070,16 +3471,17 @@ DeleteHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
   return NS_OK;
 }
 
-HelperBase::ChildProcessSendResult
-DeleteHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+DeleteHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "DeleteHelper::SendResponseToChildProcess");
+
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  if (!actor) {
-    return Success_NotSent;
-  }
+  NS_ASSERTION(actor, "How did we get this far without an actor?");
 
   ResponseValue response;
   if (NS_FAILED(aResultCode)) {
@@ -3089,7 +3491,7 @@ DeleteHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
     response = DeleteResponse();
   }
 
-  if (!actor->Send__delete__(actor, response)) {
+  if (!actor->SendResponse(response)) {
     return Error;
   }
 
@@ -3109,7 +3511,11 @@ DeleteHelper::UnpackResponseFromParentProcess(
 nsresult
 ClearHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
-  NS_PRECONDITION(aConnection, "Passed a null connection!");
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+  NS_ASSERTION(aConnection, "Passed a null connection!");
+
+  PROFILER_LABEL("IndexedDB", "ClearHelper::DoDatabaseWork");
 
   nsCOMPtr<mozIStorageStatement> stmt =
     mTransaction->GetCachedStatement(
@@ -3132,20 +3538,27 @@ ClearHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 nsresult
 ClearHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "ClearHelper::PackArgumentsForParentProcess");
+
   aParams = ClearParams();
   return NS_OK;
 }
 
-HelperBase::ChildProcessSendResult
-ClearHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+ClearHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "ClearHelper::SendResponseToChildProcess");
+
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  if (!actor) {
-    return Success_NotSent;
-  }
+  NS_ASSERTION(actor, "How did we get this far without an actor?");
 
   ResponseValue response;
   if (NS_FAILED(aResultCode)) {
@@ -3155,7 +3568,7 @@ ClearHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
     response = ClearResponse();
   }
 
-  if (!actor->Send__delete__(actor, response)) {
+  if (!actor->SendResponse(response)) {
     return Error;
   }
 
@@ -3175,6 +3588,12 @@ ClearHelper::UnpackResponseFromParentProcess(
 nsresult
 OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB",
+                 "OpenCursorHelper::DoDatabaseWork [IDBObjectStore.cpp]");
+
   NS_NAMED_LITERAL_CSTRING(keyValue, "key_value");
 
   nsCString keyRangeClause;
@@ -3182,7 +3601,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
     mKeyRange->GetBindingClause(keyValue, keyRangeClause);
   }
 
-  nsCAutoString directionClause;
+  nsAutoCString directionClause;
   switch (mDirection) {
     case IDBCursor::NEXT:
     case IDBCursor::NEXT_UNIQUE:
@@ -3237,7 +3656,7 @@ OpenCursorHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
   // Now we need to make the query to get the next match.
   keyRangeClause.Truncate();
-  nsCAutoString continueToKeyRangeClause;
+  nsAutoCString continueToKeyRangeClause;
 
   NS_NAMED_LITERAL_CSTRING(currentKey, "current_key");
   NS_NAMED_LITERAL_CSTRING(rangeKey, "range_key");
@@ -3318,7 +3737,7 @@ OpenCursorHelper::EnsureCursor()
 
 nsresult
 OpenCursorHelper::GetSuccessResult(JSContext* aCx,
-                                   jsval* aVal)
+                                   JS::MutableHandle<JS::Value> aVal)
 {
   nsresult rv = EnsureCursor();
   NS_ENSURE_SUCCESS(rv, rv);
@@ -3328,7 +3747,7 @@ OpenCursorHelper::GetSuccessResult(JSContext* aCx,
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   }
   else {
-    *aVal = JSVAL_VOID;
+    aVal.setUndefined();
   }
 
   return NS_OK;
@@ -3354,6 +3773,13 @@ nsresult
 OpenCursorHelper::PackArgumentsForParentProcess(
                                               ObjectStoreRequestParams& aParams)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "OpenCursorHelper::PackArgumentsForParentProcess "
+                             "[IDBObjectStore.cpp]");
+
   FIXME_Bug_521898_objectstore::OpenCursorParams params;
 
   if (mKeyRange) {
@@ -3371,18 +3797,19 @@ OpenCursorHelper::PackArgumentsForParentProcess(
   return NS_OK;
 }
 
-HelperBase::ChildProcessSendResult
-OpenCursorHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+OpenCursorHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+  NS_ASSERTION(!mCursor, "Shouldn't have this yet!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "OpenCursorHelper::SendResponseToChildProcess "
+                             "[IDBObjectStore.cpp]");
 
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  if (!actor) {
-    return Success_NotSent;
-  }
-
-  NS_ASSERTION(!mCursor, "Shouldn't have this yet!");
+  NS_ASSERTION(actor, "How did we get this far without an actor?");
 
   InfallibleTArray<PBlobParent*> blobsParent;
 
@@ -3443,20 +3870,15 @@ OpenCursorHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
       params.cloneInfo() = mSerializedCloneReadInfo;
       params.blobsParent().SwapElements(blobsParent);
 
-      IndexedDBCursorParent* cursorActor = new IndexedDBCursorParent(mCursor);
-
-      if (!objectStoreActor->SendPIndexedDBCursorConstructor(cursorActor,
-                                                             params)) {
+      if (!objectStoreActor->OpenCursor(mCursor, params, openCursorResponse)) {
         return Error;
       }
-
-      openCursorResponse = cursorActor;
     }
 
     response = openCursorResponse;
   }
 
-  if (!actor->Send__delete__(actor, response)) {
+  if (!actor->SendResponse(response)) {
     return Error;
   }
 
@@ -3504,6 +3926,16 @@ OpenCursorHelper::UnpackResponseFromParentProcess(
 nsresult
 CreateIndexHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "CreateIndexHelper::DoDatabaseWork");
+
+  if (IndexedDatabaseManager::InLowDiskSpaceMode()) {
+    NS_WARNING("Refusing to create index because disk space is low!");
+    return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+  }
+
   // Insert the data into the database.
   nsCOMPtr<mozIStorageStatement> stmt =
     mTransaction->GetCachedStatement(
@@ -3606,6 +4038,7 @@ CreateIndexHelper::InsertDataFromObjectStore(mozIStorageConnection* aConnection)
 
   JSContext* cx = tlsEntry->Context();
   JSAutoRequest ar(cx);
+  JSAutoCompartment ac(cx, tlsEntry->Global());
 
   do {
     StructuredCloneReadInfo cloneReadInfo;
@@ -3616,13 +4049,13 @@ CreateIndexHelper::InsertDataFromObjectStore(mozIStorageConnection* aConnection)
     JSAutoStructuredCloneBuffer& buffer = cloneReadInfo.mCloneBuffer;
 
     JSStructuredCloneCallbacks callbacks = {
-      IDBObjectStore::StructuredCloneReadCallback,
+      IDBObjectStore::StructuredCloneReadCallback<CreateIndexDeserializationTraits>,
       nullptr,
       nullptr
     };
 
-    jsval clone;
-    if (!buffer.read(cx, &clone, &callbacks, &cloneReadInfo)) {
+    JS::Rooted<JS::Value> clone(cx);
+    if (!buffer.read(cx, clone.address(), &callbacks, &cloneReadInfo)) {
       NS_WARNING("Failed to deserialize structured clone data!");
       return NS_ERROR_DOM_DATA_CLONE_ERR;
     }
@@ -3661,7 +4094,10 @@ CreateIndexHelper::DestroyTLSEntry(void* aPtr)
 nsresult
 DeleteIndexHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
-  NS_PRECONDITION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "DeleteIndexHelper::DoDatabaseWork");
 
   nsCOMPtr<mozIStorageStatement> stmt =
     mTransaction->GetCachedStatement(
@@ -3685,10 +4121,16 @@ DeleteIndexHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 nsresult
 GetAllHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB",
+                 "GetAllHelper::DoDatabaseWork [IDBObjectStore.cpp]");
+
   NS_NAMED_LITERAL_CSTRING(lowerKeyName, "lower_key");
   NS_NAMED_LITERAL_CSTRING(upperKeyName, "upper_key");
 
-  nsCAutoString keyRangeClause;
+  nsAutoCString keyRangeClause;
   if (mKeyRange) {
     if (!mKeyRange->Lower().IsUnset()) {
       keyRangeClause = NS_LITERAL_CSTRING(" AND key_value");
@@ -3713,8 +4155,8 @@ GetAllHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
     }
   }
 
-  nsCAutoString limitClause;
-  if (mLimit != PR_UINT32_MAX) {
+  nsAutoCString limitClause;
+  if (mLimit != UINT32_MAX) {
     limitClause.AssignLiteral(" LIMIT ");
     limitClause.AppendInt(mLimit);
   }
@@ -3750,14 +4192,11 @@ GetAllHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   bool hasResult;
   while (NS_SUCCEEDED((rv = stmt->ExecuteStep(&hasResult))) && hasResult) {
     if (mCloneReadInfos.Capacity() == mCloneReadInfos.Length()) {
-      if (!mCloneReadInfos.SetCapacity(mCloneReadInfos.Capacity() * 2)) {
-        NS_ERROR("Out of memory!");
-        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-      }
+      mCloneReadInfos.SetCapacity(mCloneReadInfos.Capacity() * 2);
     }
 
     StructuredCloneReadInfo* readInfo = mCloneReadInfos.AppendElement();
-    NS_ASSERTION(readInfo, "Shouldn't fail if SetCapacity succeeded!");
+    NS_ASSERTION(readInfo, "Shouldn't fail since SetCapacity succeeded!");
 
     rv = IDBObjectStore::GetStructuredCloneReadInfoFromStatement(stmt, 0, 1,
       mDatabase, *readInfo);
@@ -3770,17 +4209,16 @@ GetAllHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
 nsresult
 GetAllHelper::GetSuccessResult(JSContext* aCx,
-                               jsval* aVal)
+                               JS::MutableHandle<JS::Value> aVal)
 {
   NS_ASSERTION(mCloneReadInfos.Length() <= mLimit, "Too many results!");
 
-  nsresult rv = ConvertCloneReadInfosToArray(aCx, mCloneReadInfos, aVal);
+  nsresult rv = ConvertToArrayAndCleanup(aCx, mCloneReadInfos, aVal);
 
-  for (uint32_t index = 0; index < mCloneReadInfos.Length(); index++) {
-    mCloneReadInfos[index].mCloneBuffer.clear();
-  }
-
+  NS_ASSERTION(mCloneReadInfos.IsEmpty(),
+               "Should have cleared in ConvertToArrayAndCleanup");
   NS_ENSURE_SUCCESS(rv, rv);
+
   return NS_OK;
 }
 
@@ -3797,6 +4235,13 @@ GetAllHelper::ReleaseMainThreadObjects()
 nsresult
 GetAllHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "GetAllHelper::PackArgumentsForParentProcess "
+                             "[IDBObjectStore.cpp]");
+
   FIXME_Bug_521898_objectstore::GetAllParams params;
 
   if (mKeyRange) {
@@ -3814,19 +4259,20 @@ GetAllHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
   return NS_OK;
 }
 
-HelperBase::ChildProcessSendResult
-GetAllHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+GetAllHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "GetAllHelper::SendResponseToChildProcess "
+                             "[IDBObjectStore.cpp]");
+
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  if (!actor) {
-    return Success_NotSent;
-  }
+  NS_ASSERTION(actor, "How did we get this far without an actor?");
 
-    GetAllResponse getAllResponse;
-
+  GetAllResponse getAllResponse;
   if (NS_SUCCEEDED(aResultCode) && !mCloneReadInfos.IsEmpty()) {
     IDBDatabase* database = mObjectStore->Transaction()->Database();
     NS_ASSERTION(database, "This should never be null!");
@@ -3877,7 +4323,7 @@ GetAllHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
     response = getAllResponse;
   }
 
-  if (!actor->Send__delete__(actor, response)) {
+  if (!actor->SendResponse(response)) {
     return Error;
   }
 
@@ -3900,7 +4346,7 @@ GetAllHelper::UnpackResponseFromParentProcess(
 
   for (uint32_t index = 0; index < cloneInfos.Length(); index++) {
     const SerializedStructuredCloneReadInfo srcInfo = cloneInfos[index];
-    const InfallibleTArray<PBlobChild*> blobs = blobArrays[index].blobsChild();
+    const InfallibleTArray<PBlobChild*>& blobs = blobArrays[index].blobsChild();
 
     StructuredCloneReadInfo* destInfo = mCloneReadInfos.AppendElement();
     if (!destInfo->SetFromSerialized(srcInfo)) {
@@ -3917,10 +4363,16 @@ GetAllHelper::UnpackResponseFromParentProcess(
 nsresult
 CountHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 {
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB",
+                 "CountHelper::DoDatabaseWork [IDBObjectStore.cpp]");
+
   NS_NAMED_LITERAL_CSTRING(lowerKeyName, "lower_key");
   NS_NAMED_LITERAL_CSTRING(upperKeyName, "upper_key");
 
-  nsCAutoString keyRangeClause;
+  nsAutoCString keyRangeClause;
   if (mKeyRange) {
     if (!mKeyRange->Lower().IsUnset()) {
       keyRangeClause = NS_LITERAL_CSTRING(" AND key_value");
@@ -3980,9 +4432,9 @@ CountHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 
 nsresult
 CountHelper::GetSuccessResult(JSContext* aCx,
-                              jsval* aVal)
+                              JS::MutableHandle<JS::Value> aVal)
 {
-  *aVal = JS_NumberValue(static_cast<double>(mCount));
+  aVal.setNumber(static_cast<double>(mCount));
   return NS_OK;
 }
 
@@ -3996,6 +4448,13 @@ CountHelper::ReleaseMainThreadObjects()
 nsresult
 CountHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "CountHelper::PackArgumentsForParentProcess "
+                             "[IDBObjectStore.cpp]");
+
   FIXME_Bug_521898_objectstore::CountParams params;
 
   if (mKeyRange) {
@@ -4011,16 +4470,18 @@ CountHelper::PackArgumentsForParentProcess(ObjectStoreRequestParams& aParams)
   return NS_OK;
 }
 
-HelperBase::ChildProcessSendResult
-CountHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
+AsyncConnectionHelper::ChildProcessSendResult
+CountHelper::SendResponseToChildProcess(nsresult aResultCode)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "CountHelper::SendResponseToChildProcess "
+                             "[IDBObjectStore.cpp]");
+
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
-  if (!actor) {
-    return Success_NotSent;
-  }
+  NS_ASSERTION(actor, "How did we get this far without an actor?");
 
   ResponseValue response;
   if (NS_FAILED(aResultCode)) {
@@ -4031,7 +4492,7 @@ CountHelper::MaybeSendResponseToChildProcess(nsresult aResultCode)
     response = countResponse;
   }
 
-  if (!actor->Send__delete__(actor, response)) {
+  if (!actor->SendResponse(response)) {
     return Error;
   }
 

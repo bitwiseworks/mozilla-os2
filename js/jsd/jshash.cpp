@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -34,26 +34,26 @@ using namespace js;
 static void *
 DefaultAllocTable(void *pool, size_t size)
 {
-    return OffTheBooks::malloc_(size);
+    return js_malloc(size);
 }
 
 static void
 DefaultFreeTable(void *pool, void *item, size_t size)
 {
-    UnwantedForeground::free_(item);
+    js_free(item);
 }
 
 static JSHashEntry *
 DefaultAllocEntry(void *pool, const void *key)
 {
-    return (JSHashEntry*) OffTheBooks::malloc_(sizeof(JSHashEntry));
+    return (JSHashEntry*) js_malloc(sizeof(JSHashEntry));
 }
 
 static void
 DefaultFreeEntry(void *pool, JSHashEntry *he, unsigned flag)
 {
     if (flag == HT_FREE_ENTRY)
-        UnwantedForeground::free_(he);
+        js_free(he);
 }
 
 static JSHashAllocOps defaultHashAllocOps = {

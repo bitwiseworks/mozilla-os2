@@ -1,0 +1,28 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+TEST_DIRS += [
+    'chrome',
+    'mochitest/bug_411966',
+    'mochitest/bug_461710',
+    'browser',
+]
+
+TEST_TOOL_DIRS += ['cpp']
+
+MODULE = 'test_places'
+
+XPCSHELL_TESTS_MANIFESTS += [
+    'autocomplete/xpcshell.ini',
+    'bookmarks/xpcshell.ini',
+    'expiration/xpcshell.ini',
+    'favicons/xpcshell.ini',
+    'inline/xpcshell.ini',
+    'migration/xpcshell.ini',
+    'network/xpcshell.ini',
+    'queries/xpcshell.ini',
+    'unit/xpcshell.ini',
+]

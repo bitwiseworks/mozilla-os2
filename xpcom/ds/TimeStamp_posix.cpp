@@ -13,9 +13,43 @@
 // obtained with this API; see TimeDuration::Resolution;
 //
 
+#include <sys/syscall.h>
 #include <time.h>
+#include <unistd.h>
+
+#if defined(__DragonFly__) || defined(__FreeBSD__) \
+    || defined(__NetBSD__) || defined(__OpenBSD__)
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#endif
+
+#if defined(__DragonFly__) || defined(__FreeBSD__)
+#include <sys/user.h>
+#endif
+
+#if defined(__NetBSD__)
+#undef KERN_PROC
+#define KERN_PROC KERN_PROC2
+#define KINFO_PROC struct kinfo_proc2
+#else
+#define KINFO_PROC struct kinfo_proc
+#endif
+
+#if defined(__DragonFly__)
+#define KP_START_SEC kp_start.tv_sec
+#define KP_START_USEC kp_start.tv_usec
+#elif defined(__FreeBSD__)
+#define KP_START_SEC ki_start.tv_sec
+#define KP_START_USEC ki_start.tv_usec
+#else
+#define KP_START_SEC p_ustart_sec
+#define KP_START_USEC p_ustart_usec
+#endif
 
 #include "mozilla/TimeStamp.h"
+#include "nsCRT.h"
+#include "prprf.h"
+#include "prthread.h"
 
 // Estimate of the smallest duration of time we can measure.
 static uint64_t sResolution;
@@ -38,7 +72,7 @@ static uint64_t
 ClockTimeNs()
 {
   struct timespec ts;
-  // this can't fail: we know &ts is valid, and TimeStamp::Init()
+  // this can't fail: we know &ts is valid, and TimeStamp::Startup()
   // checks that CLOCK_MONOTONIC is supported (and aborts if not)
   clock_gettime(CLOCK_MONOTONIC, &ts);
 
@@ -94,7 +128,6 @@ ClockResolutionNs()
 
   return minres;
 }
-
 
 namespace mozilla {
 
@@ -159,6 +192,9 @@ TimeStamp::Startup()
        sResolutionSigDigs *= 10);
 
   gInitialized = true;
+  sFirstTimeStamp = TimeStamp::Now();
+  sProcessCreation = TimeStamp();
+
   return NS_OK;
 }
 
@@ -168,9 +204,154 @@ TimeStamp::Shutdown()
 }
 
 TimeStamp
-TimeStamp::Now()
+TimeStamp::Now(bool aHighResolution)
 {
   return TimeStamp(ClockTimeNs());
 }
 
+#if defined(LINUX) || defined(ANDROID)
+
+// Calculates the amount of jiffies that have elapsed since boot and up to the
+// starttime value of a specific process as found in its /proc/*/stat file.
+// Returns 0 if an error occurred.
+
+static uint64_t
+JiffiesSinceBoot(const char *aFile)
+{
+  char stat[512];
+
+  FILE *f = fopen(aFile, "r");
+  if (!f)
+    return 0;
+
+  int n = fread(&stat, 1, sizeof(stat) - 1, f);
+
+  fclose(f);
+
+  if (n <= 0)
+    return 0;
+
+  stat[n] = 0;
+
+  long long unsigned startTime = 0; // instead of uint64_t to keep GCC quiet
+  char *s = strrchr(stat, ')');
+
+  if (!s)
+    return 0;
+
+  int rv = sscanf(s + 2,
+                  "%*c %*d %*d %*d %*d %*d %*u %*u %*u %*u "
+                  "%*u %*u %*u %*d %*d %*d %*d %*d %*d %llu",
+                  &startTime);
+
+  if (rv != 1 || !startTime)
+    return 0;
+
+  return startTime;
 }
+
+// Computes the interval that has elapsed between the thread creation and the
+// process creation by comparing the starttime fields in the respective
+// /proc/*/stat files. The resulting value will be a good approximation of the
+// process uptime. This value will be stored at the address pointed by aTime;
+// if an error occurred 0 will be stored instead.
+
+static void
+ComputeProcessUptimeThread(void *aTime)
+{
+  uint64_t *uptime = static_cast<uint64_t *>(aTime);
+  long hz = sysconf(_SC_CLK_TCK);
+
+  *uptime = 0;
+
+  if (!hz)
+    return;
+
+  char threadStat[40];
+  sprintf(threadStat, "/proc/self/task/%d/stat", (pid_t) syscall(__NR_gettid));
+
+  uint64_t threadJiffies = JiffiesSinceBoot(threadStat);
+  uint64_t selfJiffies = JiffiesSinceBoot("/proc/self/stat");
+
+  if (!threadJiffies || !selfJiffies)
+    return;
+
+  *uptime = ((threadJiffies - selfJiffies) * kNsPerSec) / hz;
+}
+
+// Computes and returns the process uptime in us on Linux & its derivatives.
+// Returns 0 if an error was encountered.
+
+uint64_t
+TimeStamp::ComputeProcessUptime()
+{
+  uint64_t uptime = 0;
+  PRThread *thread = PR_CreateThread(PR_USER_THREAD,
+                                     ComputeProcessUptimeThread,
+                                     &uptime,
+                                     PR_PRIORITY_NORMAL,
+                                     PR_LOCAL_THREAD,
+                                     PR_JOINABLE_THREAD,
+                                     0);
+
+  PR_JoinThread(thread);
+
+  return uptime / kNsPerUs;
+}
+
+#elif defined(__DragonFly__) || defined(__FreeBSD__) \
+      || defined(__NetBSD__) || defined(__OpenBSD__)
+
+// Computes and returns the process uptime in us on various BSD flavors.
+// Returns 0 if an error was encountered.
+
+uint64_t
+TimeStamp::ComputeProcessUptime()
+{
+  struct timespec ts;
+  int rv = clock_gettime(CLOCK_REALTIME, &ts);
+
+  if (rv == -1) {
+    return 0;
+  }
+
+  int mib[] = {
+    CTL_KERN,
+    KERN_PROC,
+    KERN_PROC_PID,
+    getpid(),
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+    sizeof(KINFO_PROC),
+    1,
+#endif
+  };
+  u_int mibLen = sizeof(mib) / sizeof(mib[0]);
+
+  KINFO_PROC proc;
+  size_t bufferSize = sizeof(proc);
+  rv = sysctl(mib, mibLen, &proc, &bufferSize, NULL, 0);
+
+  if (rv == -1)
+    return 0;
+
+  uint64_t startTime = ((uint64_t)proc.KP_START_SEC * kNsPerSec)
+    + (proc.KP_START_USEC * kNsPerUs);
+  uint64_t now = ((uint64_t)ts.tv_sec * kNsPerSec) + ts.tv_nsec;
+
+  if (startTime > now)
+    return 0;
+
+  return (now - startTime) / kNsPerUs;
+}
+
+#else
+
+uint64_t
+TimeStamp::ComputeProcessUptime()
+{
+  return 0;
+}
+
+#endif
+
+} // namespace mozilla

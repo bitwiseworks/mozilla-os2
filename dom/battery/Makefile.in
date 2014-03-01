@@ -10,38 +10,17 @@ VPATH            = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME     = dom_battery_s
-XPIDL_MODULE     = dom_battery
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/dom/dom-config.mk
-
-EXPORTS_NAMESPACES = mozilla/dom/battery
-
-EXPORTS_mozilla/dom/battery = \
-  Constants.h \
-  Types.h \
-  $(NULL)
-
-CPPSRCS = \
-  BatteryManager.cpp \
-  $(NULL)
 
 LOCAL_INCLUDES = \
   -I$(topsrcdir)/content/events/src \
   $(NULL)
 
-XPIDLSRCS = \
-  nsIDOMBatteryManager.idl \
-  nsINavigatorBattery.idl \
-  $(NULL)
-
-TEST_DIRS += test
-
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
-XPIDL_FLAGS += \
-  -I$(topsrcdir)/dom/interfaces/events \
-  $(NULL)

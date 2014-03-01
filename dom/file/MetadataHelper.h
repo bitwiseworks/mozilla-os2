@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_file_metadatahelper_h__
 #define mozilla_dom_file_metadatahelper_h__
 
+#include "mozilla/Attributes.h"
 #include "FileCommon.h"
 
 #include "nsIFileStreams.h"
@@ -30,7 +31,7 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MetadataParameters)
 
   nsresult
-  Init(JSContext* aCx, const jsval* aVal)
+  Init(JSContext* aCx, const JS::Value* aVal)
   {
     return mConfig.Init(aCx, aVal);
   }
@@ -73,7 +74,7 @@ public:
   }
 
 private:
-  DOMFileMetadataParameters mConfig;
+  mozilla::idl::DOMFileMetadataParameters mConfig;
 
   uint64_t mSize;
   int64_t mLastModified;
@@ -90,10 +91,10 @@ public:
   { }
 
   nsresult
-  DoAsyncRun(nsISupports* aStream);
+  DoAsyncRun(nsISupports* aStream) MOZ_OVERRIDE;
 
   nsresult
-  GetSuccessResult(JSContext* aCx, jsval* aVal);
+  GetSuccessResult(JSContext* aCx, JS::Value* aVal) MOZ_OVERRIDE;
 
 protected:
   class AsyncMetadataGetter : public AsyncHelper
@@ -107,7 +108,7 @@ protected:
 
   protected:
     nsresult
-    DoStreamWork(nsISupports* aStream);
+    DoStreamWork(nsISupports* aStream) MOZ_OVERRIDE;
 
   private:
     nsRefPtr<MetadataParameters> mParams;

@@ -7,9 +7,13 @@
 
 #include "nsIX509CertDB.h"
 #include "nsIX509CertDB2.h"
-#include "nsNSSCertHeader.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/Mutex.h"
+#include "certt.h"
 
+class nsCString;
 class nsIArray;
+class nsRecentBadCerts;
 
 class nsNSSCertificateDB : public nsIX509CertDB, public nsIX509CertDB2
 {
@@ -43,10 +47,14 @@ private:
                     uint32_t     *_count,
                     PRUnichar  ***_certNameList);
 
-  CERTDERCerts *getCertsFromPackage(PRArenaPool *arena, uint8_t *data, 
+  CERTDERCerts *getCertsFromPackage(PLArenaPool *arena, uint8_t *data, 
                                     uint32_t length);
   nsresult handleCACertDownload(nsIArray *x509Certs, 
                                 nsIInterfaceRequestor *ctx);
+
+  mozilla::Mutex mBadCertsLock;
+  mozilla::RefPtr<nsRecentBadCerts> mPublicRecentBadCerts;
+  mozilla::RefPtr<nsRecentBadCerts> mPrivateRecentBadCerts;
 };
 
 #define NS_X509CERTDB_CID { /* fb0bbc5c-452e-4783-b32c-80124693d871 */ \

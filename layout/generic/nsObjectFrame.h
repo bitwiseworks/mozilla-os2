@@ -8,16 +8,13 @@
 #ifndef nsObjectFrame_h___
 #define nsObjectFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsPluginInstanceOwner.h"
 #include "nsIObjectFrame.h"
 #include "nsFrame.h"
 #include "nsRegion.h"
 #include "nsDisplayList.h"
 #include "nsIReflowCallback.h"
-
-#ifdef ACCESSIBILITY
-class nsIAccessible;
-#endif
 
 class nsPluginHost;
 class nsPresContext;
@@ -44,16 +41,18 @@ public:
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::layers::ImageContainer ImageContainer;
+  typedef mozilla::FrameLayerBuilder::ContainerParameters ContainerParameters;
 
   NS_DECL_FRAMEARENA_HELPERS
 
   friend nsIFrame* NS_NewObjectFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
+  NS_DECL_QUERYFRAME_TARGET(nsObjectFrame)
 
-  NS_IMETHOD Init(nsIContent* aContent,
-                  nsIFrame* aParent,
-                  nsIFrame* aPrevInFlow);
+  virtual void Init(nsIContent* aContent,
+                    nsIFrame* aParent,
+                    nsIFrame* aPrevInFlow) MOZ_OVERRIDE;
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext);
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext);
   NS_IMETHOD Reflow(nsPresContext* aPresContext,
@@ -63,9 +62,9 @@ public:
   NS_IMETHOD DidReflow(nsPresContext* aPresContext,
                        const nsHTMLReflowState* aReflowState,
                        nsDidReflowStatus aStatus);
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   NS_IMETHOD  HandleEvent(nsPresContext* aPresContext,
                           nsGUIEvent* aEvent,
@@ -94,29 +93,56 @@ public:
 
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
 
-  NS_METHOD GetPluginInstance(nsNPAPIPluginInstance** aPluginInstance);
+  NS_METHOD GetPluginInstance(nsNPAPIPluginInstance** aPluginInstance) MOZ_OVERRIDE;
 
-  virtual void SetIsDocumentActive(bool aIsActive);
+  virtual void SetIsDocumentActive(bool aIsActive) MOZ_OVERRIDE;
 
   NS_IMETHOD GetCursor(const nsPoint& aPoint, nsIFrame::Cursor& aCursor);
 
-  // Compute the desired position of the plugin's widget, on the assumption
-  // that it is not visible (clipped out or covered by opaque content).
-  // This will only be called for plugins which have been registered
-  // with the root pres context for geometry updates.
-  // The widget, its new position, size and (empty) clip region are appended
-  // as a Configuration record to aConfigurations.
-  // If there is no widget associated with the plugin, this
-  // simply does nothing.
-  void GetEmptyClipConfiguration(nsTArray<nsIWidget::Configuration>* aConfigurations) {
-    ComputeWidgetGeometry(nsRegion(), nsPoint(0,0), aConfigurations);
+  // APIs used by nsRootPresContext to set up the widget position/size/clip
+  // region.
+  /**
+   * Set the next widget configuration for the plugin to the desired
+   * position of the plugin's widget, on the assumption that it is not visible
+   * (clipped out or covered by opaque content).
+   * This will only be called for plugins which have been registered
+   * with the root pres context for geometry updates.
+   * If there is no widget associated with the plugin, this will have no effect.
+   */
+  void SetEmptyWidgetConfiguration()
+  {
+    mNextConfigurationBounds = nsIntRect(0,0,0,0);
+    mNextConfigurationClipRegion.Clear();
   }
-
+  /**
+   * Append the desired widget configuration to aConfigurations.
+   */
+  void GetWidgetConfiguration(nsTArray<nsIWidget::Configuration>* aConfigurations)
+  {
+    if (mWidget) {
+      if (!mWidget->GetParent()) {
+        // Plugin widgets should not be toplevel except when they're out of the
+        // document, in which case the plugin should not be registered for
+        // geometry updates and this should not be called. But apparently we
+        // have bugs where mWidget sometimes is toplevel here. Bail out.
+        NS_ERROR("Plugin widgets registered for geometry updates should not be toplevel");
+        return;
+      }
+      nsIWidget::Configuration* configuration = aConfigurations->AppendElement();
+      configuration->mChild = mWidget;
+      configuration->mBounds = mNextConfigurationBounds;
+      configuration->mClipRegion = mNextConfigurationClipRegion;
+    }
+  }
+  /**
+   * Called after all widget position/size/clip regions have been changed
+   * (even if there isn't a widget for this plugin).
+   */
   void DidSetWidgetGeometry();
 
   // accessibility support
 #ifdef ACCESSIBILITY
-  virtual already_AddRefed<Accessible> CreateAccessible();
+  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #ifdef XP_WIN
   NS_IMETHOD GetPluginPort(HWND *aPort);
 #endif
@@ -130,10 +156,8 @@ public:
                                             nsIFrame* aRoot);
 
   // nsIReflowCallback
-  virtual bool ReflowFinished();
-  virtual void ReflowCallbackCanceled();
-
-  void UpdateImageLayer(const gfxRect& aRect);
+  virtual bool ReflowFinished() MOZ_OVERRIDE;
+  virtual void ReflowCallbackCanceled() MOZ_OVERRIDE;
 
   /**
    * Builds either an ImageLayer or a ReadbackLayer, depending on the type
@@ -141,12 +165,12 @@ public:
    */
   already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                      LayerManager* aManager,
-                                     nsDisplayItem* aItem);
+                                     nsDisplayItem* aItem,
+                                     const ContainerParameters& aContainerParameters);
 
   LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                            LayerManager* aManager);
 
-  already_AddRefed<ImageContainer> GetImageContainer();
   /**
    * Get the rectangle (relative to this frame) which it will paint. Normally
    * the frame's content-box but may be smaller if the plugin is rendering
@@ -167,9 +191,7 @@ public:
    */
   static void EndSwapDocShells(nsIContent* aContent, void*);
 
-  bool PaintedByGecko();
-
-  nsIWidget* GetWidget() { return mInnerView ? mWidget : nullptr; }
+  nsIWidget* GetWidget() MOZ_OVERRIDE { return mInnerView ? mWidget : nullptr; }
 
   /**
    * Adjust the plugin's idea of its size, using aSize as its new size.
@@ -201,6 +223,7 @@ protected:
 
   bool IsOpaque() const;
   bool IsTransparentMode() const;
+  bool IsPaintedByGecko() const;
 
   nsIntPoint GetWindowOriginInPixels(bool aWindowless);
 
@@ -212,19 +235,6 @@ protected:
   void PaintPlugin(nsDisplayListBuilder* aBuilder,
                    nsRenderingContext& aRenderingContext,
                    const nsRect& aDirtyRect, const nsRect& aPluginRect);
-
-  /**
-   * Get the widget geometry for the plugin. aRegion is in some appunits
-   * coordinate system whose origin is device-pixel-aligned (if possible),
-   * and aPluginOrigin gives the top-left of the plugin frame's content-rect
-   * in that coordinate system. It doesn't matter what that coordinate
-   * system actually is, as long as aRegion and aPluginOrigin are consistent.
-   * This will append a Configuration object to aConfigurations
-   * containing the widget, its desired position, size and clip region.
-   */
-  void ComputeWidgetGeometry(const nsRegion& aRegion,
-                             const nsPoint& aPluginOrigin,
-                             nsTArray<nsIWidget::Configuration>* aConfigurations);
 
   void NotifyPluginReflowObservers();
 
@@ -248,13 +258,13 @@ private:
     PluginEventNotifier(const nsString &aEventType) : 
       mEventType(aEventType) {}
     
-    NS_IMETHOD Run();
+    NS_IMETHOD Run() MOZ_OVERRIDE;
   private:
     nsString mEventType;
   };
 
   nsPluginInstanceOwner*          mInstanceOwner; // WEAK
-  nsIView*                        mInnerView;
+  nsView*                        mInnerView;
   nsCOMPtr<nsIWidget>             mWidget;
   nsIntRect                       mWindowlessRect;
   /**
@@ -263,11 +273,19 @@ private:
    */
   PluginBackgroundSink*           mBackgroundSink;
 
-  bool mReflowCallbackPosted;
+  /**
+   * Bounds that we should set the plugin's widget to in the next composite,
+   * for plugins with widgets. For plugins without widgets, bounds in device
+   * pixels relative to the nearest frame that's a display list reference frame.
+   */
+  nsIntRect                       mNextConfigurationBounds;
+  /**
+   * Clip region that we should set the plugin's widget to
+   * in the next composite. Only meaningful for plugins with widgets.
+   */
+  nsTArray<nsIntRect>             mNextConfigurationClipRegion;
 
-  // A reference to the ImageContainer which contains the current frame
-  // of plugin to display.
-  nsRefPtr<ImageContainer> mImageContainer;
+  bool mReflowCallbackPosted;
 
   // We keep this reference to ensure we can always unregister the
   // plugins we register on the root PresContext.
@@ -282,6 +300,7 @@ public:
     : nsDisplayItem(aBuilder, aFrame)
   {
     MOZ_COUNT_CTOR(nsDisplayPlugin);
+    aBuilder->SetContainsPluginItem();
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayPlugin() {
@@ -289,46 +308,34 @@ public:
   }
 #endif
 
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap);
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE;
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                   bool* aSnap);
+                                   bool* aSnap) MOZ_OVERRIDE;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx);
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                    nsRegion* aVisibleRegion,
-                                   const nsRect& aAllowVisibleRegionExpansion);
+                                   const nsRect& aAllowVisibleRegionExpansion) MOZ_OVERRIDE;
 
   NS_DISPLAY_DECL_NAME("Plugin", TYPE_PLUGIN)
 
-  // Compute the desired position and clip region of the plugin's widget.
-  // This will only be called for plugins which have been registered
-  // with the root pres context for geometry updates.
-  // The widget, its new position, size and clip region are appended as
-  // a Configuration record to aConfigurations.
-  // If the plugin has no widget, no configuration is added, but
-  // the plugin visibility state may be adjusted.
-  void GetWidgetConfiguration(nsDisplayListBuilder* aBuilder,
-                              nsTArray<nsIWidget::Configuration>* aConfigurations);
-
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
-                                             const ContainerParameters& aContainerParameters)
+                                             const ContainerParameters& aContainerParameters) MOZ_OVERRIDE
   {
     return static_cast<nsObjectFrame*>(mFrame)->BuildLayer(aBuilder,
                                                            aManager, 
-                                                           this);
+                                                           this,
+                                                           aContainerParameters);
   }
 
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
-                                   const ContainerParameters& aParameters)
+                                   const ContainerParameters& aParameters) MOZ_OVERRIDE
   {
     return static_cast<nsObjectFrame*>(mFrame)->GetLayerState(aBuilder,
                                                               aManager);
   }
-
-private:
-  nsRegion mVisibleRegion;
 };
 
 #endif /* nsObjectFrame_h___ */

@@ -10,15 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= appcomps
 LIBRARY_NAME	= appcomps
 EXPORT_LIBRARY = 1
 IS_COMPONENT	= 1
 MODULE_NAME	= application
 LIBXUL_LIBRARY	= 1
 
-
-CPPSRCS		= nsModule.cpp
 
 include $(topsrcdir)/config/config.mk
 

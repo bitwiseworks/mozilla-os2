@@ -10,11 +10,9 @@ namespace system {
 
 NS_IMPL_ISUPPORTS1(nsVolumeStat, nsIVolumeStat)
 
-nsVolumeStat::nsVolumeStat(const nsAString &aPath)
+nsVolumeStat::nsVolumeStat(const nsAString& aPath)
 {
-  nsCString utf8Path = NS_ConvertUTF16toUTF8(aPath);
-
-  if (statfs(utf8Path.get(), &mStat) != 0) {
+  if (statfs(NS_ConvertUTF16toUTF8(aPath).get(), &mStat) != 0) {
     memset(&mStat, 0, sizeof(mStat));
   }
 }
@@ -24,14 +22,14 @@ nsVolumeStat::~nsVolumeStat()
 }
 
 /* readonly attribute long long totalBytes; */
-NS_IMETHODIMP nsVolumeStat::GetTotalBytes(int64_t *aTotalBytes)
+NS_IMETHODIMP nsVolumeStat::GetTotalBytes(int64_t* aTotalBytes)
 {
   *aTotalBytes = mStat.f_blocks * mStat.f_bsize;
   return NS_OK;
 }
 
 /* readonly attribute long long freeBytes; */
-NS_IMETHODIMP nsVolumeStat::GetFreeBytes(int64_t *aFreeBytes)
+NS_IMETHODIMP nsVolumeStat::GetFreeBytes(int64_t* aFreeBytes)
 {
   *aFreeBytes = mStat.f_bfree * mStat.f_bsize;
   return NS_OK;

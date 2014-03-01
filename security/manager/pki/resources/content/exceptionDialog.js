@@ -14,6 +14,8 @@ var gNeedReset;
 var gSecHistogram;
 var gNsISecTel;
 
+Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
+
 function badCertListener() {}
 badCertListener.prototype = {
   getInterface: function (aIID) {
@@ -42,17 +44,15 @@ badCertListener.prototype = {
 function initExceptionDialog() {
   gNeedReset = false;
   gDialog = document.documentElement;
-  gBundleBrand = srGetStrBundle("chrome://branding/locale/brand.properties");
-  gPKIBundle = srGetStrBundle("chrome://pippki/locale/pippki.properties");
+  gBundleBrand = document.getElementById("brand_bundle");
+  gPKIBundle = document.getElementById("pippki_bundle");
   gSecHistogram = Components.classes["@mozilla.org/base/telemetry;1"].
                     getService(Components.interfaces.nsITelemetry).
                     getHistogramById("SECURITY_UI");
   gNsISecTel = Components.interfaces.nsISecurityUITelemetry;
 
-  var brandName = gBundleBrand.GetStringFromName("brandShortName");
-  
-  setText("warningText", gPKIBundle.formatStringFromName("addExceptionBrandedWarning2",
-                                                         [brandName], 1));
+  var brandName = gBundleBrand.getString("brandShortName");
+  setText("warningText", gPKIBundle.getFormattedString("addExceptionBrandedWarning2", [brandName]));
   gDialog.getButton("extra1").disabled = true;
   
   var args = window.arguments;
@@ -86,8 +86,11 @@ function initExceptionDialog() {
 // returns true if found and global status could be set
 function findRecentBadCert(uri) {
   try {
-    var recentCertsSvc = Components.classes["@mozilla.org/security/recentbadcerts;1"]
-                         .getService(Components.interfaces.nsIRecentBadCertsService);
+    var certDB = Components.classes["@mozilla.org/security/x509certdb;1"]
+                           .getService(Components.interfaces.nsIX509CertDB);
+    if (!certDB)
+      return false;
+    var recentCertsSvc = certDB.getRecentBadCerts(inPrivateBrowsingMode());
     if (!recentCertsSvc)
       return false;
 
@@ -209,7 +212,7 @@ function updateCertStatus() {
   var shortDesc3, longDesc3;
   var use2 = false;
   var use3 = false;
-  let bucketId = gNsISecTel.WARNING_BAD_CERT_ADD_EXCEPTION_BASE;
+  let bucketId = gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_BASE;
   if(gCert) {
     if(gBroken) { 
       var mms = "addExceptionDomainMismatchShort";
@@ -220,13 +223,13 @@ function updateCertStatus() {
       var utl = "addExceptionUnverifiedOrBadSignatureLong";
       var use1 = false;
       if (gSSLStatus.isDomainMismatch) {
-        bucketId += gNsISecTel.WARNING_BAD_CERT_ADD_EXCEPTION_FLAG_DOMAIN;
+        bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_DOMAIN;
         use1 = true;
         shortDesc = mms;
         longDesc  = mml;
       }
       if (gSSLStatus.isNotValidAtThisTime) {
-        bucketId += gNsISecTel.WARNING_BAD_CERT_ADD_EXCEPTION_FLAG_TIME;
+        bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_TIME;
         if (!use1) {
           use1 = true;
           shortDesc = exs;
@@ -239,7 +242,7 @@ function updateCertStatus() {
         }
       }
       if (gSSLStatus.isUntrusted) {
-        bucketId += gNsISecTel.WARNING_BAD_CERT_ADD_EXCEPTION_FLAG_UNTRUSTED;
+        bucketId += gNsISecTel.WARNING_BAD_CERT_TOP_ADD_EXCEPTION_FLAG_UNTRUSTED;
         if (!use1) {
           use1 = true;
           shortDesc = uts;
@@ -269,7 +272,7 @@ function updateCertStatus() {
       pe.disabled = inPrivateBrowsing;
       pe.checked = !inPrivateBrowsing;
 
-      setText("headerDescription", gPKIBundle.GetStringFromName("addExceptionInvalidHeader"));
+      setText("headerDescription", gPKIBundle.getString("addExceptionInvalidHeader"));
     }
     else {
       shortDesc = "addExceptionValidShort";
@@ -308,17 +311,17 @@ function updateCertStatus() {
     document.getElementById("permanent").disabled = true;
   }
   
-  setText("statusDescription", gPKIBundle.GetStringFromName(shortDesc));
-  setText("statusLongDescription", gPKIBundle.GetStringFromName(longDesc));
+  setText("statusDescription", gPKIBundle.getString(shortDesc));
+  setText("statusLongDescription", gPKIBundle.getString(longDesc));
 
   if (use2) {
-    setText("status2Description", gPKIBundle.GetStringFromName(shortDesc2));
-    setText("status2LongDescription", gPKIBundle.GetStringFromName(longDesc2));
+    setText("status2Description", gPKIBundle.getString(shortDesc2));
+    setText("status2LongDescription", gPKIBundle.getString(longDesc2));
   }
 
   if (use3) {
-    setText("status3Description", gPKIBundle.GetStringFromName(shortDesc3));
-    setText("status3LongDescription", gPKIBundle.GetStringFromName(longDesc3));
+    setText("status3Description", gPKIBundle.getString(shortDesc3));
+    setText("status3LongDescription", gPKIBundle.getString(longDesc3));
   }
 
   gNeedReset = true;
@@ -328,7 +331,7 @@ function updateCertStatus() {
  * Handle user request to display certificate details
  */
 function viewCertButtonClick() {
-  gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_CLICK_VIEW_CERT);
+  gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_TOP_CLICK_VIEW_CERT);
   if (gCert)
     viewCertHelper(this, gCert);
     
@@ -344,24 +347,24 @@ function addException() {
   var overrideService = Components.classes["@mozilla.org/security/certoverride;1"]
                                   .getService(Components.interfaces.nsICertOverrideService);
   var flags = 0;
-  let confirmBucketId = gNsISecTel.WARNING_BAD_CERT_CONFIRM_ADD_EXCEPTION_BASE;
+  let confirmBucketId = gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_BASE;
   if (gSSLStatus.isUntrusted) {
     flags |= overrideService.ERROR_UNTRUSTED;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_CONFIRM_ADD_EXCEPTION_FLAG_UNTRUSTED;
+    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_UNTRUSTED;
   }
   if (gSSLStatus.isDomainMismatch) {
     flags |= overrideService.ERROR_MISMATCH;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_CONFIRM_ADD_EXCEPTION_FLAG_DOMAIN;
+    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_DOMAIN;
   }
   if (gSSLStatus.isNotValidAtThisTime) {
     flags |= overrideService.ERROR_TIME;
-    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_CONFIRM_ADD_EXCEPTION_FLAG_TIME;
+    confirmBucketId += gNsISecTel.WARNING_BAD_CERT_TOP_CONFIRM_ADD_EXCEPTION_FLAG_TIME;
   }
   
   var permanentCheckbox = document.getElementById("permanent");
   var shouldStorePermanently = permanentCheckbox.checked && !inPrivateBrowsingMode();
   if(!permanentCheckbox.checked)
-   gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_DONT_REMEMBER_EXCEPTION);
+   gSecHistogram.add(gNsISecTel.WARNING_BAD_CERT_TOP_DONT_REMEMBER_EXCEPTION);
 
   gSecHistogram.add(confirmBucketId);
   var uri = getURI();
@@ -379,22 +382,8 @@ function addException() {
 }
 
 /**
- * Returns true if the private browsing mode is currently active and
- * we have been instructed to handle it.
+ * Returns true if this dialog is in private browsing mode.
  */
 function inPrivateBrowsingMode() {
-  // first, check to see if we should handle the private browsing mode
-  var args = window.arguments;
-  if (args && args[0] && args[0].handlePrivateBrowsing) {
-    // detect if the private browsing mode is active
-    try {
-      var pb = Components.classes["@mozilla.org/privatebrowsing;1"].
-               getService(Components.interfaces.nsIPrivateBrowsingService);
-      return pb.privateBrowsingEnabled;
-    } catch (ex) {
-      Components.utils.reportError("Could not get the Private Browsing service");
-    }
-  }
-
-  return false;
+  return PrivateBrowsingUtils.isWindowPrivate(window);
 }

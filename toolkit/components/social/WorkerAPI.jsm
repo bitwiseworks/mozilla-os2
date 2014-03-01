@@ -13,9 +13,9 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "getFrameWorkerHandle", "resource://gre/modules/FrameWorker.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "openChatWindow", "resource://gre/modules/MozSocialAPI.jsm");
 
-const EXPORTED_SYMBOLS = ["WorkerAPI"];
+this.EXPORTED_SYMBOLS = ["WorkerAPI"];
 
-function WorkerAPI(provider, port) {
+this.WorkerAPI = function WorkerAPI(provider, port) {
   if (!port)
     throw new Error("Can't initialize WorkerAPI with a null port");
 
@@ -44,11 +44,21 @@ WorkerAPI.prototype = {
     try {
       handler.call(this, data);
     } catch (ex) {
-      Cu.reportError("WorkerAPI: failed to handle message '" + topic + "': " + ex);
+      Cu.reportError("WorkerAPI: failed to handle message '" + topic + "': " + ex + "\n" + ex.stack);
     }
   },
 
   handlers: {
+    "social.manifest-get": function(data) {
+      // retreive the currently installed manifest from firefox
+      this._port.postMessage({topic: "social.manifest", data: this._provider.manifest});
+    },
+    "social.manifest-set": function(data) {
+      // the provider will get reloaded as a result of this call
+      let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
+      let document = this._port._window.document;
+      SocialService.updateProvider(document, data);
+    },
     "social.reload-worker": function(data) {
       getFrameWorkerHandle(this._provider.workerURL, null)._worker.reload();
       // the frameworker is going to be reloaded, send the initialization
@@ -61,6 +71,9 @@ WorkerAPI.prototype = {
     },
     "social.ambient-notification": function (data) {
       this._provider.setAmbientNotification(data);
+    },
+    "social.page-mark-config": function(data) {
+      this._provider.pageMarkInfo = data;
     },
     "social.cookies-get": function(data) {
       let document = this._port._window.document;
@@ -75,8 +88,7 @@ WorkerAPI.prototype = {
                               data: results});
     },
     'social.request-chat': function(data) {
-      let xulWindow = Services.wm.getMostRecentWindow("navigator:browser").getTopWin();
-      openChatWindow(xulWindow, this._provider, data, null, "minimized");
+      openChatWindow(null, this._provider, data);
     },
     'social.notification-create': function(data) {
       if (!Services.prefs.getBoolPref("social.toast-notifications.enabled"))
@@ -98,19 +110,18 @@ WorkerAPI.prototype = {
             case "link":
               // if there is a url, make it open a tab
               if (actionArgs.toURL) {
-                try {
-                  let pUri = Services.io.newURI(provider.origin, null, null);
-                  let nUri = Services.io.newURI(pUri.resolve(actionArgs.toURL),
-                                                null, null);
-                  // fixup
-                  if (nUri.scheme != pUri.scheme)
-                    nUri.scheme = pUri.scheme;
-                  if (nUri.prePath == provider.origin) {
-                    let xulWindow = Services.wm.getMostRecentWindow("navigator:browser");
-                    xulWindow.openUILink(nUri.spec);
-                  }
-                } catch(e) {
-                  Cu.reportError("social.notification-create error: "+e);
+                let uriToOpen = provider.resolveUri(actionArgs.toURL);
+                // Bug 815970 - facebook gives us http:// links even though
+                // the origin is https:// - so we perform a fixup here.
+                let pUri = Services.io.newURI(provider.origin, null, null);
+                if (uriToOpen.scheme != pUri.scheme)
+                  uriToOpen.scheme = pUri.scheme;
+                if (provider.isSameOrigin(uriToOpen)) {
+                  let xulWindow = Services.wm.getMostRecentWindow("navigator:browser");
+                  xulWindow.openUILinkIn(uriToOpen.spec, "tab");
+                } else {
+                  Cu.reportError("Not opening notification link " + actionArgs.toURL
+                                 + " as not in provider origin");
                 }
               }
               break;

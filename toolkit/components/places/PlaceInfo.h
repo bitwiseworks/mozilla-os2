@@ -7,6 +7,7 @@
 
 #include "mozIAsyncHistory.h"
 #include "nsString.h"
+#include "nsTArray.h"
 #include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 
@@ -26,6 +27,8 @@ public:
   typedef nsTArray< nsCOMPtr<mozIVisitInfo> > VisitsArray;
 
   PlaceInfo(int64_t aId, const nsCString& aGUID, already_AddRefed<nsIURI> aURI,
+            const nsString& aTitle, int64_t aFrecency);
+  PlaceInfo(int64_t aId, const nsCString& aGUID, already_AddRefed<nsIURI> aURI,
             const nsString& aTitle, int64_t aFrecency,
             const VisitsArray& aVisits);
 
@@ -36,6 +39,7 @@ private:
   const nsString mTitle;
   const int64_t mFrecency;
   const VisitsArray mVisits;
+  bool mVisitsAvailable;
 };
 
 } // namespace places

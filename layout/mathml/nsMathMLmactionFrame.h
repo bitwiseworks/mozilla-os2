@@ -7,7 +7,7 @@
 #define nsMathMLmactionFrame_h___
 
 #include "nsCOMPtr.h"
-#include "nsMathMLContainerFrame.h"
+#include "nsMathMLSelectedFrame.h"
 #include "nsIDOMEventListener.h"
 #include "mozilla/Attributes.h"
 
@@ -15,46 +15,28 @@
 // <maction> -- bind actions to a subexpression
 //
 
-class nsMathMLmactionFrame : public nsMathMLContainerFrame {
+class nsMathMLmactionFrame : public nsMathMLSelectedFrame {
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
   friend nsIFrame* NS_NewMathMLmactionFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  NS_IMETHOD
-  TransmitAutomaticData();
-
-  NS_IMETHOD
+  virtual void
   Init(nsIContent*      aContent,
        nsIFrame*        aParent,
-       nsIFrame*        aPrevInFlow);
+       nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
   NS_IMETHOD
   SetInitialChildList(ChildListID     aListID,
-                      nsFrameList&    aChildList);
+                      nsFrameList&    aChildList) MOZ_OVERRIDE;
 
   virtual nsresult
-  ChildListChanged(int32_t aModType);
-
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
-
-  virtual nsresult
-  Place(nsRenderingContext& aRenderingContext,
-        bool                 aPlaceOrigin,
-        nsHTMLReflowMetrics& aDesiredSize);
-
-  NS_IMETHOD
-  Reflow(nsPresContext*          aPresContext,
-         nsHTMLReflowMetrics&     aDesiredSize,
-         const nsHTMLReflowState& aReflowState,
-         nsReflowStatus&          aStatus);
+  ChildListChanged(int32_t aModType) MOZ_OVERRIDE;
 
   NS_IMETHOD
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
-                   int32_t  aModType);
+                   int32_t  aModType) MOZ_OVERRIDE;
 
 private:
   void MouseClick();
@@ -66,27 +48,25 @@ private:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIDOMEVENTLISTENER
 
-    MouseListener(nsMathMLmactionFrame* aOwner) : mOwner(aOwner) { };
+    MouseListener(nsMathMLmactionFrame* aOwner) : mOwner(aOwner) { }
 
     nsMathMLmactionFrame* mOwner;
   };
 
 protected:
-  nsMathMLmactionFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}
+  nsMathMLmactionFrame(nsStyleContext* aContext) :
+    nsMathMLSelectedFrame(aContext) {}
   virtual ~nsMathMLmactionFrame();
   
-  virtual int GetSkipSides() const { return 0; }
-
 private:
   int32_t         mActionType;
   int32_t         mChildCount;
   int32_t         mSelection;
-  nsIFrame*       mSelectedFrame;
   nsCOMPtr<MouseListener> mListener;
 
   // helper to return the frame for the attribute selection="number"
   nsIFrame* 
-  GetSelectedFrame();
+  GetSelectedFrame() MOZ_OVERRIDE;
 };
 
 #endif /* nsMathMLmactionFrame_h___ */

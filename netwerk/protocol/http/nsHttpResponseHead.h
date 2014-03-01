@@ -20,14 +20,16 @@ class nsHttpResponseHead
 public:
     nsHttpResponseHead() : mVersion(NS_HTTP_VERSION_1_1)
                          , mStatus(200)
-                         , mContentLength(LL_MAXUINT)
+                         , mContentLength(UINT64_MAX)
                          , mCacheControlNoStore(false)
                          , mCacheControlNoCache(false)
                          , mPragmaNoCache(false) {}
-    
+
     const nsHttpHeaderArray & Headers()   const { return mHeaders; }
     nsHttpHeaderArray    &Headers()             { return mHeaders; }
     nsHttpVersion         Version()       const { return mVersion; }
+// X11's Xlib.h #defines 'Status' to 'int' on some systems!
+#undef Status
     uint16_t              Status()        const { return mStatus; }
     const nsAFlatCString &StatusText()    const { return mStatusText; }
     int64_t               ContentLength() const { return mContentLength; }
@@ -90,7 +92,7 @@ public:
     bool     ExpiresInPast() const;
 
     // update headers...
-    nsresult UpdateHeaders(const nsHttpHeaderArray &headers); 
+    nsresult UpdateHeaders(const nsHttpHeaderArray &headers);
 
     // reset the response head to it's initial state
     void     Reset();

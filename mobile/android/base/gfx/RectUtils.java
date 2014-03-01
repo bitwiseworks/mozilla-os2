@@ -74,10 +74,25 @@ public final class RectUtils {
                          y + (rect.height() * scale));
     }
 
+    public static RectF scaleAndRound(RectF rect, float scale) {
+        float left = rect.left * scale;
+        float top = rect.top * scale;
+        return new RectF(Math.round(left),
+                         Math.round(top),
+                         Math.round(left + (rect.width() * scale)),
+                         Math.round(top + (rect.height() * scale)));
+    }
+
     /** Returns the nearest integer rect of the given rect. */
     public static Rect round(RectF rect) {
-        return new Rect(Math.round(rect.left), Math.round(rect.top),
-                        Math.round(rect.right), Math.round(rect.bottom));
+        Rect r = new Rect();
+        round(rect, r);
+        return r;
+    }
+
+    public static void round(RectF rect, Rect dest) {
+        dest.set(Math.round(rect.left), Math.round(rect.top),
+                 Math.round(rect.right), Math.round(rect.bottom));
     }
 
     public static Rect roundIn(RectF rect) {
@@ -95,17 +110,6 @@ public final class RectUtils {
 
     public static PointF getOrigin(RectF rect) {
         return new PointF(rect.left, rect.top);
-    }
-
-    /*
-     * Returns the rect that represents a linear transition between `from` and `to` at time `t`,
-     * which is on the scale [0, 1).
-     */
-    public static RectF interpolate(RectF from, RectF to, float t) {
-        return new RectF(FloatUtils.interpolate(from.left, to.left, t),
-                         FloatUtils.interpolate(from.top, to.top, t),
-                         FloatUtils.interpolate(from.right, to.right, t),
-                         FloatUtils.interpolate(from.bottom, to.bottom, t));
     }
 
     public static boolean fuzzyEquals(RectF a, RectF b) {

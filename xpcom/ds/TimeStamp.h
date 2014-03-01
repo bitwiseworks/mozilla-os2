@@ -11,13 +11,22 @@
 
 #include "prinrval.h"
 #include "nsDebug.h"
-#include "prlong.h"
 
 namespace IPC {
 template <typename T> struct ParamTraits;
 }
 
+#ifdef XP_WIN
+// defines TimeStampValue as a complex value keeping both
+// GetTickCount and QueryPerformanceCounter values
+#include "TimeStamp_windows.h"
+#endif
+
 namespace mozilla {
+
+#ifndef XP_WIN
+typedef uint64_t TimeStampValue;
+#endif
 
 class TimeStamp;
 
@@ -83,6 +92,25 @@ public:
     mValue -= aOther.mValue;
     return *this;
   }
+
+private:
+  // Block double multiplier (slower, imprecise if long duration) - Bug 853398.
+  // If required, use MultDouble explicitly and with care.
+  TimeDuration operator*(const double aMultiplier) const MOZ_DELETE;
+
+public:
+  TimeDuration MultDouble(double aMultiplier) const {
+    return TimeDuration::FromTicks(static_cast<int64_t>(mValue * aMultiplier));
+  }
+  TimeDuration operator*(const int32_t aMultiplier) const {
+    return TimeDuration::FromTicks(mValue * int64_t(aMultiplier));
+  }
+  TimeDuration operator*(const uint32_t aMultiplier) const {
+    return TimeDuration::FromTicks(mValue * int64_t(aMultiplier));
+  }
+  TimeDuration operator*(const int64_t aMultiplier) const {
+    return TimeDuration::FromTicks(mValue * int64_t(aMultiplier));
+  }
   double operator/(const TimeDuration& aOther) {
     return static_cast<double>(mValue) / aOther.mValue;
   }
@@ -128,7 +156,7 @@ private:
 
   static TimeDuration FromTicks(double aTicks) {
     // NOTE: this MUST be a >= test, because int64_t(double(INT64_MAX))
-    // overflows and gives LL_MININT.
+    // overflows and gives INT64_MIN.
     if (aTicks >= double(INT64_MAX))
       return TimeDuration::FromTicks(INT64_MAX);
 
@@ -139,7 +167,7 @@ private:
     return TimeDuration::FromTicks(int64_t(aTicks));
   }
 
-  // Duration in PRIntervalTime units
+  // Duration, result is implementation-specific difference of two TimeStamps
   int64_t mValue;
 };
 
@@ -179,7 +207,7 @@ public:
   /**
    * Initialize to the "null" moment
    */
-  TimeStamp() : mValue(0) {}
+  MOZ_CONSTEXPR TimeStamp() : mValue(0) {}
   // Default copy-constructor and assignment are OK
 
   /**
@@ -190,24 +218,55 @@ public:
    * Return a timestamp reflecting the current elapsed system time. This
    * is monotonically increasing (i.e., does not decrease) over the
    * lifetime of this process' XPCOM session.
+   *
+   * Now() is trying to ensure the best possible precision on each platform,
+   * at least one millisecond.
+   *
+   * NowLoRes() has been introduced to workaround performance problems of
+   * QueryPerformanceCounter on the Windows platform.  NowLoRes() is giving
+   * lower precision, usually 15.6 ms, but with very good performance benefit.
+   * Use it for measurements of longer times, like >200ms timeouts.
    */
-  static TimeStamp Now();
+  static TimeStamp Now() { return Now(true); }
+  static TimeStamp NowLoRes() { return Now(false); }
+
+  /**
+   * Return a timestamp representing the time when the current process was
+   * created which will be comparable with other timestamps taken with this
+   * class. If the actual process creation time is detected to be inconsistent
+   * the @a aIsInconsistent parameter will be set to true, the returned
+   * timestamp however will still be valid though inaccurate.
+   *
+   * @param aIsInconsistent Set to true if an inconsistency was detected in the
+   * process creation time
+   * @returns A timestamp representing the time when the process was created,
+   * this timestamp is always valid even when errors are reported
+   */
+  static TimeStamp ProcessCreation(bool& aIsInconsistent);
+
+  /**
+   * Records a process restart. After this call ProcessCreation() will return
+   * the time when the browser was restarted instead of the actual time when
+   * the process was created.
+   */
+  static void RecordProcessRestart();
+
   /**
    * Compute the difference between two timestamps. Both must be non-null.
    */
   TimeDuration operator-(const TimeStamp& aOther) const {
     MOZ_ASSERT(!IsNull(), "Cannot compute with a null value");
     MOZ_ASSERT(!aOther.IsNull(), "Cannot compute with aOther null value");
-    PR_STATIC_ASSERT(-LL_MAXINT > LL_MININT);
+    PR_STATIC_ASSERT(-INT64_MAX > INT64_MIN);
     int64_t ticks = int64_t(mValue - aOther.mValue);
     // Check for overflow.
     if (mValue > aOther.mValue) {
       if (ticks < 0) {
-        ticks = LL_MAXINT;
+        ticks = INT64_MAX;
       }
     } else {
       if (ticks > 0) {
-        ticks = LL_MININT;
+        ticks = INT64_MIN;
       }
     }
     return TimeDuration::FromTicks(ticks);
@@ -274,8 +333,21 @@ public:
 
 private:
   friend struct IPC::ParamTraits<mozilla::TimeStamp>;
+  friend void StartupTimelineRecordExternal(int, uint64_t);
 
-  TimeStamp(uint64_t aValue) : mValue(aValue) {}
+  TimeStamp(TimeStampValue aValue) : mValue(aValue) {}
+
+  static TimeStamp Now(bool aHighResolution);
+
+  /**
+   * Computes the uptime of the current process in microseconds. The result
+   * is platform-dependent and needs to be checked against existing timestamps
+   * for consistency.
+   *
+   * @returns The number of microseconds since the calling process was started
+   *          or 0 if an error was encountered while computing the uptime
+   */
+  static uint64_t ComputeProcessUptime();
 
   /**
    * When built with PRIntervalTime, a value of 0 means this instance
@@ -290,7 +362,20 @@ private:
    *
    * When using a system clock, a value is system dependent.
    */
-  uint64_t mValue;
+  TimeStampValue mValue;
+
+  /**
+   * First timestamp taken when the class static initializers are run. This
+   * timestamp is used to sanitize timestamps coming from different sources.
+   */
+  static TimeStamp sFirstTimeStamp;
+
+  /**
+   * Timestamp representing the time when the process was created. This field
+   * is populated lazily the first time this information is required and is
+   * replaced every time the process is restarted.
+   */
+  static TimeStamp sProcessCreation;
 };
 
 }

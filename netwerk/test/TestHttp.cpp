@@ -5,6 +5,7 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIProgressEventSink.h"
+#include <algorithm>
 
 #define RETURN_IF_FAILED(rv, step) \
     PR_BEGIN_MACRO \
@@ -55,7 +56,7 @@ MyListener::OnStopRequest(nsIRequest *req, nsISupports *ctxt, nsresult status)
 NS_IMETHODIMP
 MyListener::OnDataAvailable(nsIRequest *req, nsISupports *ctxt,
                             nsIInputStream *stream,
-                            uint32_t offset, uint32_t count)
+                            uint64_t offset, uint32_t count)
 {
     printf(">>> OnDataAvailable [count=%u]\n", count);
 
@@ -64,7 +65,7 @@ MyListener::OnDataAvailable(nsIRequest *req, nsISupports *ctxt,
     uint32_t bytesRead=0;
 
     while (count) {
-        uint32_t amount = NS_MIN<uint32_t>(count, sizeof(buf));
+        uint32_t amount = std::min<uint32_t>(count, sizeof(buf));
 
         rv = stream->Read(buf, amount, &bytesRead);
         if (NS_FAILED(rv)) {

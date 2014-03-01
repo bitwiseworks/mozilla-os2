@@ -17,7 +17,6 @@
 #include "nsIWeakReferenceUtils.h"      // for nsWeakPtr
 #include "nsWeakReference.h"            // for nsSupportsWeakReference, etc
 #include "nscore.h"                     // for nsresult
-#include "prtypes.h"                    // for uint32_t, uint16_t
 
 #ifndef __gen_nsIWebProgressListener_h__
 #include "nsIWebProgressListener.h"
@@ -42,7 +41,6 @@ class nsIChannel;
 class nsIControllers;
 class nsIDocShell;
 class nsIEditor;
-class nsIEditorDocShell;
 class nsIWebProgress;
 
 class nsEditingSession : public nsIEditingSession,
@@ -66,8 +64,6 @@ public:
 protected:
 
   nsIDocShell *   GetDocShellFromWindow(nsIDOMWindow *aWindow);
-  nsresult        GetEditorDocShellFromWindow(nsIDOMWindow *aWindow, 
-                                              nsIEditorDocShell** outDocShell);
   
   nsresult        SetupEditorCommandController(const char *aControllerClassName,
                                                nsIDOMWindow *aWindow,

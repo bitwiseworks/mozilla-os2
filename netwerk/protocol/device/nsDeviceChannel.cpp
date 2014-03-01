@@ -13,10 +13,6 @@
 #include "AndroidCaptureProvider.h"
 #endif
 
-#ifdef MOZ_WIDGET_GONK
-#include "GonkCaptureProvider.h"
-#endif
-
 using namespace mozilla;
 
 // Copied from image/decoders/icon/nsIconURI.cpp
@@ -85,10 +81,10 @@ nsDeviceChannel::OpenContentStream(bool aAsync,
   NS_NAMED_LITERAL_CSTRING(width, "width=");
   NS_NAMED_LITERAL_CSTRING(height, "height=");
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   uri->GetSpec(spec);
 
-  nsCAutoString type;
+  nsAutoCString type;
 
   nsRefPtr<nsDeviceCaptureProvider> capture;
   nsCaptureParams captureParams;
@@ -103,7 +99,7 @@ nsDeviceChannel::OpenContentStream(bool aAsync,
     captureParams.captureVideo = true;
     captureParams.timeLimit = 0;
     captureParams.frameLimit = 1;
-    nsCAutoString buffer;
+    nsAutoCString buffer;
     extractAttributeValue(spec.get(), "width=", buffer);
     nsresult err;
     captureParams.width = buffer.ToInteger(&err);
@@ -119,9 +115,6 @@ nsDeviceChannel::OpenContentStream(bool aAsync,
 #ifdef MOZ_WIDGET_ANDROID
     capture = GetAndroidCaptureProvider();
 #endif
-#ifdef MOZ_WIDGET_GONK
-    capture = GetGonkCaptureProvider();
-#endif
   } else if (kNotFound != spec.Find(NS_LITERAL_CSTRING("type=video/x-raw-yuv"),
                                     true,
                                     0,
@@ -130,7 +123,7 @@ nsDeviceChannel::OpenContentStream(bool aAsync,
     SetContentType(type);
     captureParams.captureAudio = false;
     captureParams.captureVideo = true;
-    nsCAutoString buffer;
+    nsAutoCString buffer;
     extractAttributeValue(spec.get(), "width=", buffer);
     nsresult err;
     captureParams.width = buffer.ToInteger(&err);
@@ -149,10 +142,6 @@ nsDeviceChannel::OpenContentStream(bool aAsync,
     // only enable if "device.camera.enabled" is true.
     if (Preferences::GetBool("device.camera.enabled", false) == true)
       capture = GetAndroidCaptureProvider();
-#endif
-#ifdef MOZ_WIDGET_GONK
-    if (Preferences::GetBool("device.camera.enabled", false) == true)
-      capture = GetGonkCaptureProvider();
 #endif
   } else {
     return NS_ERROR_NOT_IMPLEMENTED;

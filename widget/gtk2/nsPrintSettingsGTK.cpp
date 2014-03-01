@@ -7,6 +7,7 @@
 #include "nsIFile.h"
 #include "nsNetUtil.h"
 #include <stdlib.h>
+#include <algorithm>
 
 static
 gboolean ref_printer(GtkPrinter *aPrinter, gpointer aData)
@@ -253,7 +254,7 @@ nsPrintSettingsGTK::GetStartPageRange(int32_t *aStartPageRange)
     // the lowest start page.
     int32_t start(lstRanges[0].start);
     for (gint ii = 1; ii < ctRanges; ii++) {
-      start = NS_MIN(lstRanges[ii].start, start);
+      start = std::min(lstRanges[ii].start, start);
     }
     *aStartPageRange = start + 1;
   }
@@ -288,7 +289,7 @@ nsPrintSettingsGTK::GetEndPageRange(int32_t *aEndPageRange)
   } else {
     int32_t end(lstRanges[0].end);
     for (gint ii = 1; ii < ctRanges; ii++) {
-      end = NS_MAX(lstRanges[ii].end, end);
+      end = std::max(lstRanges[ii].end, end);
     }
     *aEndPageRange = end + 1;
   }
@@ -421,7 +422,7 @@ nsPrintSettingsGTK::SetToFileName(const PRUnichar * aToFileName)
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Convert the nsIFile to a URL
-  nsCAutoString url;
+  nsAutoCString url;
   rv = NS_GetURLSpecFromFile(file, url);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -559,10 +560,10 @@ void
 nsPrintSettingsGTK::InitUnwriteableMargin()
 {
   mUnwriteableMargin.SizeTo(
-   NS_INCHES_TO_INT_TWIPS(gtk_page_setup_get_left_margin(mPageSetup, GTK_UNIT_INCH)),
    NS_INCHES_TO_INT_TWIPS(gtk_page_setup_get_top_margin(mPageSetup, GTK_UNIT_INCH)),
    NS_INCHES_TO_INT_TWIPS(gtk_page_setup_get_right_margin(mPageSetup, GTK_UNIT_INCH)),
-   NS_INCHES_TO_INT_TWIPS(gtk_page_setup_get_bottom_margin(mPageSetup, GTK_UNIT_INCH))
+   NS_INCHES_TO_INT_TWIPS(gtk_page_setup_get_bottom_margin(mPageSetup, GTK_UNIT_INCH)),
+   NS_INCHES_TO_INT_TWIPS(gtk_page_setup_get_left_margin(mPageSetup, GTK_UNIT_INCH))
   );
 }
 
@@ -734,6 +735,41 @@ nsPrintSettingsGTK::GetPageRanges(nsTArray<int32_t> &aPages)
   }
 
   g_free(lstRanges);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPrintSettingsGTK::GetResolution(int32_t *aResolution)
+{
+  if (!gtk_print_settings_has_key(mPrintSettings, GTK_PRINT_SETTINGS_RESOLUTION))
+    return NS_ERROR_FAILURE;
+  *aResolution = gtk_print_settings_get_resolution(mPrintSettings);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPrintSettingsGTK::SetResolution(int32_t aResolution)
+{
+  gtk_print_settings_set_resolution(mPrintSettings, aResolution);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPrintSettingsGTK::GetDuplex(int32_t *aDuplex)
+{
+  if (!gtk_print_settings_has_key(mPrintSettings, GTK_PRINT_SETTINGS_DUPLEX))
+    return NS_ERROR_FAILURE;
+  *aDuplex = gtk_print_settings_get_duplex(mPrintSettings);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPrintSettingsGTK::SetDuplex(int32_t aDuplex)
+{
+  MOZ_ASSERT(aDuplex >= GTK_PRINT_DUPLEX_SIMPLEX &&
+             aDuplex <= GTK_PRINT_DUPLEX_VERTICAL,
+             "value is out of bounds for GtkPrintDuplex enum");
+  gtk_print_settings_set_duplex(mPrintSettings, static_cast<GtkPrintDuplex>(aDuplex));
   return NS_OK;
 }
 

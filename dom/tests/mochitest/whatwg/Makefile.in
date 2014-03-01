@@ -43,13 +43,15 @@ MOCHITEST_FILES	= \
 		postMessage.jar \
 		postMessage.jar^headers^ \
 		test_bug477323.html \
-		test_bug500328.html \
-		file_bug500328_1.html \
-		file_bug500328_2.html \
 		test_document_scripts.html \
 		test_postMessage_structured_clone.html \
 		postMessage_structured_clone_helper.js \
 		postMessage_structured_clone_helper.html \
+		$(filter disabled-for-intermittent-failures--bug-696306, test_bug500328.html) \
+		$(filter disabled-for-intermittent-failures--bug-696306, file_bug500328_1.html) \
+		$(filter disabled-for-intermittent-failures--bug-696306, file_bug500328_2.html) \
+		test_postMessage_transfer.html \
+		postMessage_transfer_helper.html \
 		$(NULL)
 
 MOCHITEST_CHROME_FILES	= \

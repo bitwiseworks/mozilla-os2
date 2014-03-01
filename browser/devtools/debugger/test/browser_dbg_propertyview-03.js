@@ -13,7 +13,7 @@ function test() {
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
 
     testSimpleCall();
   });
@@ -23,25 +23,46 @@ function testSimpleCall() {
   gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
     Services.tm.currentThread.dispatch({ run: function() {
 
-      let testScope = gDebugger.DebuggerView.Properties._addScope("test-scope");
-      let testVar = testScope.addVar("something");
-      let duplVar = testScope.addVar("something");
+      let testScope = gDebugger.DebuggerView.Variables.addScope("test-scope");
+      let testVar = testScope.addItem("something");
+      let duplVar = testScope.addItem("something");
 
+      info("Scope id: " + testScope.target.id);
+      info("Scope name: " + testScope.target.name);
+      info("Variable id: " + testVar.target.id);
+      info("Variable name: " + testVar.target.name);
+
+      ok(testScope,
+        "Should have created a scope.");
       ok(testVar,
         "Should have created a variable.");
+
+      ok(testScope.id.contains("test-scope"),
+        "Should have the correct scope id.");
+      ok(testScope.target.id.contains("test-scope"),
+        "Should have the correct scope id on the element.");
+      is(testScope.name, "test-scope",
+        "Should have the correct scope name.");
+
+      ok(testVar.id.contains("something"),
+        "Should have the correct variable id.");
+      ok(testVar.target.id.contains("something"),
+        "Should have the correct variable id on the element.");
+      is(testVar.name, "something",
+        "Should have the correct variable name.");
 
       is(duplVar, null,
         "Shouldn't be able to duplicate variables in the same scope.");
 
-      is(testVar.querySelector(".name").getAttribute("value"), "something",
+      is(testVar.target.querySelector(".name").getAttribute("value"), "something",
         "Any new variable should have the designated title.");
 
-      is(testVar.querySelector(".details").childNodes.length, 0,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 0,
         "Any new variable should have a details container with no child nodes.");
 
 
-      let properties = testVar.addProperties({ "child": { "value": { "type": "object",
-                                                                     "class": "Object" } } });
+      let properties = testVar.addItems({ "child": { "value": { "type": "object",
+                                                                "class": "Object" } } });
 
 
       ok(!testVar.expanded,
@@ -84,42 +105,42 @@ function testSimpleCall() {
       ok(!testVar.expanded,
         "The testVar should remember it is collapsed even if it is hidden.");
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.querySelector(".name"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.target.querySelector(".name"),
         gDebugger);
 
       ok(testVar.expanded,
         "Clicking the testVar name should expand it.");
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.querySelector(".name"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.target.querySelector(".name"),
         gDebugger);
 
       ok(!testVar.expanded,
         "Clicking again the testVar name should collapse it.");
 
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.querySelector(".arrow"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.target.querySelector(".arrow"),
         gDebugger);
 
       ok(testVar.expanded,
         "Clicking the testVar arrow should expand it.");
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.querySelector(".arrow"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.target.querySelector(".arrow"),
         gDebugger);
 
       ok(!testVar.expanded,
         "Clicking again the testVar arrow should collapse it.");
 
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.querySelector(".title"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.target.querySelector(".title"),
         gDebugger);
 
-      ok(!testVar.expanded,
-        "Clicking the testVar title div shouldn't expand it.");
+      ok(testVar.expanded,
+        "Clicking the testVar title div should expand it again.");
 
 
       testScope.show();
@@ -127,66 +148,50 @@ function testSimpleCall() {
       testVar.show();
       testVar.expand();
 
-      ok(!testVar.child.expanded,
+      ok(!testVar.get("child").expanded,
         "The testVar child property should remember it is collapsed even if it is hidden.");
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.child.querySelector(".key"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.get("child").target.querySelector(".name"),
         gDebugger);
 
-      ok(testVar.child.expanded,
+      ok(testVar.get("child").expanded,
         "Clicking the testVar child property name should expand it.");
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.child.querySelector(".key"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.get("child").target.querySelector(".name"),
         gDebugger);
 
-      ok(!testVar.child.expanded,
+      ok(!testVar.get("child").expanded,
         "Clicking again the testVar child property name should collapse it.");
 
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.child.querySelector(".arrow"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.get("child").target.querySelector(".arrow"),
         gDebugger);
 
-      ok(testVar.child.expanded,
+      ok(testVar.get("child").expanded,
         "Clicking the testVar child property arrow should expand it.");
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.child.querySelector(".arrow"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.get("child").target.querySelector(".arrow"),
         gDebugger);
 
-      ok(!testVar.child.expanded,
+      ok(!testVar.get("child").expanded,
         "Clicking again the testVar child property arrow should collapse it.");
 
 
-      EventUtils.sendMouseEvent({ type: "click" },
-        testVar.child.querySelector(".title"),
+      EventUtils.sendMouseEvent({ type: "mousedown" },
+        testVar.get("child").target.querySelector(".title"),
         gDebugger);
 
-      ok(!testVar.child.expanded,
-        "Clicking the testVar child property title div shouldn't expand it.");
+      ok(testVar.get("child").expanded,
+        "Clicking the testVar child property title div should expand it again.");
 
 
-      let emptyCallbackSender = null;
-      let removeCallbackSender = null;
-
-      testScope.onempty = function(sender) { emptyCallbackSender = sender; };
-      testScope.onremove = function(sender) { removeCallbackSender = sender; };
-
-      testScope.empty();
-      is(emptyCallbackSender, testScope,
-        "The emptyCallback wasn't called as it should.");
-
-      is(testScope.querySelector(".details").childNodes.length, 0,
-        "The scope should remove all it's details container tree children.");
-
-      testScope.remove();
-      is(removeCallbackSender, testScope,
-        "The removeCallback wasn't called as it should.");
-
-      is(gDebugger.DebuggerView.Properties._vars.childNodes.length, 2,
-        "The scope should have been removed from the parent container tree.");
+      gDebugger.DebuggerView.Variables.empty();
+      is(gDebugger.DebuggerView.Variables._list.childNodes.length, 0,
+        "The scopes should have been removed from the parent container tree.");
 
       gDebugger.DebuggerController.activeThread.resume(function() {
         closeDebuggerAndFinish();

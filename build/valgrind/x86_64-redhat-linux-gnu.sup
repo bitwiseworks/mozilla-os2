@@ -1,30 +1,60 @@
+# Full list is tracked through meta bug 793882
+
+####################################
+#  Leaks in third party libraries  #
+####################################
+
 {
-    inflateReset2
-    Memcheck:Cond
-    fun:inflateReset2
-    fun:inflateInit2_
+   Bug 793537
+   Memcheck:Leak
+   ...
+   obj:/usr/lib64/libpango-1.0.so.0.2800.1
+   ...
 }
 {
-   write-XQueryExtension
-   Memcheck:Param
-   writev(vector[...])
-   fun:writev
-   fun:_X11TransSocketWritev
-   fun:_XSend
-   fun:XQueryExtension
+   Bug 793598
+   Memcheck:Leak
+   ...
+   obj:/lib64/libdbus-1.so.3.4.0
+   ...
 }
 {
-   write-pthread
-   Memcheck:Param
-   write(buf)
-   obj:/lib64/libpthread-2.5.so
+   Bug 793600
+   Memcheck:Leak
+   fun:realloc
+   obj:/usr/lib64/libfontconfig.so.1.4.4
+   ...
+   fun:FcDefaultSubstitute
+   fun:_ZN17gfxPangoFontGroup11MakeFontSetEP14_PangoLanguagedP9nsAutoRefI10_FcPatternE
+   ...
 }
 {
-   write-XChangeProperty
-   Memcheck:Param
-   writev(vector[...])
-   fun:writev
-   fun:_X11TransSocketWritev
-   fun:_XSend
-   fun:XChangeProperty
+   Bug 794366
+   Memcheck:Leak
+   ...
+   obj:/usr/lib64/libgtk-x11-2.0.so.0.1800.9
+   ...
+}
+{
+   Bug 794368
+   Memcheck:Leak
+   ...
+   obj:/usr/lib64/libXrandr.so.2.2.0
+   ...
+}
+{
+   Bug 794373
+   Memcheck:Leak
+   ...
+   obj:/lib64/libgobject-2.0.so.0.2200.5
+   ...
+}
+{
+   Bug 850134
+   Memcheck:Leak
+   fun:realloc
+   fun:_ZN2js6VectorImLm0ENS_15TempAllocPolicyEE13growStorageByEm
+   fun:_ZN2js8SCOutput5writeEm
+   fun:_ZN2js8SCOutput9writePairEjj
+   ...
 }

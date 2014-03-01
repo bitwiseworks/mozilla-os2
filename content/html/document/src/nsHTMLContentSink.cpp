@@ -81,6 +81,7 @@
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
 #include "mozAutoDocUpdate.h"
+#include "nsTextNode.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -494,10 +495,9 @@ CreateHTMLElement(uint32_t aNodeType, already_AddRefed<nsINodeInfo> aNodeInfo,
   NS_ASSERTION(cb != NS_NewHTMLNOTUSEDElement,
                "Don't know how to construct tag element!");
 
-  nsGenericHTMLElement* result = cb(aNodeInfo, aFromParser);
-  NS_IF_ADDREF(result);
+  nsRefPtr<nsGenericHTMLElement> result = cb(aNodeInfo, aFromParser);
 
-  return result;
+  return result.forget();
 }
 
 //----------------------------------------------------------------------
@@ -680,10 +680,8 @@ SinkContext::OpenContainer(const nsIParserNode& aNode)
       break;
 
     case eHTMLTag_button:
-#ifdef MOZ_MEDIA
     case eHTMLTag_audio:
     case eHTMLTag_video:
-#endif
       content->DoneCreatingElement();
       break;
 
@@ -792,10 +790,8 @@ SinkContext::CloseContainer(const nsHTMLTag aTag)
     MOZ_NOT_REACHED("Must not use HTMLContentSink for forms.");
     break;
 
-#ifdef MOZ_MEDIA
   case eHTMLTag_video:
   case eHTMLTag_audio:
-#endif
   case eHTMLTag_select:
   case eHTMLTag_textarea:
   case eHTMLTag_object:
@@ -1170,10 +1166,8 @@ SinkContext::FlushText(bool* aDidFlush, bool aReleaseLast)
         didFlush = true;
       }
     } else {
-      nsCOMPtr<nsIContent> textContent;
-      rv = NS_NewTextNode(getter_AddRefs(textContent),
-                          mSink->mNodeInfoManager);
-      NS_ENSURE_SUCCESS(rv, rv);
+      nsRefPtr<nsTextNode> textContent =
+        new nsTextNode(mSink->mNodeInfoManager);
 
       mLastTextNode = textContent;
 
@@ -1288,23 +1282,21 @@ HTMLContentSink::~HTMLContentSink()
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLContentSink)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLContentSink, nsContentSink)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mHTMLDocument)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRoot)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mBody)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mHead)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mHTMLDocument)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBody)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mHead)
   for (uint32_t i = 0; i < ArrayLength(tmp->mNodeInfoCache); ++i) {
     NS_IF_RELEASE(tmp->mNodeInfoCache[i]);
   }
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLContentSink,
                                                   nsContentSink)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mHTMLDocument)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRoot)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mBody)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mHead)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHTMLDocument)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBody)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHead)
   for (uint32_t i = 0; i < ArrayLength(tmp->mNodeInfoCache); ++i) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mNodeInfoCache[i]");
     cb.NoteXPCOMChild(tmp->mNodeInfoCache[i]);
@@ -1329,7 +1321,8 @@ IsScriptEnabled(nsIDocument *aDoc, nsIDocShell *aContainer)
 {
   NS_ENSURE_TRUE(aDoc && aContainer, true);
 
-  nsCOMPtr<nsIScriptGlobalObject> globalObject = aDoc->GetScriptGlobalObject();
+  nsCOMPtr<nsIScriptGlobalObject> globalObject =
+    do_QueryInterface(aDoc->GetWindow());
 
   // Getting context is tricky if the document hasn't had its
   // GlobalObject set yet
@@ -1343,8 +1336,7 @@ IsScriptEnabled(nsIDocument *aDoc, nsIDocShell *aContainer)
 
   nsIScriptContext *scriptContext = globalObject->GetContext();
   NS_ENSURE_TRUE(scriptContext, true);
-
-  JSContext* cx = scriptContext->GetNativeContext();
+  JSContext *cx = scriptContext->GetNativeContext();
   NS_ENSURE_TRUE(cx, true);
 
   bool enabled = true;
@@ -1395,7 +1387,6 @@ HTMLContentSink::Init(nsIDocument* aDoc,
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::html, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   // Make root part
   mRoot = NS_NewHTMLHtmlElement(nodeInfo.forget());
@@ -1412,7 +1403,6 @@ HTMLContentSink::Init(nsIDocument* aDoc,
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::head,
                                            nullptr, kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   mHead = NS_NewHTMLHeadElement(nodeInfo.forget());
   if (NS_FAILED(rv)) {
@@ -1427,7 +1417,7 @@ HTMLContentSink::Init(nsIDocument* aDoc,
   mContextStack.AppendElement(mCurrentContext);
 
 #ifdef DEBUG
-  nsCAutoString spec;
+  nsAutoCString spec;
   (void)aURI->GetSpec(spec);
   SINK_TRACE(gSinkLogModuleInfo, SINK_TRACE_CALLS,
              ("HTMLContentSink::Init: this=%p url='%s'",
@@ -2071,12 +2061,10 @@ HTMLContentSink::SetDocumentCharset(nsACString& aCharset)
       // it but if we get a null pointer, that's perfectly legal for
       // parent and parentContentViewer
 
-      nsCOMPtr<nsIDocShellTreeItem> docShellAsItem =
-        do_QueryInterface(mDocShell);
-      NS_ENSURE_TRUE(docShellAsItem, NS_ERROR_FAILURE);
+      NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
 
       nsCOMPtr<nsIDocShellTreeItem> parentAsItem;
-      docShellAsItem->GetSameTypeParent(getter_AddRefs(parentAsItem));
+      mDocShell->GetSameTypeParent(getter_AddRefs(parentAsItem));
 
       nsCOMPtr<nsIDocShell> parent(do_QueryInterface(parentAsItem));
       if (parent) {
@@ -2131,7 +2119,7 @@ HTMLContentSink::DumpContentModel()
       Element* root = mDocument->GetRootElement();
       if (root) {
         if (mDocumentURI) {
-          nsCAutoString buf;
+          nsAutoCString buf;
           mDocumentURI->GetSpec(buf);
           fputs(buf.get(), out);
         }

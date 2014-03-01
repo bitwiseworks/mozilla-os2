@@ -6,7 +6,63 @@
 ; to launch the Win8 metro browser or desktop browser.
 !define DELEGATE_EXECUTE_HANDLER_ID {5100FEC1-212B-4BF5-9BF8-3E650FD794A3}
 
+; Does metro registration for the command execute handler
+Function RegisterCEH
+!ifdef MOZ_METRO
+  ${If} ${AtLeastWin8}
+    ${CleanupMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID}
+    ${AddMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID} \
+                                    "$INSTDIR\CommandExecuteHandler.exe" \
+                                    $AppUserModelID \
+                                    "FirefoxURL" \
+                                    "FirefoxHTML"
+  ${EndIf}
+!endif
+FunctionEnd
+
+; If we're in Win8 make sure we have a start menu shortcut and that it has
+; the correct AppuserModelID so that the Metro browser has a Metro tile.
+Function RegisterStartMenuTile
+!ifdef MOZ_METRO
+  ${If} ${AtLeastWin8}
+    CreateShortCut "$SMPROGRAMS\${BrandFullName}.lnk" "$INSTDIR\${FileMainEXE}"
+    ${If} ${FileExists} "$SMPROGRAMS\${BrandFullName}.lnk"
+      ShellLink::SetShortCutWorkingDirectory "$SMPROGRAMS\${BrandFullName}.lnk" \
+                                             "$INSTDIR"
+      ${If} "$AppUserModelID" != ""
+        ApplicationID::Set "$SMPROGRAMS\${BrandFullName}.lnk" "$AppUserModelID" "true"
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!endif
+FunctionEnd
+
 !macro PostUpdate
+
+  ; PostUpdate is called from both session 0 and from the user session
+  ; for service updates, make sure that we only register with the user session
+  ; Otherwise ApplicationID::Set can fail intermittently with a file in use error.
+  System::Call "kernel32::GetCurrentProcessId() i.r0"
+  System::Call "kernel32::ProcessIdToSessionId(i $0, *i ${NSIS_MAX_STRLEN} r9)"
+
+  ; Determine if we're the protected UserChoice default or not. If so fix the
+  ; start menu tile.  In case there are 2 Firefox installations, we only do
+  ; this if the application being updated is the default.
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice" "ProgId"
+  ${If} $0 == "FirefoxURL"
+  ${AndIf} $9 != 0 ; We're not running in session 0
+    ReadRegStr $0 HKCU "Software\Classes\FirefoxURL\shell\open\command" ""
+    ${GetPathFromString} "$0" $0
+    ${GetParent} "$0" $0
+    ${If} ${FileExists} "$0"
+      ${GetLongPath} "$0" $0
+    ${EndIf}
+    ${If} "$0" == "$INSTDIR"
+      ; Win8 specific registration
+      Call RegisterStartMenuTile
+    ${EndIf}
+  ${EndIf}
+
   ${CreateShortcutsLog}
 
   ; Remove registry entries for non-existent apps and for apps that point to our
@@ -94,6 +150,11 @@
 
   ${RemoveDeprecatedFiles}
 
+  ; Fix the distribution.ini file if applicable
+  ${FixDistributionsINI}
+
+  RmDir /r /REBOOTOK "$INSTDIR\${TO_BE_DELETED}"
+
 !ifdef MOZ_MAINTENANCE_SERVICE
   Call IsUserAdmin
   Pop $R0
@@ -120,10 +181,10 @@
     ; If the maintenance service is already installed, do nothing.
     ; The maintenance service will launch:
     ; maintenanceservice_installer.exe /Upgrade to upgrade the maintenance
-    ; service if necessary.   If the update was done from updater.exe without 
-    ; the service (i.e. service is failing), updater.exe will do the update of 
-    ; the service.  The reasons we do not do it here is because we don't want 
-    ; to have to prompt for limited user accounts when the service isn't used 
+    ; service if necessary.   If the update was done from updater.exe without
+    ; the service (i.e. service is failing), updater.exe will do the update of
+    ; the service.  The reasons we do not do it here is because we don't want
+    ; to have to prompt for limited user accounts when the service isn't used
     ; and we currently call the PostUpdate twice, once for the user and once
     ; for the SYSTEM account.  Also, this would stop the maintenance service
     ; and we need a return result back to the service when run that way.
@@ -131,14 +192,29 @@
       ; An install of maintenance service was never attempted.
       ; We know we are an Admin and that we have write access into HKLM
       ; based on the above checks, so attempt to just run the EXE.
-      ; In the worst case, in case there is some edge case with the 
+      ; In the worst case, in case there is some edge case with the
       ; IsAdmin check and the permissions check, the maintenance service
-      ; will just fail to be attempted to be installed. 
+      ; will just fail to be attempted to be installed.
       nsExec::Exec "$\"$INSTDIR\maintenanceservice_installer.exe$\""
     ${EndIf}
   ${EndIf}
 !endif
 
+; Register the DEH
+!ifdef MOZ_METRO
+  ${If} ${AtLeastWin8}
+  ${AndIf} $9 != 0 ; We're not running in session 0
+    ; If RegisterCEH is called too close to changing the shortcut AppUserModelID
+    ; and if the tile image is not already in cache.  Then Windows won't refresh
+    ; the tile image on the start screen.  So wait before calling RegisterCEH.
+    ; We only need to do this when the DEH doesn't already exist.
+    ReadRegStr $0 HKCU "Software\Classes\FirefoxURL\shell\open\command" "DelegateExecute"
+    ${If} $0 != ${DELEGATE_EXECUTE_HANDLER_ID}
+      Sleep 3000
+    ${EndIf}
+    Call RegisterCEH
+  ${EndIf}
+!endif
 !macroend
 !define PostUpdate "!insertmacro PostUpdate"
 
@@ -340,16 +416,7 @@
 
   ${AddDisabledDDEHandlerValues} "FirefoxURL" "$2" "$8,1" "${AppRegName} URL" \
                                  "true"
-!ifdef MOZ_METRO
-  ${If} ${AtLeastWin8}
-    ${CleanupMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID}
-    ${AddMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID} \
-                                    "$INSTDIR\CommandExecuteHandler.exe" \
-                                    $AppUserModelID \
-                                    "FirefoxURL" \
-                                    "FirefoxHTML"
-  ${EndIf}
-!endif
+  Call RegisterCEH
 
   ; An empty string is used for the 4th & 5th params because the following
   ; protocol handlers already have a display name and the additional keys
@@ -406,7 +473,7 @@
     ${EndIf}
   ${EndIf}
 
-  WriteRegStr ${RegKey} "$0\shell\open\command" "" "$8"
+  WriteRegStr ${RegKey} "$0\shell\open\command" "" "$\"$8$\""
 
   WriteRegStr ${RegKey} "$0\shell\properties" "" "$(CONTEXT_OPTIONS)"
   WriteRegStr ${RegKey} "$0\shell\properties\command" "" "$\"$8$\" -preferences"
@@ -518,7 +585,7 @@
     ${WriteRegStr2} $1 "$0" "DisplayVersion" "${AppVersion}" 0
     ${WriteRegStr2} $1 "$0" "InstallLocation" "$8" 0
     ${WriteRegStr2} $1 "$0" "Publisher" "Mozilla" 0
-    ${WriteRegStr2} $1 "$0" "UninstallString" "$8\uninstall\helper.exe" 0
+    ${WriteRegStr2} $1 "$0" "UninstallString" "$\"$8\uninstall\helper.exe$\"" 0
     ${WriteRegStr2} $1 "$0" "URLInfoAbout" "${URLInfoAbout}" 0
     ${WriteRegStr2} $1 "$0" "URLUpdateInfo" "${URLUpdateInfo}" 0
     ${WriteRegDWORD2} $1 "$0" "NoModify" 1 0
@@ -635,7 +702,7 @@
       SetRegView lastused
     ${EndIf}
     ClearErrors
-  ${EndIf} 
+  ${EndIf}
   ; Restore the previously used value back
   Pop $R0
 !macroend
@@ -679,6 +746,34 @@
   ${EndIf}
 !macroend
 !define RemoveDeprecatedKeys "!insertmacro RemoveDeprecatedKeys"
+
+!ifdef MOZ_METRO
+; Resets Win8+ specific toast keys Windows sets. We call this on a
+; fresh install and on uninstall.
+!macro ResetWin8PromptKeys
+  ${If} ${AtLeastWin8}
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.htm"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.html"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.xht"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.xhtml"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxHTML_.shtml"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_ftp"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_http"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\ApplicationAssociationToasts" "FirefoxURL_https"
+  ${EndIf}
+!macroend
+!define ResetWin8PromptKeys "!insertmacro ResetWin8PromptKeys"
+
+; Resets Win8+ Metro specific splash screen info. Relies
+; on AppUserModelID.
+!macro ResetWin8MetroSplash
+  ${If} ${AtLeastWin8}
+  ${AndIf} "$AppUserModelID" != ""
+    DeleteRegKey HKCR "Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\DefaultBrowser_NOPUBLISHERID\SplashScreen\DefaultBrowser_NOPUBLISHERID!$AppUserModelID"
+  ${EndIf}
+!macroend
+!define ResetWin8MetroSplash "!insertmacro ResetWin8MetroSplash"
+!endif
 
 ; Removes various directories and files for reasons noted below.
 !macro RemoveDeprecatedFiles
@@ -831,6 +926,100 @@
   ${EndIf}
 !macroend
 !define RemoveDeprecatedFiles "!insertmacro RemoveDeprecatedFiles"
+
+; Converts specific partner distribution.ini from ansi to utf-8 (bug 882989)
+!macro FixDistributionsINI
+  StrCpy $1 "$INSTDIR\distribution\distribution.ini"
+  StrCpy $2 "$INSTDIR\distribution\utf8fix"
+  StrCpy $0 "0" ; Default to not attempting to fix
+
+  ; Check if the distribution.ini settings are for a partner build that needs
+  ; to have its distribution.ini converted from ansi to utf-8.
+  ${If} ${FileExists} "$1"
+    ${Unless} ${FileExists} "$2"
+      ReadINIStr $3 "$1" "Preferences" "app.distributor"
+      ${If} "$3" == "yahoo"
+        ReadINIStr $3 "$1" "Preferences" "app.distributor.channel"
+        ${If} "$3" == "de"
+        ${OrIf} "$3" == "es"
+        ${OrIf} "$3" == "e1"
+        ${OrIf} "$3" == "mx"
+          StrCpy $0 "1"
+        ${EndIf}
+      ${EndIf}
+      ; Create the utf8fix so this only runs once
+      FileOpen $3 "$2" w
+      FileClose $3
+    ${EndUnless}
+  ${EndIf}
+
+  ${If} "$0" == "1"
+    StrCpy $0 "0"
+    ClearErrors
+    ReadINIStr $3 "$1" "Global" "version"
+    ${Unless} ${Errors}
+      StrCpy $4 "$3" 2
+      ${If} "$4" == "1."
+        StrCpy $4 "$3" "" 2 ; Everything after "1."
+        ${If} $4 < 23
+          StrCpy $0 "1"
+        ${EndIf}
+      ${EndIf}
+    ${EndUnless}
+  ${EndIf}
+
+  ${If} "$0" == "1"
+    ClearErrors
+    FileOpen $3 "$1" r
+    ${If} ${Errors}
+      FileClose $3
+    ${Else}
+      StrCpy $2 "$INSTDIR\distribution\distribution.new"
+      ClearErrors
+      FileOpen $4 "$2" w
+      ${If} ${Errors}
+        FileClose $3
+        FileClose $4
+      ${Else}
+        StrCpy $0 "0" ; Default to not replacing the original distribution.ini
+        ${Do}
+          FileReadByte $3 $5
+          ${If} $5 == ""
+            ${Break}
+          ${EndIf}
+          ${If} $5 == 233 ; ansi é
+            StrCpy $0 "1"
+            FileWriteByte $4 195
+            FileWriteByte $4 169
+          ${ElseIf} $5 == 241 ; ansi ñ
+            StrCpy $0 "1"
+            FileWriteByte $4 195
+            FileWriteByte $4 177
+          ${ElseIf} $5 == 252 ; ansi ü
+            StrCpy $0 "1"
+            FileWriteByte $4 195
+            FileWriteByte $4 188
+          ${ElseIf} $5 < 128
+            FileWriteByte $4 $5
+          ${EndIf}
+        ${Loop}
+        FileClose $3
+        FileClose $4
+        ${If} "$0" == "1"
+          ClearErrors
+          Rename "$1" "$1.bak"
+          ${Unless} ${Errors}
+            Rename "$2" "$1"
+            Delete "$1.bak"
+          ${EndUnless}
+        ${Else}
+          Delete "$2"
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+!define FixDistributionsINI "!insertmacro FixDistributionsINI"
 
 ; Adds a pinned shortcut to Task Bar on update for Windows 7 and above if this
 ; macro has never been called before and the application is default (see
@@ -1114,6 +1303,14 @@ Function SetAsDefaultAppUserHKCU
   ${EndUnless}
 
   SetShellVarContext current  ; Set SHCTX to the current user (e.g. HKCU)
+
+  ${If} ${AtLeastWin8}
+    ${SetStartMenuInternet} "HKCU"
+    ${FixShellIconHandler} "HKCU"
+    ${FixClassKeys} ; Does not use SHCTX
+    Call RegisterStartMenuTile
+  ${EndIf}
+
   ${SetHandlers}
 
   ${If} ${AtLeastWinVista}
@@ -1146,9 +1343,28 @@ FunctionEnd
 !ifdef NO_LOG
 
 Function SetAsDefaultAppUser
-  ; It is only possible to set this installation of the application as the
-  ; StartMenuInternet handler if it was added to the HKLM StartMenuInternet
-  ; registry keys.
+  ; On Win8, we want to avoid having a UAC prompt since we'll already have
+  ; another action for control panel default browser selection popping up
+  ; to the user.  Win8 is the first OS where the start menu keys can be
+  ; added into HKCU.  The call to SetAsDefaultAppUserHKCU will have already
+  ; set the HKCU keys for SetStartMenuInternet.
+  ${If} ${AtLeastWin8}
+    ; Check if this is running in an elevated process
+    ClearErrors
+    ${GetParameters} $0
+    ${GetOptions} "$0" "/UAC:" $0
+    ${If} ${Errors} ; Not elevated
+      Call SetAsDefaultAppUserHKCU
+    ${Else} ; Elevated - execute the function in the unelevated process
+      GetFunctionAddress $0 SetAsDefaultAppUserHKCU
+      UAC::ExecCodeSegment $0
+    ${EndIf}
+    Return ; Nothing more needs to be done
+  ${EndIf}
+
+  ; Before Win8, it is only possible to set this installation of the application
+  ; as the StartMenuInternet handler if it was added to the HKLM
+  ; StartMenuInternet registry keys.
   ; http://support.microsoft.com/kb/297878
 
   ; Check if this install location registered as the StartMenuInternet client
@@ -1181,17 +1397,6 @@ Function SetAsDefaultAppUser
       ${EndIf}
     ${EndIf}
   ${EndUnless}
-
-  ; On Win8, we want to avoid having a UAC prompt since we'll already have
-  ; another action for control panel default browser selection popping up
-  ; to the user.  Win8 is the first OS where the start menu keys can be
-  ; added into HKCU.
-  ${If} ${AtLeastWin8}
-    ${SetStartMenuInternet} "HKCU"
-    ${FixShellIconHandler} "HKCU"
-    ${FixClassKeys} ; Does not use SHCTX
-    Return
-  ${EndIf}
 
   ; The code after ElevateUAC won't be executed on Vista and above when the
   ; user:

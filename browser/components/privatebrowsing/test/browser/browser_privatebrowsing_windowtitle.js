@@ -6,11 +6,6 @@
 // from and to private browsing mode.
 
 function test() {
-  // initialization
-  gPrefService.setBoolPref("browser.privatebrowsing.keep_current_session", true);
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
-
   const testPageURL = "http://mochi.test:8888/browser/" +
     "browser/components/privatebrowsing/test/browser/browser_privatebrowsing_windowtitle_page.html";
   waitForExplicitFinish();
@@ -43,51 +38,58 @@ function test() {
     pb_about_pb_title = "Private Browsing - " + app_name + " (Private Browsing)";
   }
 
-  function testTabTitle(url, insidePB, expected_title, funcNext) {
-    pb.privateBrowsingEnabled = insidePB;
+  function testTabTitle(aWindow, url, insidePB, expected_title, funcNext) {
+    executeSoon(function () {
+      let tab = aWindow.gBrowser.selectedTab = aWindow.gBrowser.addTab();
+      let browser = aWindow.gBrowser.selectedBrowser;
+      browser.stop();
+      // ensure that the test is run after the titlebar has been updated
+      browser.addEventListener("pageshow", function () {
+        browser.removeEventListener("pageshow", arguments.callee, false);
+        executeSoon(function () {
+          is(aWindow.document.title, expected_title, "The window title for " + url +
+             " is correct (" + (insidePB ? "inside" : "outside") +
+             " private browsing mode)");
 
-    let tab = gBrowser.selectedTab = gBrowser.addTab();
-    let browser = gBrowser.selectedBrowser;
-    browser.stop();
-    // ensure that the test is run after the titlebar has been updated
-    browser.addEventListener("pageshow", function () {
-      browser.removeEventListener("pageshow", arguments.callee, false);
-      executeSoon(function () {
-        is(document.title, expected_title, "The window title for " + url +
-           " is correct (" + (insidePB ? "inside" : "outside") +
-           " private browsing mode)");
+          let win = aWindow.gBrowser.replaceTabWithWindow(tab);
+          win.addEventListener("load", function() {
+            win.removeEventListener("load", arguments.callee, false);
 
-        let win = gBrowser.replaceTabWithWindow(tab);
-        win.addEventListener("load", function() {
-          win.removeEventListener("load", arguments.callee, false);
+            executeSoon(function() {
+              is(win.document.title, expected_title, "The window title for " + url +
+                 " detached tab is correct (" + (insidePB ? "inside" : "outside") +
+                 " private browsing mode)");
+              win.close();
+              aWindow.close();
 
-          executeSoon(function() {
-            is(win.document.title, expected_title, "The window title for " + url +
-               " detached tab is correct (" + (insidePB ? "inside" : "outside") +
-               " private browsing mode)");
-            win.close();
+              setTimeout(funcNext, 0);
+            });
+          }, false);
+        });
+      }, false);
 
-            setTimeout(funcNext, 0);
-          });
-        }, false);
-      });
-    }, false);
-
-    browser.loadURI(url);
+      browser.loadURI(url);
+    });
   }
 
-  function cleanup() {
-    pb.privateBrowsingEnabled = false;
-    gPrefService.clearUserPref("browser.privatebrowsing.keep_current_session");
-    finish();
-  }
-
-  testTabTitle("about:blank", false, page_without_title, function() {
-    testTabTitle(testPageURL, false, page_with_title, function() {
-      testTabTitle("about:privatebrowsing", false, about_pb_title, function() {
-        testTabTitle("about:blank", true, pb_page_without_title, function() {
-          testTabTitle(testPageURL, true, pb_page_with_title, function() {
-            testTabTitle("about:privatebrowsing", true, pb_about_pb_title, cleanup);
+  whenNewWindowLoaded({private: false}, function(win) {
+    testTabTitle(win, "about:blank", false, page_without_title, function() {
+      whenNewWindowLoaded({private: false}, function(win) {
+        testTabTitle(win, testPageURL, false, page_with_title, function() {
+          whenNewWindowLoaded({private: false}, function(win) {
+            testTabTitle(win, "about:privatebrowsing", false, about_pb_title, function() {
+              whenNewWindowLoaded({private: true}, function(win) {
+                testTabTitle(win, "about:blank", true, pb_page_without_title, function() {
+                  whenNewWindowLoaded({private: true}, function(win) {
+                    testTabTitle(win, testPageURL, true, pb_page_with_title, function() {
+                      whenNewWindowLoaded({private: true}, function(win) {
+                        testTabTitle(win, "about:privatebrowsing", true, pb_about_pb_title, finish);
+                      });
+                    });
+                  });
+                });
+              });
+            });
           });
         });
       });

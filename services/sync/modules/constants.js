@@ -4,9 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // Process each item in the "constants hash" to add to "global" and give a name
-let EXPORTED_SYMBOLS = [((this[key] = val), key) for ([key, val] in Iterator({
+this.EXPORTED_SYMBOLS = [((this[key] = val), key) for ([key, val] in Iterator({
 
-WEAVE_CHANNEL:                         "@weave_channel@",
 WEAVE_VERSION:                         "@weave_version@",
 
 // Sync Server API version that the client supports.
@@ -18,10 +17,6 @@ MISC_API_VERSION:                      "1.0",
 // how records are packaged; this is separate from the Server API version and
 // the per-engine cleartext formats.
 STORAGE_VERSION:                       5,
-
-UPDATED_DEV_URL:                       "https://services.mozilla.com/sync/updated/?version=@weave_version@&channel=@weave_channel@",
-UPDATED_REL_URL:                       "http://www.mozilla.com/firefox/sync/updated.html",
-
 PREFS_BRANCH:                          "services.sync.",
 
 // Host "key" to access Weave Identity in the password manager
@@ -179,6 +174,8 @@ SEAMONKEY_ID:                          "{92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}",
 TEST_HARNESS_ID:                       "xuth@mozilla.org",
 
 MIN_PP_LENGTH:                         12,
-MIN_PASS_LENGTH:                       8
+MIN_PASS_LENGTH:                       8,
+
+LOG_DATE_FORMAT:                       "%Y-%m-%d %H:%M:%S",
 
 }))];

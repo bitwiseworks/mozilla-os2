@@ -10,9 +10,9 @@
 
 #include "GfxInfo.h"
 #include "nsUnicharUtils.h"
-#include "mozilla/FunctionTimer.h"
 #include "nsCocoaFeatures.h"
 #include "mozilla/Preferences.h"
+#include <algorithm>
 
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
@@ -103,8 +103,6 @@ GfxInfo::GetDeviceInfo()
 nsresult
 GfxInfo::Init()
 {
-  NS_TIME_FUNCTION;
-
   nsresult rv = GfxInfoBase::Init();
 
   // Calling CGLQueryRendererInfo causes us to switch to the discrete GPU
@@ -119,7 +117,7 @@ GfxInfo::Init()
   if (CGLQueryRendererInfo(0xffffffff, &renderer, &rendererCount) != kCGLNoError)
     return rv;
 
-  rendererCount = (GLint) NS_MIN(rendererCount, (GLint) ArrayLength(mRendererIDs));
+  rendererCount = (GLint) std::min(rendererCount, (GLint) ArrayLength(mRendererIDs));
   for (GLint i = 0; i < rendererCount; i++) {
     GLint prop = 0;
 
@@ -294,7 +292,7 @@ GfxInfo::AddCrashReportAnnotations()
 {
 #if defined(MOZ_CRASHREPORTER)
   nsString deviceID, vendorID;
-  nsCAutoString narrowDeviceID, narrowVendorID;
+  nsAutoCString narrowDeviceID, narrowVendorID;
 
   GetAdapterDeviceID(deviceID);
   CopyUTF16toUTF8(deviceID, narrowDeviceID);
@@ -307,7 +305,7 @@ GfxInfo::AddCrashReportAnnotations()
                                      narrowDeviceID);
   /* Add an App Note for now so that we get the data immediately. These
    * can go away after we store the above in the socorro db */
-  nsCAutoString note;
+  nsAutoCString note;
   /* AppendPrintf only supports 32 character strings, mrghh. */
   note.Append("AdapterVendorID: ");
   note.Append(narrowVendorID);
@@ -356,15 +354,6 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
 
   // Don't evaluate special cases when we're evaluating the downloaded blocklist.
   if (!aDriverInfo.Length()) {
-    // Many WebGL issues on 10.5, especially:
-    //   * bug 631258: WebGL shader paints using textures belonging to other processes on Mac OS 10.5
-    //   * bug 618848: Post process shaders and texture mapping crash OS X 10.5
-    if (aFeature == nsIGfxInfo::FEATURE_WEBGL_OPENGL &&
-        !nsCocoaFeatures::OnSnowLeopardOrLater()) {
-      *aStatus = nsIGfxInfo::FEATURE_BLOCKED_OS_VERSION;
-      return NS_OK;
-    }
-
     // The code around the following has been moved into the global blocklist.
 #if 0
       // CGL reports a list of renderers, some renderers are slow (e.g. software)

@@ -22,7 +22,11 @@ public:
   // nsASocketHandler methods:
   virtual void OnSocketReady(PRFileDesc *fd, int16_t outFlags);
   virtual void OnSocketDetached(PRFileDesc *fd);
+  virtual void IsLocal(bool *aIsLocal);
+  virtual void KeepWhenOffline(bool *aKeepWhenOffline);
 
+  virtual uint64_t ByteCountSent() { return 0; }
+  virtual uint64_t ByteCountReceived() { return 0; }
   nsServerSocket();
 
   // This must be public to support older compilers (xlC_r on AIX)
@@ -42,6 +46,7 @@ private:
   nsCOMPtr<nsIServerSocketListener> mListener;
   nsCOMPtr<nsIEventTarget>          mListenerTarget;
   bool                              mAttached;
+  bool                              mKeepWhenOffline;
 };
 
 //-----------------------------------------------------------------------------

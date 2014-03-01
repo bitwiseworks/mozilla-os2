@@ -14,8 +14,8 @@ import java.util.TreeMap;
 
 import org.json.simple.JSONArray;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.db.BrowserContract;
-import org.mozilla.gecko.sync.Logger;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.repositories.InactiveSessionException;
 import org.mozilla.gecko.sync.repositories.InvalidSessionTransitionException;
@@ -131,14 +131,19 @@ public class AndroidBrowserBookmarksRepositorySession extends AndroidBrowserRepo
    * Additionally, the mobile root is annotated. In Firefox Sync, PlacesUtils is
    * used to find the IDs of these special folders.
    *
-   * Sync skips over `places` and `tags` when finding IDs.
-   *
-   * We need to consume records with these various guids, producing a local
+   * We need to consume records with these various GUIDs, producing a local
    * representation which we are able to stably map upstream.
+   *
+   * Android Sync skips over the contents of some special GUIDs -- `places`, `tags`,
+   * etc. -- when finding IDs.
+   * Some of these special GUIDs are part of desktop structure (places, tags). Some
+   * are part of Fennec's custom data (readinglist, pinned).
+   *
+   * We don't want to upload or apply these records.
    *
    * That is:
    *
-   * * We should not upload a `places` record or a `tags` record.
+   * * We should not upload a `places`,`tags`, `readinglist`, or `pinned` record.
    * * We can stably _store_ menu/toolbar/unfiled/mobile as special GUIDs, and set
      * their parent ID as appropriate on upload.
    *
@@ -192,12 +197,33 @@ public class AndroidBrowserBookmarksRepositorySession extends AndroidBrowserRepo
   /**
    * Return true if the provided record GUID should be skipped
    * in child lists or fetch results.
+   *
+   * @param recordGUID the GUID of the record to check.
+   * @return true if the record should be skipped.
    */
-  public static boolean forbiddenGUID(String recordGUID) {
+  public static boolean forbiddenGUID(final String recordGUID) {
     return recordGUID == null ||
-           "readinglist".equals(recordGUID) ||      // Temporary: Bug 762118
-           "places".equals(recordGUID) ||
-           "tags".equals(recordGUID);
+           // Temporarily exclude reading list items (Bug 762118; re-enable in Bug 762109.)
+           BrowserContract.Bookmarks.READING_LIST_FOLDER_GUID.equals(recordGUID) ||
+           BrowserContract.Bookmarks.PINNED_FOLDER_GUID.equals(recordGUID) ||
+           BrowserContract.Bookmarks.PLACES_FOLDER_GUID.equals(recordGUID) ||
+           BrowserContract.Bookmarks.TAGS_FOLDER_GUID.equals(recordGUID);
+  }
+
+  /**
+   * Return true if the provided parent GUID's children should
+   * be skipped in child lists or fetch results.
+   * This differs from {@link #forbiddenGUID(String)} in that we're skipping
+   * part of the hierarchy.
+   *
+   * @param parentGUID the GUID of parent of the record to check.
+   * @return true if the record should be skipped.
+   */
+  public static boolean forbiddenParent(final String parentGUID) {
+    return parentGUID == null ||
+           // Temporarily exclude reading list items (Bug 762118; re-enable in Bug 762109.)
+           BrowserContract.Bookmarks.READING_LIST_FOLDER_GUID.equals(parentGUID) ||
+           BrowserContract.Bookmarks.PINNED_FOLDER_GUID.equals(parentGUID);
   }
 
   public AndroidBrowserBookmarksRepositorySession(Repository repository, Context context) {
@@ -508,6 +534,7 @@ public class AndroidBrowserBookmarksRepositorySession extends AndroidBrowserRepo
     if (record.deleted) {
       return false;
     }
+
     BookmarkRecord bmk = (BookmarkRecord) record;
 
     if (forbiddenGUID(bmk.guid)) {
@@ -515,8 +542,8 @@ public class AndroidBrowserBookmarksRepositorySession extends AndroidBrowserRepo
       return true;
     }
 
-    if ("readinglist".equals(bmk.parentID)) {      // Temporary: Bug 762118
-      Logger.debug(LOG_TAG,  "Ignoring reading list item with guid: " + bmk.guid);
+    if (forbiddenParent(bmk.parentID)) {
+      Logger.debug(LOG_TAG,  "Ignoring child " + bmk.guid + " of forbidden parent folder " + bmk.parentID);
       return true;
     }
 

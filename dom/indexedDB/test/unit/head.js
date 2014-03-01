@@ -11,7 +11,6 @@ const IDBTransaction = Ci.nsIIDBTransaction;
 const IDBOpenDBRequest = Ci.nsIIDBOpenDBRequest;
 const IDBVersionChangeEvent = Ci.nsIIDBVersionChangeEvent
 const IDBDatabase = Ci.nsIIDBDatabase
-const IDBFactory = Ci.nsIIDBFactory
 const IDBIndex = Ci.nsIIDBIndex
 const IDBObjectStore = Ci.nsIIDBObjectStore
 const IDBRequest = Ci.nsIIDBRequest
@@ -39,6 +38,10 @@ function todo(condition, name, diag) {
   dump("TODO: ", diag);
 }
 
+function info(name, message) {
+  do_print(name);
+}
+
 function run_test() {
   runTest();
 };
@@ -60,6 +63,8 @@ function finishTest()
 {
   do_execute_soon(function(){
     testGenerator.close();
+    SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
+                                                 "free");
     do_test_finished();
   })
 }
@@ -87,6 +92,16 @@ function unexpectedSuccessHandler()
 {
   do_check_true(false);
   finishTest();
+}
+
+function expectedErrorHandler(name)
+{
+  return function(event) {
+    do_check_eq(event.type, "error");
+    do_check_eq(event.target.error.name, name);
+    event.preventDefault();
+    grabEventAndContinueHandler(event);
+  };
 }
 
 function ExpectError(name)
@@ -178,10 +193,34 @@ function gc()
   Components.utils.forceCC();
 }
 
+function setTimeout(fun, timeout) {
+  let timer = Components.classes["@mozilla.org/timer;1"]
+                        .createInstance(Components.interfaces.nsITimer);
+  var event = {
+    notify: function (timer) {
+      fun();
+    }
+  };
+  timer.initWithCallback(event, timeout,
+                         Components.interfaces.nsITimer.TYPE_ONE_SHOT);
+  return timer;
+}
+
 var SpecialPowers = {
   isMainProcess: function() {
     return Components.classes["@mozilla.org/xre/app-info;1"]
                      .getService(Components.interfaces.nsIXULRuntime)
                      .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+  },
+  notifyObservers: function(subject, topic, data) {
+    var obsvc = Cc['@mozilla.org/observer-service;1']
+                   .getService(Ci.nsIObserverService);
+    obsvc.notifyObservers(subject, topic, data);
+  },
+  notifyObserversInParentProcess: function(subject, topic, data) {
+    if (subject) {
+      throw new Error("Can't send subject to another process!");
+    }
+    return this.notifyObservers(subject, topic, data);
   }
 };

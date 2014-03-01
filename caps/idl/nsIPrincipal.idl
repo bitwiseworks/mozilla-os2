@@ -21,37 +21,13 @@ interface nsIContentSecurityPolicy;
 [ptr] native JSPrincipals(JSPrincipals);
 [ptr] native PrincipalArray(nsTArray<nsCOMPtr<nsIPrincipal> >);
 
-[scriptable, uuid(825ffce8-962d-11e1-aef3-8f2b6188709b)]
+[scriptable, builtinclass, uuid(dbda8bb0-3023-4aec-ad98-8e9931a29d70)]
 interface nsIPrincipal : nsISerializable
 {
     /**
-     * Values of capabilities for each principal. Order is
-     * significant: if an operation is performed on a set
-     * of capabilities, the minimum is computed.
-     */
-    const short ENABLE_DENIED                = 1;
-    const short ENABLE_UNKNOWN               = 2;
-    const short ENABLE_WITH_USER_PERMISSION  = 3;
-    const short ENABLE_GRANTED               = 4;
-
-    /**
-     * Returns the security preferences associated with this principal.
-     * prefBranch will be set to the pref branch to which these preferences
-     * pertain.  id is a pseudo-unique identifier, pertaining to either the
-     * fingerprint or the origin.  subjectName is a name that identifies the
-     * entity this principal represents (may be empty).  grantedList and
-     * deniedList are space-separated lists of capabilities which were
-     * explicitly granted or denied by a pref.  isTrusted is a boolean that
-     * indicates whether this is a codebaseTrusted certificate.
-     */
-    void getPreferences(out string prefBranch, out string id,
-                        out string subjectName, out string grantedList,
-                        out string deniedList, out boolean isTrusted);
-
-    /**
      * Returns whether the other principal is equivalent to this principal.
-     * Principals are considered equal if they are the same principal,
-     * they have the same origin, or have the same certificate fingerprint ID
+     * Principals are considered equal if they are the same principal, or
+     * they have the same origin.
      */
     boolean equals(in nsIPrincipal other);
 
@@ -59,6 +35,18 @@ interface nsIPrincipal : nsISerializable
      * Like equals, but doesn't take document.domain changes into account.
      */
     boolean equalsIgnoringDomain(in nsIPrincipal other);
+
+    %{C++
+    inline bool Equals(nsIPrincipal* aOther) {
+      bool equal = false;
+      return NS_SUCCEEDED(Equals(aOther, &equal)) && equal;
+    }
+
+    inline bool EqualsIgnoringDomain(nsIPrincipal* aOther) {
+      bool equal = false;
+      return NS_SUCCEEDED(EqualsIgnoringDomain(aOther, &equal)) && equal;
+    }
+    %}
 
     /**
      * Returns a hash value for the principal.
@@ -80,14 +68,6 @@ interface nsIPrincipal : nsISerializable
     // method.
     [noscript] attribute voidPtr securityPolicy;
 
-    // XXXcaa probably should be turned into {get|set}CapabilityFlags
-    // XXXbz again, what if this lives in our hashtable and someone
-    // messes with it?  Is that OK?
-    [noscript] short canEnableCapability(in string capability);
-    [noscript] boolean isCapabilityEnabled(in string capability,
-                                           in voidPtr annotation);
-    [noscript] void enableCapability(in string capability,
-                                     inout voidPtr annotation);
     /**
      * The codebase URI to which this principal pertains.  This is
      * generally the document URI.
@@ -111,33 +91,9 @@ interface nsIPrincipal : nsISerializable
     readonly attribute string origin;
 
     /**
-     * Whether this principal is associated with a certificate.
-     */
-    readonly attribute boolean hasCertificate;
-
-    /**
-     * The fingerprint ID of this principal's certificate.
-     * Throws if there is no certificate associated with this principal.
-     */
-    // XXXcaa kaie says this may not be unique.  We should probably
-    // consider using something else for this....
-    readonly attribute AUTF8String fingerprint;
-
-    /**
-     * The pretty name for the certificate.  This sort of (but not really)
-     * identifies the subject of the certificate (the entity that stands behind
-     * the certificate).  Note that this may be empty; prefer to get the
-     * certificate itself and get this information from it, since that may
-     * provide more information.
-     *
-     * Throws if there is no certificate associated with this principal.
-     */
-    readonly attribute AUTF8String prettyName;
-
-    /**
      * Returns whether the other principal is equal to or weaker than this
-     * principal.  Principals are equal if they are the same object, they
-     * have the same origin, or they have the same certificate ID.
+     * principal. Principals are equal if they are the same object or they
+     * have the same origin.
      *
      * Thus a principal always subsumes itself.
      *
@@ -147,18 +103,6 @@ interface nsIPrincipal : nsISerializable
      * privileged, security context) is not equal to any other principal
      * (including other null principals), and therefore does not subsume
      * anything but itself.
-     *
-     * Both codebase and certificate principals are subsumed by the system
-     * principal, but no codebase or certificate principal yet subsumes any
-     * other codebase or certificate principal.  This may change in a future
-     * release; note that nsIPrincipal is unfrozen, not slated to be frozen.
-     *
-     * XXXbz except see bug 147145!
-     *
-     * Note for the future: Perhaps we should consider a certificate principal
-     * for a given URI subsuming a codebase principal for the same URI?  Not
-     * sure what the immediate benefit would be, but I think the setup could
-     * make some code (e.g. MaybeDowngradeToCodebase) clearer.
      */
     boolean subsumes(in nsIPrincipal other);
 
@@ -168,6 +112,18 @@ interface nsIPrincipal : nsISerializable
      */
     boolean subsumesIgnoringDomain(in nsIPrincipal other);
 
+    %{C++
+    inline bool Subsumes(nsIPrincipal* aOther) {
+      bool subsumes = false;
+      return NS_SUCCEEDED(Subsumes(aOther, &subsumes)) && subsumes;
+    }
+
+    inline bool SubsumesIgnoringDomain(nsIPrincipal* aOther) {
+      bool subsumes = false;
+      return NS_SUCCEEDED(SubsumesIgnoringDomain(aOther, &subsumes)) && subsumes;
+    }
+    %}
+
     /**
      * Checks whether this principal is allowed to load the network resource
      * located at the given URI under the same-origin policy. This means that
@@ -176,7 +132,7 @@ interface nsIPrincipal : nsISerializable
      * principals are not allowed to load anything. This is changed slightly
      * by the optional flag allowIfInheritsPrincipal (which defaults to false)
      * which allows the load of a data: URI (which inherits the principal of
-     * its loader) or a URI with the same principal as its loader (eg. a 
+     * its loader) or a URI with the same principal as its loader (eg. a
      * Blob URI).
      * In these cases, with allowIfInheritsPrincipal set to true, the URI can
      * be loaded by a null principal.
@@ -202,23 +158,6 @@ interface nsIPrincipal : nsISerializable
                       in boolean allowIfInheritsPrincipal);
 
     /**
-     * The subject name for the certificate.  This actually identifies the
-     * subject of the certificate.  This may well not be a string that would
-     * mean much to a typical user on its own (e.g. it may have a number of
-     * different names all concatenated together with some information on what
-     * they mean in between).
-     *
-     * Throws if there is no certificate associated with this principal.
-     */
-    readonly attribute AUTF8String subjectName;
-
-    /**
-     * The certificate associated with this principal, if any.  If there isn't
-     * one, this will return null.  Getting this attribute never throws.
-     */
-    readonly attribute nsISupports certificate;
-
-    /**
      * A Content Security Policy associated with this principal.
      */
     [noscript] attribute nsIContentSecurityPolicy csp;
@@ -238,52 +177,90 @@ interface nsIPrincipal : nsISerializable
      */
     readonly attribute AUTF8String extendedOrigin;
 
+    /**
+     * The base domain of the codebase URI to which this principal pertains
+     * (generally the document URI), handling null principals and
+     * non-hierarchical schemes correctly.
+     */
+    readonly attribute ACString baseDomain;
+
     const short APP_STATUS_NOT_INSTALLED = 0;
     const short APP_STATUS_INSTALLED     = 1;
     const short APP_STATUS_PRIVILEGED    = 2;
     const short APP_STATUS_CERTIFIED     = 3;
 
     /**
-     * Shows the status of the app.
-     * Can be: APP_STATUS_NOT_INSTALLED, APP_STATUS_INSTALLED,
-     *         APP_STATUS_PRIVILEGED or APP_STATUS_CERTIFIED.
+     * Gets the principal's app status, which indicates whether the principal
+     * corresponds to "app code", and if it does, how privileged that code is.
+     * This method returns one of the APP_STATUS constants above.
+     *
+     * Note that a principal may have
+     *
+     *   appId != nsIScriptSecurityManager::NO_APP_ID &&
+     *   appId != nsIScriptSecurityManager::UNKNOWN_APP_ID
+     *
+     * and still have appStatus == APP_STATUS_NOT_INSTALLED.  That's because
+     * appId identifies the app that contains this principal, but a window
+     * might be contained in an app and not be running code that the app has
+     * vouched for.  For example, the window might be inside an <iframe
+     * mozbrowser>, or the window's origin might not match the app's origin.
+     *
+     * If you're doing a check to determine "does this principal correspond to
+     * app code?", you must check appStatus; checking appId != NO_APP_ID is not
+     * sufficient.
      */
-    readonly attribute unsigned short appStatus;
-
-    %{C++
-    uint16_t GetAppStatus()
-    {
-      uint16_t appStatus;
-      nsresult rv = GetAppStatus(&appStatus);
-      if (NS_FAILED(rv)) {
-        return APP_STATUS_NOT_INSTALLED;
-      }
-      return appStatus;
-    }
-    %}
-
-    /**
-     * Returns the app id the principal is in, or returns
-     * nsIScriptSecurityManager::NO_APP_ID if this principal isn't part of an
-     * app.
-     */
-    readonly attribute unsigned long appId;
+    [infallible] readonly attribute unsigned short appStatus;
 
     /**
-     * Returns true iif the principal is inside a browser element.
+     * Gets the id of the app this principal is inside.  If this principal is
+     * not inside an app, returns nsIScriptSecurityManager::NO_APP_ID.
+     *
+     * Note that this principal does not necessarily have the permissions of
+     * the app identified by appId.  For example, this principal might
+     * correspond to an iframe whose origin differs from that of the app frame
+     * containing it.  In this case, the iframe will have the appId of its
+     * containing app frame, but the iframe must not run with the app's
+     * permissions.
+     *
+     * Similarly, this principal might correspond to an <iframe mozbrowser>
+     * inside an app frame; in this case, the content inside the iframe should
+     * not have any of the app's permissions, even if the iframe is at the same
+     * origin as the app.
+     *
+     * If you're doing a security check based on appId, you must check
+     * appStatus as well.
      */
-    readonly attribute boolean isInBrowserElement;
+    [infallible] readonly attribute unsigned long appId;
+
+    /**
+     * Returns true iff the principal is inside a browser element.  (<iframe
+     * mozbrowser mozapp> does not count as a browser element.)
+     */
+    [infallible] readonly attribute boolean isInBrowserElement;
+
+    /**
+     * Returns true if this principal has an unknown appId. This shouldn't
+     * generally be used. We only expose it due to not providing the correct
+     * appId everywhere where we construct principals.
+     */
+    [infallible] readonly attribute boolean unknownAppId;
+
+    /**
+     * Returns true iff this principal is a null principal (corresponding to an
+     * unknown, hence assumed minimally privileged, security context).
+     */
+    [infallible] readonly attribute boolean isNullPrincipal;
 };
 
 /**
- * If nsSystemPrincipal is too risky to use, but we want a principal to access 
- * more than one origin, nsExpandedPrincipals letting us define an array of 
+ * If nsSystemPrincipal is too risky to use, but we want a principal to access
+ * more than one origin, nsExpandedPrincipals letting us define an array of
  * principals it subsumes. So script with an nsExpandedPrincipals will gain
- * same origin access when at least one of its principals it contains gained 
+ * same origin access when at least one of its principals it contains gained
  * sameorigin acccess. An nsExpandedPrincipal will be subsumed by the system
  * principal, and by another nsExpandedPrincipal that has all its principals.
  * It is added for jetpack content-scripts to let them interact with the
- * content and a well defined set of other domains, without the risk of 
+ * content and a well defined set of other domains, without the risk of
  * leaking out a system principal to the content. See: Bug 734891
  */
 [uuid(f3e177Df-6a5e-489f-80a7-2dd1481471d8)]
@@ -291,8 +268,8 @@ interface nsIExpandedPrincipal : nsISupports
 {
   /**
    * An array of principals that the expanded principal subsumes.
-   * Note: this list is not reference counted, it is shared, so 
+   * Note: this list is not reference counted, it is shared, so
    * should not be changed and should only be used ephemerally.
    */
-  [notxpcom] readonly attribute PrincipalArray whiteList;
+  [noscript] readonly attribute PrincipalArray whiteList;
 };

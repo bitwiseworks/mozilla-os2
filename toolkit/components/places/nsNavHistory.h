@@ -11,7 +11,6 @@
 #include "nsPIPlacesHistoryListenersNotifier.h"
 #include "nsIBrowserHistory.h"
 #include "nsINavBookmarksService.h"
-#include "nsIPrivateBrowsingService.h"
 #include "nsIFaviconService.h"
 
 #include "nsIObserverService.h"
@@ -36,10 +35,6 @@
 #define QUERYUPDATE_COMPLEX 2
 #define QUERYUPDATE_COMPLEX_WITH_BOOKMARKS 3
 #define QUERYUPDATE_HOST 4
-
-// This magic number specified an uninitialized value for the
-// mInPrivateBrowsing member
-#define PRIVATEBROWSING_NOTINITED (bool(0xffffffff))
 
 // Clamp title and URL to generously large, but not too large, length.
 // See bug 319004 for details.
@@ -83,7 +78,6 @@ public:
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSINAVHISTORYSERVICE
-  NS_DECL_NSIGLOBALHISTORY2
   NS_DECL_NSIBROWSERHISTORY
   NS_DECL_NSIOBSERVER
   NS_DECL_NSPIPLACESDATABASE
@@ -93,7 +87,7 @@ public:
   /**
    * Obtains the nsNavHistory object.
    */
-  static nsNavHistory* GetSingleton();
+  static already_AddRefed<nsNavHistory> GetSingleton();
 
   /**
    * Initializes the nsNavHistory object.  This should only be called once.
@@ -156,6 +150,7 @@ public:
    * @param _GUID
    *        Will be set to the unique id associated with the page.
    * @note This DOES NOT check for bad URLs other than that they're nonempty.
+   * @note This DOES NOT update frecency of the page.
    */
   nsresult GetOrCreateIdForPage(nsIURI* aURI,
                                 int64_t* _pageId, nsCString& _GUID);
@@ -204,7 +199,7 @@ public:
 
   // Returns whether history is enabled or not.
   bool IsHistoryDisabled() {
-    return !mHistoryEnabled || InPrivateBrowsingMode();
+    return !mHistoryEnabled;
   }
 
   // Constants for the columns returned by the above statement.
@@ -215,13 +210,13 @@ public:
   static const int32_t kGetInfoIndex_VisitCount;
   static const int32_t kGetInfoIndex_VisitDate;
   static const int32_t kGetInfoIndex_FaviconURL;
-  static const int32_t kGetInfoIndex_SessionId;
   static const int32_t kGetInfoIndex_ItemId;
   static const int32_t kGetInfoIndex_ItemDateAdded;
   static const int32_t kGetInfoIndex_ItemLastModified;
   static const int32_t kGetInfoIndex_ItemParentId;
   static const int32_t kGetInfoIndex_ItemTags;
   static const int32_t kGetInfoIndex_Frecency;
+  static const int32_t kGetInfoIndex_Hidden;
 
   int64_t GetTagsFolder();
 
@@ -293,21 +288,6 @@ public:
   nsresult QueryStringToQueryArray(const nsACString& aQueryString,
                                    nsCOMArray<nsNavHistoryQuery>* aQueries,
                                    nsNavHistoryQueryOptions** aOptions);
-
-  // Returns true if we are currently in private browsing mode
-  bool InPrivateBrowsingMode()
-  {
-    if (mInPrivateBrowsing == PRIVATEBROWSING_NOTINITED) {
-      mInPrivateBrowsing = false;
-      nsCOMPtr<nsIPrivateBrowsingService> pbs =
-        do_GetService(NS_PRIVATE_BROWSING_SERVICE_CONTRACTID);
-      if (pbs) {
-        pbs->GetPrivateBrowsingEnabled(&mInPrivateBrowsing);
-      }
-    }
-
-    return mInPrivateBrowsing;
-  }
 
   typedef nsDataHashtable<nsCStringHashKey, nsCString> StringHash;
 
@@ -420,18 +400,16 @@ public:
     return mNumVisitsForFrecency;
   }
 
-  int64_t GetNewSessionID();
-
   /**
    * Fires onVisit event to nsINavHistoryService observers
    */
   void NotifyOnVisit(nsIURI* aURI,
                      int64_t aVisitID,
                      PRTime aTime,
-                     int64_t aSessionID,
                      int64_t referringVisitID,
                      int32_t aTransitionType,
-                     const nsACString& aGUID);
+                     const nsACString& aGUID,
+                     bool aHidden);
 
   /**
    * Fires onTitleChanged event to nsINavHistoryService observers
@@ -460,31 +438,11 @@ protected:
    */
   nsresult DecayFrecency();
 
-  nsresult CalculateFrecency(int64_t aPageID, int32_t aTyped, int32_t aVisitCount, nsCAutoString &aURL, int32_t *aFrecency);
+  nsresult CalculateFrecency(int64_t aPageID, int32_t aTyped, int32_t aVisitCount, nsAutoCString &aURL, int32_t *aFrecency);
   nsresult CalculateFrecencyInternal(int64_t aPageID, int32_t aTyped, int32_t aVisitCount, bool aIsBookmarked, int32_t *aFrecency);
 
   nsresult RemovePagesInternal(const nsCString& aPlaceIdsQueryString);
   nsresult CleanupPlacesOnVisitsDelete(const nsCString& aPlaceIdsQueryString);
-
-  nsresult AddURIInternal(nsIURI* aURI, PRTime aTime, bool aRedirect,
-                          bool aToplevel, nsIURI* aReferrer);
-
-  nsresult AddVisitChain(nsIURI* aURI, PRTime aTime,
-                         bool aToplevel, bool aRedirect,
-                         nsIURI* aReferrer, int64_t* aVisitID,
-                         int64_t* aSessionID);
-  nsresult InternalAddNewPage(nsIURI* aURI, const nsAString& aTitle,
-                              bool aHidden, bool aTyped,
-                              int32_t aVisitCount, bool aCalculateFrecency,
-                              int64_t* aPageID, nsACString& guid);
-  nsresult InternalAddVisit(int64_t aPageID, int64_t aReferringVisit,
-                            int64_t aSessionID, PRTime aTime,
-                            int32_t aTransitionType, int64_t* aVisitID);
-  bool FindLastVisit(nsIURI* aURI,
-                       int64_t* aVisitID,
-                       PRTime* aTime,
-                       int64_t* aSessionID);
-  bool IsURIStringVisited(const nsACString& url);
 
   /**
    * Loads all of the preferences that we use into member variables.
@@ -527,8 +485,6 @@ protected:
                          nsCOMArray<nsNavHistoryResultNode>* aResults);
 
   void TitleForDomain(const nsCString& domain, nsACString& aTitle);
-
-  nsresult SetPageTitleInternal(nsIURI* aURI, const nsAString& aTitle);
 
   nsresult FilterResultSet(nsNavHistoryQueryResultNode *aParentNode,
                            const nsCOMArray<nsNavHistoryResultNode>& aSet,
@@ -576,9 +532,6 @@ protected:
                             const nsACString& url);
   void ExpireNonrecentEvents(RecentEventHash* hashTable);
 
-  // Sessions tracking.
-  int64_t mLastSessionID;
-
 #ifdef MOZ_XUL
   nsresult AutoCompleteFeedback(int32_t aIndex,
                                 nsIAutoCompleteController *aController);
@@ -618,9 +571,9 @@ protected:
 
   int64_t mTagsFolder;
 
-  bool mInPrivateBrowsing;
-
-  int8_t mHasHistoryEntries;
+  int32_t mDaysOfHistory;
+  int64_t mLastCachedStartOfDay;
+  int64_t mLastCachedEndOfDay;
 
   // Used to enable and disable the observer notifications
   bool mCanNotify;

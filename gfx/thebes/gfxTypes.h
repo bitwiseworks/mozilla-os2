@@ -6,7 +6,6 @@
 #ifndef GFX_TYPES_H
 #define GFX_TYPES_H
 
-#include "prtypes.h"
 #include "nsAtomicRefcnt.h"
 
 /**
@@ -14,8 +13,6 @@
  * become 'float', perhaps, in some configurations.
  */
 typedef double gfxFloat;
-
-# define THEBES_API
 
 /**
  * Priority of a line break opportunity.

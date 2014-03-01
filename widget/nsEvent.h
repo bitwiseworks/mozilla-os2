@@ -66,7 +66,6 @@ class nsQueryContentEvent;
 class nsFocusEvent;
 class nsSelectionEvent;
 class nsContentCommandEvent;
-class nsMozTouchEvent;
 class nsTouchEvent;
 class nsFormEvent;
 class nsCommandEvent;
@@ -78,6 +77,8 @@ class nsPluginEvent;
 
 namespace mozilla {
 namespace widget {
+
+struct EventFlags;
 
 class WheelEvent;
 
@@ -98,6 +99,33 @@ enum Modifier {
 };
 
 typedef uint16_t Modifiers;
+
+// NotificationToIME is shared by nsIMEStateManager and TextComposition.
+enum NotificationToIME {
+  // XXX We should replace NOTIFY_IME_OF_CURSOR_POS_CHANGED with
+  //     NOTIFY_IME_OF_SELECTION_CHANGE later.
+  NOTIFY_IME_OF_CURSOR_POS_CHANGED,
+  // An editable content is getting focus
+  NOTIFY_IME_OF_FOCUS,
+  // An editable content is losing focus
+  NOTIFY_IME_OF_BLUR,
+  // Selection in the focused editable content is changed
+  NOTIFY_IME_OF_SELECTION_CHANGE,
+  REQUEST_TO_COMMIT_COMPOSITION,
+  REQUEST_TO_CANCEL_COMPOSITION
+};
+
+#define NS_DEFINE_KEYNAME(aCPPName, aDOMKeyName) \
+  KEY_NAME_INDEX_##aCPPName,
+
+enum KeyNameIndex {
+#include "nsDOMKeyNameList.h"
+  // There shouldn't be "," at the end of enum definition, this dummy item
+  // avoids bustage on some platforms.
+  NUMBER_OF_KEY_NAME_INDEX
+};
+
+#undef NS_DEFINE_KEYNAME
 
 } // namespace widget
 } // namespace mozilla

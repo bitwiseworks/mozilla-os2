@@ -5,10 +5,10 @@
 #include "nsCRT.h"
 #include "EndianMacros.h"
 #include "nsBMPEncoder.h"
-#include "prmem.h"
 #include "prprf.h"
 #include "nsString.h"
 #include "nsStreamUtils.h"
+#include "nsTArray.h"
 #include "nsAutoPtr.h"
 
 using namespace mozilla;
@@ -449,9 +449,7 @@ nsBMPEncoder::NotifyListener()
        mNotifyThreshold || mFinished)) {
     nsCOMPtr<nsIInputStreamCallback> callback;
     if (mCallbackTarget) {
-      NS_NewInputStreamReadyEvent(getter_AddRefs(callback),
-                                  mCallback,
-                                  mCallbackTarget);
+      callback = NS_NewInputStreamReadyEvent(mCallback, mCallbackTarget);
     } else {
       callback = mCallback;
     }

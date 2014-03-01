@@ -32,7 +32,10 @@ protected:
  * a mathematical function of time.
  * Time is the type of time values, T is the value that changes over time.
  * There are a finite set of "change times"; at each change time, the function
- * instantly changes to a new value.
+ * instantly changes to a new value. ReservedChanges should be set to the
+ * expected number of change events that the object is likely to contain.
+ * This value should be 0 for all consumers unless you know that a higher value
+ * would be a benefit.
  * There is also a "current time" which must always advance (not go backward).
  * The function is constant for all times less than the current time.
  * When the current time is advanced, the value of the function at the new
@@ -42,7 +45,7 @@ protected:
  * and an array of "change times" (greater than the current time) and the
  * new value for each change time. This is a simple but dumb implementation.
  */
-template <typename Time, typename T>
+template <typename Time, typename T, uint32_t ReservedChanges>
 class TimeVarying : public TimeVaryingBase {
 public:
   TimeVarying(const T& aInitial) : mCurrent(aInitial) {}
@@ -81,13 +84,13 @@ public:
   /**
    * Returns the final value of the function. If aTime is non-null,
    * sets aTime to the time at which the function changes to that final value.
-   * If there are no changes after the current time, returns PR_INT64_MIN in aTime.
+   * If there are no changes after the current time, returns INT64_MIN in aTime.
    */
   const T& GetLast(Time* aTime = nullptr) const
   {
     if (mChanges.IsEmpty()) {
       if (aTime) {
-        *aTime = PR_INT64_MIN;
+        *aTime = INT64_MIN;
       }
       return mCurrent;
     }
@@ -119,10 +122,10 @@ public:
   /**
    * Returns the value of the function at time aTime.
    * If aEnd is non-null, sets *aEnd to the time at which the function will
-   * change from the returned value to a new value, or PR_INT64_MAX if that
+   * change from the returned value to a new value, or INT64_MAX if that
    * never happens.
    * If aStart is non-null, sets *aStart to the time at which the function
-   * changed to the returned value, or PR_INT64_MIN if that happened at or
+   * changed to the returned value, or INT64_MIN if that happened at or
    * before the current time.
    *
    * Currently uses a linear search, but could use a binary search.
@@ -131,17 +134,17 @@ public:
   {
     if (mChanges.IsEmpty() || aTime < mChanges[0].mTime) {
       if (aStart) {
-        *aStart = PR_INT64_MIN;
+        *aStart = INT64_MIN;
       }
       if (aEnd) {
-        *aEnd = mChanges.IsEmpty() ? PR_INT64_MAX : mChanges[0].mTime;
+        *aEnd = mChanges.IsEmpty() ? INT64_MAX : mChanges[0].mTime;
       }
       return mCurrent;
     }
     int32_t changesLength = mChanges.Length();
     if (mChanges[changesLength - 1].mTime <= aTime) {
       if (aEnd) {
-        *aEnd = PR_INT64_MAX;
+        *aEnd = INT64_MAX;
       }
       if (aStart) {
         *aStart = mChanges[changesLength - 1].mTime;
@@ -214,7 +217,7 @@ private:
     Time mTime;
     T mValue;
   };
-  nsTArray<Entry> mChanges;
+  nsAutoTArray<Entry, ReservedChanges> mChanges;
   T mCurrent;
 };
 

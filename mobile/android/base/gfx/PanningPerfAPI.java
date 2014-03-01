@@ -27,17 +27,26 @@ public class PanningPerfAPI {
     private static List<Float> mCheckerboardAmounts;
     private static long mCheckerboardStartTime;
 
-    public static void startFrameTimeRecording() {
-        if (mRecordingFrames) {
-            Log.e(LOGTAG, "Error: startFrameTimeRecording() called while already recording!");
-            return;
-        }
-        mRecordingFrames = true;
+    private static void initialiseRecordingArrays() {
         if (mFrameTimes == null) {
             mFrameTimes = new ArrayList<Long>(EXPECTED_FRAME_COUNT);
         } else {
             mFrameTimes.clear();
         }
+        if (mCheckerboardAmounts == null) {
+            mCheckerboardAmounts = new ArrayList<Float>(EXPECTED_FRAME_COUNT);
+        } else {
+            mCheckerboardAmounts.clear();
+        }
+    }
+
+    public static void startFrameTimeRecording() {
+        if (mRecordingFrames || mRecordingCheckerboard) {
+            Log.e(LOGTAG, "Error: startFrameTimeRecording() called while already recording!");
+            return;
+        }
+        mRecordingFrames = true;
+        initialiseRecordingArrays();
         mFrameStartTime = SystemClock.uptimeMillis();
     }
 
@@ -62,16 +71,12 @@ public class PanningPerfAPI {
     }
 
     public static void startCheckerboardRecording() {
-        if (mRecordingCheckerboard) {
+        if (mRecordingCheckerboard || mRecordingFrames) {
             Log.e(LOGTAG, "Error: startCheckerboardRecording() called while already recording!");
             return;
         }
         mRecordingCheckerboard = true;
-        if (mCheckerboardAmounts == null) {
-            mCheckerboardAmounts = new ArrayList<Float>(EXPECTED_FRAME_COUNT);
-        } else {
-            mCheckerboardAmounts.clear();
-        }
+        initialiseRecordingArrays();
         mCheckerboardStartTime = SystemClock.uptimeMillis();
     }
 
@@ -81,12 +86,31 @@ public class PanningPerfAPI {
             return null;
         }
         mRecordingCheckerboard = false;
+
+        // We take the number of values in mCheckerboardAmounts here, as there's
+        // the possibility that this function is called while recordCheckerboard
+        // is still executing. As values are added to this list last, we use
+        // this number as the canonical number of recordings.
+        int values = mCheckerboardAmounts.size();
+
+        // The score will be the sum of all the values in mCheckerboardAmounts,
+        // so weight the checkerboard values by time so that frame-rate and
+        // run-length don't affect score.
+        long lastTime = 0;
+        float totalTime = mFrameTimes.get(values - 1);
+        for (int i = 0; i < values; i++) {
+            long elapsedTime = mFrameTimes.get(i) - lastTime;
+            mCheckerboardAmounts.set(i, mCheckerboardAmounts.get(i) * elapsedTime / totalTime);
+            lastTime += elapsedTime;
+        }
+
         return mCheckerboardAmounts;
     }
 
     public static void recordCheckerboard(float amount) {
         // this will be called often, so try to make it as quick as possible
         if (mRecordingCheckerboard) {
+            mFrameTimes.add(SystemClock.uptimeMillis() - mCheckerboardStartTime);
             mCheckerboardAmounts.add(amount);
         }
     }

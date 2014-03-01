@@ -38,8 +38,11 @@ interface nsIDOMFile;
 interface nsIFile;
 interface nsIDOMTouch;
 interface nsIDOMClientRect;
+interface nsIURI;
+interface nsIDOMEventTarget;
+interface nsIRunnable;
 
-[scriptable, uuid(9f599acb-75e5-4f5f-97aa-f93165da2259)]
+[scriptable, uuid(cbe333d7-5b2c-4a9b-b99b-e6e388afa62b)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -79,8 +82,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aName the name of the metadata.  This should be all lowercase.
    * @return the value of the metadata, or the empty string if it's not set
    *
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    */
   AString getDocumentMetadata(in AString aName);
 
@@ -97,10 +99,19 @@ interface nsIDOMWindowUtils : nsISupports {
    * pixels, regardless of the size of the enclosing widget/view.
    * This will trigger reflow.
    *
-   * The caller of this method must have UniversalXPConnect
-   * privileges.
+   * The caller of this method must have chrome privileges.
    */
   void setCSSViewport(in float aWidthPx, in float aHeightPx);
+
+  /**
+   * Information retrieved from the <meta name="viewport"> tag.
+   * See nsContentUtils::GetViewportInfo for more information.
+   */
+  void getViewportInfo(in uint32_t aDisplayWidth, in uint32_t aDisplayHeight,
+                       out double aDefaultZoom, out boolean aAllowZoom,
+                       out double aMinZoom, out double aMaxZoom,
+                       out uint32_t aWidth, out uint32_t aHeight,
+                       out boolean aAutoSize);
 
   /**
    * For any scrollable element, this allows you to override the
@@ -125,8 +136,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * It's also legal to set a displayport that extends beyond the
    * area's bounds.  No pixels are rendered outside the area bounds.
    *
-   * The caller of this method must have UniversalXPConnect
-   * privileges.
+   * The caller of this method must have chrome privileges.
    *
    * Calling this will always force a recomposite, so it should be
    * avoided if at all possible. Client code should do checks before
@@ -136,6 +146,18 @@ interface nsIDOMWindowUtils : nsISupports {
   void setDisplayPortForElement(in float aXPx, in float aYPx,
                                 in float aWidthPx, in float aHeightPx,
                                 in nsIDOMElement aElement);
+
+  /**
+   * When a display port is set, this allows a sub-section of that
+   * display port to be marked as 'critical'. In this scenario, the
+   * area outside of this rectangle may be rendered at a lower
+   * detail (for example, by reducing its resolution), or not rendered
+   * at all under some circumstances.
+   * This call will have no effect if a display port has not been set.
+   */
+  void setCriticalDisplayPortForElement(in float aXPx, in float aYPx,
+                                        in float aWidthPx, in float aHeightPx,
+                                        in nsIDOMElement aElement);
 
   /**
    * Get/set the resolution at which rescalable web content is drawn.
@@ -158,19 +180,22 @@ interface nsIDOMWindowUtils : nsISupports {
    *   // elsewhere
    *   browser.setViewportScale(2.0, 2.0);
    *
-   * The caller of this method must have UniversalXPConnect
-   * privileges.
+   * The caller of this method must have chrome privileges.
    */
   void setResolution(in float aXResolution, in float aYResolution);
+
+  void getResolution(out float aXResolution, out float aYResolution);
 
   /**
    * Whether the next paint should be flagged as the first paint for a document.
    * This gives a way to track the next paint that occurs after the flag is
    * set. The flag gets cleared after the next paint.
    *
-   * Can only be accessed with UniversalXPConnect privileges.
+   * Can only be accessed with chrome privileges.
    */
   attribute boolean isFirstPaint;
+
+  void getPresShellId(out uint32_t aPresShellId);
 
   /**
    * Following modifiers are for sent*Event() except sendNative*Event().
@@ -191,7 +216,8 @@ interface nsIDOMWindowUtils : nsISupports {
   const long MODIFIER_OS         = 0x0400;
 
   /** Synthesize a mouse event. The event types supported are:
-   *    mousedown, mouseup, mousemove, mouseover, mouseout, contextmenu
+   *    mousedown, mouseup, mousemove, mouseover, mouseout, contextmenu,
+   *    MozMouseHitTest
    *
    * Events are sent in coordinates offset by aX and aY from the window.
    *
@@ -205,8 +231,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * should be sufficient to generate the correct over and out events as well.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * The event is dispatched via the toplevel window, so it could go to any
    * window under the toplevel window, in some cases it could never reach this
@@ -223,16 +248,18 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aPressure touch input pressure: 0.0 -> 1.0
    * @param aInputSourceArg input source, see nsIDOMMouseEvent for values,
    *        defaults to mouse input.
+   *
+   * returns true if the page called prevent default on this event
    */
-  void sendMouseEvent(in AString aType,
-                      in float aX,
-                      in float aY,
-                      in long aButton,
-                      in long aClickCount,
-                      in long aModifiers,
-                      [optional] in boolean aIgnoreRootScrollFrame,
-                      [optional] in float aPressure,
-                      [optional] in unsigned short aInputSourceArg);
+  boolean sendMouseEvent(in AString aType,
+                         in float aX,
+                         in float aY,
+                         in long aButton,
+                         in long aClickCount,
+                         in long aModifiers,
+                         [optional] in boolean aIgnoreRootScrollFrame,
+                         [optional] in float aPressure,
+                         [optional] in unsigned short aInputSourceArg);
 
   /** Synthesize a touch event. The event types supported are:
    *    touchstart, touchend, touchmove, and touchcancel
@@ -240,8 +267,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Events are sent in coordinates offset by aX and aY from the window.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * The event is dispatched via the toplevel window, so it could go to any
    * window under the toplevel window, in some cases it could never reach this
@@ -292,8 +318,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Events are sent in coordinates offset by aX and aY from the window.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * @param aX                 x offset in CSS pixels
    * @param aY                 y offset in CSS pixels
@@ -317,6 +342,14 @@ interface nsIDOMWindowUtils : nsISupports {
    const unsigned long WHEEL_EVENT_CAUSED_BY_PIXEL_ONLY_DEVICE = 0x0001;
    const unsigned long WHEEL_EVENT_CAUSED_BY_MOMENTUM          = 0x0002;
    const unsigned long WHEEL_EVENT_CUSTOMIZED_BY_USER_PREFS    = 0x0004;
+   // If any of the following flags is specified this method will throw an
+   // exception in case the relevant overflowDelta has an unexpected value.
+   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_ZERO      = 0x0010;
+   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_POSITIVE  = 0x0020;
+   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_NEGATIVE  = 0x0040;
+   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_ZERO      = 0x0100;
+   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_POSITIVE  = 0x0200;
+   const unsigned long WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_Y_NEGATIVE  = 0x0400;
    void sendWheelEvent(in float aX,
                        in float aY,
                        in double aDeltaX,
@@ -335,8 +368,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Key events generally end up being sent to the focused node.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * @param aType event type
    * @param aKeyCode key code
@@ -371,8 +403,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * See nsIWidget::SynthesizeNativeKeyEvent
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * When you use this for tests, use the constants defined in NativeKeyCodes.js
    */
@@ -387,8 +418,7 @@ interface nsIDOMWindowUtils : nsISupports {
    *
    * Will be called on the widget that contains aElement.
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    */
   void sendNativeMouseEvent(in long aScreenX,
                             in long aScreenY,
@@ -401,8 +431,7 @@ interface nsIDOMWindowUtils : nsISupports {
    *
    * Will be called on the widget that contains aElement.
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * NOTE: The synthesized native event may be fired asynchronously.
    *
@@ -446,8 +475,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * See nsIWidget::ActivateNativeMenuItemAt
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    */
   void activateNativeMenuItemAt(in AString indexString);
 
@@ -455,8 +483,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * See nsIWidget::ForceUpdateNativeMenuAt
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    */
   void forceUpdateNativeMenuAt(in AString indexString);
 
@@ -466,8 +493,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * that currently has focus, and focus the document.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * @param aElement the element to focus
    *
@@ -480,8 +506,8 @@ interface nsIDOMWindowUtils : nsISupports {
   /**
    * Force a garbage collection followed by a cycle collection.
    *
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges in non-debug builds. Available to all callers in debug builds.
+   * Will throw a DOM security error if called without chrome privileges in
+   * non-debug builds. Available to all callers in debug builds.
    *
    * @param aListener listener that receives information about the CC graph
    *                  (see @mozilla.org/cycle-collector-logger;1 for a logger
@@ -499,8 +525,8 @@ interface nsIDOMWindowUtils : nsISupports {
   /**
    * Force a cycle collection without garbage collection.
    *
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges in non-debug builds. Available to all callers in debug builds.
+   * Will throw a DOM security error if called without chrome privileges in
+   * non-debug builds. Available to all callers in debug builds.
    *
    * @param aListener listener that receives information about the CC graph
    *                  (see @mozilla.org/cycle-collector-logger;1 for a logger
@@ -516,14 +542,15 @@ interface nsIDOMWindowUtils : nsISupports {
                     [optional] in long aExtraForgetSkippableCalls);
 
   /** Synthesize a simple gesture event for a window. The event types
-   *  supported are: MozSwipeGesture, MozMagnifyGestureStart,
+   *  supported are: MozSwipeGestureStart, MozSwipeGestureUpdate,
+   *  MozSwipeGestureEnd, MozSwipeGesture, MozMagnifyGestureStart,
    *  MozMagnifyGestureUpdate, MozMagnifyGesture, MozRotateGestureStart,
    *  MozRotateGestureUpdate, MozRotateGesture, MozPressTapGesture,
    *  MozTapGesture, and MozEdgeUIGesture.
    *
    * Cannot be accessed from unprivileged context (not
    * content-accessible) Will throw a DOM security error if called
-   * without UniversalXPConnect privileges.
+   * without chrome privileges.
    *
    * @param aType event type
    * @param aX x offset in CSS pixels
@@ -582,7 +609,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * the maximum difference in a channel.  This will throw an error if
    * the dimensions of the two canvases are different.
    *
-   * This method requires UniversalXPConnect privileges.
+   * This method requires chrome privileges.
    */
   uint32_t compareCanvases(in nsIDOMHTMLCanvasElement aCanvas1,
                            in nsIDOMHTMLCanvasElement aCanvas2,
@@ -598,8 +625,8 @@ interface nsIDOMWindowUtils : nsISupports {
    * Suppresses/unsuppresses user initiated event handling in window's document
    * and subdocuments.
    *
-   * @throw NS_ERROR_DOM_SECURITY_ERR if called without UniversalXPConnect
-   *        privileges and NS_ERROR_FAILURE if window doesn't have a document.
+   * @throw NS_ERROR_DOM_SECURITY_ERR if called without chrome privileges and
+   *        NS_ERROR_FAILURE if window doesn't have a document.
    */
   void suppressEventHandling(in boolean aSuppress);
 
@@ -609,8 +636,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Disable or enable non synthetic test mouse events on *all* windows.
    *
    * Cannot be accessed from unprivileged context (not content-accessible).
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * @param aDisable  If true, disable all non synthetic test mouse events
    *               on all windows.  Otherwise, enable them.
@@ -624,6 +650,18 @@ interface nsIDOMWindowUtils : nsISupports {
    * @see nsIDOMWindow::scrollX/Y
    */
   void getScrollXY(in boolean aFlushLayout, out long aScrollX, out long aScrollY);
+
+  /**
+   * Returns the scrollbar width of the window's scroll frame.
+   *
+   * @param aFlushLayout flushes layout if true. Otherwise, no flush occurs.
+   */
+  void getScrollbarSize(in boolean aFlushLayout, out long aWidth, out long aHeight);
+
+  /**
+   * Returns the given element's bounds without flushing pending layout changes.
+   */
+  nsIDOMClientRect getBoundsWithoutFlushing(in nsIDOMElement aElement);
 
   /**
    * Returns the bounds of the window's currently loaded document. This will
@@ -679,13 +717,21 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute float screenPixelsPerCSSPixel;
 
   /**
+   * Get the current zoom factor.
+   * This is _approximately_ the same as nsIMarkupDocumentViewer.fullZoom,
+   * but takes into account Gecko's quantization of the zoom factor, which is
+   * implemented by adjusting the (integer) number of appUnits per devPixel.
+   */
+  readonly attribute float fullZoom;
+
+  /**
    * Dispatches aEvent via the nsIPresShell object of the window's document.
    * The event is dispatched to aTarget, which should be an object
    * which implements nsIContent interface (#element, #text, etc).
    *
    * Cannot be accessed from unprivileged context (not
    * content-accessible) Will throw a DOM security error if called
-   * without UniversalXPConnect privileges.
+   * without chrome privileges.
    *
    * @note Event handlers won't get aEvent as parameter, but a similar event.
    *       Also, aEvent should not be reused.
@@ -693,6 +739,15 @@ interface nsIDOMWindowUtils : nsISupports {
   boolean dispatchDOMEventViaPresShell(in nsIDOMNode aTarget,
                                        in nsIDOMEvent aEvent,
                                        in boolean aTrusted);
+
+  /**
+   * Sets nsEvent::mFlags::mOnlyChromeDispatch to true to ensure that
+   * the event is propagated only to chrome.
+   * Event's .target property will be aTarget.
+   * Returns the same value as what EventTarget.dispatchEvent does.
+   */
+  boolean dispatchEventToChromeOnly(in nsIDOMEventTarget aTarget,
+                                    in nsIDOMEvent aEvent);
 
   /**
    * Returns the real classname (possibly of the mostly-transparent security
@@ -704,8 +759,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Generate a content command event.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * @param aType Type of command content event to send.  Can be one of "cut",
    *        "copy", "paste", "delete", "undo", "redo", or "pasteTransferable".
@@ -719,8 +773,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Synthesize a composition event to the window.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * @param aType     The event type: "compositionstart", "compositionend" or
    *                  "compositionupdate".
@@ -737,8 +790,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Synthesize a text event to the window.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    * Currently, this method doesn't support 4 or more clauses composition
    * string.
@@ -913,6 +965,33 @@ interface nsIDOMWindowUtils : nsISupports {
                                 in unsigned long aLength,
                                 in boolean aReverse);
 
+  /* Selection behaviors - mirror nsIFrame's nsSelectionAmount constants */
+  const unsigned long SELECT_CHARACTER   = 0;
+  const unsigned long SELECT_CLUSTER     = 1;
+  const unsigned long SELECT_WORD        = 2;
+  const unsigned long SELECT_LINE        = 3;
+  const unsigned long SELECT_BEGINLINE   = 4;
+  const unsigned long SELECT_ENDLINE     = 5;
+  const unsigned long SELECT_PARAGRAPH   = 6;
+  const unsigned long SELECT_WORDNOSPACE = 7;
+
+  /**
+   * Select content at a client point based on a selection behavior if the
+   * underlying content is selectable. Selection will accumulate with any
+   * existing selection, callers should clear selection prior if needed.
+   * May fire selection changed events. Calls nsFrame's SelectByTypeAtPoint.
+   *
+   * @param aX, aY The selection point in client coordinates.
+   * @param aSelectType The selection behavior requested.
+   * @return True if a selection occured, false otherwise.
+   * @throw NS_ERROR_DOM_SECURITY_ERR, NS_ERROR_UNEXPECTED for utils
+   * issues, and NS_ERROR_INVALID_ARG for coordinates that are outside
+   * this window.
+   */
+  boolean selectAtPoint(in float aX,
+                        in float aY,
+                        in unsigned long aSelectBehavior);
+
   /**
    * Perform the equivalent of:
    *   window.getComputedStyle(aElement, aPseudoElement).
@@ -987,22 +1066,52 @@ interface nsIDOMWindowUtils : nsISupports {
   void resumeTimeouts();
 
   /**
-   * Set the network status to online from the Offline mode error page.
-   *
-   * The caller of this method must be about:neterror.
-   */
-  void goOnline();
-
-  /**
    * What type of layer manager the widget associated with this window is
    * using. "Basic" is unaccelerated; other types are accelerated. Throws an
    * error if there is no widget associated with this window.
    */
   readonly attribute AString layerManagerType;
+  
+  /**
+   * True if the layer manager for the widget associated with this window is
+   * forwarding layers to a remote compositor, false otherwise. Throws an
+   * error if there is no widget associated with this window.
+   */
+  readonly attribute boolean layerManagerRemote;
 
-  void startFrameTimeRecording();
-  void stopFrameTimeRecording([optional] out unsigned long frameCount,
-                              [retval, array, size_is(frameCount)] out float frameTime);
+  /**
+   * Record (and return) frame-intervals and paint-times for frames which were presented
+   *   between calling StartFrameTimeRecording and StopFrameTimeRecording.
+   *
+   * - Uses a cyclic buffer and serves concurrent consumers, so if Stop is called too late
+   *     (elements were overwritten since Start), result is considered invalid and hence empty.
+   * - Buffer is capable of holding 10 seconds @ 60fps (or more if frames were less frequent).
+   *     Can be changed (up to 1 hour) via pref: toolkit.framesRecording.bufferSize.
+   * - Note: the first frame-interval may be longer than expected because last frame
+   *     might have been presented some time before calling StartFrameTimeRecording.
+   */
+
+  /**
+   * Returns a handle which represents current recording start position.
+   */
+   void startFrameTimeRecording([retval] out unsigned long startIndex);
+
+  /**
+   * Returns number of recorded frames since startIndex was issued,
+   *   and allocates+populates 2 arraye with the recorded data.
+   * - Allocation is infallible. Should be released even if size is 0.
+   */
+   void stopFrameTimeRecording(in unsigned long startIndex,
+                              [optional, array, size_is(frameCount)] out float paintTimes,
+                              [optional] out unsigned long frameCount,
+                              [retval, array, size_is(frameCount)] out float frameIntervals);
+
+  /**
+   * Signals that we're begining to tab switch. This is used by painting code to
+   * determine total tab switch time.
+   */
+  void beginTabSwitch();
+
   /**
    * The DPI of the display
    */
@@ -1010,6 +1119,7 @@ interface nsIDOMWindowUtils : nsISupports {
 
   /**
    * Return the outer window with the given ID, if any.  Can return null.
+   * @deprecated Use nsIWindowMediator.getOuterWindowWithId.  See bug 865664.
    */
   nsIDOMWindow getOuterWindowWithId(in unsigned long long aOuterWindowID);
 
@@ -1043,6 +1153,12 @@ interface nsIDOMWindowUtils : nsISupports {
    * Undoes the effects of advanceTimeAndRefresh.
    */
   void restoreNormalRefresh();
+
+  /**
+   * Reports whether the current state is test-controlled refreshes
+   * (see advanceTimeAndRefresh and restoreNormalRefresh above).
+   */
+  readonly attribute bool isTestControllingRefreshes;
 
   /**
    * Method for testing nsStyleAnimation::ComputeDistance.
@@ -1181,8 +1297,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Returns an array of plugins on the page for opt-in activation.
    *
    * Cannot be accessed from unprivileged context (not content-accessible).
-   * Will throw a DOM security error if called without UniversalXPConnect
-   * privileges.
+   * Will throw a DOM security error if called without chrome privileges.
    *
    */
   [implicit_jscontext]
@@ -1192,9 +1307,22 @@ interface nsIDOMWindowUtils : nsISupports {
    * Set the scrollport size for the purposes of clamping scroll positions for
    * the root scroll frame of this document to be (aWidth,aHeight) in CSS pixels.
    *
-   * The caller of this method must have UniversalXPConnect privileges.
+   * The caller of this method must have chrome privileges.
    */
   void setScrollPositionClampingScrollPortSize(in float aWidth, in float aHeight);
+
+  /**
+   * Set margins for the layout of fixed position elements in the content
+   * document. These are used on mobile, where the viewable area can be
+   * temporarily obscured by the browser chrome. In this situation, we're ok
+   * with scrollable page content being obscured, but fixed position content
+   * cannot be revealed without removing the obscuring chrome, so we use these
+   * margins so that it can remain visible.
+   *
+   * The caller of this method must have chrome privileges.
+   */
+  void setContentDocumentFixedPositionMargins(in float aTop, in float aRight,
+                                              in float aBottom, in float aLeft);
 
   /**
    * Prevent this window (and any child windows) from displaying any further
@@ -1202,9 +1330,93 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   void preventFurtherDialogs();
 
+  const unsigned long AGENT_SHEET = 0;
+  const unsigned long USER_SHEET = 1;
+  const unsigned long AUTHOR_SHEET = 2;
+  /**
+   * Synchronously loads a style sheet from |sheetURI| and adds it to the list
+   * of additional style sheets of the document.
+   *
+   * These additional style sheets are very much like user/agent sheets loaded 
+   * with loadAndRegisterSheet. The only difference is that they are applied only
+   * on the document owned by this window.
+   *
+   * Sheets added via this API take effect immediately on the document.
+   */
+  void loadSheet(in nsIURI sheetURI,
+                           in unsigned long type);
+
+  /**
+   * Remove the document style sheet at |sheetURI| from the list of additional 
+   * style sheets of the document.  The removal takes effect immediately.
+   */
+  void removeSheet(in nsIURI sheetURI,
+                                in unsigned long type);
+
+  /**
+   * Returns true if a user input is being handled.
+   *
+   * This calls nsEventStateManager::IsHandlingUserInput().
+   */
+  readonly attribute boolean isHandlingUserInput;
+
   /**
    * After calling the method, the window for which this DOMWindowUtils
    * was created can be closed using scripts.
    */
    void allowScriptsToClose();
+
+  /**
+   * Is the parent window's main widget visible?  If it isn't, we probably
+   * don't want to display any dialogs etc it may request.  This corresponds
+   * to the visibility check in nsWindowWatcher::OpenWindowInternal().
+   *
+   * Will throw a DOM security error if called without chrome privileges or
+   * NS_ERROR_NOT_AVAILABLE in the unlikely event that the parent window's
+   * main widget can't be reached.
+   */
+  readonly attribute boolean isParentWindowMainWidgetVisible;
+
+   /**
+    * In certain cases the event handling of nodes, form controls in practice,
+    * may be disabled. Such cases are for example the existence of disabled
+    * attribute or -moz-user-input: none/disabled.
+    */
+   boolean isNodeDisabledForEvents(in nsIDOMNode aNode);
+
+   /**
+    * Setting paintFlashing to true will flash newly painted area.
+    */
+   attribute boolean paintFlashing;
+
+   /**
+    * Allows running of a "synchronous section", in the form of an nsIRunnable
+    * once the event loop has reached a "stable state". We've reached a stable
+    * state when the currently executing task/event has finished, see:
+    * http://www.whatwg.org/specs/web-apps/current-work/multipage/webappapis.html#synchronous-section
+    * In practice this runs aRunnable once the currently executing event
+    * finishes. If called multiple times per task/event, all the runnables will
+    * be executed, in the order in which runInStableState() was called.
+    *
+    * XXX - This can wreak havoc if you're not using this for very simple
+    * purposes, eg testing or setting a flag.
+    */
+   void runInStableState(in nsIRunnable runnable);
+
+   /**
+    * Run the given runnable before the next iteration of the event loop (this
+    * includes native events too). If a nested loop is spawned within the current
+    * event then the runnable will not be run until that loop has terminated.
+    *
+    * XXX - This can wreak havoc if you're not using this for very simple
+    * purposes, eg testing or setting a flag.
+    */
+   void runBeforeNextEvent(in nsIRunnable runnable);
+
+   /*
+    * Returns the value of a given property.  If the property is animated off the
+    * main thread, this function will fetch the correct value from the compositor.
+    */
+   AString getOMTAOrComputedStyle(in nsIDOMNode aNode,
+                                  in AString aProperty);
 };

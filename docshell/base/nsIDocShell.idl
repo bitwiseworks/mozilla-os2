@@ -4,7 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsISupports.idl"
+#include "domstubs.idl"
+#include "nsIDocShellTreeItem.idl"
 #include "nsIAtom.idl"
 
 %{ C++
@@ -26,6 +27,7 @@ interface nsIContentViewer;
 interface nsIURIContentListener;
 interface nsIDOMEventTarget;
 interface nsIDocShellLoadInfo;
+interface nsIEditor;
 interface nsIWebNavigation;
 interface nsISimpleEnumerator;
 interface nsIInputStream;
@@ -38,9 +40,10 @@ interface nsIPrincipal;
 interface nsIWebBrowserPrint;
 interface nsIVariant;
 interface nsIPrivacyTransitionObserver;
+interface nsIReflowObserver;
 
-[scriptable, builtinclass, uuid(9b283337-097d-4fa8-a2da-916318eaf828)]
-interface nsIDocShell : nsISupports
+[scriptable, builtinclass, uuid(f453d2ee-bac7-46f9-a553-df918f0cc0d0)]
+interface nsIDocShell : nsIDocShellTreeItem
 {
   /**
    * Loads a given URI.  This will give priority to loading the requested URI
@@ -118,6 +121,8 @@ interface nsIDocShell : nsISupports
    * @param aWindowTarget   - Window target for the load.
    * @param aTypeHint       - A hint as to the content-type of the resulting
    *                          data.  May be null or empty if no hint.
+   * @param aFileName       - Non-null when the link should be downloaded as
+                              the given filename.
    * @param aPostDataStream - Post data stream (if POSTing)
    * @param aHeadersStream  - Stream containing "extra" request headers...
    * @param aLoadFlags      - Flags to modify load behaviour. Flags are defined
@@ -130,6 +135,7 @@ interface nsIDocShell : nsISupports
                               in uint32_t aFlags,
                               in wstring aWindowTarget,
                               in string aTypeHint,
+                              in AString aFileName,
                               in nsIInputStream aPostDataStream,
                               in nsIInputStream aHeadersStream,
                               in unsigned long aLoadFlags,
@@ -183,7 +189,7 @@ interface nsIDocShell : nsISupports
   /**
    * Presentation shell for the currently loaded document.  This may be null.
    */
-  [noscript] readonly attribute nsIPresShell presShell;
+  [noscript,notxpcom] nsIPresShell GetPresShell();
 
   /**
    * Presentation shell for the oldest document, if this docshell is
@@ -227,6 +233,11 @@ interface nsIDocShell : nsISupports
    * Attribute stating whether or not images should be loaded.
    */
   attribute boolean allowImages;
+
+  /**
+   * Attribute stating whether or not media (audio/video) should be loaded.
+   */
+  [infallible] attribute boolean allowMedia;
 
   /**
    * Attribute that determines whether DNS prefetch is allowed for this subtree
@@ -403,6 +414,8 @@ interface nsIDocShell : nsISupports
   void historyPurged(in long numEntries);
 
   /*
+   * @deprecated, use nsIDocShell.QueryInterface(nsIDOMStorageManager) instead.
+   *
    * Retrieves the WebApps session storage object for the supplied principal.
    *
    * @param principal returns a storage for this principal
@@ -416,25 +429,14 @@ interface nsIDocShell : nsISupports
                                               in boolean create);
 
   /*
+   * @deprecated, use nsIDocShell.QueryInterface(nsIDOMStorageManager) instead.
+   *
    * Add a WebApps session storage object to the docshell.
    *
    * @param principal the principal the storage object is associated with
    * @param storage the storage object to add
    */
   void addSessionStorage(in nsIPrincipal principal, in nsIDOMStorage storage);
-
-  /**
-   * Clones all session storage objects and attaches them to the given docshell.
-   * Useful when duplicating tabs and their states.
-   *
-   * @param docShell the docshell to clone the sessionstorage objects to
-   */
-  void cloneSessionStoragesTo(in nsIDocShell docShell);
-
-  /**
-   * Removes all WebApps session storage objects attached to the docshell.
-   */
-  void clearSessionStorages();
 
   /**
    * Gets the channel for the currently loaded document, if any. 
@@ -462,6 +464,45 @@ interface nsIDocShell : nsISupports
   readonly attribute boolean channelIsUnsafe;
 
   /**
+   * This attribute determines whether Mixed Active Content is loaded on the
+   * document. When it is true, mixed active content was not blocked and has
+   * loaded (or is about to load) on the page. When it is false, mixed active content
+   * has not loaded on the page, either because there was no mixed active content
+   * requests on the page or such requests were blocked by nsMixedContentBlocker.
+   * This boolean is set to true in nsMixedContentBlocker if Mixed Active Content
+   * is allowed (either explicitly on the page by the user or when the about:config
+   * setting security.mixed_content.block_active_content is set to false).
+   */
+  [infallible] readonly attribute boolean hasMixedActiveContentLoaded;
+
+   /**
+   * This attribute determines whether a document has Mixed Active Content
+   * that has been blocked from loading. When it is true, there is definitely
+   * mixed active content on a page that has been blocked by
+   * nsMixedContentBlocker.  When it is false, there may or may not be mixed
+   * active content on a page, but if there is, it will load. Note that if the
+   * about:config setting security.mixed_content.block_active_content is set
+   * false, this boolean will be false, since blocking active content has been
+   * disabled.
+   */
+  [infallible] readonly attribute boolean hasMixedActiveContentBlocked;
+
+  /**
+   * This attribute determines whether Mixed Display Content is loaded on the
+   * document. When it is true, mixed display content was not blocked and has
+   * loaded (or is about to load) on the page. Similar behavior to
+   * hasMixedActiveContentLoaded.
+   */
+  [infallible] readonly attribute boolean hasMixedDisplayContentLoaded;
+
+   /**
+   * This attribute determines whether a document has Mixed Display Content
+   * that has been blocked from loading. Similar behavior to
+   * hasMixedActiveContentBlocked.
+   */
+  [infallible] readonly attribute boolean hasMixedDisplayContentBlocked;
+
+  /**
    * Disconnects this docshell's editor from its window, and stores the
    * editor data in the open document's session history entry.  This
    * should be called only during page transitions.
@@ -485,10 +526,7 @@ interface nsIDocShell : nsISupports
   /**
    * Whether this docshell can execute scripts based on its hierarchy.
    * The rule of thumb here is that we disable js if this docshell or any
-   * of its parents disallow scripting, unless the only reason for js being
-   * disabled in this docshell is a parent docshell having a document that
-   * is in design mode.  In that case, we explicitly allow scripting on the
-   * current docshell.
+   * of its parents disallow scripting.
    */
   readonly attribute boolean canExecuteScripts;
 
@@ -554,21 +592,28 @@ interface nsIDocShell : nsISupports
   attribute string charset;
 
   /**
+   * Called when the user chose an encoding override from the character
+   * encoding menu. Separate from the setter for the charset property to avoid
+   * extensions adding noise to the data.
+   */
+  void gatherCharsetMenuTelemetry();
+
+  /**
    * The charset forced by the user. When the charset attribute is set this
    * attribute is set to the same value.
    *
    * XXX Could this be replaced by a boolean?
    */
-  attribute nsIAtom forcedCharset;
+  attribute ACString forcedCharset;
 
   /**
    * In a child docshell, this is the charset of the parent docshell
    */
-  attribute nsIAtom parentCharset;
+  attribute ACString parentCharset;
 
   /*
    * In a child docshell, this is the source of parentCharset
-   * @see nsIParser
+   * @see nsCharsetSource.h
    */
   attribute int32_t parentCharsetSource;
 
@@ -579,90 +624,124 @@ interface nsIDocShell : nsISupports
   void addWeakPrivacyTransitionObserver(in nsIPrivacyTransitionObserver obs);
 
   /**
-   * Mark the docshell as a browser frame.
-   * This should be used for <iframe mozbrowser> but not for <iframe mozapp>.
-   *
-   * This method should not be called more than once.
+   * Add an observer to the list of parties to be notified when reflows are
+   * occurring. |obs| must support weak references.
    */
-  void setIsBrowserElement();
+  void addWeakReflowObserver(in nsIReflowObserver obs);
 
   /**
-   * Returns true iff the docshell is marked as a browser frame.
+   * Remove an observer from the list of parties to be notified about reflows.
+   */
+  void removeWeakReflowObserver(in nsIReflowObserver obs);
+
+  /**
+   * Notify all attached observers that a reflow has just occurred.
+   *
+   * @param interruptible if true, the reflow was interruptible.
+   * @param start         timestamp when reflow started, in milliseconds since
+   *                      navigationStart (accurate to 1/1000 of a ms)
+   * @param end           timestamp when reflow ended, in milliseconds since
+   *                      navigationStart (accurate to 1/1000 of a ms)
+   */
+  [noscript] void notifyReflowObservers(in bool interruptible,
+                                        in DOMHighResTimeStamp start,
+                                        in DOMHighResTimeStamp end);
+
+  /**
+   * Returns true if this docshell corresponds to an <iframe mozbrowser>.
+   * (<iframe mozapp mozbrowser> is not considered a browser.)
    */
   [infallible] readonly attribute boolean isBrowserElement;
 
   /**
-   * Returns true iif the docshell is marked as an app frame.
+   * Returns true iff the docshell corresponds to an <iframe mozapp>.
    */
   [infallible] readonly attribute boolean isApp;
 
   /**
-   * Returns true iif the docshell is marked as a type that behaves like a
-   * content boundary.
+   * Returns isBrowserElement || isApp.
    */
-  [infallible] readonly attribute boolean isContentBoundary;
+  [infallible] readonly attribute boolean isBrowserOrApp;
 
   /**
-   * Returns true iif the docshell is inside a browser element.
+   * Returns true if this docshell corresponds to an <iframe mozbrowser> or if
+   * the docshell is contained in an <iframe mozbrowser>.  (<iframe mozapp
+   * mozbrowser> does not count as a browser.)
+   *
+   * Our notion here of "contained in" means: Walk up the docshell hierarchy in
+   * this process until we hit an <iframe mozapp> or <iframe mozbrowser> (or
+   * until the hierarchy ends).  Return true iff the docshell we stopped on has
+   * isBrowserElement == true.
    */
   [infallible] readonly attribute boolean isInBrowserElement;
 
   /**
-   * Returns true iif the docshell is inside an application.  However, it will
-   * return false if the docshell is inside a browser element that is inside
-   * an application.
+   * Returns true if this docshell corresponds to an <iframe mozbrowser> or
+   * <iframe mozap>, or if this docshell is contained in an <iframe mozbrowser>
+   * or <iframe mozapp>.
    *
-   * Note: Do not use this method for permissions checks!  An app may contain
-   * an <iframe> pointing at arbitrary web code.  This iframe's docshell will
-   * have isInApp() == true, but the iframe's content is not "app code", and
-   * so should not be granted more trust than vanilla web content.
-   *
-   * (For example, suppose when web content calls API method X, we show a
-   * permission prompt, but when "app code" calls method X, we don't.  In this
-   * case, it would be /incorrect/ to show the permission prompt if
-   * !isInApp().)
-   *
-   * If you're doing a security check, use the content's principal instead of
-   * this method.
+   * To compute this value, we walk up the docshell hierarchy.  If we encounter
+   * a docshell with isBrowserElement or isApp before we hit the end of the
+   * hierarchy, we return true.  Otherwise, we return false.
    */
-  [infallible] readonly attribute boolean isInApp;
+  [infallible] readonly attribute boolean isInBrowserOrApp;
+
+   /**
+    * Indicate that this docshell corresponds to an app with the given app id.
+    *
+    * You may pass NO_APP_ID or UNKNOWN_APP_ID for containingAppId.  If you
+    * pass NO_APP_ID, then this docshell will return NO_APP_ID for appId.  If
+    * you pass UNKNOWN_APP_ID, then this docshell will search its hiearchy for
+    * an app frame and use that frame's appId.
+    *
+    * You can call this method more than once, but there's no guarantee that
+    * other components will update their view of the world if you change a
+    * docshell's app id, so tread lightly.
+    *
+    * If you call this method after calling setIsBrowserInsideApp, this
+    * docshell will forget the fact that it was a browser.
+    */
+   void setIsApp(in unsigned long ownAppId);
+
+   /**
+    * Indicate that this docshell corresponds to a browser inside an app with
+    * the given ID.  As with setIsApp, you may pass NO_APP_ID or
+    * UNKNOWN_APP_ID.
+    *
+    * As with setIsApp, you may call this more than once, but it's kind of a
+    * hack, so be careful.
+    */
+   void setIsBrowserInsideApp(in unsigned long containingAppId);
 
   /**
-   * Returns if the docshell has a docshell that behaves as a content boundary
-   * in his parent hierarchy.
-   */
-  [infallible] readonly attribute boolean isBelowContentBoundary;
-
-  /**
-   * Set the app id this docshell is associated with. The id has to be a valid
-   * app id. If the docshell isn't associated with any app, the value should be
-   * nsIScriptSecurityManager::NO_APP_ID. However, this is the default value if
-   * nothing is et.
+   * Returns the id of the app associated with this docshell.  If this docshell
+   * is an <iframe mozbrowser> inside an <iframe mozapp>, we return the app's
+   * appId.
    *
-   * This method is [noscript] to reduce the scope. It should be used at very
-   * specific moments.
+   * We compute this value by walking up the docshell hierarchy until we find a
+   * docshell on which setIsApp(x) or setIsBrowserInsideApp(x) was called
+   * (ignoring those docshells where x == UNKNOWN_APP_ID).  We return the app
+   * id x.
    *
-   * Calling setAppId() will mark the frame as an app frame.
-   */
-  [noscript] void setAppId(in unsigned long appId);
-
-  /**
-   * Returns the app id of the app the docshell is in. Returns
-   * nsIScriptSecurityManager::NO_APP_ID if the docshell is not in an app.
+   * If we don't find a docshell with an associated app id in our hierarchy, we
+   * return NO_APP_ID.  We never return UNKNOWN_APP_ID.
+   *
+   * Notice that a docshell may have an associated app even if it returns true
+   * for isBrowserElement!
    */
   [infallible] readonly attribute unsigned long appId;
+
+  /**
+   * Like nsIDocShellTreeItem::GetSameTypeParent, except this ignores <iframe
+   * mozbrowser> and <iframe mozapp> boundaries.
+   */
+  nsIDocShell getSameTypeParentIgnoreBrowserAndAppBoundaries();
 
   /** 
    * True iff asynchronous panning and zooming is enabled for this
    * docshell.
    */
   readonly attribute bool asyncPanZoomEnabled;
-
-  /**
-   * Like GetSameTypeParent, except this ignores <iframe mozbrowser>
-   * boundaries.
-   */
-  nsIDocShell getParentIgnoreBrowserFrame();
 
   /**
    * The sandbox flags on the docshell. These reflect the value of the sandbox
@@ -679,10 +758,112 @@ interface nsIDocShell : nsISupports
   attribute unsigned long sandboxFlags;
 
   /**
+   * This member variable determines whether a document has Mixed Active Content that
+   * was initially blocked from loading, but the user has choosen to override the
+   * block and allow the content to load. mMixedContentChannel is set to the document's
+   * channel when the user allows mixed content. The nsMixedContentBlocker content policy
+   * checks if the document's root channel matches the mMixedContentChannel.  If it matches,
+   * then Mixed Content is loaded.  If it does match, mixed content is blocked.
+   *
+   * A match implies that there is definitely mixed active content on a page that was
+   * initially blocked by nsMixedContentBlocker and then allowed and loaded by the user.
+   * A miss imples that IF there is mixed active content on the page AND it was
+   * blocked by nsMixedContentBlocker.cpp, the user has not choosen to override
+   * the block. Note that if the about:config setting
+   * security.mixed_content.block_active_content is set to false, this boolean
+   * will be false, mMixedContentChannel will remain null since blocking active content has
+   * been disabled and hence mMixedContentChannel will never be set.
+   */
+  attribute nsIChannel mixedContentChannel;
+
+  /**
+   * Checks whether the channel associated with the root docShell is equal to
+   * mMixedContentChannel. If they are the same, allowMixedContent is set to true.
+   * Checks if the root document has a secure connection. If it is, sets 
+   * rootHasSecureConnection to true. If the docShell is the root doc shell, 
+   * isRootDocShell is set to true. 
+   */
+  void GetAllowMixedContentAndConnectionData(out boolean rootHasSecureConnection, out boolean allowMixedContent, out boolean isRootDocShell);
+
+
+  /**
    * Are plugins allowed in the current document loaded in this docshell ?
    * (if there is one). This depends on whether plugins are allowed by this
    * docshell itself or if the document is sandboxed and hence plugins should
    * not be allowed.
    */
   [noscript, notxpcom] bool pluginsAllowedInCurrentDoc();
+  
+
+  /**
+   * Attribute that determines whether fullscreen is allowed to be entered for
+   * this subtree of the docshell tree. This is true when all iframes containing
+   * this docshell have their "allowfullscreen" attribute set to "true".
+   * fullscreenAllowed is only writable at content boundaries, where it is used
+   * to propagate the value of the cross process parent's iframe's
+   * "allowfullscreen" attribute to the child process. Setting
+   * fullscreenAllowed on docshells which aren't content boundaries throws an
+   * exception.
+   */
+  [infallible] readonly attribute boolean fullscreenAllowed;
+  
+  void setFullscreenAllowed(in boolean allowed);
+
+  [noscript, infallible] attribute boolean affectPrivateSessionLifetime;
+
+  /**
+   * Indicates whether the UI may enable the character encoding menu. The UI
+   * must disable the menu when this property is false.
+   */
+  [infallible] readonly attribute boolean mayEnableCharacterEncodingMenu;
+
+           attribute  nsIEditor editor;
+  readonly attribute  boolean   editable;             /* this docShell is editable */
+  readonly attribute  boolean   hasEditingSession;    /* this docShell has an editing session */
+    
+  /**
+   * Make this docShell editable, setting a flag that causes
+   * an editor to get created, either immediately, or after
+   * a url has been loaded.
+   *      @param  inWaitForUriLoad    true to wait for a URI before
+   *                                  creating the editor.
+   */     
+  void makeEditable(in boolean inWaitForUriLoad);
+
+  /**
+   * Get the SHEntry associated with a child docshell
+   */
+  nsISHEntry getChildSHEntry(in long aChildOffset);
+
+  /**
+   * Add a Child SHEntry for a frameset page, given the child's loadtype.
+   * If aCloneChildren is true, then aCloneReference's children will be
+   * cloned onto aHistoryEntry.
+   */
+  void addChildSHEntry(in nsISHEntry aCloneReference,
+                       in nsISHEntry aHistoryEntry,
+                       in long aChildOffset,
+                       in unsigned long aLoadType,
+                       in boolean aCloneChilden);
+
+  /**
+   * Whether this docshell should save entries in global history.
+   */
+  attribute boolean useGlobalHistory;
+
+  /**
+   * Removes nsISHEntry objects related to this docshell from session history.
+   * Use this only with subdocuments, like iframes.
+   */
+  void removeFromSessionHistory();
+
+  /**
+   * Set when an iframe/frame is added dynamically.
+   */
+  attribute boolean createdDynamically;
+
+  /**
+   * Returns false for mLSHE, true for mOSHE
+   */
+  boolean getCurrentSHEntry(out nsISHEntry aEntry);
 };

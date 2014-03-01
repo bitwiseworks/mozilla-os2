@@ -1,8 +1,6 @@
 #filter substitution
 package @ANDROID_PACKAGE_NAME@.tests;
 
-import @ANDROID_PACKAGE_NAME@.*;
-
 import android.app.Instrumentation;
 import android.os.SystemClock;
 import android.util.FloatMath;
@@ -57,6 +55,7 @@ class MotionEventHelper {
 
     public Thread dragAsync(final float startX, final float startY, final float endX, final float endY, final long durationMillis) {
         Thread t = new Thread() {
+            @Override
             public void run() {
                 int numEvents = (int)(durationMillis * DRAG_EVENTS_PER_SECOND / 1000);
                 float eventDx = (endX - startX) / numEvents;
@@ -69,6 +68,13 @@ class MotionEventHelper {
                     } catch (InterruptedException ie) {
                         ie.printStackTrace();
                     }
+                }
+                // sleep a bit before sending the last move so that the calculated
+                // fling velocity is low and we don't end up doing a fling afterwards.
+                try {
+                    Thread.sleep(1000L);
+                } catch (InterruptedException ie) {
+                    ie.printStackTrace();
                 }
                 // do the last one using endX/endY directly to avoid rounding errors
                 downTime = move(downTime, endX, endY);
@@ -106,6 +112,7 @@ class MotionEventHelper {
             throw new IllegalArgumentException( "Fling parameters require too small a time period" );
         }
         Thread t = new Thread() {
+            @Override
             public void run() {
                 long downTime = down(startX, startY);
                 downTime = move(downTime, downTime + time, startX + dx, startY + dy);

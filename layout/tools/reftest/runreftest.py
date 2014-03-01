@@ -6,9 +6,9 @@
 Runs the reftest test harness.
 """
 
-import sys, shutil, os, os.path
+import re, sys, shutil, os, os.path
 SCRIPT_DIRECTORY = os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0])))
-sys.path.append(SCRIPT_DIRECTORY)
+sys.path.insert(0, SCRIPT_DIRECTORY)
 
 from automation import Automation
 from automationutils import *
@@ -39,6 +39,9 @@ class RefTest(object):
           path = defaultManifestPath
     return path
 
+  def makeJSString(self, s):
+    return '"%s"' % re.sub(r'([\\"])', r'\\\1', s)
+
   def createReftestProfile(self, options, profileDir, manifest, server='localhost'):
     """
       Sets up a profile for reftest.
@@ -64,6 +67,9 @@ class RefTest(object):
       prefsFile.write('user_pref("reftest.logFile", "%s");\n' % options.logFile)
     if options.ignoreWindowSize != False:
       prefsFile.write('user_pref("reftest.ignoreWindowSize", true);\n')
+    if options.filter != None:
+      prefsFile.write('user_pref("reftest.filter", %s);\n' % self.makeJSString(options.filter))
+    prefsFile.write('user_pref("reftest.focusFilterMode", %s);\n' % self.makeJSString(options.focusFilterMode))
 
     for v in options.extraPrefs:
       thispref = v.split("=")
@@ -78,6 +84,13 @@ class RefTest(object):
     self.automation.installExtension(os.path.join(SCRIPT_DIRECTORY, "reftest"),
                                                   profileDir,
                                                   "reftest@mozilla.org")
+
+    # I would prefer to use "--install-extension reftest/specialpowers", but that requires tight coordination with
+    # release engineering and landing on multiple branches at once.
+    if manifest.endswith('crashtests.list'):
+      self.automation.installExtension(os.path.join(SCRIPT_DIRECTORY, "specialpowers"),
+                                                    profileDir,
+                                                    "special-powers@mozilla.org")
 
   def buildBrowserEnv(self, options, profileDir):
     browserEnv = self.automation.environment(xrePath = options.xrePath)
@@ -224,9 +237,9 @@ class ReftestOptions(OptionParser):
 
     self.add_option("--install-extension",
                     action = "append", dest = "extensionsToInstall",
-                    help = "install the specified extension in the testing profile."
-                           "The extension file's name should be <id>.xpi where <id> is"
-                           "the extension's id as indicated in its install.rdf."
+                    help = "install the specified extension in the testing profile. "
+                           "The extension file's name should be <id>.xpi where <id> is "
+                           "the extension's id as indicated in its install.rdf. "
                            "An optional path can be specified too.")
     defaults["extensionsToInstall"] = []
 
@@ -237,7 +250,41 @@ class ReftestOptions(OptionParser):
                            "environment")
     defaults["environment"] = []
 
+    self.add_option("--filter",
+                    action = "store", type="string", dest = "filter",
+                    help = "specifies a regular expression (as could be passed to the JS "
+                           "RegExp constructor) to test against URLs in the reftest manifest; "
+                           "only test items that have a matching test URL will be run.")
+    defaults["filter"] = None
+
+    self.add_option("--focus-filter-mode",
+                    action = "store", type = "string", dest = "focusFilterMode",
+                    help = "filters tests to run by whether they require focus. "
+                           "Valid values are `all', `needs-focus', or `non-needs-focus'. "
+                           "Defaults to `all'.")
+    defaults["focusFilterMode"] = "all"
+
     self.set_defaults(**defaults)
+
+  def verifyCommonOptions(self, options, reftest):
+    if options.totalChunks is not None and options.thisChunk is None:
+      self.error("thisChunk must be specified when totalChunks is specified")
+
+    if options.totalChunks:
+      if not 1 <= options.thisChunk <= options.totalChunks:
+        self.error("thisChunk must be between 1 and totalChunks")
+
+    if options.logFile:
+      options.logFile = reftest.getFullPath(options.logFile)
+
+    if options.xrePath is not None:
+      if not os.access(options.xrePath, os.F_OK):
+        self.error("--xre-path '%s' not found" % options.xrePath)
+      if not os.path.isdir(options.xrePath):
+        self.error("--xre-path '%s' is not a directory" % options.xrePath)
+      options.xrePath = reftest.getFullPath(options.xrePath)
+
+    return options
 
 def main():
   automation = Automation()
@@ -249,6 +296,8 @@ def main():
     print >>sys.stderr, "No reftest.list specified."
     sys.exit(1)
 
+  options = parser.verifyCommonOptions(options, reftest)
+
   options.app = reftest.getFullPath(options.app)
   if not os.path.exists(options.app):
     print """Error: Path %(app)s doesn't exist.
@@ -258,27 +307,12 @@ Are you executing $objdir/_tests/reftest/runreftest.py?""" \
 
   if options.xrePath is None:
     options.xrePath = os.path.dirname(options.app)
-  else:
-    # allow relative paths
-    options.xrePath = reftest.getFullPath(options.xrePath)
 
   if options.symbolsPath and not isURL(options.symbolsPath):
     options.symbolsPath = reftest.getFullPath(options.symbolsPath)
   options.utilityPath = reftest.getFullPath(options.utilityPath)
 
-  if options.totalChunks is not None and options.thisChunk is None:
-    print "thisChunk must be specified when totalChunks is specified"
-    sys.exit(1)
-
-  if options.totalChunks:
-    if not 1 <= options.thisChunk <= options.totalChunks:
-      print "thisChunk must be between 1 and totalChunks"
-      sys.exit(1)
-  
-  if options.logFile:
-    options.logFile = reftest.getFullPath(options.logFile)
-
   sys.exit(reftest.runTests(args[0], options))
-  
+
 if __name__ == "__main__":
   main()

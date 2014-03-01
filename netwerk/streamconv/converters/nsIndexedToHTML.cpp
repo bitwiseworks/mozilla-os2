@@ -19,6 +19,7 @@
 #include "nsIPrefBranch.h"
 #include "nsIPrefLocalizedString.h"
 #include "nsIChromeRegistry.h"
+#include <algorithm>
 
 NS_IMPL_ISUPPORTS4(nsIndexedToHTML,
                    nsIDirIndexListener,
@@ -156,7 +157,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
     rv = mParser->OnStartRequest(request, aContext);
     if (NS_FAILED(rv)) return rv;
 
-    nsCAutoString baseUri, titleUri;
+    nsAutoCString baseUri, titleUri;
     rv = uri->GetAsciiSpec(baseUri);
     if (NS_FAILED(rv)) return rv;
     titleUri = baseUri;
@@ -179,7 +180,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
         // This is done by the 300: line generation in ftp, but we don't use
         // that - see above
         
-        nsCAutoString pw;
+        nsAutoCString pw;
         rv = uri->GetPassword(pw);
         if (NS_FAILED(rv)) return rv;
         if (!pw.IsEmpty()) {
@@ -192,7 +193,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
              if (NS_FAILED(rv)) return rv;
         }
 
-        nsCAutoString path;
+        nsAutoCString path;
         rv = uri->GetPath(path);
         if (NS_FAILED(rv)) return rv;
 
@@ -207,7 +208,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
         if (NS_FAILED(rv)) return rv;
         file->SetFollowLinks(true);
         
-        nsCAutoString url;
+        nsAutoCString url;
         rv = net_GetURLSpecFromFile(file, url);
         if (NS_FAILED(rv)) return rv;
         baseUri.Assign(url);
@@ -226,7 +227,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
         NS_ENSURE_SUCCESS(rv, rv);
 
     } else if (NS_SUCCEEDED(uri->SchemeIs("jar", &isScheme)) && isScheme) {
-        nsCAutoString path;
+        nsAutoCString path;
         rv = uri->GetPath(path);
         if (NS_FAILED(rv)) return rv;
 
@@ -244,7 +245,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
     else {
         // default behavior for other protocols is to assume the channel's
         // URL references a directory ending in '/' -- fixup if necessary.
-        nsCAutoString path;
+        nsAutoCString path;
         rv = uri->GetPath(path);
         if (NS_FAILED(rv)) return rv;
         if (baseUri.Last() != '/') {
@@ -355,6 +356,8 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
                          ".file > img {\n"
                          "  -moz-margin-end: 4px;\n"
                          "  -moz-margin-start: -20px;\n"
+                         "  max-width: 16px;\n"
+                         "  max-height: 16px;\n"
                          "  vertical-align: middle;\n"
                          "}\n"
                          ".dir::before {\n"
@@ -512,7 +515,7 @@ nsIndexedToHTML::DoOnStartRequest(nsIRequest* request, nsISupports *aContext,
     if (NS_FAILED(rv) && isSchemeFile) {
         nsCOMPtr<nsIPlatformCharset> platformCharset(do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv));
         NS_ENSURE_SUCCESS(rv, rv);
-        nsCAutoString charset;
+        nsAutoCString charset;
         rv = platformCharset->GetCharset(kPlatformCharsetSel_FileName, charset);
         NS_ENSURE_SUCCESS(rv, rv);
 
@@ -748,7 +751,7 @@ NS_IMETHODIMP
 nsIndexedToHTML::OnDataAvailable(nsIRequest *aRequest,
                                  nsISupports *aCtxt,
                                  nsIInputStream* aInput,
-                                 uint32_t aOffset,
+                                 uint64_t aOffset,
                                  uint32_t aCount) {
     return mParser->OnDataAvailable(aRequest, aCtxt, aInput, aOffset, aCount);
 }
@@ -820,7 +823,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
         descriptionAffix.Cut(0, descriptionAffix.Length() - 25);
         if (NS_IS_LOW_SURROGATE(descriptionAffix.First()))
             descriptionAffix.Cut(0, 1);
-        description.Truncate(NS_MIN<uint32_t>(71, description.Length() - 28));
+        description.Truncate(std::min<uint32_t>(71, description.Length() - 28));
         if (NS_IS_HIGH_SURROGATE(description.Last()))
             description.Truncate(description.Length() - 1);
 
@@ -860,7 +863,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
     if (NS_FAILED(rv)) return rv;
 
     // need to escape links
-    nsCAutoString escapeBuf;
+    nsAutoCString escapeBuf;
 
     NS_ConvertUTF16toUTF8 utf8UnEscapeSpec(unEscapeSpec);
 
@@ -931,7 +934,7 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest *aRequest,
         int64_t size;
         aIndex->GetSize(&size);
 
-        if (uint64_t(size) != LL_MAXUINT) {
+        if (uint64_t(size) != UINT64_MAX) {
             pushBuffer.AppendLiteral(" sortable-data=\"");
             pushBuffer.AppendInt(size);
             pushBuffer.AppendLiteral("\">");

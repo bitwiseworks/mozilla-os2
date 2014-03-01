@@ -24,10 +24,32 @@ SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0])))
 sys.path.insert(0, SCRIPT_DIR)
 import automationutils
 
+# --------------------------------------------------------------
+# TODO: this is a hack for mozbase without virtualenv, remove with bug 849900
+#
+here = os.path.dirname(__file__)
+mozbase = os.path.realpath(os.path.join(os.path.dirname(here), 'mozbase'))
+
+if os.path.isdir(mozbase):
+    for package in os.listdir(mozbase):
+        sys.path.append(os.path.join(mozbase, package))
+
+import mozcrash
+
+# ---------------------------------------------------------------
+
+_DEFAULT_PREFERENCE_FILE = os.path.join(SCRIPT_DIR, 'prefs_general.js')
+
 _DEFAULT_WEB_SERVER = "127.0.0.1"
 _DEFAULT_HTTP_PORT = 8888
 _DEFAULT_SSL_PORT = 4443
 _DEFAULT_WEBSOCKET_PORT = 9988
+
+# from nsIPrincipal.idl
+_APP_STATUS_NOT_INSTALLED = 0
+_APP_STATUS_INSTALLED     = 1
+_APP_STATUS_PRIVILEGED    = 2
+_APP_STATUS_CERTIFIED     = 3
 
 #expand _DIST_BIN = __XPC_BIN_PATH__
 #expand _IS_WIN32 = len("__WIN32__") != 0
@@ -47,6 +69,7 @@ _IS_CYGWIN = False
 #expand _IS_TEST_BUILD = __IS_TEST_BUILD__
 #expand _IS_DEBUG_BUILD = __IS_DEBUG_BUILD__
 #expand _CRASHREPORTER = __CRASHREPORTER__ == 1
+#expand _IS_ASAN = __IS_ASAN__ == 1
 
 
 if _IS_WIN32:
@@ -55,13 +78,21 @@ else:
   import errno
 
 
+def getGlobalLog():
+  return _log
+
+def resetGlobalLog(log):
+  while _log.handlers:
+    _log.removeHandler(_log.handlers[0])
+  handler = logging.StreamHandler(log)
+  _log.setLevel(logging.INFO)
+  _log.addHandler(handler)
+
 # We use the logging system here primarily because it'll handle multiple
 # threads, which is needed to process the output of the server and application
 # processes simultaneously.
 _log = logging.getLogger()
-handler = logging.StreamHandler(sys.stdout)
-_log.setLevel(logging.INFO)
-_log.addHandler(handler)
+resetGlobalLog(sys.stdout)
 
 
 #################
@@ -115,6 +146,7 @@ class Automation(object):
   IS_TEST_BUILD = _IS_TEST_BUILD
   IS_DEBUG_BUILD = _IS_DEBUG_BUILD
   CRASHREPORTER = _CRASHREPORTER
+  IS_ASAN = _IS_ASAN
 
   # timeout, in seconds
   DEFAULT_TIMEOUT = 60.0
@@ -268,40 +300,42 @@ class Automation(object):
     cursor.execute("PRAGMA user_version=3");
 
     # SQL copied from nsPermissionManager.cpp
-    cursor.execute("""CREATE TABLE moz_hosts (
-       id INTEGER PRIMARY KEY,
-       host TEXT,
-       type TEXT,
-       permission INTEGER,
-       expireType INTEGER,
-       expireTime INTEGER,
-       appId INTEGER,
-       isInBrowserElement INTEGER)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS moz_hosts (
+      id INTEGER PRIMARY KEY,
+      host TEXT,
+      type TEXT,
+      permission INTEGER,
+      expireType INTEGER,
+      expireTime INTEGER,
+      appId INTEGER,
+      isInBrowserElement INTEGER)""")
 
     # Insert desired permissions
-    c = 0
     for perm in permissions.keys():
       for host,allow in permissions[perm]:
-        c += 1
-        cursor.execute("INSERT INTO moz_hosts values(?, ?, ?, ?, 0, 0, 0, 0)",
-                       (c, host, perm, 1 if allow else 2))
+        cursor.execute("INSERT INTO moz_hosts values(NULL, ?, ?, ?, 0, 0, 0, 0)",
+                       (host, perm, 1 if allow else 2))
 
     # Commit and close
     permDB.commit()
     cursor.close()
 
   def setupTestApps(self, profileDir, apps):
-    webappJSONTemplate = Template(""""$name": {
-"origin": "$origin",
-"installOrigin": "$origin",
-"receipt": null,
-"installTime": 132333986000,
-"manifestURL": "$manifestURL",
-"localId": $localId
+    webappJSONTemplate = Template(""""$id": {
+  "origin": "$origin",
+  "installOrigin": "$origin",
+  "receipt": null,
+  "installTime": 132333986000,
+  "manifestURL": "$manifestURL",
+  "localId": $localId,
+  "id": "$id",
+  "appStatus": $appStatus,
+  "csp": "$csp"
 }""")
 
     manifestTemplate = Template("""{
   "name": "$name",
+  "csp": "$csp",
   "description": "$description",
   "launch_path": "/",
   "developer": {
@@ -324,16 +358,73 @@ class Automation(object):
 
     # Create webapps/webapps.json
     webappsDir = os.path.join(profileDir, "webapps")
-    os.mkdir(webappsDir);
+    if not os.access(webappsDir, os.F_OK):
+      os.mkdir(webappsDir)
 
+    lineRe = re.compile(r'(.*?)"(.*?)": (.*)')
+
+    webappsJSONFilename = os.path.join(webappsDir, "webapps.json")
     webappsJSON = []
-    for localId, app in enumerate(apps):
-      app['localId'] = localId + 1 # Has to be 1..n
-      webappsJSON.append(webappJSONTemplate.substitute(app))
-    webappsJSON = '{\n' + ',\n'.join(webappsJSON) + '\n}\n'
+    if os.access(webappsJSONFilename, os.F_OK):
+      # If there is an existing webapps.json file (which will be the case for
+      # b2g), we parse the data in the existing file before appending test
+      # test apps to it.
+      startId = 1
+      webappsJSONFile = open(webappsJSONFilename, "r")
+      contents = webappsJSONFile.read()
 
-    webappsJSONFile = open(os.path.join(webappsDir, "webapps.json"), "a")
-    webappsJSONFile.write(webappsJSON)
+      for app_content in contents.split('},'):
+        app = {}
+        # ghetto json parser needed due to lack of json/simplejson on test slaves
+        for line in app_content.split('\n'):
+          m = lineRe.match(line)
+          if m:
+            value = m.groups()[2]
+            # remove any trailing commas
+            if value[-1:] == ',':
+              value = value[:-1]
+            # set the app name from a line that looks like this:
+            # "name.gaiamobile.org": {
+            if value == '{':
+              app['id'] = m.groups()[1]
+            # parse string, None, bool and int types
+            elif value[0:1] == '"':
+              app[m.groups()[1]] = value[1:-1]
+            elif value == "null":
+              app[m.groups()[1]] = None
+            elif value == "true":
+              app[m.groups()[1]] = True
+            elif value == "false":
+              app[m.groups()[1]] = False
+            else:
+              app[m.groups()[1]] = int(value)
+        if app:
+          webappsJSON.append(app)
+
+      webappsJSONFile.close()
+
+    startId = 1
+    for app in webappsJSON:
+      if app['localId'] >= startId:
+        startId = app['localId'] + 1
+      if not app.get('csp'):
+        app['csp'] = ''
+      if not app.get('appStatus'):
+        app['appStatus'] = 3
+
+    for localId, app in enumerate(apps):
+      app['localId'] = localId + startId # localId must be from 1..N
+      if not app.get('id'):
+        app['id'] = app['name']
+      webappsJSON.append(app)
+
+    contents = []
+    for app in webappsJSON:
+      contents.append(webappJSONTemplate.substitute(app))
+    contents = '{\n' + ',\n'.join(contents) + '\n}\n'
+
+    webappsJSONFile = open(webappsJSONFilename, "w")
+    webappsJSONFile.write(contents)
     webappsJSONFile.close()
 
     # Create manifest file for each app.
@@ -347,102 +438,31 @@ class Automation(object):
       manifestFile.write(manifest)
       manifestFile.close()
 
-  def initializeProfile(self, profileDir, extraPrefs = [], useServerLocations = False):
+  def initializeProfile(self, profileDir,
+                              extraPrefs=None,
+                              useServerLocations=False,
+                              initialProfile=None,
+                              prefsPath=_DEFAULT_PREFERENCE_FILE):
     " Sets up the standard testing profile."
 
+    extraPrefs = extraPrefs or []
     prefs = []
     # Start with a clean slate.
     shutil.rmtree(profileDir, True)
-    os.mkdir(profileDir)
+
+    if initialProfile:
+      shutil.copytree(initialProfile, profileDir)
+    else:
+      os.mkdir(profileDir)
 
     # Set up permissions database
     locations = self.readLocations()
     self.setupPermissionsDatabase(profileDir,
       {'allowXULXBL':[(l.host, 'noxul' not in l.options) for l in locations]});
 
-    part = """\
-user_pref("social.skipLoadingProviders", true);
-user_pref("browser.console.showInPanel", true);
-user_pref("browser.dom.window.dump.enabled", true);
-user_pref("browser.firstrun.show.localepicker", false);
-user_pref("browser.firstrun.show.uidiscovery", false);
-user_pref("browser.startup.page", 0); // use about:blank, not browser.startup.homepage
-user_pref("browser.ui.layout.tablet", 0); // force tablet UI off
-user_pref("dom.allow_scripts_to_close_windows", true);
-user_pref("dom.disable_open_during_load", false);
-user_pref("dom.max_script_run_time", 0); // no slow script dialogs
-user_pref("hangmonitor.timeout", 0); // no hang monitor
-user_pref("dom.max_chrome_script_run_time", 0);
-user_pref("dom.popup_maximum", -1);
-user_pref("dom.send_after_paint_to_content", true);
-user_pref("dom.successive_dialog_time_limit", 0);
-user_pref("signed.applets.codebase_principal_support", true);
-user_pref("security.warn_submit_insecure", false);
-user_pref("browser.shell.checkDefaultBrowser", false);
-user_pref("shell.checkDefaultClient", false);
-user_pref("browser.warnOnQuit", false);
-user_pref("accessibility.typeaheadfind.autostart", false);
-user_pref("javascript.options.showInConsole", true);
-user_pref("devtools.errorconsole.enabled", true);
-user_pref("layout.debug.enable_data_xbl", true);
-user_pref("browser.EULA.override", true);
-user_pref("javascript.options.jit_hardening", true);
-user_pref("gfx.color_management.force_srgb", true);
-user_pref("network.manage-offline-status", false);
-user_pref("dom.min_background_timeout_value", 1000);
-user_pref("test.mousescroll", true);
-user_pref("security.default_personal_cert", "Select Automatically"); // Need to client auth test be w/o any dialogs
-user_pref("network.http.prompt-temp-redirect", false);
-user_pref("media.cache_size", 100);
-user_pref("security.warn_viewing_mixed", false);
-user_pref("app.update.enabled", false);
-user_pref("app.update.staging.enabled", false);
-user_pref("browser.panorama.experienced_first_run", true); // Assume experienced
-user_pref("dom.w3c_touch_events.enabled", true);
-user_pref("toolkit.telemetry.prompted", 2);
-// Existing tests assume there is no font size inflation.
-user_pref("font.size.inflation.emPerLine", 0);
-user_pref("font.size.inflation.minTwips", 0);
-
-// Only load extensions from the application and user profile
-// AddonManager.SCOPE_PROFILE + AddonManager.SCOPE_APPLICATION
-user_pref("extensions.enabledScopes", 5);
-// Disable metadata caching for installed add-ons by default
-user_pref("extensions.getAddons.cache.enabled", false);
-// Disable intalling any distribution add-ons
-user_pref("extensions.installDistroAddons", false);
-
-user_pref("extensions.testpilot.runStudies", false);
-
-user_pref("geo.wifi.uri", "http://%(server)s/tests/dom/tests/mochitest/geolocation/network_geolocation.sjs");
-user_pref("geo.wifi.testing", true);
-user_pref("geo.ignore.location_filter", true);
-
-user_pref("camino.warn_when_closing", false); // Camino-only, harmless to others
-
-// Make url-classifier updates so rare that they won't affect tests
-user_pref("urlclassifier.updateinterval", 172800);
-// Point the url-classifier to the local testing server for fast failures
-user_pref("browser.safebrowsing.gethashURL", "http://%(server)s/safebrowsing-dummy/gethash");
-user_pref("browser.safebrowsing.keyURL", "http://%(server)s/safebrowsing-dummy/newkey");
-user_pref("browser.safebrowsing.updateURL", "http://%(server)s/safebrowsing-dummy/update");
-// Point update checks to the local testing server for fast failures
-user_pref("extensions.update.url", "http://%(server)s/extensions-dummy/updateURL");
-user_pref("extensions.update.background.url", "http://%(server)s/extensions-dummy/updateBackgroundURL");
-user_pref("extensions.blocklist.url", "http://%(server)s/extensions-dummy/blocklistURL");
-user_pref("extensions.hotfix.url", "http://%(server)s/extensions-dummy/hotfixURL");
-// Make sure opening about:addons won't hit the network
-user_pref("extensions.webservice.discoverURL", "http://%(server)s/extensions-dummy/discoveryURL");
-// Make sure AddonRepository won't hit the network
-user_pref("extensions.getAddons.maxResults", 0);
-user_pref("extensions.getAddons.get.url", "http://%(server)s/extensions-dummy/repositoryGetURL");
-user_pref("extensions.getAddons.getWithPerformance.url", "http://%(server)s/extensions-dummy/repositoryGetWithPerformanceURL");
-user_pref("extensions.getAddons.search.browseURL", "http://%(server)s/extensions-dummy/repositoryBrowseURL");
-user_pref("extensions.getAddons.search.url", "http://%(server)s/extensions-dummy/repositorySearchURL");
-
-// Make enablePrivilege continue to work for test code. :-(
-user_pref("security.enablePrivilege.enable_for_tests", true);
-""" % { "server" : self.webServer + ":" + str(self.httpPort) }
+    f = open(prefsPath, 'r')
+    part = f.read() % {"server" : "%s:%s" % (self.webServer, self.httpPort)}
+    f.close()
     prefs.append(part)
 
     if useServerLocations:
@@ -491,16 +511,15 @@ function FindProxyForURL(url, host)
          "sslport": self.sslPort }
       pacURL = "".join(pacURL.splitlines())
 
-      part += """
+      part = """
 user_pref("network.proxy.type", 2);
 user_pref("network.proxy.autoconfig_url", "%(pacURL)s");
 
 user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless to others
 """ % {"pacURL": pacURL}
-      prefs.append(part)
     else:
       part = 'user_pref("network.proxy.type", 0);\n'
-      prefs.append(part)
+    prefs.append(part)
 
     for v in extraPrefs:
       thispref = v.split("=", 1)
@@ -518,33 +537,99 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
     apps = [
       {
         'name': 'http_example_org',
+        'csp': '',
         'origin': 'http://example.org',
         'manifestURL': 'http://example.org/manifest.webapp',
-        'description': 'http://example.org App'
+        'description': 'http://example.org App',
+        'appStatus': _APP_STATUS_INSTALLED
       },
       {
         'name': 'https_example_com',
+        'csp': '',
         'origin': 'https://example.com',
         'manifestURL': 'https://example.com/manifest.webapp',
-        'description': 'https://example.com App'
+        'description': 'https://example.com App',
+        'appStatus': _APP_STATUS_INSTALLED
       },
       {
         'name': 'http_test1_example_org',
+        'csp': '',
         'origin': 'http://test1.example.org',
         'manifestURL': 'http://test1.example.org/manifest.webapp',
-        'description': 'http://test1.example.org App'
+        'description': 'http://test1.example.org App',
+        'appStatus': _APP_STATUS_INSTALLED
       },
       {
         'name': 'http_test1_example_org_8000',
+        'csp': '',
         'origin': 'http://test1.example.org:8000',
         'manifestURL': 'http://test1.example.org:8000/manifest.webapp',
-        'description': 'http://test1.example.org:8000 App'
+        'description': 'http://test1.example.org:8000 App',
+        'appStatus': _APP_STATUS_INSTALLED
       },
       {
         'name': 'http_sub1_test1_example_org',
+        'csp': '',
         'origin': 'http://sub1.test1.example.org',
         'manifestURL': 'http://sub1.test1.example.org/manifest.webapp',
-        'description': 'http://sub1.test1.example.org App'
+        'description': 'http://sub1.test1.example.org App',
+        'appStatus': _APP_STATUS_INSTALLED
+      },
+      {
+        'name': 'https_example_com_privileged',
+        'csp': '',
+        'origin': 'https://example.com',
+        'manifestURL': 'https://example.com/manifest_priv.webapp',
+        'description': 'https://example.com Privileged App',
+        'appStatus': _APP_STATUS_PRIVILEGED
+      },
+      {
+        'name': 'https_example_com_certified',
+        'csp': '',
+        'origin': 'https://example.com',
+        'manifestURL': 'https://example.com/manifest_cert.webapp',
+        'description': 'https://example.com Certified App',
+        'appStatus': _APP_STATUS_CERTIFIED
+      },
+      {
+        'name': 'https_example_csp_certified',
+        'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
+        'origin': 'https://example.com',
+        'manifestURL': 'https://example.com/manifest_csp_cert.webapp',
+        'description': 'https://example.com Certified App with manifest policy',
+        'appStatus': _APP_STATUS_CERTIFIED
+      },
+      {
+        'name': 'https_example_csp_installed',
+        'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
+        'origin': 'https://example.com',
+        'manifestURL': 'https://example.com/manifest_csp_inst.webapp',
+        'description': 'https://example.com Installed App with manifest policy',
+        'appStatus': _APP_STATUS_INSTALLED
+      },
+      {
+        'name': 'https_example_csp_privileged',
+        'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
+        'origin': 'https://example.com',
+        'manifestURL': 'https://example.com/manifest_csp_priv.webapp',
+        'description': 'https://example.com Privileged App with manifest policy',
+        'appStatus': _APP_STATUS_PRIVILEGED
+      },
+      {
+        'name': 'https_a_domain_certified',
+        'csp': "",
+        'origin': 'https://acertified.com',
+        'manifestURL': 'https://acertified.com/manifest.webapp',
+        'description': 'https://acertified.com Certified App',
+        'appStatus': _APP_STATUS_CERTIFIED
+      },
+      {
+        'name': 'https_a_domain_privileged',
+        'csp': "",
+        'origin': 'https://aprivileged.com',
+        'manifestURL': 'https://aprivileged.com/manifest.webapp',
+        'description': 'https://aprivileged.com Privileged App ',
+        'appStatus': _APP_STATUS_PRIVILEGED
       },
     ];
     self.setupTestApps(profileDir, apps)
@@ -660,6 +745,33 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
     env['GNOME_DISABLE_CRASH_DIALOG'] = '1'
     env['XRE_NO_WINDOWS_CRASH_DIALOG'] = '1'
     env['NS_TRACE_MALLOC_DISABLE_STACKS'] = '1'
+
+    # Additional temporary logging while we try to debug some intermittent
+    # WebRTC conditions. This is necessary to troubleshoot bugs 841496,
+    # 841150, and 839677 (at least)
+    # Also (temporary) bug 870002 (mediastreamgraph)
+    if 'NSPR_LOG_MODULES' not in env:
+      env['NSPR_LOG_MODULES'] = 'signaling:5,mtransport:3'
+    env['R_LOG_LEVEL'] = '5'
+    env['R_LOG_DESTINATION'] = 'stderr'
+    env['R_LOG_VERBOSE'] = '1'
+
+    # ASan specific environment stuff
+    if self.IS_ASAN and (self.IS_LINUX or self.IS_MAC):
+      try:
+        totalMemory = int(os.popen("free").readlines()[1].split()[1])
+
+        # Only 2 GB RAM or less available? Use custom ASan options to reduce
+        # the amount of resources required to do the tests. Standard options 
+        # will otherwise lead to OOM conditions on the current test slaves.
+        if totalMemory <= 1024 * 1024 * 2:
+          self.log.info("INFO | automation.py | ASan running in low-memory configuration")
+          env["ASAN_OPTIONS"] = "quarantine_size=50331648:redzone=64"
+      except OSError,err:
+        self.log.info("Failed determine available memory, disabling ASan low-memory configuration: %s", err.strerror)
+      except:
+        self.log.info("Failed determine available memory, disabling ASan low-memory configuration")
+
     return env
 
   if IS_WIN32:
@@ -685,7 +797,7 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
           if err == 38 or err == 109: # ERROR_HANDLE_EOF || ERROR_BROKEN_PIPE
             return ('', False)
           else:
-            log.error("readWithTimeout got error: %d", err)
+            self.log.error("readWithTimeout got error: %d", err)
         if l.value > 0:
           # we're assuming that the output is line-buffered,
           # which is not unreasonable
@@ -709,7 +821,7 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
       pHandle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, 0, pid)
       if not pHandle:
         return
-      success = ctypes.windll.kernel32.TerminateProcess(pHandle, 1)
+      ctypes.windll.kernel32.TerminateProcess(pHandle, 1)
       ctypes.windll.kernel32.CloseHandle(pHandle)
 
   else:
@@ -745,6 +857,10 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
       os.kill(pid, signal.SIGKILL)
 
   def dumpScreen(self, utilityPath):
+    if self.haveDumpedScreen:
+      self.log.info("Not taking screenshot here: see the one that was previously logged")
+      return
+
     self.haveDumpedScreen = True;
 
     # Need to figure out what tool and whether it write to a file or stdout
@@ -791,27 +907,28 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
     encoded = base64.b64encode(image)
     self.log.info("SCREENSHOT: data:image/png;base64,%s", encoded)
 
-  def killAndGetStack(self, proc, utilityPath, debuggerInfo):
-    """Kill the process, preferrably in a way that gets us a stack trace."""
+  def killAndGetStack(self, processPID, utilityPath, debuggerInfo):
+    """Kill the process, preferrably in a way that gets us a stack trace.
+       Also attempts to obtain a screenshot before killing the process."""
     if not debuggerInfo:
-      if self.haveDumpedScreen:
-        self.log.info("Not taking screenshot here: see the one that was previously logged")
-      else:
-        self.dumpScreen(utilityPath)
+      self.dumpScreen(utilityPath)
+    self.killAndGetStackNoScreenshot(processPID, utilityPath, debuggerInfo)
 
+  def killAndGetStackNoScreenshot(self, processPID, utilityPath, debuggerInfo):
+    """Kill the process, preferrably in a way that gets us a stack trace."""
     if self.CRASHREPORTER and not debuggerInfo:
       if self.UNIXISH:
         # ABRT will get picked up by Breakpad's signal handler
-        os.kill(proc.pid, signal.SIGABRT)
+        os.kill(processPID, signal.SIGABRT)
         return
       elif self.IS_WIN32:
         # We should have a "crashinject" program in our utility path
         crashinject = os.path.normpath(os.path.join(utilityPath, "crashinject.exe"))
-        if os.path.exists(crashinject) and subprocess.Popen([crashinject, str(proc.pid)]).wait() == 0:
+        if os.path.exists(crashinject) and subprocess.Popen([crashinject, str(processPID)]).wait() == 0:
           return
       #TODO: kill the process such that it triggers Breakpad on OS X (bug 525296)
     self.log.info("Can't trigger Breakpad, just killing process")
-    proc.kill()
+    self.killPid(processPID)
 
   def waitForFinish(self, proc, utilityPath, timeout, maxTime, startTime, debuggerInfo, symbolsPath):
     """ Look for timeout or crashes and return the status after the process terminates """
@@ -824,7 +941,7 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
     else:
       logsource = proc.stdout
 
-      if self.IS_DEBUG_BUILD and (self.IS_MAC or self.IS_LINUX) and symbolsPath and os.path.exists(symbolsPath):
+      if self.IS_DEBUG_BUILD and symbolsPath and os.path.exists(symbolsPath):
         # Run each line through a function in fix_stack_using_bpsyms.py (uses breakpad symbol files)
         # This method is preferred for Tinderbox builds, since native symbols may have been stripped.
         sys.path.insert(0, utilityPath)
@@ -853,20 +970,17 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
         if "TEST-START" in line and "|" in line:
           self.lastTestSeen = line.split("|")[1].strip()
         if not debuggerInfo and "TEST-UNEXPECTED-FAIL" in line and "Test timed out" in line:
-          if self.haveDumpedScreen:
-            self.log.info("Not taking screenshot here: see the one that was previously logged")
-          else:
-            self.dumpScreen(utilityPath)
+          self.dumpScreen(utilityPath)
 
         (line, didTimeout) = self.readWithTimeout(logsource, timeout)
         if not hitMaxTime and maxTime and datetime.now() - startTime > timedelta(seconds = maxTime):
           # Kill the application, but continue reading from stack fixer so as not to deadlock on stackFixerProcess.wait().
           hitMaxTime = True
           self.log.info("TEST-UNEXPECTED-FAIL | %s | application ran for longer than allowed maximum time of %d seconds", self.lastTestSeen, int(maxTime))
-          self.killAndGetStack(proc, utilityPath, debuggerInfo)
+          self.killAndGetStack(proc.pid, utilityPath, debuggerInfo)
       if didTimeout:
         self.log.info("TEST-UNEXPECTED-FAIL | %s | application timed out after %d seconds with no output", self.lastTestSeen, int(timeout))
-        self.killAndGetStack(proc, utilityPath, debuggerInfo)
+        self.killAndGetStack(proc.pid, utilityPath, debuggerInfo)
 
     status = proc.wait()
     if status == 0:
@@ -912,36 +1026,41 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
     args.extend(extraArgs)
     return cmd, args
 
-  def checkForZombies(self, processLog):
+  def checkForZombies(self, processLog, utilityPath, debuggerInfo):
     """ Look for hung processes """
     if not os.path.exists(processLog):
-      self.log.info('INFO | automation.py | PID log not found: %s', processLog)
-    else:
-      self.log.info('INFO | automation.py | Reading PID log: %s', processLog)
-      processList = []
-      pidRE = re.compile(r'launched child process (\d+)$')
-      processLogFD = open(processLog)
-      for line in processLogFD:
-        self.log.info(line.rstrip())
-        m = pidRE.search(line)
-        if m:
-          processList.append(int(m.group(1)))
-      processLogFD.close()
+      self.log.info('Automation Error: PID log not found: %s', processLog)
+      # Whilst no hung process was found, the run should still display as a failure
+      return True
 
-      for processPID in processList:
-        self.log.info("INFO | automation.py | Checking for orphan process with PID: %d", processPID)
-        if self.isPidAlive(processPID):
-          self.log.info("TEST-UNEXPECTED-FAIL | automation.py | child process %d still alive after shutdown", processPID)
-          self.killPid(processPID)
+    foundZombie = False
+    self.log.info('INFO | zombiecheck | Reading PID log: %s', processLog)
+    processList = []
+    pidRE = re.compile(r'launched child process (\d+)$')
+    processLogFD = open(processLog)
+    for line in processLogFD:
+      self.log.info(line.rstrip())
+      m = pidRE.search(line)
+      if m:
+        processList.append(int(m.group(1)))
+    processLogFD.close()
 
-  def checkForCrashes(self, profileDir, symbolsPath):
-    automationutils.checkForCrashes(os.path.join(profileDir, "minidumps"), symbolsPath, self.lastTestSeen)
+    for processPID in processList:
+      self.log.info("INFO | zombiecheck | Checking for orphan process with PID: %d", processPID)
+      if self.isPidAlive(processPID):
+        foundZombie = True
+        self.log.info("TEST-UNEXPECTED-FAIL | zombiecheck | child process %d still alive after shutdown", processPID)
+        self.killAndGetStack(processPID, utilityPath, debuggerInfo)
+    return foundZombie
+
+  def checkForCrashes(self, minidumpDir, symbolsPath):
+    return mozcrash.check_for_crashes(minidumpDir, symbolsPath, test_name=self.lastTestSeen)
 
   def runApp(self, testURL, env, app, profileDir, extraArgs,
              runSSLTunnel = False, utilityPath = None,
              xrePath = None, certPath = None,
              debuggerInfo = None, symbolsPath = None,
-             timeout = -1, maxTime = None):
+             timeout = -1, maxTime = None, onLaunch = None):
     """
     Run the app, log the duration it took to execute, return the status code.
     Kills the app if it runs for longer than |maxTime| seconds, or outputs nothing for |timeout| seconds.
@@ -998,12 +1117,21 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
                  stderr = subprocess.STDOUT)
     self.log.info("INFO | automation.py | Application pid: %d", proc.pid)
 
+    if onLaunch is not None:
+      # Allow callers to specify an onLaunch callback to be fired after the
+      # app is launched.
+      onLaunch()
+
     status = self.waitForFinish(proc, utilityPath, timeout, maxTime, startTime, debuggerInfo, symbolsPath)
     self.log.info("INFO | automation.py | Application ran for: %s", str(datetime.now() - startTime))
 
     # Do a final check for zombie child processes.
-    self.checkForZombies(processLog)
-    self.checkForCrashes(profileDir, symbolsPath)
+    zombieProcesses = self.checkForZombies(processLog, utilityPath, debuggerInfo)
+
+    crashed = self.checkForCrashes(os.path.join(profileDir, "minidumps"), symbolsPath)
+
+    if crashed or zombieProcesses:
+      status = 1
 
     if os.path.exists(processLog):
       os.unlink(processLog)
@@ -1097,3 +1225,8 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
 
     else:
       self.log.info("INFO | automation.py | Cannot install extension, invalid extensionSource at: %s", extensionSource)
+
+  def elf_arm(self, filename):
+    data = open(filename, 'rb').read(20)
+    return data[:4] == "\x7fELF" and ord(data[18]) == 40 # EM_ARM
+

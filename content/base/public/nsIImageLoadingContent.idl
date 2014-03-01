@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "imgIDecoderObserver.idl"
+#include "imgINotificationObserver.idl"
 
 interface imgIRequest;
 interface nsIChannel;
@@ -32,10 +32,13 @@ interface nsIFrame;
  * missed.  We should NOT freeze this interface without considering
  * this issue.  (It could be that the image status on imgIRequest is
  * sufficient, when combined with the imageBlockingStatus information.)
+ *
+ * Please make sure to update the MozImageLoadingContent WebIDL
+ * interface to mirror this interface when changing it.
  */
 
-[scriptable, uuid(4bf1a7c5-6edb-4191-a257-e31a90f6aa85)]
-interface nsIImageLoadingContent : imgIDecoderObserver
+[scriptable, builtinclass, uuid(e3968acd-b796-4ca3-aec0-e7f0880f2219)]
+interface nsIImageLoadingContent : imgINotificationObserver
 {
   /**
    * Request types.  Image loading content nodes attempt to do atomic
@@ -75,14 +78,14 @@ interface nsIImageLoadingContent : imgIDecoderObserver
    *
    * @throws NS_ERROR_OUT_OF_MEMORY
    */
-  void addObserver(in imgIDecoderObserver aObserver);
+  void addObserver(in imgINotificationObserver aObserver);
 
   /**
    * Used to unregister an image decoder observer.
    *
    * @param aObserver the observer to unregister
    */
-  void removeObserver(in imgIDecoderObserver aObserver);
+  void removeObserver(in imgINotificationObserver aObserver);
   
   /**
    * Accessor to get the image requests
@@ -111,7 +114,7 @@ interface nsIImageLoadingContent : imgIDecoderObserver
 
   /**
    * Used to find out what type of request one is dealing with (eg
-   * which request got passed through to the imgIDecoderObserver
+   * which request got passed through to the imgINotificationObserver
    * interface of an observer)
    *
    * @param aRequest the request whose type we want to know
@@ -156,4 +159,12 @@ interface nsIImageLoadingContent : imgIDecoderObserver
    * as PR_FALSE to revert ImageState() to its original behaviour.
    */
   void forceImageState(in boolean aForce, in unsigned long long aState);
+
+  /**
+   * A visible count is stored, if it is non-zero then this image is considered
+   * visible. These methods increment, decrement, or return the visible coount.
+   */
+  [noscript, notxpcom] void IncrementVisibleCount();
+  [noscript, notxpcom] void DecrementVisibleCount();
+  [noscript, notxpcom] uint32_t GetVisibleCount();
 };

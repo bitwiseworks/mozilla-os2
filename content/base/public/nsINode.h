@@ -6,16 +6,18 @@
 #ifndef nsINode_h___
 #define nsINode_h___
 
+#include "mozilla/Likely.h"
 #include "nsCOMPtr.h"               // for member, local
 #include "nsGkAtoms.h"              // for nsGkAtoms::baseURIProperty
-#include "nsIDOMEventTarget.h"      // for base class
+#include "nsIDOMNode.h"
+#include "nsIDOMNodeSelector.h"     // base class
 #include "nsINodeInfo.h"            // member (in nsCOMPtr)
 #include "nsIVariant.h"             // for use in GetUserData()
 #include "nsNodeInfoManager.h"      // for use in NodePrincipal()
 #include "nsPropertyTable.h"        // for typedefs
 #include "nsTObserverArray.h"       // for member
 #include "nsWindowMemoryReporter.h" // for NS_DECL_SIZEOF_EXCLUDING_THIS
-#include "nsWrapperCache.h"         // for base class
+#include "mozilla/dom/EventTarget.h" // for base class
 
 // Including 'windows.h' will #define GetClassInfo to something else.
 #ifdef XP_WIN
@@ -26,10 +28,10 @@
 
 class nsAttrAndChildArray;
 class nsChildContentList;
+class nsDOMAttributeMap;
 class nsIContent;
 class nsIDocument;
 class nsIDOMElement;
-class nsIDOMNode;
 class nsIDOMNodeList;
 class nsIDOMUserDataHandler;
 class nsIEditor;
@@ -45,29 +47,45 @@ class nsXPCClassInfo;
 
 namespace mozilla {
 namespace dom {
+/**
+ * @return true if aChar is what the DOM spec defines as 'space character'.
+ * http://dom.spec.whatwg.org/#space-character
+ */
+inline bool IsSpaceCharacter(PRUnichar aChar) {
+  return aChar == ' ' || aChar == '\t' || aChar == '\n' || aChar == '\r' ||
+         aChar == '\f';
+}
+inline bool IsSpaceCharacter(char aChar) {
+  return aChar == ' ' || aChar == '\t' || aChar == '\n' || aChar == '\r' ||
+         aChar == '\f';
+}
 class Element;
+class EventHandlerNonNull;
+class OnErrorEventHandlerNonNull;
+template<typename T> class Optional;
 } // namespace dom
 } // namespace mozilla
 
 namespace JS {
 class Value;
+template<typename T> class Handle;
 }
 
-inline void SetDOMStringToNull(nsAString& aString);
+#define NODE_FLAG_BIT(n_) (1U << (WRAPPER_CACHE_FLAGS_BITS_USED + (n_)))
 
 enum {
   // This bit will be set if the node has a listener manager.
-  NODE_HAS_LISTENERMANAGER =     0x00000001U,
+  NODE_HAS_LISTENERMANAGER =              NODE_FLAG_BIT(0),
 
   // Whether this node has had any properties set on it
-  NODE_HAS_PROPERTIES =          0x00000002U,
+  NODE_HAS_PROPERTIES =                   NODE_FLAG_BIT(1),
 
   // Whether this node is the root of an anonymous subtree.  Note that this
   // need not be a native anonymous subtree.  Any anonymous subtree, including
   // XBL-generated ones, will do.  This flag is set-once: once a node has it,
   // it must not be removed.
   // NOTE: Should only be used on nsIContent nodes
-  NODE_IS_ANONYMOUS =            0x00000004U,
+  NODE_IS_ANONYMOUS =                     NODE_FLAG_BIT(2),
 
   // Whether the node has some ancestor, possibly itself, that is native
   // anonymous.  This includes ancestors crossing XBL scopes, in cases when an
@@ -75,39 +93,39 @@ enum {
   // ancestor.  This flag is set-once: once a node has it, it must not be
   // removed.
   // NOTE: Should only be used on nsIContent nodes
-  NODE_IS_IN_ANONYMOUS_SUBTREE = 0x00000008U,
+  NODE_IS_IN_ANONYMOUS_SUBTREE =          NODE_FLAG_BIT(3),
 
   // Whether this node is the root of a native anonymous (from the perspective
   // of its parent) subtree.  This flag is set-once: once a node has it, it
   // must not be removed.
   // NOTE: Should only be used on nsIContent nodes
-  NODE_IS_NATIVE_ANONYMOUS_ROOT = 0x00000010U,
+  NODE_IS_NATIVE_ANONYMOUS_ROOT =         NODE_FLAG_BIT(4),
 
   // Forces the XBL code to treat this node as if it were
   // in the document and therefore should get bindings attached.
-  NODE_FORCE_XBL_BINDINGS =      0x00000020U,
+  NODE_FORCE_XBL_BINDINGS =               NODE_FLAG_BIT(5),
 
   // Whether a binding manager may have a pointer to this
-  NODE_MAY_BE_IN_BINDING_MNGR =  0x00000040U,
+  NODE_MAY_BE_IN_BINDING_MNGR =           NODE_FLAG_BIT(6),
 
-  NODE_IS_EDITABLE =             0x00000080U,
+  NODE_IS_EDITABLE =                      NODE_FLAG_BIT(7),
 
   // For all Element nodes, NODE_MAY_HAVE_CLASS is guaranteed to be set if the
   // node in fact has a class, but may be set even if it doesn't.
-  NODE_MAY_HAVE_CLASS =          0x00000100U,
+  NODE_MAY_HAVE_CLASS =                   NODE_FLAG_BIT(8),
 
-  NODE_IS_INSERTION_PARENT =     0x00000200U,
+  NODE_IS_INSERTION_PARENT =              NODE_FLAG_BIT(9),
 
   // Node has an :empty or :-moz-only-whitespace selector
-  NODE_HAS_EMPTY_SELECTOR =      0x00000400U,
+  NODE_HAS_EMPTY_SELECTOR =               NODE_FLAG_BIT(10),
 
   // A child of the node has a selector such that any insertion,
   // removal, or appending of children requires restyling the parent.
-  NODE_HAS_SLOW_SELECTOR =       0x00000800U,
+  NODE_HAS_SLOW_SELECTOR =                NODE_FLAG_BIT(11),
 
   // A child of the node has a :first-child, :-moz-first-node,
   // :only-child, :last-child or :-moz-last-node selector.
-  NODE_HAS_EDGE_CHILD_SELECTOR = 0x00001000U,
+  NODE_HAS_EDGE_CHILD_SELECTOR =          NODE_FLAG_BIT(12),
 
   // A child of the node has a selector such that any insertion or
   // removal of children requires restyling later siblings of that
@@ -116,51 +134,47 @@ enum {
   // other content tree changes (e.g., the child changes to or from
   // matching :empty due to a grandchild insertion or removal), the
   // child's later siblings must also be restyled.
-  NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS
-                               = 0x00002000U,
+  NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS = NODE_FLAG_BIT(13),
 
-  NODE_ALL_SELECTOR_FLAGS =      NODE_HAS_EMPTY_SELECTOR |
-                                 NODE_HAS_SLOW_SELECTOR |
-                                 NODE_HAS_EDGE_CHILD_SELECTOR |
-                                 NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS,
+  NODE_ALL_SELECTOR_FLAGS =               NODE_HAS_EMPTY_SELECTOR |
+                                          NODE_HAS_SLOW_SELECTOR |
+                                          NODE_HAS_EDGE_CHILD_SELECTOR |
+                                          NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS,
 
-  NODE_ATTACH_BINDING_ON_POSTCREATE
-                               = 0x00004000U,
+  NODE_ATTACH_BINDING_ON_POSTCREATE =     NODE_FLAG_BIT(14),
 
   // This node needs to go through frame construction to get a frame (or
   // undisplayed entry).
-  NODE_NEEDS_FRAME =             0x00008000U,
+  NODE_NEEDS_FRAME =                      NODE_FLAG_BIT(15),
 
   // At least one descendant in the flattened tree has NODE_NEEDS_FRAME set.
   // This should be set on every node on the flattened tree path between the
   // node(s) with NODE_NEEDS_FRAME and the root content.
-  NODE_DESCENDANTS_NEED_FRAMES = 0x00010000U,
+  NODE_DESCENDANTS_NEED_FRAMES =          NODE_FLAG_BIT(16),
 
   // Set if the node has the accesskey attribute set.
-  NODE_HAS_ACCESSKEY           = 0x00020000U,
-
-  // Set if the node is handling a click.
-  NODE_HANDLING_CLICK          = 0x00040000U,
-
-  // Set if the node has had :hover selectors matched against it
-  NODE_HAS_RELEVANT_HOVER_RULES = 0x00080000U,
+  NODE_HAS_ACCESSKEY =                    NODE_FLAG_BIT(17),
 
   // Set if the node has right-to-left directionality
-  NODE_HAS_DIRECTION_RTL        = 0x00100000U,
+  NODE_HAS_DIRECTION_RTL =                NODE_FLAG_BIT(18),
 
   // Set if the node has left-to-right directionality
-  NODE_HAS_DIRECTION_LTR        = 0x00200000U,
+  NODE_HAS_DIRECTION_LTR =                NODE_FLAG_BIT(19),
 
-  NODE_ALL_DIRECTION_FLAGS      = NODE_HAS_DIRECTION_LTR | NODE_HAS_DIRECTION_RTL,
+  NODE_ALL_DIRECTION_FLAGS =              NODE_HAS_DIRECTION_LTR |
+                                          NODE_HAS_DIRECTION_RTL,
 
-  NODE_CHROME_ONLY_ACCESS       = 0x00400000U,
+  NODE_CHROME_ONLY_ACCESS =               NODE_FLAG_BIT(20),
 
-  NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS
-                                = 0x00800000U,
+  NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS =    NODE_FLAG_BIT(21),
 
   // Remaining bits are node type specific.
-  NODE_TYPE_SPECIFIC_BITS_OFFSET =        24
+  NODE_TYPE_SPECIFIC_BITS_OFFSET =        22
 };
+
+// Make sure we have space for our bits
+#define ASSERT_NODE_FLAGS_SPACE(n) PR_STATIC_ASSERT(WRAPPER_CACHE_FLAGS_BITS_USED + (n) <= 32)
+ASSERT_NODE_FLAGS_SPACE(NODE_TYPE_SPECIFIC_BITS_OFFSET);
 
 /**
  * Class used to detect unexpected mutations. To use the class create an
@@ -242,16 +256,15 @@ private:
 
 // IID for the nsINode interface
 #define NS_INODE_IID \
-{ 0xf73e3890, 0xe4ab, 0x453e, \
-  { 0x8c, 0x78, 0x2d, 0x1f, 0xa4, 0x0b, 0x48, 0x00 } }
+{ 0x5daa9e95, 0xe49c, 0x4b41, \
+  { 0xb2, 0x02, 0xde, 0xa9, 0xd3, 0x06, 0x21, 0x17 } }
 
 /**
  * An internal interface that abstracts some DOMNode-related parts that both
  * nsIContent and nsIDocument share.  An instance of this interface has a list
  * of nsIContent children and provides access to them.
  */
-class nsINode : public nsIDOMEventTarget,
-                public nsWrapperCache
+class nsINode : public mozilla::dom::EventTarget
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INODE_IID)
@@ -260,15 +273,15 @@ public:
   // measurement of the following members may be added later if DMD finds it is
   // worthwhile:
   // - nsGenericHTMLElement:  mForm, mFieldSet
-  // - nsGenericHTMLFrameElement: mFrameLoader (bug 672539), mTitleChangedListener
-  // - nsHTMLBodyElement:     mContentStyleRule
-  // - nsHTMLDataListElement: mOptions
-  // - nsHTMLFieldSetElement: mElements, mDependentElements, mFirstLegend
-  // - nsHTMLFormElement:     many!
-  // - nsHTMLFrameSetElement: mRowSpecs, mColSpecs
-  // - nsHTMLInputElement:    mInputData, mFiles, mFileList, mStaticDocfileList
+  // - nsGenericHTMLFrameElement: mFrameLoader (bug 672539)
+  // - HTMLBodyElement:       mContentStyleRule
+  // - HTMLDataListElement:   mOptions
+  // - HTMLFieldSetElement:   mElements, mDependentElements, mFirstLegend
+  // - HTMLFormElement:       many!
+  // - HTMLFrameSetElement:   mRowSpecs, mColSpecs
+  // - HTMLInputElement:      mInputData, mFiles, mFileList, mStaticDocfileList
   // - nsHTMLMapElement:      mAreas
-  // - nsHTMLMediaElement:    many!
+  // - HTMLMediaElement:      many!
   // - nsHTMLOutputElement:   mDefaultValue, mTokenList
   // - nsHTMLRowElement:      mCells
   // - nsHTMLSelectElement:   mOptions, mRestoreState
@@ -304,7 +317,6 @@ public:
   nsINode(already_AddRefed<nsINodeInfo> aNodeInfo)
   : mNodeInfo(aNodeInfo),
     mParent(nullptr),
-    mFlags(0),
     mBoolFlags(0),
     mNextSibling(nullptr),
     mPreviousSibling(nullptr),
@@ -344,10 +356,12 @@ public:
     /** data nodes (comments, PIs, text). Nodes of this type always
      returns a non-null value for nsIContent::GetText() */
     eDATA_NODE           = 1 << 8,
-    /** nsHTMLMediaElement */
+    /** HTMLMediaElement */
     eMEDIA               = 1 << 9,
     /** animation elements */
-    eANIMATION           = 1 << 10
+    eANIMATION           = 1 << 10,
+    /** filter elements that implement SVGFilterPrimitiveStandardAttributes */
+    eFILTER              = 1 << 11
   };
 
   /**
@@ -359,6 +373,33 @@ public:
    * @return whether the content matches ALL flags passed in
    */
   virtual bool IsNodeOfType(uint32_t aFlags) const = 0;
+
+  virtual JSObject* WrapObject(JSContext *aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+protected:
+  /**
+   * WrapNode is called from WrapObject to actually wrap this node, WrapObject
+   * does some additional checks and fix-up that's common to all nodes. WrapNode
+   * should just call the DOM binding's Wrap function.
+   */
+  virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+  {
+    MOZ_ASSERT(!IsDOMBinding(), "Someone forgot to override WrapNode");
+    return nullptr;
+  }
+
+public:
+  nsIDocument* GetParentObject() const
+  {
+    // Make sure that we get the owner document of the content node, in case
+    // we're in document teardown.  If we are, it's important to *not* use
+    // globalObj as the node's parent since that would give the node the
+    // principal of globalObj (i.e. the principal of the document that's being
+    // loaded) and not the principal of the document that's being unloaded.
+    // See http://bugzilla.mozilla.org/show_bug.cgi?id=227417
+    return OwnerDoc();
+  }
 
   /**
    * Return whether the node is an Element node
@@ -419,7 +460,7 @@ public:
    * If the return value is not -1, then calling GetChildAt() with that value
    * will return aPossibleChild.
    */
-  virtual int32_t IndexOf(nsINode* aPossibleChild) const = 0;
+  virtual int32_t IndexOf(const nsINode* aPossibleChild) const = 0;
 
   /**
    * Return the "owner document" of this node.  Note that this is not the same
@@ -486,23 +527,6 @@ public:
   {
     return mNodeInfo->NameAtom();
   }
-
-  nsINode*
-  InsertBefore(nsINode *aNewChild, nsINode *aRefChild, nsresult *aReturn)
-  {
-    return ReplaceOrInsertBefore(false, aNewChild, aRefChild, aReturn);
-  }
-  nsINode*
-  ReplaceChild(nsINode *aNewChild, nsINode *aOldChild, nsresult *aReturn)
-  {
-    return ReplaceOrInsertBefore(true, aNewChild, aOldChild, aReturn);
-  }
-  nsINode*
-  AppendChild(nsINode *aNewChild, nsresult *aReturn)
-  {
-    return InsertBefore(aNewChild, nullptr, aReturn);
-  }
-  nsresult RemoveChild(nsINode *aOldChild);
 
   /**
    * Insert a content node at a particular index.  This method handles calling
@@ -722,7 +746,7 @@ public:
    * @return the parent, or null if no parent or the parent is not an nsIContent
    */
   nsIContent* GetParent() const {
-    return NS_LIKELY(GetBoolFlag(ParentIsContent)) ?
+    return MOZ_LIKELY(GetBoolFlag(ParentIsContent)) ?
       reinterpret_cast<nsIContent*>(mParent) : nullptr;
   }
 
@@ -731,7 +755,7 @@ public:
    * an nsIDocument or an nsIAttribute.
    * @return the parent node
    */
-  nsINode* GetNodeParent() const
+  nsINode* GetParentNode() const
   {
     return mParent;
   }
@@ -740,7 +764,7 @@ public:
    * Get the parent nsINode for this node if it is an Element.
    * @return the parent node
    */
-  mozilla::dom::Element* GetElementParent() const
+  mozilla::dom::Element* GetParentElement() const
   {
     return mParent && mParent->IsElement() ? mParent->AsElement() : nullptr;
   }
@@ -764,7 +788,7 @@ public:
     {
       const nsINode* slowNode = this;
       const nsINode* iter = slowNode;
-      while ((iter = iter->GetNodeParent())) {
+      while ((iter = iter->GetParentNode())) {
         slowNode = iter;
       }
 
@@ -778,8 +802,15 @@ public:
    * See nsIDOMEventTarget
    */
   NS_DECL_NSIDOMEVENTTARGET
+  using mozilla::dom::EventTarget::RemoveEventListener;
   using nsIDOMEventTarget::AddEventListener;
+  virtual void AddEventListener(const nsAString& aType,
+                                nsIDOMEventListener* aListener,
+                                bool aUseCapture,
+                                const mozilla::dom::Nullable<bool>& aWantsUntrusted,
+                                mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
   using nsIDOMEventTarget::AddSystemEventListener;
+  virtual nsIDOMWindow* GetOwnerGlobal() MOZ_OVERRIDE;
 
   /**
    * Adds a mutation observer to be notified when this node, or any of its
@@ -793,13 +824,11 @@ public:
    */
   void AddMutationObserver(nsIMutationObserver* aMutationObserver)
   {
-    nsSlots* s = GetSlots();
-    if (s) {
-      NS_ASSERTION(s->mMutationObservers.IndexOf(aMutationObserver) ==
-                   nsTArray<int>::NoIndex,
-                   "Observer already in the list");
-      s->mMutationObservers.AppendElement(aMutationObserver);
-    }
+    nsSlots* s = Slots();
+    NS_ASSERTION(s->mMutationObservers.IndexOf(aMutationObserver) ==
+                 nsTArray<int>::NoIndex,
+                 "Observer already in the list");
+    s->mMutationObservers.AppendElement(aMutationObserver);
   }
 
   /**
@@ -808,10 +837,8 @@ public:
    */
   void AddMutationObserverUnlessExists(nsIMutationObserver* aMutationObserver)
   {
-    nsSlots* s = GetSlots();
-    if (s) {
-      s->mMutationObservers.AppendElementUnlessExists(aMutationObserver);
-    }
+    nsSlots* s = Slots();
+    s->mMutationObservers.AppendElementUnlessExists(aMutationObserver);
   }
 
   /**
@@ -897,19 +924,9 @@ public:
 #ifdef DEBUG
   nsSlots* DebugGetSlots()
   {
-    return GetSlots();
+    return Slots();
   }
 #endif
-
-  bool HasFlag(PtrBits aFlag) const
-  {
-    return !!(GetFlags() & aFlag);
-  }
-
-  uint32_t GetFlags() const
-  {
-    return mFlags;
-  }
 
   void SetFlags(uint32_t aFlagsToSet)
   {
@@ -922,7 +939,7 @@ public:
                                   NODE_CHROME_ONLY_ACCESS)) ||
                  IsNodeOfType(eCONTENT),
                  "Flag only permitted on nsIContent nodes");
-    mFlags |= aFlagsToSet;
+    nsWrapperCache::SetFlags(aFlagsToSet);
   }
 
   void UnsetFlags(uint32_t aFlagsToUnset)
@@ -932,7 +949,7 @@ public:
                     NODE_IS_IN_ANONYMOUS_SUBTREE |
                     NODE_IS_NATIVE_ANONYMOUS_ROOT)),
                  "Trying to unset write-only flags");
-    mFlags &= ~aFlagsToUnset;
+    nsWrapperCache::UnsetFlags(aFlagsToUnset);
   }
 
   void SetEditableFlag(bool aEditable)
@@ -1006,7 +1023,7 @@ public:
    */
   nsIContent* GetSelectionRootContent(nsIPresShell* aPresShell);
 
-  virtual nsINodeList* GetChildNodesList();
+  virtual nsINodeList* ChildNodes();
   nsIContent* GetFirstChild() const { return mFirstChild; }
   nsIContent* GetLastChild() const
   {
@@ -1022,7 +1039,7 @@ public:
    */
   nsIDocument* GetOwnerDocument() const;
 
-  nsresult Normalize();
+  void Normalize();
 
   /**
    * Get the base URI for any relative URIs within this piece of
@@ -1033,6 +1050,10 @@ public:
    * @return the base URI
    */
   virtual already_AddRefed<nsIURI> GetBaseURI() const = 0;
+  already_AddRefed<nsIURI> GetBaseURIObject() const
+  {
+    return GetBaseURI();
+  }
 
   /**
    * Facility for explicitly setting a base URI on a node.
@@ -1050,19 +1071,20 @@ protected:
   }
   
 public:
-  nsresult GetDOMBaseURI(nsAString &aURI) const;
+  void GetTextContent(nsAString& aTextContent)
+  {
+    GetTextContentInternal(aTextContent);
+  }
+  void SetTextContent(const nsAString& aTextContent,
+                      mozilla::ErrorResult& aError)
+  {
+    SetTextContentInternal(aTextContent, aError);
+  }
 
-  // Note! This function must never fail. It only return an nsresult so that
-  // we can use it to implement nsIDOMNode
-  NS_IMETHOD GetTextContent(nsAString &aTextContent)
-  {
-    SetDOMStringToNull(aTextContent);
-    return NS_OK;
-  }
-  NS_IMETHOD SetTextContent(const nsAString& aTextContent)
-  {
-    return NS_OK;
-  }
+  mozilla::dom::Element* QuerySelector(const nsAString& aSelector,
+                                       mozilla::ErrorResult& aResult);
+  already_AddRefed<nsINodeList> QuerySelectorAll(const nsAString& aSelector,
+                                                 mozilla::ErrorResult& aResult);
 
   /**
    * Associate an object aData to aKey on this node. If aData is null any
@@ -1089,15 +1111,7 @@ public:
    * @return aResult the previously registered object for aKey on this node, if
    *                 any
    */
-  nsIVariant* GetUserData(const nsAString& aKey)
-  {
-    nsCOMPtr<nsIAtom> key = do_GetAtom(aKey);
-    if (!key) {
-      return nullptr;
-    }
-
-    return static_cast<nsIVariant*>(GetProperty(DOM_USER_DATA, key));
-  }
+  nsIVariant* GetUserData(const nsAString& aKey);
 
   nsresult GetUserData(const nsAString& aKey, nsIVariant** aResult)
   {
@@ -1106,41 +1120,23 @@ public:
     return NS_OK;
   }
 
-
   /**
-   * Compares the document position of a node to this node.
-   *
-   * @param aOtherNode The node whose position is being compared to this node
-   *
-   * @return  The document position flags of the nodes. aOtherNode is compared
-   *          to this node, i.e. if aOtherNode is before this node then
-   *          DOCUMENT_POSITION_PRECEDING will be set.
-   *
-   * @see nsIDOMNode
+   * Control if GetUserData and SetUserData methods will be exposed to
+   * unprivileged content.
    */
-  uint16_t CompareDocPosition(nsINode* aOtherNode);
-  nsresult CompareDocPosition(nsINode* aOtherNode, uint16_t* aReturn)
-  {
-    NS_ENSURE_ARG(aOtherNode);
-    *aReturn = CompareDocPosition(aOtherNode);
-    return NS_OK;
-  }
-  nsresult CompareDocumentPosition(nsIDOMNode* aOther,
-                                   uint16_t* aReturn);
+  static bool IsChromeOrXBL(JSContext* aCx, JSObject* /* unused */);
 
-  nsresult LookupPrefix(const nsAString& aNamespaceURI, nsAString& aPrefix);
-  nsresult IsDefaultNamespace(const nsAString& aNamespaceURI, bool* aResult)
+  void LookupPrefix(const nsAString& aNamespace, nsAString& aResult);
+  bool IsDefaultNamespace(const nsAString& aNamespaceURI)
   {
     nsAutoString defaultNamespace;
     LookupNamespaceURI(EmptyString(), defaultNamespace);
-    *aResult = aNamespaceURI.Equals(defaultNamespace);
-    return NS_OK;
+    return aNamespaceURI.Equals(defaultNamespace);
   }
-  nsresult LookupNamespaceURI(const nsAString& aNamespacePrefix,
-                              nsAString& aNamespaceURI);
+  void LookupNamespaceURI(const nsAString& aNamespacePrefix,
+                          nsAString& aNamespaceURI);
 
   nsresult IsEqualNode(nsIDOMNode* aOther, bool* aReturn);
-  bool IsEqualTo(nsINode* aOther);
 
   nsIContent* GetNextSibling() const { return mNextSibling; }
   nsIContent* GetPreviousSibling() const { return mPreviousSibling; }
@@ -1189,7 +1185,7 @@ private:
 #ifdef DEBUG
     if (aRoot) {
       const nsINode* cur = this;
-      for (; cur; cur = cur->GetNodeParent())
+      for (; cur; cur = cur->GetParentNode())
         if (cur == aRoot) break;
       NS_ASSERTION(cur, "aRoot not an ancestor of |this|?");
     }
@@ -1209,7 +1205,7 @@ private:
       if (next) {
         return next;
       }
-      nsINode* parent = cur->GetNodeParent();
+      nsINode* parent = cur->GetParentNode();
       if (parent == aRoot) {
         return nullptr;
       }
@@ -1234,7 +1230,7 @@ public:
 #ifdef DEBUG
       if (aRoot) {
         const nsINode* cur = this;
-        for (; cur; cur = cur->GetNodeParent())
+        for (; cur; cur = cur->GetParentNode())
           if (cur == aRoot) break;
         NS_ASSERTION(cur, "aRoot not an ancestor of |this|?");
       }
@@ -1300,8 +1296,30 @@ private:
     NodeIsContent,
     // Set if the node has animations or transitions
     ElementHasAnimations,
-    // Set if node has a dir attribute with a valid value (ltr or rtl)
+    // Set if node has a dir attribute with a valid value (ltr, rtl, or auto)
     NodeHasValidDirAttribute,
+    // Set if node has a dir attribute with a fixed value (ltr or rtl, NOT auto)
+    NodeHasFixedDir,
+    // Set if the node has dir=auto and has a property pointing to the text
+    // node that determines its direction
+    NodeHasDirAutoSet,
+    // Set if the node is a text node descendant of a node with dir=auto
+    // and has a TextNodeDirectionalityMap property listing the elements whose
+    // direction it determines.
+    NodeHasTextNodeDirectionalityMap,
+    // Set if the node has dir=auto.
+    NodeHasDirAuto,
+    // Set if a node in the node's parent chain has dir=auto.
+    NodeAncestorHasDirAuto,
+    // Set if the element is in the scope of a scoped style sheet; this flag is
+    // only accurate for elements bounds to a document
+    ElementIsInStyleScope,
+    // Set if the element is a scoped style sheet root
+    ElementIsScopedStyleRoot,
+    // Set if the node is handling a click.
+    NodeHandlingClick,
+    // Set if the node has had :hover selectors matched against it
+    NodeHasRelevantHoverRules,
     // Guard value
     BooleanFlagCount
   };
@@ -1372,6 +1390,72 @@ public:
   void SetHasValidDir() { SetBoolFlag(NodeHasValidDirAttribute); }
   void ClearHasValidDir() { ClearBoolFlag(NodeHasValidDirAttribute); }
   bool HasValidDir() const { return GetBoolFlag(NodeHasValidDirAttribute); }
+  void SetHasFixedDir() {
+    MOZ_ASSERT(NodeType() != nsIDOMNode::TEXT_NODE,
+               "SetHasFixedDir on text node");
+    SetBoolFlag(NodeHasFixedDir);
+  }
+  void ClearHasFixedDir() {
+    MOZ_ASSERT(NodeType() != nsIDOMNode::TEXT_NODE,
+               "ClearHasFixedDir on text node");
+    ClearBoolFlag(NodeHasFixedDir);
+  }
+  bool HasFixedDir() const { return GetBoolFlag(NodeHasFixedDir); }
+  void SetHasDirAutoSet() {
+    MOZ_ASSERT(NodeType() != nsIDOMNode::TEXT_NODE,
+               "SetHasDirAutoSet on text node");
+    SetBoolFlag(NodeHasDirAutoSet);
+  }
+  void ClearHasDirAutoSet() {
+    MOZ_ASSERT(NodeType() != nsIDOMNode::TEXT_NODE,
+               "ClearHasDirAutoSet on text node");
+    ClearBoolFlag(NodeHasDirAutoSet);
+  }
+  bool HasDirAutoSet() const
+    { return GetBoolFlag(NodeHasDirAutoSet); }
+  void SetHasTextNodeDirectionalityMap() {
+    MOZ_ASSERT(NodeType() == nsIDOMNode::TEXT_NODE,
+               "SetHasTextNodeDirectionalityMap on non-text node");
+    SetBoolFlag(NodeHasTextNodeDirectionalityMap);
+  }
+  void ClearHasTextNodeDirectionalityMap() {
+    MOZ_ASSERT(NodeType() == nsIDOMNode::TEXT_NODE,
+               "ClearHasTextNodeDirectionalityMap on non-text node");
+    ClearBoolFlag(NodeHasTextNodeDirectionalityMap);
+  }
+  bool HasTextNodeDirectionalityMap() const
+    { return GetBoolFlag(NodeHasTextNodeDirectionalityMap); }
+
+  void SetHasDirAuto() { SetBoolFlag(NodeHasDirAuto); }
+  void ClearHasDirAuto() { ClearBoolFlag(NodeHasDirAuto); }
+  bool HasDirAuto() const { return GetBoolFlag(NodeHasDirAuto); }
+
+  void SetAncestorHasDirAuto() { SetBoolFlag(NodeAncestorHasDirAuto); }
+  void ClearAncestorHasDirAuto() { ClearBoolFlag(NodeAncestorHasDirAuto); }
+  bool AncestorHasDirAuto() const { return GetBoolFlag(NodeAncestorHasDirAuto); }
+
+  bool NodeOrAncestorHasDirAuto() const
+    { return HasDirAuto() || AncestorHasDirAuto(); }
+
+  void SetIsElementInStyleScope(bool aValue) {
+    MOZ_ASSERT(IsElement(), "SetIsInStyleScope on a non-Element node");
+    SetBoolFlag(ElementIsInStyleScope, aValue);
+  }
+  void SetIsElementInStyleScope() {
+    MOZ_ASSERT(IsElement(), "SetIsInStyleScope on a non-Element node");
+    SetBoolFlag(ElementIsInStyleScope);
+  }
+  void ClearIsElementInStyleScope() {
+    MOZ_ASSERT(IsElement(), "ClearIsInStyleScope on a non-Element node");
+    ClearBoolFlag(ElementIsInStyleScope);
+  }
+  bool IsElementInStyleScope() const { return GetBoolFlag(ElementIsInStyleScope); }
+
+  void SetIsScopedStyleRoot() { SetBoolFlag(ElementIsScopedStyleRoot); }
+  void ClearIsScopedStyleRoot() { ClearBoolFlag(ElementIsScopedStyleRoot); }
+  bool IsScopedStyleRoot() { return GetBoolFlag(ElementIsScopedStyleRoot); }
+  bool HasRelevantHoverRules() const { return GetBoolFlag(NodeHasRelevantHoverRules); }
+  void SetHasRelevantHoverRules() { SetBoolFlag(NodeHasRelevantHoverRules); }
 protected:
   void SetParentIsContent(bool aValue) { SetBoolFlag(ParentIsContent, aValue); }
   void SetInDocument() { SetBoolFlag(IsInDocument); }
@@ -1391,8 +1475,11 @@ protected:
   void ClearHasLockedStyleStates() { ClearBoolFlag(ElementHasLockedStyleStates); }
   bool HasLockedStyleStates() const
     { return GetBoolFlag(ElementHasLockedStyleStates); }
+  bool HandlingClick() const { return GetBoolFlag(NodeHandlingClick); }
+  void SetHandlingClick() { SetBoolFlag(NodeHandlingClick); }
+  void ClearHandlingClick() { ClearBoolFlag(NodeHandlingClick); }
 
-    void SetSubtreeRootPointer(nsINode* aSubtreeRoot)
+  void SetSubtreeRootPointer(nsINode* aSubtreeRoot)
   {
     NS_ASSERTION(aSubtreeRoot, "aSubtreeRoot can never be null!");
     NS_ASSERTION(!(IsNodeOfType(eCONTENT) && IsInDoc()), "Shouldn't be here!");
@@ -1406,7 +1493,10 @@ protected:
 
 public:
   // Optimized way to get classinfo.
-  virtual nsXPCClassInfo* GetClassInfo() = 0;
+  virtual nsXPCClassInfo* GetClassInfo()
+  {
+    return nullptr;
+  }
 
   // Makes nsINode object to keep aObject alive.
   void BindObject(nsISupports* aObject);
@@ -1420,9 +1510,93 @@ public:
    */
   uint32_t Length() const;
 
+  void GetNodeName(nsAString& aNodeName) const
+  {
+    aNodeName = NodeName();
+  }
+  void GetBaseURI(nsAString& aBaseURI) const;
+  bool HasChildNodes() const
+  {
+    return HasChildren();
+  }
+  uint16_t CompareDocumentPosition(nsINode& aOther) const;
+  void GetNodeValue(nsAString& aNodeValue)
+  {
+    GetNodeValueInternal(aNodeValue);
+  }
+  void SetNodeValue(const nsAString& aNodeValue,
+                    mozilla::ErrorResult& aError)
+  {
+    SetNodeValueInternal(aNodeValue, aError);
+  }
+  virtual void GetNodeValueInternal(nsAString& aNodeValue);
+  virtual void SetNodeValueInternal(const nsAString& aNodeValue,
+                                    mozilla::ErrorResult& aError)
+  {
+    // The DOM spec says that when nodeValue is defined to be null "setting it
+    // has no effect", so we don't throw an exception.
+  }
+  nsINode* InsertBefore(nsINode& aNode, nsINode* aChild,
+                        mozilla::ErrorResult& aError)
+  {
+    return ReplaceOrInsertBefore(false, &aNode, aChild, aError);
+  }
+  nsINode* AppendChild(nsINode& aNode, mozilla::ErrorResult& aError)
+  {
+    return InsertBefore(aNode, nullptr, aError);
+  }
+  nsINode* ReplaceChild(nsINode& aNode, nsINode& aChild,
+                        mozilla::ErrorResult& aError)
+  {
+    return ReplaceOrInsertBefore(true, &aNode, &aChild, aError);
+  }
+  nsINode* RemoveChild(nsINode& aChild, mozilla::ErrorResult& aError);
+  already_AddRefed<nsINode> CloneNode(bool aDeep, mozilla::ErrorResult& aError);
+  bool IsEqualNode(nsINode* aNode);
+  void GetNamespaceURI(nsAString& aNamespaceURI) const
+  {
+    mNodeInfo->GetNamespaceURI(aNamespaceURI);
+  }
+#ifdef MOZILLA_INTERNAL_API
+  void GetPrefix(nsAString& aPrefix)
+  {
+    mNodeInfo->GetPrefix(aPrefix);
+  }
+#endif
+  void GetLocalName(nsAString& aLocalName)
+  {
+    aLocalName = mNodeInfo->LocalName();
+  }
+  // HasAttributes is defined inline in Element.h.
+  bool HasAttributes() const;
+  nsDOMAttributeMap* GetAttributes();
+  JS::Value SetUserData(JSContext* aCx, const nsAString& aKey,
+                        JS::Handle<JS::Value> aData,
+                        nsIDOMUserDataHandler* aHandler,
+                        mozilla::ErrorResult& aError);
+  JS::Value GetUserData(JSContext* aCx, const nsAString& aKey,
+                        mozilla::ErrorResult& aError);
+
+  // Helper method to remove this node from its parent. This is not exposed
+  // through WebIDL.
+  // Only call this if the node has a parent node.
+  nsresult RemoveFromParent()
+  {
+    nsINode* parent = GetParentNode();
+    mozilla::ErrorResult rv;
+    parent->RemoveChild(*this, rv);
+    return rv.ErrorCode();
+  }
+
+  /**
+   * Remove this node from its parent, if any.
+   */
+  void Remove();
+
 protected:
 
   // Override this function to create a custom slots class.
+  // Must not return null.
   virtual nsINode::nsSlots* CreateSlots();
 
   bool HasSlots() const
@@ -1435,10 +1609,11 @@ protected:
     return mSlots;
   }
 
-  nsSlots* GetSlots()
+  nsSlots* Slots()
   {
     if (!HasSlots()) {
       mSlots = CreateSlots();
+      MOZ_ASSERT(mSlots);
     }
     return GetExistingSlots();
   }
@@ -1454,12 +1629,20 @@ protected:
     return IsEditableInternal();
   }
 
+  virtual void GetTextContentInternal(nsAString& aTextContent);
+  virtual void SetTextContentInternal(const nsAString& aTextContent,
+                                      mozilla::ErrorResult& aError)
+  {
+  }
+
 #ifdef DEBUG
   // Note: virtual so that IsInNativeAnonymousSubtree can be called accross
   // module boundaries.
   virtual void CheckNotNativeAnonymous() const;
 #endif
 
+  // These are just used to implement nsIDOMNode using
+  // NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER and for quickstubs.
   nsresult GetParentNode(nsIDOMNode** aParentNode);
   nsresult GetParentElement(nsIDOMElement** aParentElement);
   nsresult GetChildNodes(nsIDOMNodeList** aChildNodes);
@@ -1468,21 +1651,14 @@ protected:
   nsresult GetPreviousSibling(nsIDOMNode** aPrevSibling);
   nsresult GetNextSibling(nsIDOMNode** aNextSibling);
   nsresult GetOwnerDocument(nsIDOMDocument** aOwnerDocument);
+  nsresult CompareDocumentPosition(nsIDOMNode* aOther,
+                                   uint16_t* aReturn);
 
   nsresult ReplaceOrInsertBefore(bool aReplace, nsIDOMNode *aNewChild,
                                  nsIDOMNode *aRefChild, nsIDOMNode **aReturn);
-  nsINode* ReplaceOrInsertBefore(bool aReplace, nsINode *aNewChild,
-                                 nsINode *aRefChild, nsresult *aReturn)
-  {
-    *aReturn = ReplaceOrInsertBefore(aReplace, aNewChild, aRefChild);
-    if (NS_FAILED(*aReturn)) {
-      return nullptr;
-    }
-
-    return aReplace ? aRefChild : aNewChild;
-  }
-  virtual nsresult ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
-                                         nsINode* aRefChild);
+  nsINode* ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
+                                 nsINode* aRefChild,
+                                 mozilla::ErrorResult& aError);
   nsresult RemoveChild(nsIDOMNode* aOldChild, nsIDOMNode** aReturn);
 
   /**
@@ -1529,26 +1705,26 @@ public:
      Note that we include DOCUMENT_ONLY_EVENT events here so that we
      can forward all the document stuff to this implementation.
   */
-#define EVENT(name_, id_, type_, struct_)                         \
-  NS_IMETHOD GetOn##name_(JSContext *cx, JS::Value *vp);          \
+#define EVENT(name_, id_, type_, struct_)                             \
+  mozilla::dom::EventHandlerNonNull* GetOn##name_();                  \
+  void SetOn##name_(mozilla::dom::EventHandlerNonNull* listener,      \
+                    mozilla::ErrorResult& error);                     \
+  NS_IMETHOD GetOn##name_(JSContext *cx, JS::Value *vp);              \
   NS_IMETHOD SetOn##name_(JSContext *cx, const JS::Value &v);
 #define TOUCH_EVENT EVENT
 #define DOCUMENT_ONLY_EVENT EVENT
 #include "nsEventNameList.h"
 #undef DOCUMENT_ONLY_EVENT
 #undef TOUCH_EVENT
-#undef EVENT  
+#undef EVENT
 
 protected:
-  static void Trace(nsINode *tmp, TraceCallback cb, void *closure);
   static bool Traverse(nsINode *tmp, nsCycleCollectionTraversalCallback &cb);
   static void Unlink(nsINode *tmp);
 
   nsCOMPtr<nsINodeInfo> mNodeInfo;
 
   nsINode* mParent;
-
-  uint32_t mFlags;
 
 private:
   // Boolean flags.
@@ -1584,124 +1760,201 @@ inline nsINode* NODE_FROM(C& aContent, D& aDocument)
   return static_cast<nsINode*>(aDocument);
 }
 
+/**
+ * A tearoff class for FragmentOrElement to implement NodeSelector
+ */
+class nsNodeSelectorTearoff MOZ_FINAL : public nsIDOMNodeSelector
+{
+public:
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
-extern const nsIID kThisPtrOffsetsSID;
+  NS_DECL_NSIDOMNODESELECTOR
 
-// _implClass is the class to use to cast to nsISupports
-#define NS_OFFSET_AND_INTERFACE_TABLE_BEGIN_AMBIGUOUS(_class, _implClass)     \
-  static const QITableEntry offsetAndQITable[] = {                            \
-    NS_INTERFACE_TABLE_ENTRY_AMBIGUOUS(_class, nsISupports, _implClass)
+  NS_DECL_CYCLE_COLLECTION_CLASS(nsNodeSelectorTearoff)
 
-#define NS_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_BEGIN_AMBIGUOUS(_class, _class)
-
-#define NS_OFFSET_AND_INTERFACE_TABLE_END                                     \
-  { nullptr, 0 } };                                                            \
-  if (aIID.Equals(kThisPtrOffsetsSID)) {                                      \
-    *aInstancePtr =                                                           \
-      const_cast<void*>(static_cast<const void*>(&offsetAndQITable));         \
-    return NS_OK;                                                             \
+  nsNodeSelectorTearoff(nsINode *aNode) : mNode(aNode)
+  {
   }
 
-#define NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE                            \
-  rv = NS_TableDrivenQI(this, offsetAndQITable, aIID, aInstancePtr);          \
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+private:
+  ~nsNodeSelectorTearoff() {}
 
-// nsNodeSH::PreCreate() depends on the identity pointer being the same as
-// nsINode, so if you change the nsISupports line  below, make sure
-// nsNodeSH::PreCreate() still does the right thing!
-#define NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                      \
-  NS_OFFSET_AND_INTERFACE_TABLE_BEGIN_AMBIGUOUS(_class, nsINode)              \
-    NS_INTERFACE_TABLE_ENTRY(_class, nsINode)                       
-
-#define NS_NODE_INTERFACE_TABLE2(_class, _i1, _i2)                            \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
-#define NS_NODE_INTERFACE_TABLE3(_class, _i1, _i2, _i3)                       \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i3)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
-#define NS_NODE_INTERFACE_TABLE4(_class, _i1, _i2, _i3, _i4)                  \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i3)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i4)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
-#define NS_NODE_INTERFACE_TABLE5(_class, _i1, _i2, _i3, _i4, _i5)             \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i3)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i4)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i5)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
-#define NS_NODE_INTERFACE_TABLE6(_class, _i1, _i2, _i3, _i4, _i5, _i6)        \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i3)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i4)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i5)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i6)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
-#define NS_NODE_INTERFACE_TABLE7(_class, _i1, _i2, _i3, _i4, _i5, _i6, _i7)   \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i3)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i4)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i5)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i6)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i7)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
-#define NS_NODE_INTERFACE_TABLE8(_class, _i1, _i2, _i3, _i4, _i5, _i6, _i7,   \
-                                 _i8)                                         \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i3)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i4)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i5)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i6)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i7)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i8)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
-#define NS_NODE_INTERFACE_TABLE9(_class, _i1, _i2, _i3, _i4, _i5, _i6, _i7,   \
-                                 _i8, _i9)                                    \
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(_class)                            \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i1)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i2)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i3)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i4)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i5)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i6)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i7)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i8)                                     \
-    NS_INTERFACE_TABLE_ENTRY(_class, _i9)                                     \
-  NS_OFFSET_AND_INTERFACE_TABLE_END                                           \
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-
+private:
+  nsCOMPtr<nsINode> mNode;
+};
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsINode, NS_INODE_IID)
 
+#define NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER(...) \
+  NS_IMETHOD GetNodeName(nsAString& aNodeName) __VA_ARGS__ \
+  { \
+    nsINode::GetNodeName(aNodeName); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD GetNodeValue(nsAString& aNodeValue) __VA_ARGS__ \
+  { \
+    nsINode::GetNodeValue(aNodeValue); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD SetNodeValue(const nsAString& aNodeValue) __VA_ARGS__ \
+  { \
+    mozilla::ErrorResult rv; \
+    nsINode::SetNodeValue(aNodeValue, rv); \
+    return rv.ErrorCode(); \
+  } \
+  NS_IMETHOD GetNodeType(uint16_t* aNodeType) __VA_ARGS__ \
+  { \
+    *aNodeType = nsINode::NodeType(); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD GetParentNode(nsIDOMNode** aParentNode) __VA_ARGS__ \
+  { \
+    return nsINode::GetParentNode(aParentNode); \
+  } \
+  NS_IMETHOD GetParentElement(nsIDOMElement** aParentElement) __VA_ARGS__ \
+  { \
+    return nsINode::GetParentElement(aParentElement); \
+  } \
+  NS_IMETHOD GetChildNodes(nsIDOMNodeList** aChildNodes) __VA_ARGS__ \
+  { \
+    return nsINode::GetChildNodes(aChildNodes); \
+  } \
+  NS_IMETHOD GetFirstChild(nsIDOMNode** aFirstChild) __VA_ARGS__ \
+  { \
+    return nsINode::GetFirstChild(aFirstChild); \
+  } \
+  NS_IMETHOD GetLastChild(nsIDOMNode** aLastChild) __VA_ARGS__ \
+  { \
+    return nsINode::GetLastChild(aLastChild); \
+  } \
+  NS_IMETHOD GetPreviousSibling(nsIDOMNode** aPreviousSibling) __VA_ARGS__ \
+  { \
+    return nsINode::GetPreviousSibling(aPreviousSibling); \
+  } \
+  NS_IMETHOD GetNextSibling(nsIDOMNode** aNextSibling) __VA_ARGS__ \
+  { \
+    return nsINode::GetNextSibling(aNextSibling); \
+  } \
+  NS_IMETHOD GetOwnerDocument(nsIDOMDocument** aOwnerDocument) __VA_ARGS__ \
+  { \
+    return nsINode::GetOwnerDocument(aOwnerDocument); \
+  } \
+  NS_IMETHOD InsertBefore(nsIDOMNode* aNewChild, nsIDOMNode* aRefChild, nsIDOMNode** aResult) __VA_ARGS__ \
+  { \
+    return ReplaceOrInsertBefore(false, aNewChild, aRefChild, aResult); \
+  } \
+  NS_IMETHOD ReplaceChild(nsIDOMNode* aNewChild, nsIDOMNode* aOldChild, nsIDOMNode** aResult) __VA_ARGS__ \
+  { \
+    return ReplaceOrInsertBefore(true, aNewChild, aOldChild, aResult); \
+  } \
+  NS_IMETHOD RemoveChild(nsIDOMNode* aOldChild, nsIDOMNode** aResult) __VA_ARGS__ \
+  { \
+    return nsINode::RemoveChild(aOldChild, aResult); \
+  } \
+  NS_IMETHOD AppendChild(nsIDOMNode* aNewChild, nsIDOMNode** aResult) __VA_ARGS__ \
+  { \
+    return InsertBefore(aNewChild, nullptr, aResult); \
+  } \
+  NS_IMETHOD HasChildNodes(bool* aResult) __VA_ARGS__ \
+  { \
+    *aResult = nsINode::HasChildNodes(); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD CloneNode(bool aDeep, uint8_t aArgc, nsIDOMNode** aResult) __VA_ARGS__ \
+  { \
+    if (aArgc == 0) { \
+      aDeep = true; \
+    } \
+    mozilla::ErrorResult rv; \
+    nsCOMPtr<nsINode> clone = nsINode::CloneNode(aDeep, rv); \
+    if (rv.Failed()) { \
+      return rv.ErrorCode(); \
+    } \
+    *aResult = clone.forget().get()->AsDOMNode(); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD Normalize() __VA_ARGS__ \
+  { \
+    nsINode::Normalize(); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD GetNamespaceURI(nsAString& aNamespaceURI) __VA_ARGS__ \
+  { \
+    nsINode::GetNamespaceURI(aNamespaceURI); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD GetPrefix(nsAString& aPrefix) __VA_ARGS__ \
+  { \
+    nsINode::GetPrefix(aPrefix); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD GetLocalName(nsAString& aLocalName) __VA_ARGS__ \
+  { \
+    nsINode::GetLocalName(aLocalName); \
+    return NS_OK; \
+  } \
+  using nsINode::HasAttributes; \
+  NS_IMETHOD HasAttributes(bool* aResult) __VA_ARGS__ \
+  { \
+    *aResult = nsINode::HasAttributes(); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD GetDOMBaseURI(nsAString& aBaseURI) __VA_ARGS__ \
+  { \
+    nsINode::GetBaseURI(aBaseURI); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD CompareDocumentPosition(nsIDOMNode* aOther, uint16_t* aResult) __VA_ARGS__ \
+  { \
+    return nsINode::CompareDocumentPosition(aOther, aResult); \
+  } \
+  NS_IMETHOD GetTextContent(nsAString& aTextContent) __VA_ARGS__ \
+  { \
+    nsINode::GetTextContent(aTextContent); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD SetTextContent(const nsAString& aTextContent) __VA_ARGS__ \
+  { \
+    mozilla::ErrorResult rv; \
+    nsINode::SetTextContent(aTextContent, rv); \
+    return rv.ErrorCode(); \
+  } \
+  NS_IMETHOD LookupPrefix(const nsAString& aNamespaceURI, nsAString& aResult) __VA_ARGS__ \
+  { \
+    nsINode::LookupPrefix(aNamespaceURI, aResult); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD IsDefaultNamespace(const nsAString& aNamespaceURI, bool* aResult) __VA_ARGS__ \
+  { \
+    *aResult = nsINode::IsDefaultNamespace(aNamespaceURI); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD LookupNamespaceURI(const nsAString& aPrefix, nsAString& aResult) __VA_ARGS__ \
+  { \
+    nsINode::LookupNamespaceURI(aPrefix, aResult); \
+    return NS_OK; \
+  } \
+  NS_IMETHOD IsEqualNode(nsIDOMNode* aArg, bool* aResult) __VA_ARGS__ \
+  { \
+    return nsINode::IsEqualNode(aArg, aResult); \
+  } \
+  NS_IMETHOD SetUserData(const nsAString& aKey, nsIVariant* aData, nsIDOMUserDataHandler* aHandler, nsIVariant** aResult) __VA_ARGS__ \
+  { \
+    return nsINode::SetUserData(aKey, aData, aHandler, aResult); \
+  } \
+  NS_IMETHOD GetUserData(const nsAString& aKey, nsIVariant** aResult) __VA_ARGS__ \
+  { \
+    return nsINode::GetUserData(aKey, aResult); \
+  } \
+  NS_IMETHOD Contains(nsIDOMNode* aOther, bool* aResult) __VA_ARGS__ \
+  { \
+    return nsINode::Contains(aOther, aResult); \
+  }
+
+#define NS_FORWARD_NSIDOMNODE_TO_NSINODE \
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER(MOZ_FINAL)
+
+#define NS_FORWARD_NSIDOMNODE_TO_NSINODE_OVERRIDABLE \
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER()
 
 #endif /* nsINode_h___ */

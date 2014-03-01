@@ -37,13 +37,13 @@ MOCHITEST_FILES = 	test_bug1682.html \
 		test_bug402680.html \
 		test_bug403868.html \
 		test_bug403868.xhtml \
-		$(warning test_bug435128.html disabled because it takes 60 seconds) \
+		$(filter disabled-for-timeouts, test_bug435128.html) \
 		test_bug463104.html \
 		test_form-parsing.html \
 		test_viewport.html \
 		test_documentAll.html \
 		test_document-element-inserted.html \
-		test_bug445004.html \
+		$(filter disabled-temporarily--bug-559932, test_bug445004.html) \
 		bug445004-inner.js \
 		bug445004-outer-rel.html \
 		bug445004-outer-abs.html \
@@ -72,13 +72,14 @@ MOCHITEST_FILES = 	test_bug1682.html \
 		test_bug677495.html \
 		test_bug677495-1.html \
 		test_bug741266.html \
+		test_non-ascii-cookie.html \
+		test_non-ascii-cookie.html^headers^ \
+		test_bug765780.html \
 		$(NULL)
 
-ifneq (mobile,$(MOZ_BUILD_APP))
 MOCHITEST_BROWSER_FILES = \
 		browser_bug592641.js \
 		bug592641_img.jpg \
 		$(NULL)
-endif
 
 include $(topsrcdir)/config/rules.mk

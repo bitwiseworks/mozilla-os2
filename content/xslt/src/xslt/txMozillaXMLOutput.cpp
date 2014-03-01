@@ -31,7 +31,7 @@
 #include "nsIDocumentTransformer.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/Element.h"
-#include "nsCharsetAlias.h"
+#include "mozilla/dom/EncodingUtils.h"
 #include "nsContentUtils.h"
 #include "txXMLUtils.h"
 #include "nsContentSink.h"
@@ -39,11 +39,15 @@
 #include "nsContentCreatorFunctions.h"
 #include "nsError.h"
 #include "nsIFrame.h"
+#include <algorithm>
+#include "nsTextNode.h"
+#include "mozilla/dom/Comment.h"
+#include "mozilla/dom/ProcessingInstruction.h"
 
 using namespace mozilla::dom;
 
 #define TX_ENSURE_CURRENTNODE                           \
-    NS_ASSERTION(mCurrentNode, "mCurrentNode is NULL"); \
+    NS_ASSERTION(mCurrentNode, "mCurrentNode is nullptr"); \
     if (!mCurrentNode)                                  \
         return NS_ERROR_UNEXPECTED
 
@@ -191,9 +195,7 @@ txMozillaXMLOutput::comment(const nsString& aData)
 
     TX_ENSURE_CURRENTNODE;
 
-    nsCOMPtr<nsIContent> comment;
-    rv = NS_NewCommentNode(getter_AddRefs(comment), mNodeInfoManager);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsRefPtr<Comment> comment = new Comment(mNodeInfoManager);
 
     rv = comment->SetText(aData, false);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -308,13 +310,9 @@ txMozillaXMLOutput::endElement()
         } else if (ns == kNameSpaceID_XHTML &&
                    (localName == nsGkAtoms::input ||
                     localName == nsGkAtoms::button ||
-                    localName == nsGkAtoms::menuitem
-#ifdef MOZ_MEDIA
-                     ||
+                    localName == nsGkAtoms::menuitem ||
                     localName == nsGkAtoms::audio ||
-                    localName == nsGkAtoms::video
-#endif
-                  )) {
+                    localName == nsGkAtoms::video)) {
           element->DoneCreatingElement();
         }   
     }
@@ -353,7 +351,7 @@ txMozillaXMLOutput::endElement()
 
         // Check to make sure that script hasn't inserted the node somewhere
         // else in the tree
-        if (!mCurrentNode->GetNodeParent()) {
+        if (!mCurrentNode->GetParentNode()) {
             parent->AppendChildTo(mNonAddedNode, true);
         }
         mNonAddedNode = nullptr;
@@ -386,10 +384,8 @@ txMozillaXMLOutput::processingInstruction(const nsString& aTarget, const nsStrin
     rv = nsContentUtils::CheckQName(aTarget, false);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsIContent> pi;
-    rv = NS_NewXMLProcessingInstruction(getter_AddRefs(pi),
-                                        mNodeInfoManager, aTarget, aData);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIContent> pi =
+      NS_NewXMLProcessingInstruction(mNodeInfoManager, aTarget, aData);
 
     nsCOMPtr<nsIStyleSheetLinkingElement> ssle;
     if (mCreatingNewDocument) {
@@ -534,7 +530,6 @@ txMozillaXMLOutput::startElementInternal(nsIAtom* aPrefix,
     nsCOMPtr<nsINodeInfo> ni =
         mNodeInfoManager->GetNodeInfo(aLocalName, aPrefix, aNsID,
                                       nsIDOMNode::ELEMENT_NODE);
-    NS_ENSURE_TRUE(ni, NS_ERROR_OUT_OF_MEMORY);
 
     NS_NewElement(getter_AddRefs(mOpenedElement), ni.forget(),
                   mCreatingNewDocument ?
@@ -603,9 +598,7 @@ txMozillaXMLOutput::closePrevious(bool aFlushText)
             rv = createTxWrapper();
             NS_ENSURE_SUCCESS(rv, rv);
         }
-        nsCOMPtr<nsIContent> text;
-        rv = NS_NewTextNode(getter_AddRefs(text), mNodeInfoManager);
-        NS_ENSURE_SUCCESS(rv, rv);
+        nsRefPtr<nsTextNode> text = new nsTextNode(mNodeInfoManager);
 
         rv = text->SetText(mText, false);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -656,7 +649,7 @@ txMozillaXMLOutput::createTxWrapper()
             // The new documentElement should go after the document type.
             // This is needed for cases when there is no existing
             // documentElement in the document.
-            rootLocation = NS_MAX(rootLocation, j + 1);
+            rootLocation = std::max(rootLocation, j + 1);
 #endif
             ++j;
         }
@@ -791,19 +784,22 @@ void txMozillaXMLOutput::processHTTPEquiv(nsIAtom* aHeader, const nsString& aVal
 
 nsresult
 txMozillaXMLOutput::createResultDocument(const nsSubstring& aName, int32_t aNsID,
-                                         nsIDOMDocument* aSourceDocument)
+                                         nsIDOMDocument* aSourceDocument,
+                                         bool aLoadedAsData)
 {
     nsresult rv;
 
     // Create the document
     if (mOutputFormat.mMethod == eHTMLOutput) {
-        rv = NS_NewHTMLDocument(getter_AddRefs(mDocument));
+        rv = NS_NewHTMLDocument(getter_AddRefs(mDocument),
+                                aLoadedAsData);
         NS_ENSURE_SUCCESS(rv, rv);
     }
     else {
         // We should check the root name/namespace here and create the
         // appropriate document
-        rv = NS_NewXMLDocument(getter_AddRefs(mDocument));
+        rv = NS_NewXMLDocument(getter_AddRefs(mDocument),
+                               aLoadedAsData);
         NS_ENSURE_SUCCESS(rv, rv);
     }
     // This should really be handled by nsIDocument::BeginLoad
@@ -826,9 +822,9 @@ txMozillaXMLOutput::createResultDocument(const nsSubstring& aName, int32_t aNsID
 
     // Set the charset
     if (!mOutputFormat.mEncoding.IsEmpty()) {
-        NS_LossyConvertUTF16toASCII charset(mOutputFormat.mEncoding);
-        nsCAutoString canonicalCharset;
-        if (NS_SUCCEEDED(nsCharsetAlias::GetPreferred(charset, canonicalCharset))) {
+        nsAutoCString canonicalCharset;
+        if (EncodingUtils::FindEncodingForLabel(mOutputFormat.mEncoding,
+                                                canonicalCharset)) {
             mDocument->SetDocumentCharacterSetSource(kCharsetFromOtherComponent);
             mDocument->SetDocumentCharacterSet(canonicalCharset);
         }
@@ -937,7 +933,6 @@ txMozillaXMLOutput::createHTMLElement(nsIAtom* aName,
     ni = mNodeInfoManager->GetNodeInfo(aName, nullptr,
                                        kNameSpaceID_XHTML,
                                        nsIDOMNode::ELEMENT_NODE);
-    NS_ENSURE_TRUE(ni, NS_ERROR_OUT_OF_MEMORY);
 
     return NS_NewHTMLElement(aResult, ni.forget(), mCreatingNewDocument ?
         FROM_PARSER_XSLT : FROM_PARSER_FRAGMENT);

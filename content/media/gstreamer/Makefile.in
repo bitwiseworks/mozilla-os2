@@ -10,19 +10,7 @@ FAIL_ON_WARNINGS := 1
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
-LIBRARY_NAME	= gkcongstreamer_s
 LIBXUL_LIBRARY 	= 1
-
-
-EXPORTS		+= \
-		nsGStreamerDecoder.h \
-		$(NULL)
-
-CPPSRCS		= \
-		nsGStreamerReader.cpp \
-		nsGStreamerDecoder.cpp \
-		$(NULL)
 
 FORCE_STATIC_LIB = 1
 

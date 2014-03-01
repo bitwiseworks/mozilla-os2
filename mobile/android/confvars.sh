@@ -5,29 +5,33 @@
 MOZ_APP_BASENAME=Fennec
 MOZ_APP_VENDOR=Mozilla
 
-MOZ_APP_VERSION=17.0
+MOZ_APP_VERSION=24.0
 MOZ_APP_UA_NAME=Firefox
 
 MOZ_BRANDING_DIRECTORY=mobile/android/branding/unofficial
 MOZ_OFFICIAL_BRANDING_DIRECTORY=mobile/android/branding/official
 # MOZ_APP_DISPLAYNAME is set by branding/configure.sh
 
-MOZ_SAFE_BROWSING=
+MOZ_SAFE_BROWSING=1
 
-MOZ_DISABLE_DOMCRYPTO=1
+MOZ_DISABLE_CRYPTOLEGACY=1
 
 # Enable getUserMedia
 MOZ_MEDIA_NAVIGATOR=1
+
+# Enable NFC permission
+MOZ_ANDROID_BEAM=1
 
 if test "$LIBXUL_SDK"; then
 MOZ_XULRUNNER=1
 else
 MOZ_XULRUNNER=
-MOZ_PLACES=1
 fi
 
 MOZ_CAPTURE=1
 MOZ_RAW=1
+MOZ_PLACES=
+MOZ_SOCIAL=
 MOZ_ANDROID_HISTORY=1
 
 # Needed for building our components as part of libxul
@@ -42,7 +46,19 @@ MOZ_ONLY_TOUCH_EVENTS=1
 
 MOZ_APP_ID={aa3c5121-dab2-40e2-81ca-7ea25febc110}
 
-MOZ_JAVA_COMPOSITOR=1
+MOZ_ANDROID_OMTC=1
 MOZ_EXTENSION_MANAGER=1
 MOZ_APP_STATIC_INI=1
 
+MOZ_FENNEC=1
+
+MOZ_FOLD_LIBS=1
+
+# Enable navigator.mozPay
+MOZ_PAY=1
+
+# Enable UI for healthreporter
+MOZ_SERVICES_HEALTHREPORT=1
+
+# Enable the production cert for verifying signed packaged apps.
+MOZ_B2G_CERTDATA=1

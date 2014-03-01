@@ -8,6 +8,10 @@ Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
+                                  "resource://gre/modules/TelemetryStopwatch.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Constants
@@ -76,6 +80,9 @@ const kBrowserUrlbarAutocompleteEnabledPref = "autocomplete.enabled";
 const kBrowserUrlbarAutofillPref = "autoFill";
 // Whether to search only typed entries.
 const kBrowserUrlbarAutofillTypedPref = "autoFill.typed";
+
+// The Telemetry histogram for urlInlineComplete query on domain
+const DOMAIN_QUERY_TELEMETRY = "PLACES_AUTOCOMPLETE_URLINLINE_DOMAIN_QUERY_TIME_MS";
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Globals
@@ -299,10 +306,7 @@ function nsPlacesAutoComplete()
     // to our own in-memory temp table, and having a cloned copy means we do not
     // run the risk of our queries taking longer due to the main database
     // connection performing a long-running task.
-    let db = Cc["@mozilla.org/browser/nav-history-service;1"].
-             getService(Ci.nsPIPlacesDatabase).
-             DBConnection.
-             clone(true);
+    let db = PlacesUtils.history.DBConnection.clone(true);
 
     // Autocomplete often fallbacks to a table scan due to lack of text indices.
     // In such cases a larger cache helps reducing IO.  The default Storage
@@ -333,22 +337,6 @@ function nsPlacesAutoComplete()
 
     return db;
   });
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_bh",
-                                     "@mozilla.org/browser/global-history;2",
-                                     "nsIBrowserHistory");
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_bs",
-                                     "@mozilla.org/browser/nav-bookmarks-service;1",
-                                     "nsINavBookmarksService");
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_ioService",
-                                     "@mozilla.org/network/io-service;1",
-                                     "nsIIOService");
-
-  XPCOMUtils.defineLazyServiceGetter(this, "_faviconService",
-                                     "@mozilla.org/browser/favicon-service;1",
-                                     "nsIFaviconService");
 
   XPCOMUtils.defineLazyGetter(this, "_defaultQuery", function() {
     let replacementText = "";
@@ -576,7 +564,7 @@ nsPlacesAutoComplete.prototype = {
   onValueRemoved: function PAC_onValueRemoved(aResult, aURISpec, aRemoveFromDB)
   {
     if (aRemoveFromDB) {
-      this._bh.removePage(this._ioService.newURI(aURISpec, null, null));
+      PlacesUtils.history.removePage(NetUtil.newURI(aURISpec));
     }
   },
 
@@ -619,7 +607,7 @@ nsPlacesAutoComplete.prototype = {
   handleResult: function PAC_handleResult(aResultSet)
   {
     let row, haveMatches = false;
-    while (row = aResultSet.getNextRow()) {
+    while ((row = aResultSet.getNextRow())) {
       let match = this._processRow(row);
       haveMatches = haveMatches || match;
 
@@ -956,7 +944,7 @@ nsPlacesAutoComplete.prototype = {
 
     // Bind the needed parameters to the query so consumers can use it.
     let (params = query.params) {
-      params.parent = this._bs.tagsFolder;
+      params.parent = PlacesUtils.tagsFolderId;
       params.query_type = kQueryTypeFiltered;
       params.matchBehavior = aMatchBehavior;
       params.searchBehavior = this._behavior;
@@ -1038,7 +1026,7 @@ nsPlacesAutoComplete.prototype = {
 
     let query = this._adaptiveQuery;
     let (params = query.params) {
-      params.parent = this._bs.tagsFolder;
+      params.parent = PlacesUtils.tagsFolderId;
       params.search_string = this._currentSearchString;
       params.query_type = kQueryTypeFiltered;
       params.matchBehavior = aMatchBehavior;
@@ -1189,10 +1177,10 @@ nsPlacesAutoComplete.prototype = {
     // Obtain the favicon for this URI.
     let favicon;
     if (aFaviconSpec) {
-      let uri = this._ioService.newURI(aFaviconSpec, null, null);
-      favicon = this._faviconService.getFaviconLinkForIcon(uri).spec;
+      let uri = NetUtil.newURI(aFaviconSpec);
+      favicon = PlacesUtils.favicons.getFaviconLinkForIcon(uri).spec;
     }
-    favicon = favicon || this._faviconService.defaultFavicon.spec;
+    favicon = favicon || PlacesUtils.favicons.defaultFavicon.spec;
 
     this._result.appendMatch(aURISpec, aTitle, favicon, aStyle);
   },
@@ -1284,8 +1272,7 @@ urlInlineComplete.prototype = {
   get _db()
   {
     if (!this.__db && this._autofillEnabled) {
-      this.__db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).
-                  DBConnection.clone(true);
+      this.__db = PlacesUtils.history.DBConnection.clone(true);
     }
     return this.__db;
   },
@@ -1391,7 +1378,11 @@ urlInlineComplete.prototype = {
     if (lastSlashIndex == -1) {
       var hasDomainResult = false;
       var domain, untrimmedDomain;
+      TelemetryStopwatch.start(DOMAIN_QUERY_TELEMETRY);
       try {
+        // Execute the query synchronously.
+        // This is by design, to avoid race conditions between the
+        // user typing and the connection searching for the result.
         hasDomainResult = query.executeStep();
         if (hasDomainResult) {
           domain = query.getString(0);
@@ -1400,13 +1391,14 @@ urlInlineComplete.prototype = {
       } finally {
         query.reset();
       }
+      TelemetryStopwatch.finish(DOMAIN_QUERY_TELEMETRY);
 
       if (hasDomainResult) {
         // We got a match for a domain, we can add it immediately.
         // If the untrimmed value doesn't preserve the user's input just
         // ignore it and complete to the found domain.
         if (untrimmedDomain &&
-            untrimmedDomain.toLowerCase().indexOf(this._originalSearchString.toLowerCase()) == -1) {
+            !untrimmedDomain.toLowerCase().contains(this._originalSearchString.toLowerCase())) {
           untrimmedDomain = null;
         }
 
@@ -1524,7 +1516,7 @@ urlInlineComplete.prototype = {
     // ignore it and complete to the found url.
     let untrimmedURL = prefix + url;
     if (untrimmedURL &&
-        untrimmedURL.toLowerCase().indexOf(this._originalSearchString.toLowerCase()) == -1) {
+        !untrimmedURL.toLowerCase().contains(this._originalSearchString.toLowerCase())) {
       untrimmedURL = null;
      }
 
@@ -1651,4 +1643,4 @@ urlInlineComplete.prototype = {
 };
 
 let components = [nsPlacesAutoComplete, urlInlineComplete];
-const NSGetFactory = XPCOMUtils.generateNSGetFactory(components);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

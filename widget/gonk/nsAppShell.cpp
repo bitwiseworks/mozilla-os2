@@ -30,12 +30,15 @@
 
 #include "base/basictypes.h"
 #include "nscore.h"
+#ifdef MOZ_OMX_DECODER
+#include "MediaResourceManagerService.h"
+#endif
 #include "mozilla/FileUtils.h"
 #include "mozilla/Hal.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Services.h"
 #include "nsAppShell.h"
-#include "nsDOMTouchEvent.h"
+#include "mozilla/dom/Touch.h"
 #include "nsGkAtoms.h"
 #include "nsGUIEvent.h"
 #include "nsIObserverService.h"
@@ -43,13 +46,17 @@
 #include "nsScreenManagerGonk.h"
 #include "nsWindow.h"
 #include "OrientationObserver.h"
+#include "GonkMemoryPressureMonitoring.h"
 
 #include "android/log.h"
 #include "libui/EventHub.h"
 #include "libui/InputReader.h"
 #include "libui/InputDispatcher.h"
 
-#include "sampler.h"
+#include "GeckoProfiler.h"
+
+// Defines kKeyMapping and GetKeyNameIndex()
+#include "GonkKeyMapping.h"
 
 #define LOG(args...)                                            \
     __android_log_print(ANDROID_LOG_INFO, "Gonk" , ## args)
@@ -64,11 +71,15 @@
 using namespace android;
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::services;
+using namespace mozilla::widget;
 
 bool gDrawRequest = false;
 static nsAppShell *gAppShell = NULL;
 static int epollfd = 0;
 static int signalfds[2] = {0};
+
+NS_IMPL_ISUPPORTS_INHERITED1(nsAppShell, nsBaseAppShell, nsIObserver)
 
 namespace mozilla {
 
@@ -82,7 +93,7 @@ void NotifyEvent()
     gAppShell->NotifyNativeEvent();
 }
 
-}
+} // namespace mozilla
 
 static void
 pipeHandler(int fd, FdHandler *data)
@@ -115,7 +126,7 @@ struct UserInputData {
         } key;
         struct {
             int32_t touchCount;
-            Touch touches[MAX_POINTERS];
+            ::Touch touches[MAX_POINTERS];
         } motion;
     };
 };
@@ -130,11 +141,11 @@ sendMouseEvent(uint32_t msg, uint64_t timeMs, int x, int y, bool forwardToChildr
     event.refPoint.y = y;
     event.time = timeMs;
     event.button = nsMouseEvent::eLeftButton;
+    event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
     if (msg != NS_MOUSE_MOVE)
         event.clickCount = 1;
 
-    if (!forwardToChildren)
-        event.flags |= NS_EVENT_FLAG_DONT_FORWARD_CROSS_PROCESS;
+    event.mFlags.mNoCrossProcessBoundaryForwarding = !forwardToChildren;
 
     nsWindow::DispatchInputEvent(event);
 }
@@ -142,9 +153,9 @@ sendMouseEvent(uint32_t msg, uint64_t timeMs, int x, int y, bool forwardToChildr
 static void
 addDOMTouch(UserInputData& data, nsTouchEvent& event, int i)
 {
-    const Touch& touch = data.motion.touches[i];
+    const ::Touch& touch = data.motion.touches[i];
     event.touches.AppendElement(
-        new nsDOMTouch(touch.id,
+        new dom::Touch(touch.id,
                        nsIntPoint(touch.coords.getX(), touch.coords.getY()),
                        nsIntPoint(touch.coords.getAxisValue(AMOTION_EVENT_AXIS_SIZE),
                                   touch.coords.getAxisValue(AMOTION_EVENT_AXIS_SIZE)),
@@ -154,7 +165,7 @@ addDOMTouch(UserInputData& data, nsTouchEvent& event, int i)
 }
 
 static nsEventStatus
-sendTouchEvent(UserInputData& data)
+sendTouchEvent(UserInputData& data, bool* captured)
 {
     uint32_t msg;
     int32_t action = data.action & AMOTION_EVENT_ACTION_MASK;
@@ -190,46 +201,53 @@ sendTouchEvent(UserInputData& data)
             addDOMTouch(data, event, i);
     }
 
-    return nsWindow::DispatchInputEvent(event);
+    return nsWindow::DispatchInputEvent(event, captured);
 }
 
 static nsEventStatus
 sendKeyEventWithMsg(uint32_t keyCode,
+                    KeyNameIndex keyNameIndex,
                     uint32_t msg,
                     uint64_t timeMs,
-                    uint32_t flags)
+                    const EventFlags& flags)
 {
     nsKeyEvent event(true, msg, NULL);
     event.keyCode = keyCode;
+    event.mKeyNameIndex = keyNameIndex;
     event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_MOBILE;
     event.time = timeMs;
-    event.flags |= flags;
+    event.mFlags.Union(flags);
     return nsWindow::DispatchInputEvent(event);
 }
 
 static void
-sendKeyEvent(uint32_t keyCode, bool down, uint64_t timeMs)
+sendKeyEvent(uint32_t keyCode, KeyNameIndex keyNameIndex, bool down,
+             uint64_t timeMs)
 {
+    EventFlags extraFlags;
     nsEventStatus status =
-        sendKeyEventWithMsg(keyCode, down ? NS_KEY_DOWN : NS_KEY_UP, timeMs, 0);
+        sendKeyEventWithMsg(keyCode, keyNameIndex,
+                            down ? NS_KEY_DOWN : NS_KEY_UP, timeMs, extraFlags);
     if (down) {
-        sendKeyEventWithMsg(keyCode, NS_KEY_PRESS, timeMs,
-                            status == nsEventStatus_eConsumeNoDefault ?
-                            NS_EVENT_FLAG_NO_DEFAULT : 0);
+        extraFlags.mDefaultPrevented =
+            (status == nsEventStatus_eConsumeNoDefault);
+        sendKeyEventWithMsg(keyCode, keyNameIndex, NS_KEY_PRESS, timeMs,
+                            extraFlags);
     }
 }
-
-// Defines kKeyMapping
-#include "GonkKeyMapping.h"
 
 static void
 maybeSendKeyEvent(int keyCode, bool pressed, uint64_t timeMs)
 {
-    if (keyCode < ArrayLength(kKeyMapping) && kKeyMapping[keyCode])
-        sendKeyEvent(kKeyMapping[keyCode], pressed, timeMs);
-    else
+    uint32_t DOMKeyCode =
+        (keyCode < ArrayLength(kKeyMapping)) ? kKeyMapping[keyCode] : 0;
+    KeyNameIndex DOMKeyNameIndex = GetKeyNameIndex(keyCode);
+    if (DOMKeyCode || DOMKeyNameIndex != KEY_NAME_INDEX_Unidentified) {
+        sendKeyEvent(DOMKeyCode, DOMKeyNameIndex, pressed, timeMs);
+    } else {
         VERBOSE_LOG("Got unknown key event code. type 0x%04x code 0x%04x value %d",
                     keyCode, pressed);
+    }
 }
 
 class GeckoPointerController : public PointerControllerInterface {
@@ -435,7 +453,11 @@ GeckoInputDispatcher::dispatchOnce()
         nsEventStatus status = nsEventStatus_eIgnore;
         if ((data.action & AMOTION_EVENT_ACTION_MASK) !=
             AMOTION_EVENT_ACTION_HOVER_MOVE) {
-            status = sendTouchEvent(data);
+            bool captured;
+            status = sendTouchEvent(data, &captured);
+            if (captured) {
+                return;
+            }
         }
 
         uint32_t msg;
@@ -513,7 +535,7 @@ GeckoInputDispatcher::notifyMotion(const NotifyMotionArgs* args)
     MOZ_ASSERT(args->pointerCount <= MAX_POINTERS);
     data.motion.touchCount = args->pointerCount;
     for (uint32_t i = 0; i < args->pointerCount; ++i) {
-        Touch& touch = data.motion.touches[i];
+        ::Touch& touch = data.motion.touches[i];
         touch.id = args->pointerProperties[i].id;
         memcpy(&touch.coords, &args->pointerCoords[i], sizeof(*args->pointerCoords));
     }
@@ -581,20 +603,25 @@ GeckoInputDispatcher::unregisterInputChannel(const sp<InputChannel>& inputChanne
 nsAppShell::nsAppShell()
     : mNativeCallbackRequest(false)
     , mHandlers()
+    , mEnableDraw(false)
 {
     gAppShell = this;
 }
 
 nsAppShell::~nsAppShell()
 {
-    // We separate requestExit() and join() here so we can wake the EventHub's
-    // input loop, and stop it from polling for input events
-    mReaderThread->requestExit();
-    mEventHub->wake();
+    // mReaderThread and mEventHub will both be null if InitInputDevices
+    // is not called.
+    if (mReaderThread.get()) {
+        // We separate requestExit() and join() here so we can wake the EventHub's
+        // input loop, and stop it from polling for input events
+        mReaderThread->requestExit();
+        mEventHub->wake();
 
-    status_t result = mReaderThread->requestExitAndWait();
-    if (result)
-        LOG("Could not stop reader thread - %d", result);
+        status_t result = mReaderThread->requestExitAndWait();
+        if (result)
+            LOG("Could not stop reader thread - %d", result);
+    }
     gAppShell = NULL;
 }
 
@@ -613,16 +640,46 @@ nsAppShell::Init()
     rv = AddFdHandler(signalfds[0], pipeHandler, "");
     NS_ENSURE_SUCCESS(rv, rv);
 
+    InitGonkMemoryPressureMonitoring();
+
+#ifdef MOZ_OMX_DECODER
+    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+      android::MediaResourceManagerService::instantiate();
+    }
+#endif
+    nsCOMPtr<nsIObserverService> obsServ = GetObserverService();
+    if (obsServ) {
+        obsServ->AddObserver(this, "browser-ui-startup-complete", false);
+    }
+
     // Delay initializing input devices until the screen has been
     // initialized (and we know the resolution).
     return rv;
 }
 
 NS_IMETHODIMP
+nsAppShell::Observe(nsISupports* aSubject,
+                    const char* aTopic,
+                    const PRUnichar* aData)
+{
+    if (strcmp(aTopic, "browser-ui-startup-complete")) {
+        return nsBaseAppShell::Observe(aSubject, aTopic, aData);
+    }
+
+    mEnableDraw = true;
+    NotifyEvent();
+    return NS_OK;
+}
+
+NS_IMETHODIMP
 nsAppShell::Exit()
 {
-  OrientationObserver::ShutDown();
-  return nsBaseAppShell::Exit();
+    OrientationObserver::ShutDown();
+    nsCOMPtr<nsIObserverService> obsServ = GetObserverService();
+    if (obsServ) {
+        obsServ->RemoveObserver(this, "browser-ui-startup-complete");
+    }
+    return nsBaseAppShell::Exit();
 }
 
 void
@@ -670,12 +727,12 @@ nsAppShell::ScheduleNativeEventCallback()
 bool
 nsAppShell::ProcessNextNativeEvent(bool mayWait)
 {
-    SAMPLE_LABEL("nsAppShell", "ProcessNextNativeEvent");
+    PROFILER_LABEL("nsAppShell", "ProcessNextNativeEvent");
     epoll_event events[16] = {{ 0 }};
 
     int event_count;
     {
-        SAMPLE_LABEL("nsAppShell", "ProcessNextNativeEvent::Wait");
+        PROFILER_LABEL("nsAppShell", "ProcessNextNativeEvent::Wait");
         if ((event_count = epoll_wait(epollfd, events, 16,  mayWait ? -1 : 0)) <= 0)
             return true;
     }
@@ -694,7 +751,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         NativeEventCallback();
     }
 
-    if (gDrawRequest) {
+    if (gDrawRequest && mEnableDraw) {
         gDrawRequest = false;
         nsWindow::DoDraw();
     }

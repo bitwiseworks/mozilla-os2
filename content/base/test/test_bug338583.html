@@ -53,7 +53,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
   function runAllTests() {
     // these tests run asynchronously, and they will take 8000 ms
     var all_tests = [
-      doTest1, doTest1_e, doTest2, doTest3, doTest3_b, doTest3_c, doTest3_d,
+      doTest1, doTest1_e, doTest1_f, doTest2, doTest3, doTest3_b, doTest3_c, doTest3_d,
       doTest3_e, doTest3_f, doTest3_g, doTest3_h, doTest4, doTest4_b,
       doTest5, doTest5_b, doTest5_c, doTest5_e, doTest6, doTest7
     ];
@@ -92,7 +92,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
   var domBranch;
   var oldPrefVal;
 
-  var gEventSourceObj1 = null, gEventSourceObj1_e;
+  var gEventSourceObj1 = null, gEventSourceObj1_e, gEventSourceObj1_f;
   var gEventSourceObj2 = null;
   var gEventSourceObj3_a = null, gEventSourceObj3_b = null,
       gEventSourceObj3_c = null, gEventSourceObj3_d = null,
@@ -120,7 +120,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
 //   b) let its fn_onmessage, fn_event_listener_message, and fn_other_event_name functions listeners be hit four times each
 //   c) the close method (we expect readyState == CLOSED)
 //   d) the close method (we expect no message events anymore)
-//   e) if the ctor throws an exception when the second parameter is null
+//   e) use the default for withCredentials when passing dictionary arguments that don't explicitly set it
+//   f) if a 204 HTTP response closes (interrupts) connections. See bug 869432.
 
   function doTest1(test_id) {
     gEventSourceObj1 = new EventSource("eventsource.resource");
@@ -170,13 +171,39 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
 
   function doTest1_e(test_id) {
     try {
-      gEventSourceObj1_e = new EventSource("eventsource.resource", null);
-      ok(false, "Test 1.e failed");
-      gEventSourceObj1_e.close();
+      for (var options of [null, undefined, {}]) {
+        gEventSourceObj1_e = new EventSource("eventsource.resource", options);
+        is(gEventSourceObj1_e.withCredentials, false, "withCredentials should default to false");
+        gEventSourceObj1_e.close();
+      }
     } catch (e) {
-      ok(true, "Test 1.e failed");
+      ok(false, "Test 1.e failed");
     }
     setTestHasFinished(test_id);
+  }
+
+  function doTest1_f(test_id) {
+    var called_on_error = false;
+  
+    gEventSourceObj1_f = new EventSource("file_bug869432.eventsource");
+    gEventSourceObj1_f.onopen = function(e) {
+      ok(false, "Test 1.f failed: onopen was called");
+    };
+    gEventSourceObj1_f.onmessage = function(e) {
+      ok(false, "Test 1.f failed: onmessage was called");
+    };
+    gEventSourceObj1_f.onerror = function(e) {
+      if (called_on_error) {
+        ok(false, "Test 1.f failed: onerror was called twice");
+      }
+      called_on_error = true;
+      ok(gEventSourceObj1_f.readyState == 2, "Test 1.f failed: onerror was called with readyState = " + gEventSourceObj1_f.readyState);
+    };
+
+    setTimeout(function() {  // just to clean...
+      ok(called_on_error, "Test 1.f failed: onerror was not called");
+      setTestHasFinished(test_id);
+    }, parseInt(5000*stress_factor));
   }
 
 // in order to test (2)
@@ -205,8 +232,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
 //   d) wrong Content-Type test
 //   e) bad http response code test
 //   f) message eventsource without a data test
-//   g) eventsource with invalid NCName char in the event field test
-//   h) DNS error
+//   g) DNS error
+//   h) EventSource which last message doesn't end with an empty line. See bug 710546
 
   function doTest3(test_id) {
     gEventSourceObj3_a = new EventSource("http://example.org/tests/content/base/test/eventsource.resource");
@@ -308,30 +335,44 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
   }
 
   function doTest3_g(test_id) {
-    gEventSourceObj3_g = new EventSource("badEventFieldName.eventsource");
+    gEventSourceObj3_g = new EventSource("http://hdfskjghsbg.jtiyoejowe.dafsgbhjab.com");
 
-    fnInvalidNCName.hits = 0;
-    gEventSourceObj3_g.addEventListener('message event', fnInvalidNCName, true);
+    gEventSourceObj3_g.onmessage = fn_onmessage;
+    gEventSourceObj3_g.hits = [];
+    gEventSourceObj3_g.hits['fn_onmessage'] = 0;
 
     setTimeout(function() {
-      ok(fnInvalidNCName.hits != 0, "Test 3.g failed");
+      ok(gEventSourceObj3_g.hits['fn_onmessage'] == 0, "Test 3.g failed");
       gEventSourceObj3_g.close();
       setTestHasFinished(test_id);
     }, parseInt(1500*stress_factor));
   }
 
+  function fnMessageListenerTest3h(e) {
+    fnMessageListenerTest3h.msg_ok = (fnMessageListenerTest3h.msg_ok && e.data == "ok");
+    fnMessageListenerTest3h.id_ok = (fnMessageListenerTest3h.msg_ok && e.lastEventId == "");
+  }
+
   function doTest3_h(test_id) {
-    gEventSourceObj3_h = new EventSource("http://hdfskjghsbg.jtiyoejowe.dafsgbhjab.com");
+    gEventSourceObj3_h = new EventSource("badMessageEvent2.eventsource");
+
+    gEventSourceObj3_h.addEventListener('message event', fnMessageListenerTest3h, true);
+    fnMessageListenerTest3h.msg_ok = true;
+    fnMessageListenerTest3h.id_ok = true;
 
     gEventSourceObj3_h.onmessage = fn_onmessage;
     gEventSourceObj3_h.hits = [];
     gEventSourceObj3_h.hits['fn_onmessage'] = 0;
 
     setTimeout(function() {
-      ok(gEventSourceObj3_h.hits['fn_onmessage'] == 0, "Test 3.h failed");
+      ok(gEventSourceObj3_h.hits['fn_onmessage'] > 1, "Test 3.h.1 failed");
+      if (gEventSourceObj3_h.hits['fn_onmessage'] > 1) {
+        ok(fnMessageListenerTest3h.msg_ok, "Test 3.h.2 failed");
+        ok(fnMessageListenerTest3h.id_ok, "Test 3.h.3 failed");
+      }
       gEventSourceObj3_h.close();
       setTestHasFinished(test_id);
-    }, parseInt(1500*stress_factor));
+    }, parseInt(3000*stress_factor));
   }
 
 // in order to test (4)
@@ -542,8 +583,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
       } else if (fn_somedata.expected == 1) {
         ok(e.data == " :xxabcdefghij\nçãá\"\'@`~Ý Ḿyyyy : zz",
           "Test 6.b failed");
-      } else if (fn_somedata.expected == 2) {
-        ok(e.data == "1", "Test 6.c failed");
         gEventSourceObj6.close();
       } else {
         ok(false, "Test 6 failed (unexpected message event)");
@@ -581,7 +620,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=338583
     }, parseInt(8000*stress_factor));
   }
 
-  function doTest(test_id)
+  function doTest()
+  {
+    // Allow all cookies, then run the actual test
+    SpecialPowers.pushPrefEnv({"set": [["network.cookie.cookieBehavior", 0]]}, doTestCallback);
+  }
+  
+  function doTestCallback()
   {
     oldPrefVal = SpecialPowers.getBoolPref("dom.server-events.enabled");
     SpecialPowers.setBoolPref("dom.server-events.enabled", true);

@@ -10,6 +10,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/PluralForm.jsm");
 Cu.import("resource://gre/modules/DownloadUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/ForgetAboutSite.jsm");
 
 let gFaviconService = Cc["@mozilla.org/browser/favicon-service;1"].
                       getService(Ci.nsIFaviconService);
@@ -231,9 +232,7 @@ Site.prototype = {
    * Removes all data from the browser corresponding to the site.
    */
   forgetSite: function Site_forgetSite() {
-    let pb = Cc["@mozilla.org/privatebrowsing;1"].
-             getService(Ci.nsIPrivateBrowsingService);
-    pb.removeDataFromDomain(this.host);
+    ForgetAboutSite.removeDataFromDomain(this.host);
   }
 }
 
@@ -438,10 +437,10 @@ let AboutPermissions = {
       Services.prefs.removeObserver("plugins.click_to_play", this, false);
       Services.prefs.removeObserver("full-screen-api.enabled", this, false);
 
-      Services.obs.removeObserver(this, "perm-changed", false);
-      Services.obs.removeObserver(this, "passwordmgr-storage-changed", false);
-      Services.obs.removeObserver(this, "cookie-changed", false);
-      Services.obs.removeObserver(this, "browser:purge-domain-data", false);
+      Services.obs.removeObserver(this, "perm-changed");
+      Services.obs.removeObserver(this, "passwordmgr-storage-changed");
+      Services.obs.removeObserver(this, "cookie-changed");
+      Services.obs.removeObserver(this, "browser:purge-domain-data");
     }
 
     gSitesStmt.finalize();
@@ -761,12 +760,18 @@ let AboutPermissions = {
       permissionValue = PermissionDefaults[aType];
       if (aType == "plugins")
         document.getElementById("plugins-pref-item").hidden = false;
+      else if (aType == "cookie")
+	// cookie-9 corresponds to ALLOW_FIRST_PARTY_ONLY, which is reserved
+	// for site-specific preferences only.
+	document.getElementById("cookie-9").hidden = true;
     } else {
       if (aType == "plugins") {
         document.getElementById("plugins-pref-item").hidden =
           !Services.prefs.getBoolPref("plugins.click_to_play");
         return;
       }
+      if (aType == "cookie")
+        document.getElementById("cookie-9").hidden = false;
       let result = {};
       permissionValue = this._selectedSite.getPermission(aType, result) ?
                         result.value : PermissionDefaults[aType];

@@ -6,19 +6,9 @@
 #include "NotificationController.h"
 
 #include "Accessible-inl.h"
-#include "nsAccessibilityService.h"
-#include "nsAccUtils.h"
-#include "nsCoreUtils.h"
-#include "DocAccessible.h"
-#include "nsEventShell.h"
-#include "FocusManager.h"
-#include "Role.h"
+#include "DocAccessible-inl.h"
 #include "TextLeafAccessible.h"
 #include "TextUpdater.h"
-
-#ifdef DEBUG
-#include "Logging.h"
-#endif
 
 #include "mozilla/dom/Element.h"
 #include "mozilla/Telemetry.h"
@@ -36,7 +26,7 @@ const unsigned int kSelChangeCountToPack = 5;
 
 NotificationController::NotificationController(DocAccessible* aDocument,
                                                nsIPresShell* aPresShell) :
-  mObservingState(eNotObservingRefresh), mDocument(aDocument),
+  EventQueue(aDocument), mObservingState(eNotObservingRefresh),
   mPresShell(aPresShell)
 {
   mTextHash.Init();
@@ -58,21 +48,15 @@ NotificationController::~NotificationController()
 NS_IMPL_CYCLE_COLLECTING_NATIVE_ADDREF(NotificationController)
 NS_IMPL_CYCLE_COLLECTING_NATIVE_RELEASE(NotificationController)
 
-NS_IMPL_CYCLE_COLLECTION_NATIVE_CLASS(NotificationController)
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_NATIVE(NotificationController)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(NotificationController)
   if (tmp->mDocument)
     tmp->Shutdown();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_BEGIN(NotificationController)
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mDocument");
-  cb.NoteXPCOMChild(static_cast<nsIAccessible*>(tmp->mDocument.get()));
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSTARRAY_MEMBER(mHangingChildDocuments,
-                                                    DocAccessible)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSTARRAY_MEMBER(mContentInsertions,
-                                                    ContentInsertion)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSTARRAY_MEMBER(mEvents, AccEvent)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(NotificationController)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHangingChildDocuments)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContentInsertions)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEvents)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(NotificationController, AddRef)
@@ -105,24 +89,6 @@ NotificationController::Shutdown()
   mContentInsertions.Clear();
   mNotifications.Clear();
   mEvents.Clear();
-}
-
-void
-NotificationController::QueueEvent(AccEvent* aEvent)
-{
-  if (!mEvents.AppendElement(aEvent))
-    return;
-
-  // Filter events.
-  CoalesceEvents();
-
-  // Associate text change with hide event if it wasn't stolen from hiding
-  // siblings during coalescence.
-  AccMutationEvent* showOrHideEvent = downcast_accEvent(aEvent);
-  if (showOrHideEvent && !showOrHideEvent->mTextChangeEvent)
-    CreateTextChangeEventFor(showOrHideEvent);
-
-  ScheduleProcessing();
 }
 
 void
@@ -185,6 +151,10 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
   if (!mDocument)
     return;
 
+  if (mObservingState == eRefreshProcessing ||
+      mObservingState == eRefreshProcessingForUpdate)
+    return;
+
   // Any generic notifications should be queued if we're processing content
   // insertions or generic notifications.
   mObservingState = eRefreshProcessingForUpdate;
@@ -198,7 +168,7 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
       return;
     }
 
-#ifdef DEBUG
+#ifdef A11Y_LOG
     if (logging::IsEnabled(logging::eTree)) {
       logging::MsgBegin("TREE", "initial tree created");
       logging::Address("document", mDocument);
@@ -211,6 +181,10 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
     NS_ASSERTION(mContentInsertions.Length() == 0,
                  "Pending content insertions while initial accessible tree isn't created!");
   }
+
+  // Initialize scroll support if needed.
+  if (!(mDocument->mDocFlags & DocAccessible::eScrollInitialized))
+    mDocument->AddScrollListener();
 
   // Process content inserted notifications to update the tree. Process other
   // notifications like DOM events and then flush event queue. If any new
@@ -243,8 +217,8 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
     if (childDoc->IsDefunct())
       continue;
 
-    nsIContent* ownerContent = mDocument->GetDocumentNode()->
-      FindContentForSubDocument(childDoc->GetDocumentNode());
+    nsIContent* ownerContent = mDocument->DocumentNode()->
+      FindContentForSubDocument(childDoc->DocumentNode());
     if (ownerContent) {
       Accessible* outerDocAcc = mDocument->GetAccessible(ownerContent);
       if (outerDocAcc && outerDocAcc->AppendChild(childDoc)) {
@@ -295,401 +269,24 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
   mDocument->ProcessInvalidationList();
 
   // If a generic notification occurs after this point then we may be allowed to
-  // process it synchronously.
+  // process it synchronously.  However we do not want to reenter if fireing
+  // events causes script to run.
+  mObservingState = eRefreshProcessing;
+
+  ProcessEventQueue();
   mObservingState = eRefreshObserving;
-
-  // Process only currently queued events.
-  nsTArray<nsRefPtr<AccEvent> > events;
-  events.SwapElements(mEvents);
-
-  uint32_t eventCount = events.Length();
-#ifdef DEBUG
-  if (eventCount > 0 && logging::IsEnabled(logging::eEvents)) {
-    logging::MsgBegin("EVENTS", "events processing");
-    logging::Address("document", mDocument);
-    logging::MsgEnd();
-  }
-#endif
-
-  for (uint32_t idx = 0; idx < eventCount; idx++) {
-    AccEvent* accEvent = events[idx];
-    if (accEvent->mEventRule != AccEvent::eDoNotEmit) {
-      Accessible* target = accEvent->GetAccessible();
-      if (!target || target->IsDefunct())
-        continue;
-
-      // Dispatch the focus event if target is still focused.
-      if (accEvent->mEventType == nsIAccessibleEvent::EVENT_FOCUS) {
-        FocusMgr()->ProcessFocusEvent(accEvent);
-        continue;
-      }
-
-      mDocument->ProcessPendingEvent(accEvent);
-
-      // Fire text change event caused by tree mutation.
-      AccMutationEvent* showOrHideEvent = downcast_accEvent(accEvent);
-      if (showOrHideEvent) {
-        if (showOrHideEvent->mTextChangeEvent)
-          mDocument->ProcessPendingEvent(showOrHideEvent->mTextChangeEvent);
-      }
-    }
-    if (!mDocument)
-      return;
-  }
+  if (!mDocument)
+    return;
 
   // Stop further processing if there are no new notifications of any kind or
   // events and document load is processed.
-  if (mContentInsertions.Length() == 0 && mNotifications.Length() == 0 &&
-      mEvents.Length() == 0 && mTextHash.Count() == 0 &&
-      mHangingChildDocuments.Length() == 0 &&
+  if (mContentInsertions.IsEmpty() && mNotifications.IsEmpty() &&
+      mEvents.IsEmpty() && mTextHash.Count() == 0 &&
+      mHangingChildDocuments.IsEmpty() &&
       mDocument->HasLoadState(DocAccessible::eCompletelyLoaded) &&
       mPresShell->RemoveRefreshObserver(this, Flush_Display)) {
     mObservingState = eNotObservingRefresh;
   }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// NotificationController: event queue
-
-void
-NotificationController::CoalesceEvents()
-{
-  uint32_t numQueuedEvents = mEvents.Length();
-  int32_t tail = numQueuedEvents - 1;
-  AccEvent* tailEvent = mEvents[tail];
-
-  switch(tailEvent->mEventRule) {
-    case AccEvent::eCoalesceFromSameSubtree:
-    {
-      // No node means this is application accessible (which is a subject of
-      // reorder events), we do not coalesce events for it currently.
-      if (!tailEvent->mNode)
-        return;
-
-      for (int32_t index = tail - 1; index >= 0; index--) {
-        AccEvent* thisEvent = mEvents[index];
-
-        if (thisEvent->mEventType != tailEvent->mEventType)
-          continue; // Different type
-
-        // Skip event for application accessible since no coalescence for it
-        // is supported. Ignore events from different documents since we don't
-        // coalesce them.
-        if (!thisEvent->mNode ||
-            thisEvent->mNode->OwnerDoc() != tailEvent->mNode->OwnerDoc())
-          continue;
-
-        // Coalesce earlier event for the same target.
-        if (thisEvent->mNode == tailEvent->mNode) {
-          thisEvent->mEventRule = AccEvent::eDoNotEmit;
-          return;
-        }
-
-        // If event queue contains an event of the same type and having target
-        // that is sibling of target of newly appended event then apply its
-        // event rule to the newly appended event.
-
-        // Coalesce hide and show events for sibling targets.
-        if (tailEvent->mEventType == nsIAccessibleEvent::EVENT_HIDE) {
-          AccHideEvent* tailHideEvent = downcast_accEvent(tailEvent);
-          AccHideEvent* thisHideEvent = downcast_accEvent(thisEvent);
-          if (thisHideEvent->mParent == tailHideEvent->mParent) {
-            tailEvent->mEventRule = thisEvent->mEventRule;
-
-            // Coalesce text change events for hide events.
-            if (tailEvent->mEventRule != AccEvent::eDoNotEmit)
-              CoalesceTextChangeEventsFor(tailHideEvent, thisHideEvent);
-
-            return;
-          }
-        } else if (tailEvent->mEventType == nsIAccessibleEvent::EVENT_SHOW) {
-          if (thisEvent->mAccessible->Parent() ==
-              tailEvent->mAccessible->Parent()) {
-            tailEvent->mEventRule = thisEvent->mEventRule;
-
-            // Coalesce text change events for show events.
-            if (tailEvent->mEventRule != AccEvent::eDoNotEmit) {
-              AccShowEvent* tailShowEvent = downcast_accEvent(tailEvent);
-              AccShowEvent* thisShowEvent = downcast_accEvent(thisEvent);
-              CoalesceTextChangeEventsFor(tailShowEvent, thisShowEvent);
-            }
-
-            return;
-          }
-        }
-
-        // Ignore events unattached from DOM since we don't coalesce them.
-        if (!thisEvent->mNode->IsInDoc())
-          continue;
-
-        // Coalesce events by sibling targets (this is a case for reorder
-        // events).
-        if (thisEvent->mNode->GetNodeParent() ==
-            tailEvent->mNode->GetNodeParent()) {
-          tailEvent->mEventRule = thisEvent->mEventRule;
-          return;
-        }
-
-        // This and tail events can be anywhere in the tree, make assumptions
-        // for mutation events.
-
-        // Coalesce tail event if tail node is descendant of this node. Stop
-        // processing if tail event is coalesced since all possible descendants
-        // of this node was coalesced before.
-        // Note: more older hide event target (thisNode) can't contain recent
-        // hide event target (tailNode), i.e. be ancestor of tailNode. Skip
-        // this check for hide events.
-        if (tailEvent->mEventType != nsIAccessibleEvent::EVENT_HIDE &&
-            nsCoreUtils::IsAncestorOf(thisEvent->mNode, tailEvent->mNode)) {
-          tailEvent->mEventRule = AccEvent::eDoNotEmit;
-          return;
-        }
-
-        // If this node is a descendant of tail node then coalesce this event,
-        // check other events in the queue. Do not emit thisEvent, also apply
-        // this result to sibling nodes of thisNode.
-        if (nsCoreUtils::IsAncestorOf(tailEvent->mNode, thisEvent->mNode)) {
-          thisEvent->mEventRule = AccEvent::eDoNotEmit;
-          ApplyToSiblings(0, index, thisEvent->mEventType,
-                          thisEvent->mNode, AccEvent::eDoNotEmit);
-          continue;
-        }
-
-      } // for (index)
-
-    } break; // case eCoalesceFromSameSubtree
-
-    case AccEvent::eCoalesceOfSameType:
-    {
-      // Coalesce old events by newer event.
-      for (int32_t index = tail - 1; index >= 0; index--) {
-        AccEvent* accEvent = mEvents[index];
-        if (accEvent->mEventType == tailEvent->mEventType &&
-            accEvent->mEventRule == tailEvent->mEventRule) {
-          accEvent->mEventRule = AccEvent::eDoNotEmit;
-          return;
-        }
-      }
-    } break; // case eCoalesceOfSameType
-
-    case AccEvent::eRemoveDupes:
-    {
-      // Check for repeat events, coalesce newly appended event by more older
-      // event.
-      for (int32_t index = tail - 1; index >= 0; index--) {
-        AccEvent* accEvent = mEvents[index];
-        if (accEvent->mEventType == tailEvent->mEventType &&
-            accEvent->mEventRule == tailEvent->mEventRule &&
-            accEvent->mNode == tailEvent->mNode) {
-          tailEvent->mEventRule = AccEvent::eDoNotEmit;
-          return;
-        }
-      }
-    } break; // case eRemoveDupes
-
-    case AccEvent::eCoalesceSelectionChange:
-    {
-      AccSelChangeEvent* tailSelChangeEvent = downcast_accEvent(tailEvent);
-      int32_t index = tail - 1;
-      for (; index >= 0; index--) {
-        AccEvent* thisEvent = mEvents[index];
-        if (thisEvent->mEventRule == tailEvent->mEventRule) {
-          AccSelChangeEvent* thisSelChangeEvent =
-            downcast_accEvent(thisEvent);
-
-          // Coalesce selection change events within same control.
-          if (tailSelChangeEvent->mWidget == thisSelChangeEvent->mWidget) {
-            CoalesceSelChangeEvents(tailSelChangeEvent, thisSelChangeEvent, index);
-            return;
-          }
-        }
-      }
-
-    } break; // eCoalesceSelectionChange
-
-    default:
-      break; // case eAllowDupes, eDoNotEmit
-  } // switch
-}
-
-void
-NotificationController::ApplyToSiblings(uint32_t aStart, uint32_t aEnd,
-                                        uint32_t aEventType, nsINode* aNode,
-                                        AccEvent::EEventRule aEventRule)
-{
-  for (uint32_t index = aStart; index < aEnd; index ++) {
-    AccEvent* accEvent = mEvents[index];
-    if (accEvent->mEventType == aEventType &&
-        accEvent->mEventRule != AccEvent::eDoNotEmit && accEvent->mNode &&
-        accEvent->mNode->GetNodeParent() == aNode->GetNodeParent()) {
-      accEvent->mEventRule = aEventRule;
-    }
-  }
-}
-
-void
-NotificationController::CoalesceSelChangeEvents(AccSelChangeEvent* aTailEvent,
-                                                AccSelChangeEvent* aThisEvent,
-                                                int32_t aThisIndex)
-{
-  aTailEvent->mPreceedingCount = aThisEvent->mPreceedingCount + 1;
-
-  // Pack all preceding events into single selection within event
-  // when we receive too much selection add/remove events.
-  if (aTailEvent->mPreceedingCount >= kSelChangeCountToPack) {
-    aTailEvent->mEventType = nsIAccessibleEvent::EVENT_SELECTION_WITHIN;
-    aTailEvent->mAccessible = aTailEvent->mWidget;
-    aThisEvent->mEventRule = AccEvent::eDoNotEmit;
-
-    // Do not emit any preceding selection events for same widget if they
-    // weren't coalesced yet.
-    if (aThisEvent->mEventType != nsIAccessibleEvent::EVENT_SELECTION_WITHIN) {
-      for (int32_t jdx = aThisIndex - 1; jdx >= 0; jdx--) {
-        AccEvent* prevEvent = mEvents[jdx];
-        if (prevEvent->mEventRule == aTailEvent->mEventRule) {
-          AccSelChangeEvent* prevSelChangeEvent =
-            downcast_accEvent(prevEvent);
-          if (prevSelChangeEvent->mWidget == aTailEvent->mWidget)
-            prevSelChangeEvent->mEventRule = AccEvent::eDoNotEmit;
-        }
-      }
-    }
-    return;
-  }
-
-  // Pack sequential selection remove and selection add events into
-  // single selection change event.
-  if (aTailEvent->mPreceedingCount == 1 &&
-      aTailEvent->mItem != aThisEvent->mItem) {
-    if (aTailEvent->mSelChangeType == AccSelChangeEvent::eSelectionAdd &&
-        aThisEvent->mSelChangeType == AccSelChangeEvent::eSelectionRemove) {
-      aThisEvent->mEventRule = AccEvent::eDoNotEmit;
-      aTailEvent->mEventType = nsIAccessibleEvent::EVENT_SELECTION;
-      aTailEvent->mPackedEvent = aThisEvent;
-      return;
-    }
-
-    if (aThisEvent->mSelChangeType == AccSelChangeEvent::eSelectionAdd &&
-        aTailEvent->mSelChangeType == AccSelChangeEvent::eSelectionRemove) {
-      aTailEvent->mEventRule = AccEvent::eDoNotEmit;
-      aThisEvent->mEventType = nsIAccessibleEvent::EVENT_SELECTION;
-      aThisEvent->mPackedEvent = aThisEvent;
-      return;
-    }
-  }
-
-  // Unpack the packed selection change event because we've got one
-  // more selection add/remove.
-  if (aThisEvent->mEventType == nsIAccessibleEvent::EVENT_SELECTION) {
-    if (aThisEvent->mPackedEvent) {
-      aThisEvent->mPackedEvent->mEventType =
-        aThisEvent->mPackedEvent->mSelChangeType == AccSelChangeEvent::eSelectionAdd ?
-          nsIAccessibleEvent::EVENT_SELECTION_ADD :
-          nsIAccessibleEvent::EVENT_SELECTION_REMOVE;
-
-      aThisEvent->mPackedEvent->mEventRule =
-        AccEvent::eCoalesceSelectionChange;
-
-      aThisEvent->mPackedEvent = nullptr;
-    }
-
-    aThisEvent->mEventType =
-      aThisEvent->mSelChangeType == AccSelChangeEvent::eSelectionAdd ?
-        nsIAccessibleEvent::EVENT_SELECTION_ADD :
-        nsIAccessibleEvent::EVENT_SELECTION_REMOVE;
-
-    return;
-  }
-
-  // Convert into selection add since control has single selection but other
-  // selection events for this control are queued.
-  if (aTailEvent->mEventType == nsIAccessibleEvent::EVENT_SELECTION)
-    aTailEvent->mEventType = nsIAccessibleEvent::EVENT_SELECTION_ADD;
-}
-
-void
-NotificationController::CoalesceTextChangeEventsFor(AccHideEvent* aTailEvent,
-                                                    AccHideEvent* aThisEvent)
-{
-  // XXX: we need a way to ignore SplitNode and JoinNode() when they do not
-  // affect the text within the hypertext.
-
-  AccTextChangeEvent* textEvent = aThisEvent->mTextChangeEvent;
-  if (!textEvent)
-    return;
-
-  if (aThisEvent->mNextSibling == aTailEvent->mAccessible) {
-    aTailEvent->mAccessible->AppendTextTo(textEvent->mModifiedText);
-
-  } else if (aThisEvent->mPrevSibling == aTailEvent->mAccessible) {
-    uint32_t oldLen = textEvent->GetLength();
-    aTailEvent->mAccessible->AppendTextTo(textEvent->mModifiedText);
-    textEvent->mStart -= textEvent->GetLength() - oldLen;
-  }
-
-  aTailEvent->mTextChangeEvent.swap(aThisEvent->mTextChangeEvent);
-}
-
-void
-NotificationController::CoalesceTextChangeEventsFor(AccShowEvent* aTailEvent,
-                                                    AccShowEvent* aThisEvent)
-{
-  AccTextChangeEvent* textEvent = aThisEvent->mTextChangeEvent;
-  if (!textEvent)
-    return;
-
-  if (aTailEvent->mAccessible->IndexInParent() ==
-      aThisEvent->mAccessible->IndexInParent() + 1) {
-    // If tail target was inserted after this target, i.e. tail target is next
-    // sibling of this target.
-    aTailEvent->mAccessible->AppendTextTo(textEvent->mModifiedText);
-
-  } else if (aTailEvent->mAccessible->IndexInParent() ==
-             aThisEvent->mAccessible->IndexInParent() -1) {
-    // If tail target was inserted before this target, i.e. tail target is
-    // previous sibling of this target.
-    nsAutoString startText;
-    aTailEvent->mAccessible->AppendTextTo(startText);
-    textEvent->mModifiedText = startText + textEvent->mModifiedText;
-    textEvent->mStart -= startText.Length();
-  }
-
-  aTailEvent->mTextChangeEvent.swap(aThisEvent->mTextChangeEvent);
-}
-
-void
-NotificationController::CreateTextChangeEventFor(AccMutationEvent* aEvent)
-{
-  DocAccessible* document = aEvent->GetDocAccessible();
-  Accessible* container = document->GetContainerAccessible(aEvent->mNode);
-  if (!container)
-    return;
-
-  HyperTextAccessible* textAccessible = container->AsHyperText();
-  if (!textAccessible)
-    return;
-
-  // Don't fire event for the first html:br in an editor.
-  if (aEvent->mAccessible->Role() == roles::WHITESPACE) {
-    nsCOMPtr<nsIEditor> editor = textAccessible->GetEditor();
-    if (editor) {
-      bool isEmpty = false;
-      editor->GetDocumentIsEmpty(&isEmpty);
-      if (isEmpty)
-        return;
-    }
-  }
-
-  int32_t offset = textAccessible->GetChildOffset(aEvent->mAccessible);
-
-  nsAutoString text;
-  aEvent->mAccessible->AppendTextTo(text);
-  if (text.IsEmpty())
-    return;
-
-  aEvent->mTextChangeEvent =
-    new AccTextChangeEvent(textAccessible, offset, text, aEvent->IsShow(),
-                           aEvent->mIsFromUserInput ? eFromUserInput : eNoUserInput);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -705,7 +302,7 @@ NotificationController::TextEnumerator(nsCOMPtrHashKey<nsIContent>* aEntry,
 
   // If the text node is not in tree or doesn't have frame then this case should
   // have been handled already by content removal notifications.
-  nsINode* containerNode = textNode->GetNodeParent();
+  nsINode* containerNode = textNode->GetParentNode();
   if (!containerNode) {
     NS_ASSERTION(!textAcc,
                  "Text node was removed but accessible is kept alive!");
@@ -728,7 +325,7 @@ NotificationController::TextEnumerator(nsCOMPtrHashKey<nsIContent>* aEntry,
   // Remove text accessible if rendered text is empty.
   if (textAcc) {
     if (text.IsEmpty()) {
-#ifdef DEBUG
+#ifdef A11Y_LOG
       if (logging::IsEnabled(logging::eTree | logging::eText)) {
         logging::MsgBegin("TREE", "text node lost its content");
         logging::Node("container", containerElm);
@@ -742,7 +339,7 @@ NotificationController::TextEnumerator(nsCOMPtrHashKey<nsIContent>* aEntry,
     }
 
     // Update text of the accessible and fire text change events.
-#ifdef DEBUG
+#ifdef A11Y_LOG
     if (logging::IsEnabled(logging::eText)) {
       logging::MsgBegin("TEXT", "text may be changed");
       logging::Node("container", containerElm);
@@ -761,7 +358,7 @@ NotificationController::TextEnumerator(nsCOMPtrHashKey<nsIContent>* aEntry,
 
   // Append an accessible if rendered text is not empty.
   if (!text.IsEmpty()) {
-#ifdef DEBUG
+#ifdef A11Y_LOG
     if (logging::IsEnabled(logging::eTree | logging::eText)) {
       logging::MsgBegin("TREE", "text node gains new content");
       logging::Node("container", containerElm);
@@ -816,16 +413,8 @@ NotificationController::ContentInsertion::
   return haveToUpdate;
 }
 
-NS_IMPL_CYCLE_COLLECTION_NATIVE_CLASS(NotificationController::ContentInsertion)
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_NATIVE(NotificationController::ContentInsertion)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mContainer)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_BEGIN(NotificationController::ContentInsertion)
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mContainer");
-  cb.NoteXPCOMChild(static_cast<nsIAccessible*>(tmp->mContainer.get()));
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_1(NotificationController::ContentInsertion,
+                           mContainer)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(NotificationController::ContentInsertion,
                                      AddRef)

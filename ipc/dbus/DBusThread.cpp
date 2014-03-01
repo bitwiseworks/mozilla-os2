@@ -46,6 +46,9 @@
 #include "base/message_loop.h"
 #include "nsTArray.h"
 #include "nsDataHashtable.h"
+#include "mozilla/SyncRunnable.h"
+#include "mozilla/NullPtr.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Util.h"
 #include "mozilla/FileUtils.h"
@@ -69,13 +72,12 @@
 // Functions for converting between unix events in the poll struct,
 // and their dbus definitions
 
-// TODO Add Wakeup to this list once we've moved to ics
-
-enum {
+enum DBusEventTypes {
   DBUS_EVENT_LOOP_EXIT = 1,
   DBUS_EVENT_LOOP_ADD = 2,
   DBUS_EVENT_LOOP_REMOVE = 3,
-} DBusEventTypes;
+  DBUS_EVENT_LOOP_WAKEUP = 4
+};
 
 static unsigned int UnixEventsToDBusFlags(short events)
 {
@@ -113,13 +115,10 @@ struct DBusThread : public RawDBusConnection
   DBusThread();
   ~DBusThread();
 
-  bool StartEventLoop();
-  bool StopEventLoop();
-  bool IsEventLoopRunning();
-  void EventLoop();
+  bool Initialize();
+  void CleanUp();
 
-  // Thread members
-  nsCOMPtr<nsIThread> mThread;
+  void WakeUp();
 
   // Information about the sockets we're polling. Socket counts
   // increase/decrease depending on how many add/remove watch signals
@@ -133,11 +132,8 @@ struct DBusThread : public RawDBusConnection
   ScopedClose mControlFdW;
 
 protected:
-  bool SetUpEventLoop();
-  bool TearDownData();
+  bool SetUp();
 };
-
-static nsAutoPtr<DBusThread> sDBusThread;
 
 // DBus utility functions
 // Free statics, as they're used as function pointers in dbus setup
@@ -158,8 +154,7 @@ AddWatch(DBusWatch *aWatch, void *aData)
       return false;
     }
 
-    // TODO change this to dbus_watch_get_unix_fd once we move to ics
-    int fd = dbus_watch_get_fd(aWatch);
+    int fd = dbus_watch_get_unix_fd(aWatch);
     if (write(dbt->mControlFdW.get(), &fd, sizeof(int)) < 0) {
       LOG("Cannot write DBus add watch descriptor data to socket!\n");
       return false;
@@ -190,8 +185,7 @@ RemoveWatch(DBusWatch *aWatch, void *aData)
     return;
   }
 
-  // TODO change this to dbus_watch_get_unix_fd once we move to ics
-  int fd = dbus_watch_get_fd(aWatch);
+  int fd = dbus_watch_get_unix_fd(aWatch);
   if (write(dbt->mControlFdW.get(), &fd, sizeof(int)) < 0) {
     LOG("Cannot write DBus remove watch descriptor data to socket!\n");
     return;
@@ -243,7 +237,8 @@ HandleWatchAdd(DBusThread* aDbt)
   aDbt->mWatchData.AppendElement(watch);
 }
 
-static void HandleWatchRemove(DBusThread* aDbt)
+static void
+HandleWatchRemove(DBusThread* aDbt)
 {
   int removeFD;
   unsigned int flags;
@@ -276,6 +271,14 @@ static void HandleWatchRemove(DBusThread* aDbt)
   aDbt->mWatchData.RemoveElementAt(index);
 }
 
+static
+void DBusWakeup(void* aData)
+{
+  MOZ_ASSERT(aData);
+  DBusThread* dbusThread = static_cast<DBusThread*>(aData);
+  dbusThread->WakeUp();
+}
+
 // DBus Thread Implementation
 
 DBusThread::DBusThread()
@@ -288,16 +291,41 @@ DBusThread::~DBusThread()
 }
 
 bool
-DBusThread::SetUpEventLoop()
+DBusThread::SetUp()
 {
+  MOZ_ASSERT(!NS_IsMainThread());
+
   // If we already have a connection, exit
   if (mConnection) {
     return false;
   }
 
-  dbus_threads_init_default();
-  DBusError err;
-  dbus_error_init(&err);
+  // socketpair opens two sockets for the process to communicate on.
+  // This is how android's implementation of the dbus event loop
+  // communicates with itself in relation to IPC signals. These
+  // sockets are contained sequentially in the same struct in the
+  // android code, but we break them out into class members here.
+  // Therefore we read into a local array and then copy.
+
+  int sockets[2];
+  if (socketpair(AF_LOCAL, SOCK_STREAM, 0, sockets) < 0) {
+    return false;
+  }
+
+  mControlFdR.rwget() = sockets[0];
+  mControlFdW.rwget() = sockets[1];
+
+  pollfd *p = mPollData.AppendElement();
+
+  p->fd = mControlFdR.get();
+  p->events = POLLIN;
+  p->revents = 0;
+
+  // Due to the fact that mPollData and mWatchData have to match, we
+  // push a null to the front of mWatchData since it has the control
+  // fd in the first slot of mPollData.
+
+  mWatchData.AppendElement(static_cast<DBusWatch*>(nullptr));
 
   // If we can't establish a connection to dbus, nothing else will work
   nsresult rv = EstablishDBusConnection();
@@ -306,13 +334,44 @@ DBusThread::SetUpEventLoop()
     return false;
   }
 
+  dbus_bool_t success =
+    dbus_connection_set_watch_functions(mConnection, AddWatch, RemoveWatch,
+                                        ToggleWatch, this, nullptr);
+  NS_ENSURE_TRUE(success == TRUE, false);
+
+  dbus_connection_set_wakeup_main_function(mConnection, DBusWakeup, this, nullptr);
+
   return true;
 }
 
 bool
-DBusThread::TearDownData()
+DBusThread::Initialize()
 {
+  if (!SetUp()) {
+    CleanUp();
+    return false;
+  }
+
+  return true;
+}
+
+void
+DBusThread::CleanUp()
+{
+  MOZ_ASSERT(!NS_IsMainThread());
+
+  dbus_connection_set_wakeup_main_function(mConnection, nullptr, nullptr, nullptr);
+
+  dbus_bool_t success = dbus_connection_set_watch_functions(mConnection, nullptr,
+                                                            nullptr, nullptr,
+                                                            nullptr, nullptr);
+  if (success != TRUE) {
+    NS_WARNING("dbus_connection_set_watch_functions failed");
+  }
+
+#ifdef DEBUG
   LOG("Removing DBus Sockets\n");
+#endif
   if (mControlFdW.get()) {
     mControlFdW.dispose();
   }
@@ -324,122 +383,111 @@ DBusThread::TearDownData()
   // DBusWatch pointers are maintained by DBus, so we won't leak by
   // clearing.
   mWatchData.Clear();
-  return true;
 }
 
 void
-DBusThread::EventLoop()
+DBusThread::WakeUp()
 {
-  dbus_connection_set_watch_functions(mConnection, AddWatch,
-                                      RemoveWatch, ToggleWatch, this, NULL);
+  static const char control = DBUS_EVENT_LOOP_WAKEUP;
 
-  LOG("DBus Event Loop Starting\n");
-  while (1) {
-    poll(mPollData.Elements(), mPollData.Length(), -1);
+  struct pollfd fds = {
+    mControlFdW.get(),
+    POLLOUT,
+    0
+  };
 
-    for (uint32_t i = 0; i < mPollData.Length(); i++) {
-      if (!mPollData[i].revents) {
-        continue;
-      }
+  int nfds = TEMP_FAILURE_RETRY(poll(&fds, 1, 0));
+  NS_ENSURE_TRUE_VOID(nfds == 1);
+  NS_ENSURE_TRUE_VOID(fds.revents == POLLOUT);
 
-      if (mPollData[i].fd == mControlFdR.get()) {
-        char data;
-        while (recv(mControlFdR.get(), &data, sizeof(char), MSG_DONTWAIT)
-               != -1) {
-          switch (data) {
+  ssize_t rv = TEMP_FAILURE_RETRY(write(mControlFdW.get(), &control, sizeof(control)));
+
+  if (rv < 0) {
+    NS_WARNING("Cannot write wakeup bit to DBus controller!");
+  }
+}
+
+// Main task for polling the DBus system
+
+class DBusPollTask : public nsRunnable
+{
+public:
+  DBusPollTask(DBusThread* aConnection)
+  : mConnection(aConnection)
+  { }
+
+  NS_IMETHOD Run()
+  {
+    MOZ_ASSERT(!NS_IsMainThread());
+
+    bool exitThread = false;
+
+    while (!exitThread) {
+
+      int res = TEMP_FAILURE_RETRY(poll(mConnection->mPollData.Elements(),
+                                        mConnection->mPollData.Length(),
+                                        -1));
+      NS_ENSURE_TRUE(res > 0, NS_OK);
+
+      nsTArray<pollfd>::size_type i = 0;
+
+      while (i < mConnection->mPollData.Length()) {
+        if (mConnection->mPollData[i].revents == POLLIN) {
+
+          if (mConnection->mPollData[i].fd == mConnection->mControlFdR.get()) {
+            char data;
+            res = TEMP_FAILURE_RETRY(read(mConnection->mControlFdR.get(), &data, sizeof(data)));
+            NS_ENSURE_TRUE(res > 0, NS_OK);
+
+            switch (data) {
             case DBUS_EVENT_LOOP_EXIT:
-              LOG("DBus Event Loop Exiting\n");
-              dbus_connection_set_watch_functions(mConnection,
-                                                  NULL, NULL, NULL, NULL, NULL);
-              return;
+              exitThread = true;
+              break;
             case DBUS_EVENT_LOOP_ADD:
-              HandleWatchAdd(this);
+              HandleWatchAdd(mConnection);
               break;
             case DBUS_EVENT_LOOP_REMOVE:
-              HandleWatchRemove(this);
+              HandleWatchRemove(mConnection);
+              // don't increment i, or we'll skip one element
+              continue;
+            case DBUS_EVENT_LOOP_WAKEUP:
+              NS_ProcessPendingEvents(NS_GetCurrentThread(),
+                                      PR_INTERVAL_NO_TIMEOUT);
               break;
+            default:
+#if DEBUG
+              nsCString warning("unknown command ");
+              warning.AppendInt(data);
+              NS_WARNING(warning.get());
+#endif
+              break;
+            }
+          } else {
+            short events = mConnection->mPollData[i].revents;
+            unsigned int flags = UnixEventsToDBusFlags(events);
+            dbus_watch_handle(mConnection->mWatchData[i], flags);
+            mConnection->mPollData[i].revents = 0;
+            // Break at this point since we don't know if the operation
+            // was destructive
+            break;
           }
+          while (dbus_connection_dispatch(mConnection->GetConnection()) ==
+                 DBUS_DISPATCH_DATA_REMAINS)
+          {}
         }
-      } else {
-        short events = mPollData[i].revents;
-        unsigned int flags = UnixEventsToDBusFlags(events);
-        dbus_watch_handle(mWatchData[i], flags);
-        mPollData[i].revents = 0;
-        // Break at this point since we don't know if the operation
-        // was destructive
-        break;
+        ++i;
       }
     }
-    while (dbus_connection_dispatch(mConnection) ==
-           DBUS_DISPATCH_DATA_REMAINS)
-    {}
-  }
-}
 
-bool
-DBusThread::StartEventLoop()
-{
-  // socketpair opens two sockets for the process to communicate on.
-  // This is how android's implementation of the dbus event loop
-  // communicates with itself in relation to IPC signals. These
-  // sockets are contained sequentially in the same struct in the
-  // android code, but we break them out into class members here.
-  // Therefore we read into a local array and then copy.
+    return NS_OK;
+  }
 
-  int sockets[2];
-  if (socketpair(AF_LOCAL, SOCK_STREAM, 0, (int*)(&sockets)) < 0) {
-    TearDownData();
-    return false;
-  }
-  mControlFdR.rwget() = sockets[0];
-  mControlFdW.rwget() = sockets[1];
-  pollfd p;
-  p.fd = mControlFdR.get();
-  p.events = POLLIN;
-  mPollData.AppendElement(p);
+private:
+  DBusThread* mConnection;
+};
 
-  // Due to the fact that mPollData and mWatchData have to match, we
-  // push a null to the front of mWatchData since it has the control
-  // fd in the first slot of mPollData.
-
-  mWatchData.AppendElement((DBusWatch*)NULL);
-  if (!SetUpEventLoop()) {
-    TearDownData();
-    return false;
-  }
-  if (NS_FAILED(NS_NewNamedThread("DBus Poll",
-                                  getter_AddRefs(mThread),
-                                  NS_NewNonOwningRunnableMethod(this,
-                                                                &DBusThread::EventLoop)))) {
-    NS_WARNING("Cannot create DBus Thread!");
-    return false;    
-  }
-  LOG("DBus Thread Starting\n");
-  return true;
-}
-
-bool
-DBusThread::StopEventLoop()
-{
-  if (!mThread) {
-    return true;
-  }
-  char data = DBUS_EVENT_LOOP_EXIT;
-  ssize_t wret = write(mControlFdW.get(), &data, sizeof(char));
-  if(wret < 0) {
-    NS_ERROR("Cannot write exit flag to Dbus Thread!");
-    return false;
-  }
-  LOG("DBus Thread Joining\n");
-  nsCOMPtr<nsIThread> tmpThread;
-  mThread.swap(tmpThread);
-  if(NS_FAILED(tmpThread->Shutdown())) {
-    NS_WARNING("DBus thread shutdown failed!");
-  }
-  LOG("DBus Thread Joined\n");
-  TearDownData();
-  return true;
-}
+static StaticAutoPtr<DBusThread> gDBusThread;
+static StaticRefPtr<nsIThread>   gDBusServiceThread;
 
 // Startup/Shutdown utility functions
 
@@ -447,16 +495,34 @@ bool
 StartDBus()
 {
   MOZ_ASSERT(!NS_IsMainThread());
-  if (sDBusThread) {
-    NS_WARNING("Trying to start DBus Thread that is already currently running, skipping.");
-    return true;
+  NS_ENSURE_TRUE(!gDBusThread, true);
+
+  nsAutoPtr<DBusThread> dbusThread(new DBusThread());
+
+  bool eventLoopStarted = dbusThread->Initialize();
+  NS_ENSURE_TRUE(eventLoopStarted, false);
+
+  nsresult rv;
+
+  if (!gDBusServiceThread) {
+    nsIThread* dbusServiceThread;
+    rv = NS_NewNamedThread("DBus Thread", &dbusServiceThread);
+    NS_ENSURE_SUCCESS(rv, false);
+    gDBusServiceThread = dbusServiceThread;
   }
-  nsAutoPtr<DBusThread> thread(new DBusThread());
-  if (!thread->StartEventLoop()) {
-    NS_WARNING("Cannot start DBus event loop!");
-    return false;
-  }
-  sDBusThread = thread;
+
+#ifdef DEBUG
+  LOG("DBus Thread Starting\n");
+#endif
+
+  nsRefPtr<nsIRunnable> pollTask(new DBusPollTask(dbusThread));
+  NS_ENSURE_TRUE(pollTask, false);
+
+  rv = gDBusServiceThread->Dispatch(pollTask, NS_DISPATCH_NORMAL);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  gDBusThread = dbusThread.forget();
+
   return true;
 }
 
@@ -464,13 +530,48 @@ bool
 StopDBus()
 {
   MOZ_ASSERT(!NS_IsMainThread());
-  if (!sDBusThread) {
-    return true;
+  NS_ENSURE_TRUE(gDBusServiceThread, true);
+
+  if (gDBusThread) {
+    static const char data = DBUS_EVENT_LOOP_EXIT;
+    ssize_t wret = TEMP_FAILURE_RETRY(write(gDBusThread->mControlFdW.get(),
+                                            &data, sizeof(data)));
+    NS_ENSURE_TRUE(wret == 1, false);
   }
 
-  nsAutoPtr<DBusThread> thread(sDBusThread);
-  sDBusThread = nullptr;  
-  return thread->StopEventLoop();
+#ifdef DEBUG
+  LOG("DBus Thread Joining\n");
+#endif
+
+  if (NS_FAILED(gDBusServiceThread->Shutdown())) {
+    NS_WARNING("DBus thread shutdown failed!");
+  }
+  gDBusServiceThread = nullptr;
+
+#ifdef DEBUG
+  LOG("DBus Thread Joined\n");
+#endif
+
+  if (gDBusThread) {
+    gDBusThread->CleanUp();
+    gDBusThread = nullptr;
+  }
+
+  return true;
+}
+
+nsresult
+DispatchToDBusThread(nsIRunnable* event)
+{
+  MOZ_ASSERT(gDBusServiceThread);
+  MOZ_ASSERT(gDBusThread);
+
+  nsresult rv = gDBusServiceThread->Dispatch(event, NS_DISPATCH_NORMAL);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  gDBusThread->WakeUp();
+
+  return NS_OK;
 }
 
 }

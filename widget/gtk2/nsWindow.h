@@ -82,10 +82,6 @@ public:
     
     void CommonCreate(nsIWidget *aParent, bool aListenForResizes);
     
-    // event handling code
-    void DispatchActivateEvent(void);
-    void DispatchDeactivateEvent(void);
-
     virtual nsresult DispatchEvent(nsGUIEvent *aEvent, nsEventStatus &aStatus);
     
     // called when we are destroyed
@@ -110,17 +106,17 @@ public:
                                          int32_t *aX,
                                          int32_t *aY);
     virtual void       SetSizeConstraints(const SizeConstraints& aConstraints);
-    NS_IMETHOD         Move(int32_t aX,
-                            int32_t aY);
+    NS_IMETHOD         Move(double aX,
+                            double aY);
     NS_IMETHOD         Show             (bool aState);
-    NS_IMETHOD         Resize           (int32_t aWidth,
-                                         int32_t aHeight,
-                                         bool    aRepaint);
-    NS_IMETHOD         Resize           (int32_t aX,
-                                         int32_t aY,
-                                         int32_t aWidth,
-                                         int32_t aHeight,
-                                         bool     aRepaint);
+    NS_IMETHOD         Resize           (double aWidth,
+                                         double aHeight,
+                                         bool   aRepaint);
+    NS_IMETHOD         Resize           (double aX,
+                                         double aY,
+                                         double aWidth,
+                                         double aHeight,
+                                         bool   aRepaint);
     virtual bool       IsEnabled() const;
 
 
@@ -148,8 +144,7 @@ public:
     NS_IMETHOD         EnableDragDrop(bool aEnable);
     NS_IMETHOD         CaptureMouse(bool aCapture);
     NS_IMETHOD         CaptureRollupEvents(nsIRollupListener *aListener,
-                                           bool aDoCapture,
-                                           bool aConsumeRollupEvent);
+                                           bool aDoCapture);
     NS_IMETHOD         GetAttention(int32_t aCycleCount);
 
     virtual bool       HasPendingInputEvent();
@@ -175,33 +170,20 @@ public:
 #endif
     gboolean           OnConfigureEvent(GtkWidget *aWidget,
                                         GdkEventConfigure *aEvent);
-    void               OnContainerUnrealize(GtkWidget *aWidget);
-    void               OnSizeAllocate(GtkWidget *aWidget,
-                                      GtkAllocation *aAllocation);
-    void               OnDeleteEvent(GtkWidget *aWidget,
-                                     GdkEventAny *aEvent);
-    void               OnEnterNotifyEvent(GtkWidget *aWidget,
-                                          GdkEventCrossing *aEvent);
-    void               OnLeaveNotifyEvent(GtkWidget *aWidget,
-                                          GdkEventCrossing *aEvent);
-    void               OnMotionNotifyEvent(GtkWidget *aWidget,
-                                           GdkEventMotion *aEvent);
-    void               OnButtonPressEvent(GtkWidget *aWidget,
-                                          GdkEventButton *aEvent);
-    void               OnButtonReleaseEvent(GtkWidget *aWidget,
-                                            GdkEventButton *aEvent);
-    void               OnContainerFocusInEvent(GtkWidget *aWidget,
-                                               GdkEventFocus *aEvent);
-    void               OnContainerFocusOutEvent(GtkWidget *aWidget,
-                                                GdkEventFocus *aEvent);
-    gboolean           OnKeyPressEvent(GtkWidget *aWidget,
-                                       GdkEventKey *aEvent);
-    gboolean           OnKeyReleaseEvent(GtkWidget *aWidget,
-                                         GdkEventKey *aEvent);
-    void               OnScrollEvent(GtkWidget *aWidget,
-                                     GdkEventScroll *aEvent);
-    void               OnVisibilityNotifyEvent(GtkWidget *aWidget,
-                                               GdkEventVisibility *aEvent);
+    void               OnContainerUnrealize();
+    void               OnSizeAllocate(GtkAllocation *aAllocation);
+    void               OnDeleteEvent();
+    void               OnEnterNotifyEvent(GdkEventCrossing *aEvent);
+    void               OnLeaveNotifyEvent(GdkEventCrossing *aEvent);
+    void               OnMotionNotifyEvent(GdkEventMotion *aEvent);
+    void               OnButtonPressEvent(GdkEventButton *aEvent);
+    void               OnButtonReleaseEvent(GdkEventButton *aEvent);
+    void               OnContainerFocusInEvent(GdkEventFocus *aEvent);
+    void               OnContainerFocusOutEvent(GdkEventFocus *aEvent);
+    gboolean           OnKeyPressEvent(GdkEventKey *aEvent);
+    gboolean           OnKeyReleaseEvent(GdkEventKey *aEvent);
+    void               OnScrollEvent(GdkEventScroll *aEvent);
+    void               OnVisibilityNotifyEvent(GdkEventVisibility *aEvent);
     void               OnWindowStateEvent(GtkWidget *aWidget,
                                           GdkEventWindowState *aEvent);
     void               OnDragDataReceivedEvent(GtkWidget       *aWidget,
@@ -273,16 +255,17 @@ public:
     bool               DispatchKeyDownEvent(GdkEventKey *aEvent,
                                             bool *aIsCancelled);
 
-    NS_IMETHOD ResetInputState();
+    NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
     NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                       const InputContextAction& aAction);
     NS_IMETHOD_(InputContext) GetInputContext();
-    NS_IMETHOD CancelIMEComposition();
-    NS_IMETHOD OnIMEFocusChange(bool aFocus);
     NS_IMETHOD GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState);
 
-   void                ResizeTransparencyBitmap(int32_t aNewWidth, int32_t aNewHeight);
-   void                ApplyTransparencyBitmap();
+    // These methods are for toplevel windows only.
+    void               ResizeTransparencyBitmap();
+    void               ApplyTransparencyBitmap();
+    void               ClearTransparencyBitmap();
+
    virtual void        SetTransparencyMode(nsTransparencyMode aMode);
    virtual nsTransparencyMode GetTransparencyMode();
    virtual nsresult    ConfigureChildren(const nsTArray<Configuration>& aConfigurations);
@@ -307,6 +290,11 @@ public:
     { return SynthesizeNativeMouseEvent(aPoint, GDK_MOTION_NOTIFY, 0); }
 
 protected:
+    // event handling code
+    void DispatchActivateEvent(void);
+    void DispatchDeactivateEvent(void);
+    void DispatchResized(int32_t aWidth, int32_t aHeight);
+
     // Helper for SetParent and ReparentNativeWidget.
     void ReparentNativeWidgetInternal(nsIWidget* aNewParent,
                                       GtkWidget* aNewContainer,
@@ -336,7 +324,7 @@ protected:
 
 private:
     void               DestroyChildWindows();
-    void               GetToplevelWidget(GtkWidget **aWidget);
+    GtkWidget         *GetToplevelWidget();
     nsWindow          *GetContainerWindow();
     void               SetUrgencyHint(GtkWidget *top_window, bool state);
     void              *SetupPluginPort(void);
@@ -346,6 +334,8 @@ private:
     bool               DispatchContentCommandEvent(int32_t aMsg);
     void               SetWindowClipRegion(const nsTArray<nsIntRect>& aRects,
                                            bool aIntersectWithExisting);
+    bool               CheckForRollup(gdouble aMouseX, gdouble aMouseY,
+                                      bool aIsWheel, bool aAlwaysRollup);
     bool               GetDragInfo(nsMouseEvent* aMouseEvent,
                                    GdkWindow** aWindow, gint* aButton,
                                    gint* aRootX, gint* aRootY);
@@ -355,12 +345,9 @@ private:
     MozContainer       *mContainer;
     GdkWindow          *mGdkWindow;
 
-    GtkWindowGroup     *mWindowGroup;
-
     uint32_t            mHasMappedToplevel : 1,
                         mIsFullyObscured : 1,
                         mRetryPointerGrab : 1;
-    GtkWindow          *mTransientParent;
     nsSizeMode          mSizeState;
     PluginType          mPluginType;
 
@@ -374,7 +361,7 @@ private:
     nsRefPtr<gfxASurface> mThebesSurface;
 
 #ifdef ACCESSIBILITY
-    nsRefPtr<Accessible> mRootAccessible;
+    nsRefPtr<mozilla::a11y::Accessible> mRootAccessible;
 
     /**
      * Request to create the accessible for this window if it is top level.
@@ -441,6 +428,14 @@ private:
     static bool DragInProgress(void);
 
     void DispatchMissedButtonReleases(GdkEventCrossing *aGdkEvent);
+
+    // nsBaseWidget
+    virtual LayerManager* GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
+                                          LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
+                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
+                                          bool* aAllowRetaining = nullptr) MOZ_OVERRIDE;
+
+    void CleanLayerManagerRecursive();
 
     /**
      * |mIMModule| takes all IME related stuff.

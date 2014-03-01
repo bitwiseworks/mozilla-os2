@@ -62,6 +62,12 @@
 #endif
 
 
+/* Void! */
+struct _hb_void_t {};
+typedef const _hb_void_t &hb_void_t;
+#define HB_VOID (* (const _hb_void_t *) NULL)
+
+
 /* Basics */
 
 
@@ -76,7 +82,9 @@ static inline Type MAX (const Type &a, const Type &b) { return a > b ? a : b; }
 
 #undef  ARRAY_LENGTH
 template <typename Type, unsigned int n>
-static inline unsigned int ARRAY_LENGTH (const Type (&a)[n]) { return n; }
+static inline unsigned int ARRAY_LENGTH (const Type (&)[n]) { return n; }
+/* A const version, but does not detect erratically being called on pointers. */
+#define ARRAY_LENGTH_CONST(__array) ((signed int) (sizeof (__array) / sizeof (__array[0])))
 
 #define HB_STMT_START do
 #define HB_STMT_END   while (0)
@@ -368,6 +376,14 @@ struct hb_prealloced_array_t
   }
 };
 
+#define HB_AUTO_ARRAY_PREALLOCED 64
+template <typename Type>
+struct hb_auto_array_t : hb_prealloced_array_t <Type, HB_AUTO_ARRAY_PREALLOCED>
+{
+  hb_auto_array_t (void) { hb_prealloced_array_t<Type, HB_AUTO_ARRAY_PREALLOCED>::init (); }
+  ~hb_auto_array_t (void) { hb_prealloced_array_t<Type, HB_AUTO_ARRAY_PREALLOCED>::finish (); }
+};
+
 
 #define HB_LOCKABLE_SET_INIT {HB_PREALLOCED_ARRAY_INIT}
 template <typename item_t, typename lock_t>
@@ -501,13 +517,19 @@ static inline uint32_t hb_uint32_swap (const uint32_t v)
 #define hb_be_uint32_get(v)	(uint32_t) ((v[0] << 24) + (v[1] << 16) + (v[2] << 8) + v[3])
 #define hb_be_uint32_eq(a,b)	(a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3])
 
+#define hb_be_uint24_put(v,V)	HB_STMT_START { v[0] = (V>>16); v[1] = (V>>8); v[2] = (V); } HB_STMT_END
+#define hb_be_uint24_get(v)	(uint32_t) ((v[0] << 16) + (v[1] << 8) + v[2])
+#define hb_be_uint24_eq(a,b)	(a[0] == b[0] && a[1] == b[1] && a[2] == b[2])
+
 
 /* ASCII tag/character handling */
 
-static inline unsigned char ISALPHA (unsigned char c)
+static inline bool ISALPHA (unsigned char c)
 { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
-static inline unsigned char ISALNUM (unsigned char c)
+static inline bool ISALNUM (unsigned char c)
 { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
+static inline bool ISSPACE (unsigned char c)
+{ return c == ' ' || c =='\f'|| c =='\n'|| c =='\r'|| c =='\t'|| c =='\v'; }
 static inline unsigned char TOUPPER (unsigned char c)
 { return (c >= 'a' && c <= 'z') ? c - 'a' + 'A' : c; }
 static inline unsigned char TOLOWER (unsigned char c)
@@ -544,7 +566,7 @@ _hb_debug (unsigned int level,
 #define DEBUG_LEVEL(WHAT, LEVEL) (_hb_debug ((LEVEL), HB_DEBUG_##WHAT))
 #define DEBUG(WHAT) (DEBUG_LEVEL (WHAT, 0))
 
-template <int max_level> inline void
+template <int max_level> static inline void
 _hb_debug_msg_va (const char *what,
 		  const void *obj,
 		  const char *func,
@@ -580,13 +602,22 @@ _hb_debug_msg_va (const char *what,
   } else
     fprintf (stderr, "   " VRBAR LBAR);
 
-  if (func) {
-    /* If there's a class name, just write that. */
-    const char *dotdot = strstr (func, "::");
+  if (func)
+  {
+    unsigned int func_len = strlen (func);
+#ifndef HB_DEBUG_VERBOSE
+    /* Skip "typename" */
+    if (0 == strncmp (func, "typename ", 9))
+      func += 9;
+    /* Skip return type */
     const char *space = strchr (func, ' ');
-    if (space && dotdot && space < dotdot)
+    if (space)
       func = space + 1;
-    unsigned int func_len = dotdot ? dotdot - func : strlen (func);
+    /* Skip parameter list */
+    const char *paren = strchr (func, '(');
+    if (paren)
+      func_len = paren - func;
+#endif
     fprintf (stderr, "%.*s: ", func_len, func);
   }
 
@@ -605,7 +636,7 @@ _hb_debug_msg_va<0> (const char *what HB_UNUSED,
 		     const char *message HB_UNUSED,
 		     va_list ap HB_UNUSED) {}
 
-template <int max_level> inline void
+template <int max_level> static inline void
 _hb_debug_msg (const char *what,
 	       const void *obj,
 	       const char *func,
@@ -614,7 +645,7 @@ _hb_debug_msg (const char *what,
 	       int level_dir,
 	       const char *message,
 	       ...) HB_PRINTF_FUNC(7, 8);
-template <int max_level> inline void
+template <int max_level> static inline void
 _hb_debug_msg (const char *what,
 	       const void *obj,
 	       const char *func,
@@ -654,10 +685,39 @@ _hb_debug_msg<0> (const char *what HB_UNUSED,
 
 
 /*
+ * Printer
+ */
+
+template <typename T>
+struct hb_printer_t {};
+
+template <>
+struct hb_printer_t<bool> {
+  const char *print (bool v) { return v ? "true" : "false"; }
+};
+
+template <>
+struct hb_printer_t<hb_void_t> {
+  const char *print (hb_void_t) { return ""; }
+};
+
+
+/*
  * Trace
  */
 
-template <int max_level>
+template <typename T>
+static inline void _hb_warn_no_return (bool returned)
+{
+  if (unlikely (!returned)) {
+    fprintf (stderr, "OUCH, returned with no call to TRACE_RETURN.  This is a bug, please report.\n");
+  }
+}
+template <>
+inline void _hb_warn_no_return<hb_void_t> (bool returned HB_UNUSED)
+{}
+
+template <int max_level, typename ret_t>
 struct hb_auto_trace_t {
   explicit inline hb_auto_trace_t (unsigned int *plevel_,
 				   const char *what_,
@@ -675,23 +735,23 @@ struct hb_auto_trace_t {
   }
   inline ~hb_auto_trace_t (void)
   {
-    if (unlikely (!returned)) {
-      fprintf (stderr, "OUCH, returned with no call to TRACE_RETURN.  This is a bug, please report.  Level was %d.\n", plevel ? *plevel : -1);
+    _hb_warn_no_return<ret_t> (returned);
+    if (!returned) {
       _hb_debug_msg<max_level> (what, obj, NULL, true, plevel ? *plevel : 1, -1, " ");
-      return;
     }
-
     if (plevel) --*plevel;
   }
 
-  inline bool ret (bool v, unsigned int line = 0)
+  inline ret_t ret (ret_t v, unsigned int line = 0)
   {
     if (unlikely (returned)) {
       fprintf (stderr, "OUCH, double calls to TRACE_RETURN.  This is a bug, please report.\n");
       return v;
     }
 
-    _hb_debug_msg<max_level> (what, obj, NULL, true, plevel ? *plevel : 1, -1, "return %s (line %d)", v ? "true" : "false", line);
+    _hb_debug_msg<max_level> (what, obj, NULL, true, plevel ? *plevel : 1, -1,
+			      "return %s (line %d)",
+			      hb_printer_t<ret_t>().print (v), line);
     if (plevel) --*plevel;
     plevel = NULL;
     returned = true;
@@ -700,12 +760,12 @@ struct hb_auto_trace_t {
 
   private:
   unsigned int *plevel;
-  bool returned;
   const char *what;
   const void *obj;
+  bool returned;
 };
-template <> /* Optimize when tracing is disabled */
-struct hb_auto_trace_t<0> {
+template <typename ret_t> /* Optimize when tracing is disabled */
+struct hb_auto_trace_t<0, ret_t> {
   explicit inline hb_auto_trace_t (unsigned int *plevel_ HB_UNUSED,
 				   const char *what HB_UNUSED,
 				   const void *obj HB_UNUSED,
@@ -713,8 +773,7 @@ struct hb_auto_trace_t<0> {
 				   const char *message HB_UNUSED,
 				   ...) {}
 
-  template <typename T>
-  inline T ret (T v, unsigned int line = 0) { return v; }
+  inline ret_t ret (ret_t v, unsigned int line HB_UNUSED = 0) { return v; }
 };
 
 #define TRACE_RETURN(RET) trace.ret (RET, __LINE__)
@@ -796,8 +855,9 @@ hb_codepoint_parse (const char *s, unsigned int len, int base, hb_codepoint_t *o
 {
   /* Pain because we don't know whether s is nul-terminated. */
   char buf[64];
-  strncpy (buf, s, MIN (ARRAY_LENGTH (buf) - 1, len));
-  buf[MIN (ARRAY_LENGTH (buf) - 1, len)] = '\0';
+  len = MIN (ARRAY_LENGTH (buf) - 1, len);
+  strncpy (buf, s, len);
+  buf[len] = '\0';
 
   char *end;
   errno = 0;
@@ -806,6 +866,35 @@ hb_codepoint_parse (const char *s, unsigned int len, int base, hb_codepoint_t *o
   if (*end) return false;
   *out = v;
   return true;
+}
+
+
+/* Global runtime options. */
+
+struct hb_options_t
+{
+  int initialized : 1;
+  int uniscribe_bug_compatible : 1;
+};
+
+union hb_options_union_t {
+  int i;
+  hb_options_t opts;
+};
+ASSERT_STATIC (sizeof (int) == sizeof (hb_options_union_t));
+
+HB_INTERNAL void
+_hb_options_init (void);
+
+extern HB_INTERNAL hb_options_union_t _hb_options;
+
+static inline hb_options_t
+hb_options (void)
+{
+  if (unlikely (!_hb_options.i))
+    _hb_options_init ();
+
+  return _hb_options.opts;
 }
 
 

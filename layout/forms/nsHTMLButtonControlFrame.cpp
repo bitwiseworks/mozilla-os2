@@ -29,10 +29,10 @@
 #include "nsIDOMHTMLButtonElement.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsStyleSet.h"
-#ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
-#endif
 #include "nsDisplayList.h"
+#include <algorithm>
+
+using namespace mozilla;
 
 nsIFrame*
 NS_NewHTMLButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -55,21 +55,17 @@ void
 nsHTMLButtonControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
   nsFormControlFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
-  DestroyAbsoluteFrames(aDestructRoot);
   nsContainerFrame::DestroyFrom(aDestructRoot);
 }
 
-NS_IMETHODIMP
+void
 nsHTMLButtonControlFrame::Init(
               nsIContent*      aContent,
               nsIFrame*        aParent,
               nsIFrame*        aPrevInFlow)
 {
-  nsresult  rv = nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
-  if (NS_SUCCEEDED(rv)) {
-    mRenderer.SetFrame(this, PresContext());
-  }
-  return rv;
+  nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  mRenderer.SetFrame(this, PresContext());
 }
 
 NS_QUERYFRAME_HEAD(nsHTMLButtonControlFrame)
@@ -77,16 +73,10 @@ NS_QUERYFRAME_HEAD(nsHTMLButtonControlFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 #ifdef ACCESSIBILITY
-already_AddRefed<Accessible>
-nsHTMLButtonControlFrame::CreateAccessible()
+a11y::AccType
+nsHTMLButtonControlFrame::AccessibleType()
 {
-  nsAccessibilityService* accService = nsIPresShell::AccService();
-  if (accService) {
-    return accService->CreateHTMLButtonAccessible(mContent,
-                                                  PresContext()->PresShell()); 
-  }
-
-  return nullptr;
+  return a11y::eHTMLButtonType;
 }
 #endif
 
@@ -117,50 +107,44 @@ nsHTMLButtonControlFrame::HandleEvent(nsPresContext* aPresContext,
 }
 
 
-NS_IMETHODIMP
+void
 nsHTMLButtonControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                            const nsRect&           aDirtyRect,
                                            const nsDisplayListSet& aLists)
 {
   nsDisplayList onTop;
   if (IsVisibleForPainting(aBuilder)) {
-    nsresult rv = mRenderer.DisplayButton(aBuilder, aLists.BorderBackground(), &onTop);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mRenderer.DisplayButton(aBuilder, aLists.BorderBackground(), &onTop);
   }
-  
+
   nsDisplayListCollection set;
+
   // Do not allow the child subtree to receive events.
   if (!aBuilder->IsForEventDelivery()) {
-    nsresult rv =
-      BuildDisplayListForChild(aBuilder, mFrames.FirstChild(), aDirtyRect, set,
-                               DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+
+    if (IsInput() || StyleDisplay()->mOverflowX != NS_STYLE_OVERFLOW_VISIBLE) {
+      nsMargin border = StyleBorder()->GetComputedBorder();
+      nsRect rect(aBuilder->ToReferenceFrame(this), GetSize());
+      rect.Deflate(border);
+      nscoord radii[8];
+      bool hasRadii = GetPaddingBoxBorderRadii(radii);
+      clipState.ClipContainingBlockDescendants(rect, hasRadii ? radii : nullptr);
+    }
+
+    BuildDisplayListForChild(aBuilder, mFrames.FirstChild(), aDirtyRect, set,
+                             DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT);
     // That should put the display items in set.Content()
   }
   
   // Put the foreground outline and focus rects on top of the children
   set.Content()->AppendToTop(&onTop);
-
-  // clips to our padding box for <input>s but not <button>s, unless
-  // they have non-visible overflow..
-  if (IsInput() || GetStyleDisplay()->mOverflowX != NS_STYLE_OVERFLOW_VISIBLE) {
-    nsMargin border = GetStyleBorder()->GetComputedBorder();
-    nsRect rect(aBuilder->ToReferenceFrame(this), GetSize());
-    rect.Deflate(border);
-    nscoord radii[8];
-    GetPaddingBoxBorderRadii(radii);
-
-    nsresult rv = OverflowClip(aBuilder, set, aLists, rect, radii);
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else {
-    set.MoveTo(aLists);
-  }
+  set.MoveTo(aLists);
   
-  nsresult rv = DisplayOutline(aBuilder, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DisplayOutline(aBuilder, aLists);
 
   // to draw border when selected in editor
-  return DisplaySelectionOverlay(aBuilder, aLists.Content());
+  DisplaySelectionOverlay(aBuilder, aLists.Content());
 }
 
 nscoord
@@ -284,12 +268,12 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
     NS_ASSERTION(extraright >=0, "How'd that happen?");
     
     // Do not allow the extras to be bigger than the relevant padding
-    extraleft = NS_MIN(extraleft, aReflowState.mComputedPadding.left);
-    extraright = NS_MIN(extraright, aReflowState.mComputedPadding.right);
+    extraleft = std::min(extraleft, aReflowState.mComputedPadding.left);
+    extraright = std::min(extraright, aReflowState.mComputedPadding.right);
     xoffset -= extraleft;
     availSize.width += extraleft + extraright;
   }
-  availSize.width = NS_MAX(availSize.width,0);
+  availSize.width = std::max(availSize.width,0);
   
   nsHTMLReflowState reflowState(aPresContext, aReflowState, aFirstKid,
                                 availSize);
@@ -303,7 +287,7 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
   // XXXbz this assumes border-box sizing.
   nscoord minInternalHeight = aReflowState.mComputedMinHeight -
     aReflowState.mComputedBorderPadding.TopBottom();
-  minInternalHeight = NS_MAX(minInternalHeight, 0);
+  minInternalHeight = std::max(minInternalHeight, 0);
 
   // center child vertically
   nscoord yoff = 0;
@@ -329,26 +313,12 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
   aDesiredSize.ascent += yoff;
 }
 
-int
-nsHTMLButtonControlFrame::GetSkipSides() const
-{
-  return 0;
-}
-
 nsresult nsHTMLButtonControlFrame::SetFormProperty(nsIAtom* aName, const nsAString& aValue)
 {
   if (nsGkAtoms::value == aName) {
     return mContent->SetAttr(kNameSpaceID_None, nsGkAtoms::value,
                              aValue, true);
   }
-  return NS_OK;
-}
-
-nsresult nsHTMLButtonControlFrame::GetFormProperty(nsIAtom* aName, nsAString& aValue) const
-{
-  if (nsGkAtoms::value == aName)
-    mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, aValue);
-
   return NS_OK;
 }
 

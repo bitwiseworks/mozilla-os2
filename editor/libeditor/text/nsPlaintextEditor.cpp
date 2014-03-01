@@ -5,7 +5,6 @@
 
 
 #include "mozilla/Assertions.h"
-#include "mozilla/FunctionTimer.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Selection.h"
 #include "mozilla/dom/Element.h"
@@ -92,16 +91,14 @@ nsPlaintextEditor::~nsPlaintextEditor()
     mRules->DetachEditor();
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsPlaintextEditor)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsPlaintextEditor, nsEditor)
   if (tmp->mRules)
     tmp->mRules->DetachEditor();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRules)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRules)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsPlaintextEditor, nsEditor)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRules)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRules)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ADDREF_INHERITED(nsPlaintextEditor, nsEditor)
@@ -118,8 +115,6 @@ NS_IMETHODIMP nsPlaintextEditor::Init(nsIDOMDocument *aDoc,
                                       nsISelectionController *aSelCon,
                                       uint32_t aFlags)
 {
-  NS_TIME_FUNCTION;
-
   NS_PRECONDITION(aDoc, "bad arg");
   NS_ENSURE_TRUE(aDoc, NS_ERROR_NULL_POINTER);
   
@@ -267,17 +262,19 @@ nsPlaintextEditor::UpdateMetaCharset(nsIDOMDocument* aDocument,
 {
   MOZ_ASSERT(aDocument);
   // get a list of META tags
-  nsCOMPtr<nsIDOMNodeList> metaList;
+  nsCOMPtr<nsIDOMNodeList> list;
   nsresult rv = aDocument->GetElementsByTagName(NS_LITERAL_STRING("meta"),
-                                                getter_AddRefs(metaList));
+                                                getter_AddRefs(list));
   NS_ENSURE_SUCCESS(rv, false);
-  NS_ENSURE_TRUE(metaList, false);
+  NS_ENSURE_TRUE(list, false);
+
+  nsCOMPtr<nsINodeList> metaList = do_QueryInterface(list);
 
   uint32_t listLength = 0;
   metaList->GetLength(&listLength);
 
   for (uint32_t i = 0; i < listLength; ++i) {
-    nsCOMPtr<nsIContent> metaNode = metaList->GetNodeAt(i);
+    nsCOMPtr<nsIContent> metaNode = metaList->Item(i);
     MOZ_ASSERT(metaNode);
 
     if (!metaNode->IsElement()) {
@@ -641,8 +638,6 @@ nsPlaintextEditor::DeleteSelection(EDirection aAction,
 
   nsresult result;
 
-  HandlingTrustedAction trusted(this, aAction != eNone);
-
   // delete placeholder txns merge.
   nsAutoPlaceHolderBatch batch(this, nsGkAtoms::DeleteTxnName);
   nsAutoRules beginRulesSniffing(this, EditAction::deleteSelection, aAction);
@@ -835,7 +830,7 @@ nsresult
 nsPlaintextEditor::UpdateIMEComposition(const nsAString& aCompositionString,
                                         nsIPrivateTextRangeList* aTextRangeList)
 {
-  NS_ABORT_IF_FALSE(aTextRangeList, "aTextRangeList must not be NULL");
+  NS_ABORT_IF_FALSE(aTextRangeList, "aTextRangeList must not be nullptr");
 
   nsCOMPtr<nsIPresShell> ps = GetPresShell();
   NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
@@ -1081,8 +1076,6 @@ nsPlaintextEditor::Undo(uint32_t aCount)
   // Protect the edit rules object from dying
   nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
 
-  HandlingTrustedAction trusted(this);
-
   nsAutoUpdateViewBatch beginViewBatching(this);
 
   ForceCompositionEnd();
@@ -1109,8 +1102,6 @@ nsPlaintextEditor::Redo(uint32_t aCount)
 {
   // Protect the edit rules object from dying
   nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
-
-  HandlingTrustedAction trusted(this);
 
   nsAutoUpdateViewBatch beginViewBatching(this);
 
@@ -1166,8 +1157,6 @@ nsPlaintextEditor::FireClipboardEvent(int32_t aType)
 
 NS_IMETHODIMP nsPlaintextEditor::Cut()
 {
-  HandlingTrustedAction trusted(this);
-
   if (FireClipboardEvent(NS_CUT))
     return DeleteSelection(eNone, eStrip);
   return NS_OK;
@@ -1202,7 +1191,7 @@ nsPlaintextEditor::GetAndInitDocEncoder(const nsAString& aFormatType,
 {
   nsresult rv = NS_OK;
 
-  nsCAutoString formatType(NS_DOC_ENCODER_CONTRACTID_BASE);
+  nsAutoCString formatType(NS_DOC_ENCODER_CONTRACTID_BASE);
   LossyAppendUTF16toASCII(aFormatType, formatType);
   nsCOMPtr<nsIDocumentEncoder> docEncoder (do_CreateInstance(formatType.get(), &rv));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1275,7 +1264,7 @@ nsPlaintextEditor::OutputToString(const nsAString& aFormatType,
     return rv;
   }
 
-  nsCAutoString charsetStr;
+  nsAutoCString charsetStr;
   rv = GetDocumentCharacterSet(charsetStr);
   if(NS_FAILED(rv) || charsetStr.IsEmpty())
     charsetStr.AssignLiteral("ISO-8859-1");
@@ -1330,13 +1319,11 @@ nsPlaintextEditor::PasteAsQuotation(int32_t aSelectionType)
   nsCOMPtr<nsIClipboard> clipboard(do_GetService("@mozilla.org/widget/clipboard;1", &rv));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Create generic Transferable for getting the data
-  nsCOMPtr<nsITransferable> trans = do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
+  // Get the nsITransferable interface for getting the data from the clipboard
+  nsCOMPtr<nsITransferable> trans;
+  rv = PrepareTransferable(getter_AddRefs(trans));
   if (NS_SUCCEEDED(rv) && trans)
   {
-    // We only handle plaintext pastes here
-    trans->AddDataFlavor(kUnicodeMime);
-
     // Get the Data from the clipboard
     clipboard->GetData(trans, aSelectionType);
 
@@ -1358,7 +1345,8 @@ nsPlaintextEditor::PasteAsQuotation(int32_t aSelectionType)
 #ifdef DEBUG_clipboard
     printf("Got flavor [%s]\n", flav);
 #endif
-    if (0 == nsCRT::strcmp(flav, kUnicodeMime))
+    if (0 == nsCRT::strcmp(flav, kUnicodeMime) ||
+        0 == nsCRT::strcmp(flav, kMozTextInternal))
     {
       nsCOMPtr<nsISupportsString> textDataObj ( do_QueryInterface(genericDataObj) );
       if (textDataObj && len > 0)

@@ -243,10 +243,8 @@ EnsureWindowVisible(HWND hwnd)
     HWND parentHwnd = GetParent(hwnd);
     RECT parentRect;
     GetWindowRect(parentHwnd, &parentRect);
-    BOOL b = SetWindowPos(hwnd, NULL, 
-                          parentRect.left, 
-                          parentRect.top, 0, 0, 
-                          SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
+    SetWindowPos(hwnd, NULL, parentRect.left, parentRect.top, 0, 0,
+                 SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
   }
 }
 
@@ -1130,7 +1128,7 @@ nsFilePicker::GetFiles(nsISimpleEnumerator **aFiles)
 
 // Get the file + path
 NS_IMETHODIMP
-nsFilePicker::SetDefaultString(const nsAString& aString)
+nsBaseWinFilePicker::SetDefaultString(const nsAString& aString)
 {
   mDefaultFilePath = aString;
 
@@ -1159,26 +1157,27 @@ nsFilePicker::SetDefaultString(const nsAString& aString)
   // Then, we need to replace illegal characters. At this stage, we cannot
   // replace the backslash as the string might represent a file path.
   mDefaultFilePath.ReplaceChar(FILE_ILLEGAL_CHARACTERS, '-');
+  mDefaultFilename.ReplaceChar(FILE_ILLEGAL_CHARACTERS, '-');
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsFilePicker::GetDefaultString(nsAString& aString)
+nsBaseWinFilePicker::GetDefaultString(nsAString& aString)
 {
   return NS_ERROR_FAILURE;
 }
 
 // The default extension to use for files
 NS_IMETHODIMP
-nsFilePicker::GetDefaultExtension(nsAString& aExtension)
+nsBaseWinFilePicker::GetDefaultExtension(nsAString& aExtension)
 {
   aExtension = mDefaultExtension;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsFilePicker::SetDefaultExtension(const nsAString& aExtension)
+nsBaseWinFilePicker::SetDefaultExtension(const nsAString& aExtension)
 {
   mDefaultExtension = aExtension;
   return NS_OK;

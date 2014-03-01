@@ -40,6 +40,16 @@ function setup() {
 }
 
 function onSaveState() {
+  try {
+    ss.getWindowValue(newWin, "foobar");
+  } catch (e) {
+    // The window is untracked which means that the saveState() call isn't the
+    // one we're waiting for. It's most likely been triggered by an async
+    // collection running in the background.
+    waitForSaveState(onSaveState);
+    return;
+  }
+
   // Double check that we have no closed windows
   is(ss.getClosedWindowCount(), 0, "no closed windows on first save");
 
@@ -63,11 +73,11 @@ function observe1(aSubject, aTopic, aData) {
       // The API still treats the closed window as closed, so ensure that window is there
       is(ss.getClosedWindowCount(), 1,
          "observe1: 1 closed window according to API");
-      Services.obs.removeObserver(observe1, "sessionstore-state-write", false);
+      Services.obs.removeObserver(observe1, "sessionstore-state-write");
       Services.obs.addObserver(observe1, "sessionstore-state-write-complete", false);
       break;
     case "sessionstore-state-write-complete":
-      Services.obs.removeObserver(observe1, "sessionstore-state-write-complete", false);
+      Services.obs.removeObserver(observe1, "sessionstore-state-write-complete");
       openTab();
       break;
   }
@@ -87,11 +97,11 @@ function observe2(aSubject, aTopic, aData) {
       // The API still treats the closed window as closed, so ensure that window is there
       is(ss.getClosedWindowCount(), 1,
          "observe2: 1 closed window according to API");
-      Services.obs.removeObserver(observe2, "sessionstore-state-write", false);
+      Services.obs.removeObserver(observe2, "sessionstore-state-write");
       Services.obs.addObserver(observe2, "sessionstore-state-write-complete", false);
       break;
     case "sessionstore-state-write-complete":
-      Services.obs.removeObserver(observe2, "sessionstore-state-write-complete", false);
+      Services.obs.removeObserver(observe2, "sessionstore-state-write-complete");
       done();
       break;
   }

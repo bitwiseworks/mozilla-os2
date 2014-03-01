@@ -10,12 +10,11 @@ import java.util.HashSet;
 import java.util.Set;
 
 import org.json.simple.parser.ParseException;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.CollectionKeys;
 import org.mozilla.gecko.sync.CryptoRecord;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
-import org.mozilla.gecko.sync.GlobalSession;
 import org.mozilla.gecko.sync.InfoCollections;
-import org.mozilla.gecko.sync.Logger;
 import org.mozilla.gecko.sync.NoCollectionKeysSetException;
 import org.mozilla.gecko.sync.NonObjectJSONException;
 import org.mozilla.gecko.sync.crypto.CryptoException;
@@ -28,10 +27,6 @@ import org.mozilla.gecko.sync.net.SyncStorageResponse;
 public class EnsureCrypto5KeysStage
 extends AbstractNonRepositorySyncStage
 implements SyncStorageRequestDelegate {
-
-  public EnsureCrypto5KeysStage(GlobalSession session) {
-    super(session);
-  }
 
   private static final String LOG_TAG = "EnsureC5KeysStage";
   private static final String CRYPTO_COLLECTION = "crypto";

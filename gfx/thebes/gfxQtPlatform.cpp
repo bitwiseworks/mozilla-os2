@@ -8,7 +8,8 @@
 #if (QT_VERSION < QT_VERSION_CHECK(5,0,0))
 #  include <QX11Info>
 #else
-#  include <QPlatformNativeInterface>
+#  include <qpa/qplatformnativeinterface.h>
+#  include <qpa/qplatformintegration.h>
 #endif
 #include <QApplication>
 #include <QDesktopWidget>
@@ -201,7 +202,7 @@ gfxQtPlatform::GetXScreen(QWidget* aWindow)
 #endif
 #else
   return ScreenOfDisplay(GetXDisplay(aWindow),
-                         (int)qApp->platformNativeInterface()->
+                         (int)(intptr_t)qApp->platformNativeInterface()->
                            nativeResourceForWindow("screen",
                              aWindow ? aWindow->windowHandle() : nullptr));
 #endif
@@ -378,7 +379,7 @@ gfxQtPlatform::ResolveFontName(const nsAString& aFontName,
         return NS_OK;
     }
 
-    nsCAutoString utf8Name = NS_ConvertUTF16toUTF8(aFontName);
+    nsAutoCString utf8Name = NS_ConvertUTF16toUTF8(aFontName);
 
     FcPattern *npat = FcPatternCreate();
     FcPatternAddString(npat, FC_FAMILY, (FcChar8*)utf8Name.get());

@@ -21,10 +21,12 @@
 #endif
 
 /**
- * Incorporate the core NSPR data types which XPCOM uses.
+ * Incorporate the integer data types which XPCOM uses.
  */
-#include "prtypes.h"
 #include "mozilla/StandardInteger.h"
+#include "stddef.h"
+
+#include "mozilla/NullPtr.h"
 
 /*
  * This is for functions that are like malloc_usable_size.  Such functions are
@@ -115,8 +117,7 @@ typedef size_t(*nsMallocSizeOfFun)(const void *p);
  *           NS_HIDDEN_(int) NS_FASTCALL func2(char *foo);
  */
 
-#if defined(__i386__) && defined(__GNUC__) && \
-    (__GNUC__ >= 3) && !defined(XP_OS2)
+#if defined(__i386__) && defined(__GNUC__) && !defined(XP_OS2)
 #define NS_FASTCALL __attribute__ ((regparm (3), stdcall))
 #define NS_CONSTRUCTOR_FASTCALL __attribute__ ((regparm (3), stdcall))
 #elif defined(XP_WIN) && !defined(_WIN64)
@@ -210,7 +211,7 @@ typedef size_t(*nsMallocSizeOfFun)(const void *p);
 /**
  * Deprecated declarations.
  */
-#if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))
+#ifdef __GNUC__
 # define MOZ_DEPRECATED __attribute__((deprecated))
 #elif defined(_MSC_VER)
 # define MOZ_DEPRECATED __declspec(deprecated)
@@ -308,7 +309,7 @@ typedef size_t(*nsMallocSizeOfFun)(const void *p);
 /**
  * Generic XPCOM result data type
  */
-typedef uint32_t nsresult;
+#include "nsError.h"
 
 /**
  * Reference count values
@@ -318,29 +319,11 @@ typedef uint32_t nsresult;
  * The following ifdef exists to maintain binary compatibility with
  * IUnknown.
  */
-#if defined(XP_WIN) && PR_BYTES_PER_LONG == 4
+#ifdef XP_WIN
 typedef unsigned long nsrefcnt;
 #else
 typedef uint32_t nsrefcnt;
 #endif
-
-/**
- * Use C++11 nullptr if available; otherwise use a C++ typesafe template; and
- * for C, fall back to longs.  See bugs 547964 and 626472.
- */
-#ifndef HAVE_NULLPTR
-#ifndef __cplusplus
-# define nullptr ((void*)0)
-#elif defined(__GNUC__)
-# define nullptr __null
-#elif defined(_WIN64)
-# define nullptr 0LL
-#else
-# define nullptr 0L
-#endif
-#endif /* defined(HAVE_NULLPTR) */
-
-#include "nsError.h"
 
 /* ------------------------------------------------------------------------ */
 /* Casting macros for hiding C++ features from older compilers */
@@ -377,31 +360,6 @@ typedef uint32_t nsrefcnt;
 #define NS_STRINGIFY_HELPER(x_) #x_
 #define NS_STRINGIFY(x_) NS_STRINGIFY_HELPER(x_)
 
-/*
- * These macros allow you to give a hint to the compiler about branch
- * probability so that it can better optimize.  Use them like this:
- *
- *  if (NS_LIKELY(v == 1)) {
- *    ... expected code path ...
- *  }
- *
- *  if (NS_UNLIKELY(v == 0)) {
- *    ... non-expected code path ...
- *  }
- *
- * These macros are guaranteed to always return 0 or 1.
- * The NS_FAILED/NS_SUCCEEDED macros depends on this.
- * @return 0 or 1
- */
-
-#if defined(__GNUC__) && (__GNUC__ > 2)
-#define NS_LIKELY(x)    (__builtin_expect(!!(x), 1))
-#define NS_UNLIKELY(x)  (__builtin_expect(!!(x), 0))
-#else
-#define NS_LIKELY(x)    (!!(x))
-#define NS_UNLIKELY(x)  (!!(x))
-#endif
-
  /*
   * If we're being linked as standalone glue, we don't want a dynamic
   * dependency on NSPR libs, so we skip the debug thread-safety
@@ -413,34 +371,6 @@ typedef uint32_t nsrefcnt;
 
 #if defined(HAVE_THREAD_TLS_KEYWORD)
 #define NS_TLS __thread
-#endif
-
-/**
- * Static type annotations, enforced when static-checking is enabled:
- *
- * NS_STACK_CLASS: a class which must only be instantiated on the stack
- *
- * NS_MUST_OVERRIDE:
- *   a method which every immediate subclass of this class must
- *   override.  A subclass override can itself be NS_MUST_OVERRIDE, in
- *   which case its own subclasses must override the method as well.
- *
- *   This is similar to, but not the same as, marking a method pure
- *   virtual.  It has no effect on the class in which the annotation
- *   appears, you can still provide a definition for the method, and
- *   it objects to the mere existence of a subclass that doesn't
- *   override the method.  See examples in analysis/must-override.js.
- */
-#ifdef NS_STATIC_CHECKING
-#define NS_STACK_CLASS __attribute__((user("NS_stack")))
-#define NS_OKONHEAP    __attribute__((user("NS_okonheap")))
-#define NS_SUPPRESS_STACK_CHECK __attribute__((user("NS_suppress_stackcheck")))
-#define NS_MUST_OVERRIDE __attribute__((user("NS_must_override")))
-#else
-#define NS_STACK_CLASS
-#define NS_OKONHEAP
-#define NS_SUPPRESS_STACK_CHECK
-#define NS_MUST_OVERRIDE
 #endif
 
 /*

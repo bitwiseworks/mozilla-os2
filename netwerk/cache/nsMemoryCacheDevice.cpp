@@ -1,18 +1,20 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsCache.h"
 #include "nsMemoryCacheDevice.h"
 #include "nsCacheService.h"
 #include "nsICacheService.h"
-#include "nsIStorageStream.h"
 #include "nsICacheVisitor.h"
+#include "nsIStorageStream.h"
+#include "nsIMemoryReporter.h"
 #include "nsCRT.h"
-#include "nsCache.h"
 #include "nsReadableUtils.h"
 #include "mozilla/Telemetry.h"
+#include <algorithm>
 
 // The memory cache implements the "LRU-SP" caching algorithm
 // described in "LRU-SP: A Size-Adjusted and Popularity-Aware LRU Replacement
@@ -26,6 +28,26 @@
 
 const char *gMemoryDeviceID      = "memory";
 
+class NetworkMemoryCacheReporter MOZ_FINAL :
+    public mozilla::MemoryReporterBase
+{
+public:
+    NetworkMemoryCacheReporter(nsMemoryCacheDevice* aDevice)
+      : MemoryReporterBase(
+            "explicit/network/memory-cache",
+            KIND_HEAP,
+            UNITS_BYTES,
+            "Memory used by the network memory cache.")
+      , mDevice(aDevice)
+    {}
+
+private:
+    int64_t Amount() { return mDevice->TotalSize(); }
+
+    nsMemoryCacheDevice* mDevice;
+};
+
+
 nsMemoryCacheDevice::nsMemoryCacheDevice()
     : mInitialized(false),
       mHardLimit(4 * 1024 * 1024),       // default, if no pref
@@ -34,15 +56,20 @@ nsMemoryCacheDevice::nsMemoryCacheDevice()
       mInactiveSize(0),
       mEntryCount(0),
       mMaxEntryCount(0),
-      mMaxEntrySize(-1) // -1 means "no limit"
+      mMaxEntrySize(-1), // -1 means "no limit"
+      mReporter(nullptr)
 {
     for (int i=0; i<kQueueCount; ++i)
         PR_INIT_CLIST(&mEvictionList[i]);
+
+    mReporter = new NetworkMemoryCacheReporter(this);
+    NS_RegisterMemoryReporter(mReporter);
 }
 
 
 nsMemoryCacheDevice::~nsMemoryCacheDevice()
-{    
+{
+    NS_UnregisterMemoryReporter(mReporter);
     Shutdown();
 }
 
@@ -373,7 +400,7 @@ nsMemoryCacheDevice::EvictEntriesIfNecessary(void)
             if (entry != &mEvictionList[i]) {
                 entryCost = (uint64_t)
                     (now - entry->LastFetched()) * entry->DataSize() / 
-                    PR_MAX(1, entry->FetchCount());
+                    std::max(1, entry->FetchCount());
                 if (!maxEntry || (entryCost > maxCost)) {
                     maxEntry = entry;
                     maxCost = entryCost;
@@ -400,9 +427,9 @@ nsMemoryCacheDevice::EvictionList(nsCacheEntry * entry, int32_t  deltaSize)
     // compute which eviction queue this entry should go into,
     // based on floor(log2(size/nref))
     int32_t  size       = deltaSize + (int32_t)entry->DataSize();
-    int32_t  fetchCount = NS_MAX(1, entry->FetchCount());
+    int32_t  fetchCount = std::max(1, entry->FetchCount());
 
-    return NS_MIN(PR_FloorLog2(size / fetchCount), kQueueCount - 1);
+    return std::min(PR_FloorLog2(size / fetchCount), kQueueCount - 1);
 }
 
 
@@ -442,11 +469,30 @@ nsMemoryCacheDevice::Visit(nsICacheVisitor * visitor)
 }
 
 
+static bool
+IsEntryPrivate(nsCacheEntry* entry, void* args)
+{
+    return entry->IsPrivate();
+}
+
+struct ClientIDArgs {
+    const char* clientID;
+    uint32_t prefixLength;
+};
+
+static bool
+EntryMatchesClientID(nsCacheEntry* entry, void* args)
+{
+    const char * clientID = static_cast<ClientIDArgs*>(args)->clientID;
+    uint32_t prefixLength = static_cast<ClientIDArgs*>(args)->prefixLength;
+    const char * key = entry->Key()->get();
+    return !clientID || nsCRT::strncmp(clientID, key, prefixLength) == 0;
+}
+
 nsresult
-nsMemoryCacheDevice::EvictEntries(const char * clientID)
+nsMemoryCacheDevice::DoEvictEntries(bool (*matchFn)(nsCacheEntry* entry, void* args), void* args)
 {
     nsCacheEntry * entry;
-    uint32_t prefixLength = (clientID ? strlen(clientID) : 0);
 
     for (int i = kQueueCount - 1; i >= 0; --i) {
         PRCList * elem = PR_LIST_HEAD(&mEvictionList[i]);
@@ -454,14 +500,13 @@ nsMemoryCacheDevice::EvictEntries(const char * clientID)
             entry = (nsCacheEntry *)elem;
             elem = PR_NEXT_LINK(elem);
 
-            const char * key = entry->Key()->get();
-            if (clientID && nsCRT::strncmp(clientID, key, prefixLength) != 0)
+            if (!matchFn(entry, args))
                 continue;
             
             if (entry->IsInUse()) {
                 nsresult rv = nsCacheService::DoomEntry(entry);
                 if (NS_FAILED(rv)) {
-                    CACHE_LOG_WARNING(("memCache->EvictEntries() aborted: rv =%x", rv));
+                    CACHE_LOG_WARNING(("memCache->DoEvictEntries() aborted: rv =%x", rv));
                     return rv;
                 }
             } else {
@@ -471,6 +516,19 @@ nsMemoryCacheDevice::EvictEntries(const char * clientID)
     }
 
     return NS_OK;
+}
+
+nsresult
+nsMemoryCacheDevice::EvictEntries(const char * clientID)
+{
+    ClientIDArgs args = {clientID, clientID ? uint32_t(strlen(clientID)) : 0};
+    return DoEvictEntries(&EntryMatchesClientID, &args);
+}
+
+nsresult
+nsMemoryCacheDevice::EvictPrivateEntries()
+{
+    return DoEvictEntries(&IsEntryPrivate, NULL);
 }
 
 

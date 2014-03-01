@@ -13,7 +13,7 @@ typedef long nsCookieAccess;
 /**
  * An interface to test for cookie permissions
  */
-[scriptable, uuid(4b1a775d-f6d3-4389-be2e-9dfbaf2ab47b)]
+[scriptable, uuid(11ddd4ed-8f5b-40b3-b2a0-27c20ea1c88d)]
 interface nsICookiePermission : nsISupports
 {
   /**
@@ -24,12 +24,14 @@ interface nsICookiePermission : nsISupports
   const nsCookieAccess ACCESS_DENY    = 2;
 
   /**
-   * additional values for nsCookieAccess, which are not directly used by
-   * any methods on this interface, but are nevertheless convenient to define
-   * here. these may be relocated somewhere else if we ever consider freezing
-   * this interface.
+   * additional values for nsCookieAccess which may not match
+   * nsIPermissionManager. Keep 3-7 available to allow nsIPermissionManager to
+   * add values without colliding. ACCESS_SESSION is not directly returned by
+   * any methods on this interface.
    */
   const nsCookieAccess ACCESS_SESSION = 8;
+  const nsCookieAccess ACCESS_ALLOW_FIRST_PARTY_ONLY = 9;
+  const nsCookieAccess ACCESS_LIMIT_THIRD_PARTY = 10;
 
   /**
    * setAccess
@@ -58,7 +60,8 @@ interface nsICookiePermission : nsISupports
    *        the channel corresponding to aURI
    *
    * @return one of the following nsCookieAccess values:
-   *         ACCESS_DEFAULT, ACCESS_ALLOW, or ACCESS_DENY
+   *         ACCESS_DEFAULT, ACCESS_ALLOW, ACCESS_DENY, or
+   *         ACCESS_ALLOW_FIRST_PARTY_ONLY
    */
   nsCookieAccess canAccess(in nsIURI     aURI,
                            in nsIChannel aChannel);
@@ -95,24 +98,6 @@ interface nsICookiePermission : nsISupports
                        in nsICookie2 aCookie,
                        inout boolean aIsSession,
                        inout int64_t aExpiry);
-
-  /**
-   * getOriginatingURI
-   *
-   * determines the originating URI for a load given a channel, for third-party
-   * cookie blocking. this is done by leveraging the loadgroup of the channel to
-   * find the root content docshell, and the URI associated with its principal.
-   * if the root content docshell or its principal's URI cannot be obtained,
-   * this method will throw.
-   *
-   * @param aChannel
-   *        the channel for the load trying to get or set cookies
-   *
-   * @return the originating URI.
-   *
-   * @status DEPRECATED -- use mozIThirdPartyUtil instead.
-   */
-  nsIURI getOriginatingURI(in nsIChannel aChannel);
 };
 
 %{ C++

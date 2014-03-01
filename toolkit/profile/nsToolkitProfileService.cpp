@@ -7,6 +7,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <prlong.h>
+#include <prprf.h>
+#include <prtime.h>
 #include "nsProfileLock.h"
 
 #ifdef XP_WIN
@@ -122,6 +125,8 @@ private:
 
     NS_HIDDEN_(nsresult) Init();
 
+    nsresult CreateTimesInternal(nsIFile *profileDir);
+
     nsresult CreateProfileInternal(nsIFile* aRootDir,
                                    nsIFile* aLocalDir,
                                    const nsACString& aName,
@@ -226,6 +231,9 @@ nsToolkitProfile::Remove(bool removeFiles)
 
     if (mLock)
         return NS_ERROR_FILE_IS_LOCKED;
+
+    if (!mPrev && !mNext && nsToolkitProfileService::gService->mFirst != this)
+        return NS_ERROR_NOT_INITIALIZED;
 
     if (removeFiles) {
         bool equals;
@@ -408,7 +416,7 @@ nsToolkitProfileService::Init()
     if (NS_FAILED(rv))
         return rv;
 
-    nsCAutoString buffer;
+    nsAutoCString buffer;
     rv = parser.GetString("General", "StartWithLastProfile", buffer);
     if (NS_SUCCEEDED(rv) && buffer.EqualsLiteral("0"))
         mStartWithLast = false;
@@ -417,7 +425,7 @@ nsToolkitProfileService::Init()
 
     unsigned int c = 0;
     for (c = 0; true; ++c) {
-        nsCAutoString profileID("Profile");
+        nsAutoCString profileID("Profile");
         profileID.AppendInt(c);
 
         rv = parser.GetString(profileID.get(), "IsRelative", buffer);
@@ -425,7 +433,7 @@ nsToolkitProfileService::Init()
 
         bool isRelative = buffer.EqualsLiteral("1");
 
-        nsCAutoString filePath;
+        nsAutoCString filePath;
 
         rv = parser.GetString(profileID.get(), "Path", filePath);
         if (NS_FAILED(rv)) {
@@ -606,11 +614,10 @@ static const char kTable[] =
 
 static void SaltProfileName(nsACString& aName)
 {
-    double fpTime;
-    LL_L2D(fpTime, PR_Now());
+    double fpTime = double(PR_Now());
 
     // use 1e-6, granularity of PR_Now() on the mac is seconds
-    srand((uint)(fpTime * 1e-6 + 0.5));
+    srand((unsigned int)(fpTime * 1e-6 + 0.5));
 
     char salt[9];
 
@@ -661,22 +668,22 @@ nsToolkitProfileService::CreateDefaultProfileForApp(const nsACString& aProfileNa
     (*aResult)->GetRootDir(getter_AddRefs(rootDir));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCAutoString profileDir;
+    nsAutoCString profileDir;
     rv = rootDir->GetRelativeDescriptor(appData, profileDir);
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCString ini;
     ini.SetCapacity(512);
-    ini.AppendASCII("[General]\n");
-    ini.AppendASCII("StartWithLastProfile=1\n\n");
+    ini.AppendLiteral("[General]\n");
+    ini.AppendLiteral("StartWithLastProfile=1\n\n");
 
-    ini.AppendASCII("[Profile0]\n");
-    ini.AppendASCII("Name=default\n");
-    ini.AppendASCII("IsRelative=1\n");
-    ini.AppendASCII("Path=");
+    ini.AppendLiteral("[Profile0]\n");
+    ini.AppendLiteral("Name=default\n");
+    ini.AppendLiteral("IsRelative=1\n");
+    ini.AppendLiteral("Path=");
     ini.Append(profileDir);
-    ini.AppendASCII("\n");
-    ini.AppendASCII("Default=1\n\n");
+    ini.Append('\n');
+    ini.AppendLiteral("Default=1\n\n");
 
     FILE* writeFile;
     rv = profilesini->OpenANSIFileDesc("w", &writeFile);
@@ -722,7 +729,7 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
 
     nsCOMPtr<nsIFile> rootDir (aRootDir);
 
-    nsCAutoString dirName;
+    nsAutoCString dirName;
     if (!rootDir) {
         rv = gDirServiceProvider->GetUserProfilesRootDir(getter_AddRefs(rootDir),
                                                          aProfileName, aAppName,
@@ -814,6 +821,12 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
         NS_ENSURE_SUCCESS(rv, rv);
     }
 
+    // We created a new profile dir. Let's store a creation timestamp.
+    // Note that this code path does not apply if the profile dir was
+    // created prior to launching.
+    rv = CreateTimesInternal(rootDir);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     nsToolkitProfile* last = aForExternalApp ? nullptr : mFirst;
     if (last) {
         while (last->mNext)
@@ -825,6 +838,40 @@ nsToolkitProfileService::CreateProfileInternal(nsIFile* aRootDir,
     if (!profile) return NS_ERROR_OUT_OF_MEMORY;
 
     NS_ADDREF(*aResult = profile);
+    return NS_OK;
+}
+
+nsresult
+nsToolkitProfileService::CreateTimesInternal(nsIFile* aProfileDir)
+{
+    nsresult rv = NS_ERROR_FAILURE;
+    nsCOMPtr<nsIFile> creationLog;
+    rv = aProfileDir->Clone(getter_AddRefs(creationLog));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = creationLog->AppendNative(NS_LITERAL_CSTRING("times.json"));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    bool exists = false;
+    creationLog->Exists(&exists);
+    if (exists) {
+      return NS_OK;
+    }
+
+    rv = creationLog->Create(nsIFile::NORMAL_FILE_TYPE, 0700);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    // We don't care about microsecond resolution.
+    int64_t msec;
+    LL_DIV(msec, PR_Now(), PR_USEC_PER_MSEC);
+
+    // Write it out.
+    PRFileDesc *writeFile;
+    rv = creationLog->OpenNSPRFileDesc(PR_WRONLY, 0700, &writeFile);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    PR_fprintf(writeFile, "{\n\"created\": %lld\n}\n", msec);
+    PR_Close(writeFile);
     return NS_OK;
 }
 
@@ -867,7 +914,7 @@ nsToolkitProfileService::Flush()
                    "StartWithLastProfile=%s\n\n",
                    mStartWithLast ? "1" : "0");
 
-    nsCAutoString path;
+    nsAutoCString path;
     cur = mFirst;
     pCount = 0;
 

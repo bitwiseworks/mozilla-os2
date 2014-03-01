@@ -24,6 +24,11 @@ namespace Telemetry {
 
 #include "TelemetryHistogramEnums.h"
 
+enum TimerResolution {
+  Millisecond,
+  Microsecond
+};
+
 /**
  * Initialize the Telemetry service on the main thread at startup.
  */
@@ -51,7 +56,34 @@ void AccumulateTimeDelta(ID id, TimeStamp start, TimeStamp end = TimeStamp::Now(
  */
 base::Histogram* GetHistogramById(ID id);
 
-template<ID id>
+/**
+ * Those wrappers are needed because the VS versions we use do not support free
+ * functions with default template arguments.
+ */
+template<TimerResolution res>
+struct AccumulateDelta_impl
+{
+  static void compute(ID id, TimeStamp start, TimeStamp end = TimeStamp::Now());
+};
+
+template<>
+struct AccumulateDelta_impl<Millisecond>
+{
+  static void compute(ID id, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    Accumulate(id, static_cast<uint32_t>((end - start).ToMilliseconds()));
+  }
+};
+
+template<>
+struct AccumulateDelta_impl<Microsecond>
+{
+  static void compute(ID id, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    Accumulate(id, static_cast<uint32_t>((end - start).ToMicroseconds()));
+  }
+};
+
+
+template<ID id, TimerResolution res = Millisecond>
 class AutoTimer {
 public:
   AutoTimer(TimeStamp aStart = TimeStamp::Now() MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -61,7 +93,7 @@ public:
   }
 
   ~AutoTimer() {
-    AccumulateTimeDelta(id, start);
+    AccumulateDelta_impl<res>::compute(id, start);
   }
 
 private:
@@ -116,9 +148,10 @@ void RecordSlowSQLStatement(const nsACString &statement,
                             uint32_t delay);
 
 /**
- * Threshold for a statement to be considered slow, in milliseconds
+ * Thresholds for a statement to be considered slow, in milliseconds
  */
-const uint32_t kSlowStatementThreshold = 100;
+const uint32_t kSlowSQLThresholdForMainThread = 50;
+const uint32_t kSlowSQLThresholdForHelperThreads = 100;
 
 class ProcessedStack;
 
@@ -133,6 +166,13 @@ class ProcessedStack;
 void RecordChromeHang(uint32_t duration,
                       ProcessedStack &aStack);
 #endif
+
+/**
+ * Record a failed attempt at locking the user's profile.
+ *
+ * @param aProfileDir The profile directory whose lock attempt failed
+ */
+void WriteFailedProfileLock(nsIFile* aProfileDir);
 
 } // namespace Telemetry
 } // namespace mozilla

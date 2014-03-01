@@ -10,11 +10,10 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE       = nptest
-LIBRARY_NAME = nptest
 MODULE_NAME  = TestPlugin
-
-DIRS = secondplugin
+ifndef _MSC_VER
+FAIL_ON_WARNINGS = 1
+endif # !_MSC_VER
 
 RELATIVE_PATH=.
 COCOA_NAME=Test

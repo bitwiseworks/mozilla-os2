@@ -5,16 +5,15 @@
 
 #include "nsDOMTransitionEvent.h"
 #include "nsGUIEvent.h"
-#include "nsDOMClassInfoID.h"
-#include "nsIClassInfo.h"
-#include "nsIXPCScriptable.h"
 
-nsDOMTransitionEvent::nsDOMTransitionEvent(nsPresContext *aPresContext,
+nsDOMTransitionEvent::nsDOMTransitionEvent(mozilla::dom::EventTarget* aOwner,
+                                           nsPresContext *aPresContext,
                                            nsTransitionEvent *aEvent)
-  : nsDOMEvent(aPresContext, aEvent ? aEvent
-                                    : new nsTransitionEvent(false, 0,
-                                                            EmptyString(),
-                                                            0.0))
+  : nsDOMEvent(aOwner, aPresContext,
+               aEvent ? aEvent : new nsTransitionEvent(false, 0,
+                                                       EmptyString(),
+                                                       0.0,
+                                                       EmptyString()))
 {
   if (aEvent) {
     mEventIsInternal = false;
@@ -33,15 +32,33 @@ nsDOMTransitionEvent::~nsDOMTransitionEvent()
   }
 }
 
-DOMCI_DATA(TransitionEvent, nsDOMTransitionEvent)
-
 NS_INTERFACE_MAP_BEGIN(nsDOMTransitionEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMTransitionEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(TransitionEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
 
 NS_IMPL_ADDREF_INHERITED(nsDOMTransitionEvent, nsDOMEvent)
 NS_IMPL_RELEASE_INHERITED(nsDOMTransitionEvent, nsDOMEvent)
+
+//static
+already_AddRefed<nsDOMTransitionEvent>
+nsDOMTransitionEvent::Constructor(const mozilla::dom::GlobalObject& aGlobal,
+                                  const nsAString& aType,
+                                  const mozilla::dom::TransitionEventInit& aParam,
+                                  mozilla::ErrorResult& aRv)
+{
+  nsCOMPtr<mozilla::dom::EventTarget> t = do_QueryInterface(aGlobal.Get());
+  nsRefPtr<nsDOMTransitionEvent> e = new nsDOMTransitionEvent(t, nullptr, nullptr);
+  bool trusted = e->Init(t);
+
+  aRv = e->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
+
+  e->TransitionEvent()->propertyName = aParam.mPropertyName;
+  e->TransitionEvent()->elapsedTime = aParam.mElapsedTime;
+  e->TransitionEvent()->pseudoElement = aParam.mPseudoElement;
+
+  e->SetTrusted(trusted);
+  return e.forget();
+}
 
 NS_IMETHODIMP
 nsDOMTransitionEvent::GetPropertyName(nsAString & aPropertyName)
@@ -53,31 +70,24 @@ nsDOMTransitionEvent::GetPropertyName(nsAString & aPropertyName)
 NS_IMETHODIMP
 nsDOMTransitionEvent::GetElapsedTime(float *aElapsedTime)
 {
-  *aElapsedTime = TransitionEvent()->elapsedTime;
+  *aElapsedTime = ElapsedTime();
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDOMTransitionEvent::InitTransitionEvent(const nsAString & typeArg,
-                                          bool canBubbleArg,
-                                          bool cancelableArg,
-                                          const nsAString & propertyNameArg,
-                                          float elapsedTimeArg)
+nsDOMTransitionEvent::GetPseudoElement(nsAString& aPseudoElement)
 {
-  nsresult rv = nsDOMEvent::InitEvent(typeArg, canBubbleArg, cancelableArg);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  TransitionEvent()->propertyName = propertyNameArg;
-  TransitionEvent()->elapsedTime = elapsedTimeArg;
-
+  aPseudoElement = TransitionEvent()->pseudoElement;
   return NS_OK;
 }
 
 nsresult
 NS_NewDOMTransitionEvent(nsIDOMEvent **aInstancePtrResult,
+                         mozilla::dom::EventTarget* aOwner,
                          nsPresContext *aPresContext,
                          nsTransitionEvent *aEvent)
 {
-  nsDOMTransitionEvent *it = new nsDOMTransitionEvent(aPresContext, aEvent);
+  nsDOMTransitionEvent *it =
+    new nsDOMTransitionEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

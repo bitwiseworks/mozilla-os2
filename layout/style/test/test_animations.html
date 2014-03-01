@@ -60,9 +60,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=435442
     100% { padding-bottom: 20px; animation-timing-function: ease-out }
   }
 
+  @keyframes always_fifty {
+    from, to { margin-left: 50px }
+  }
+
   #withbefore::before, #withafter::after {
     content: "";
-    animation: anim2 1s linear alternate infinite;
+    animation: anim2 1s linear alternate 3;
   }
 
   @keyframes multiprop {
@@ -108,6 +112,19 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=435442
     to { -moz-transform: rotate(270deg) translate3d(0px, 0px, 0px) scale(1)
       translateY(0px) scaleY(1); }
   }
+
+  @keyframes important1 {
+    from { margin-top: 50px; }
+    50%  { margin-top: 150px !important; } /* ignored */
+    to   { margin-top: 100px; }
+  }
+
+  @keyframes important2 {
+    from { margin-top: 50px;
+           margin-bottom: 100px; }
+    to   { margin-top: 150px !important; /* ignored */
+           margin-bottom: 50px; }
+  }
   </style>
 </head>
 <body>
@@ -118,6 +135,21 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=435442
 "use strict";
 
 /** Test for css3-animations (Bug 435442) **/
+
+var e = new AnimationEvent("foo",
+                            {
+                              bubbles: true,
+                              cancelable: true,
+                              animationName: "name",
+                              elapsedTime: 0.5,
+                              pseudoElement: "pseudo"
+                            });
+is(e.bubbles, true);
+is(e.cancelable, true);
+is(e.animationName, "name");
+is(e.elapsedTime, 0.5);
+is(e.pseudoElement, "pseudo");
+is(e.isTrusted, false)
 
 function advance_clock(milliseconds) {
   SpecialPowers.DOMWindowUtils.advanceTimeAndRefresh(milliseconds);
@@ -224,7 +256,8 @@ function test_fill_mode(fill_mode, fills_backwards, fills_forwards)
   advance_clock(1000);
   check_events([{ type: 'animationstart', target: div,
                   bubbles: true, cancelable: true,
-                  animationName: 'anim1', elapsedTime: 0.0 }],
+                  animationName: 'anim1', elapsedTime: 0.0,
+                  pseudoElement: "" }],
                "right after start in test_fill_mode");
   if (fills_backwards)
     is(cs.marginLeft, "0px", desc + "affects value at start of animation");
@@ -242,7 +275,8 @@ function test_fill_mode(fill_mode, fills_backwards, fills_forwards)
   advance_clock(125);
   check_events([{ type: 'animationend', target: div,
                   bubbles: true, cancelable: true,
-                  animationName: 'anim1', elapsedTime: 10.0 }],
+                  animationName: 'anim1', elapsedTime: 10.0,
+                  pseudoElement: "" }],
                "right after end in test_fill_mode");
   if (fills_forwards)
     is(cs.marginLeft, "100px", desc + "affects value at end of animation");
@@ -1100,24 +1134,29 @@ is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_out(0.1), 0.01,
           "positive delay test at 500ms");
 done_div();
 
-// test dynamic changes to delay (i.e., that we only check delay once,
-// at the very start of the animation)
-new_div("animation: anim2 1s 0.5s ease-out");
+// test dynamic changes to delay (i.e., that we preserve the start time
+// that's before the delay)
+new_div("animation: anim2 1s 0.5s ease-out both");
 is(cs.marginRight, "0px", "dynamic delay delay test at 0ms");
 advance_clock(400);
-is(cs.marginRight, "0px", "dynamic delay delay test at 400ms");
+is(cs.marginRight, "0px", "dynamic delay delay test at 400ms (1)");
 div.style.animationDelay = "0.2s";
-advance_clock(0);
-advance_clock(100);
-is(cs.marginRight, "0px", "dynamic delay delay test at 500ms");
-advance_clock(100);
-is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_out(0.1), 0.01,
-          "dynamic delay delay test at 500ms");
-div.style.animationDelay = "1s";
-advance_clock(0);
-advance_clock(100);
 is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_out(0.2), 0.01,
-          "dynamic delay delay test at 500ms");
+          "dynamic delay delay test at 400ms (2)");
+div.style.animationDelay = "0.6s";
+advance_clock(0);
+advance_clock(200);
+is(cs.marginRight, "0px", "dynamic delay delay test at 600ms");
+advance_clock(200);
+is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_out(0.2), 0.01,
+          "dynamic delay delay test at 800ms");
+advance_clock(1000);
+is(cs.marginRight, "100px", "dynamic delay delay test at 1800ms (1)");
+div.style.animationDelay = "1.5s";
+is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_out(0.3), 0.01,
+          "dynamic delay delay test at 1800ms (2)");
+div.style.animationDelay = "2s";
+is(cs.marginRight, "0px", "dynamic delay delay test at 1800ms (3)");
 done_div();
 
 // test delay and play-state interaction
@@ -1161,7 +1200,8 @@ listen(); // rely on no flush having happened yet
 is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_in(0.4), 0.01,
           "large negative delay test at 0ms");
 check_events([{ type: 'animationstart', target: div,
-                animationName: 'anim2', elapsedTime: 3.6 }],
+                animationName: 'anim2', elapsedTime: 3.6,
+                pseudoElement: "" }],
              "right after start in large negative delay test");
 advance_clock(380);
 is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_in(0.02), 0.01,
@@ -1170,7 +1210,8 @@ check_events([]);
 advance_clock(20);
 is(cs.marginRight, "0px", "large negative delay test at 400ms");
 check_events([{ type: 'animationiteration', target: div,
-                animationName: 'anim2', elapsedTime: 4.0 }],
+                animationName: 'anim2', elapsedTime: 4.0,
+                pseudoElement: "" }],
              "right after start in large negative delay test");
 advance_clock(800);
 is_approx(px_to_num(cs.marginRight), 100 * gTF.ease_in(0.8), 0.01,
@@ -1179,7 +1220,8 @@ check_events([]);
 advance_clock(200);
 is(cs.marginRight, "100px", "large negative delay test at 1400ms");
 check_events([{ type: 'animationend', target: div,
-                animationName: 'anim2', elapsedTime: 5.0 }],
+                animationName: 'anim2', elapsedTime: 5.0,
+                pseudoElement: "" }],
              "right after start in large negative delay test");
 done_div();
 
@@ -1215,7 +1257,11 @@ advance_clock(800);
 is(cs_before.marginRight, "0px", ":before test at 2000ms");
 advance_clock(300);
 is(cs_before.marginRight, "30px", ":before test at 2300ms");
-check_events([], "no events should be fired for animations on :before");
+advance_clock(700);
+check_events([ { type: "animationstart", animationName: "anim2", elapsedTime: 0, pseudoElement: "::before" },
+               { type: "animationiteration", animationName: "anim2", elapsedTime: 1.2, pseudoElement: "::before" },
+               { type: "animationiteration", animationName: "anim2", elapsedTime: 2, pseudoElement: "::before" },
+               { type: "animationend", animationName: "anim2", elapsedTime: 3, pseudoElement: "::before" }]);
 done_div();
 
 new_div("");
@@ -1232,7 +1278,11 @@ advance_clock(800);
 is(cs_after.marginRight, "0px", ":after test at 2000ms");
 advance_clock(300);
 is(cs_after.marginRight, "30px", ":after test at 2300ms");
-check_events([], "no events should be fired for animations on :after");
+advance_clock(700);
+check_events([ { type: "animationstart", animationName: "anim2", elapsedTime: 0, pseudoElement: "::after" },
+               { type: "animationiteration", animationName: "anim2", elapsedTime: 1.2, pseudoElement: "::after" },
+               { type: "animationiteration", animationName: "anim2", elapsedTime: 2, pseudoElement: "::after" },
+               { type: "animationend", animationName: "anim2", elapsedTime: 3, pseudoElement: "::after" }]);
 done_div();
 
 /**
@@ -1314,6 +1364,15 @@ is(cs.lineHeight, default_line_height,
    "animations should not override UA !important at 200ms");
 is(cs.marginTop, "40px",
    "rest of animation should still work when UA !important present at 200ms");
+done_div();
+
+// Test that author !important rules override animations, but
+// that animations override regular author rules.
+new_div("animation: always_fifty 1s linear infinite; margin-left: 200px");
+is(cs.marginLeft, "50px", "animations override regular author rules");
+done_div();
+new_div("animation: always_fifty 1s linear infinite; margin-left: 200px ! important;");
+is(cs.marginLeft, "200px", "important author rules override animations");
 done_div();
 
 // Test interaction of animations and restyling (Bug 686656).
@@ -1407,6 +1466,35 @@ is(cs.getPropertyValue("-moz-transform"),
 advance_clock(1000);
 is(cs.getPropertyValue("-moz-transform"), "matrix(0, -1, 1, 0, 0, 0)",
     "primitives1 at 0s");
+done_div();
+
+new_div("animation: important1 1s linear forwards");
+is(cs.marginTop, "50px", "important1 test at 0s");
+advance_clock(500);
+is(cs.marginTop, "75px", "important1 test at 0.5s");
+advance_clock(500);
+is(cs.marginTop, "100px", "important1 test at 1s");
+done_div();
+
+new_div("animation: important2 1s linear forwards");
+is(cs.marginTop, "50px", "important2 (margin-top) test at 0s");
+is(cs.marginBottom, "100px", "important2 (margin-bottom) test at 0s");
+advance_clock(1000);
+is(cs.marginTop, "0px", "important2 (margin-top) test at 1s");
+is(cs.marginBottom, "50px", "important2 (margin-bottom) test at 1s");
+done_div();
+
+// Test that it's the length of the 'animation-name' list that's used to
+// start animations.
+// note: anim2 animates margin-right from 0 to 100px
+// note: anim3 animates margin-top from 0 to 100px
+new_div("animation-name: anim2, anim3; animation-duration: 1s; animation-timing-function: linear; animation-delay: -250ms, -250ms, -750ms, -500ms;");
+is(cs.marginRight, "25px", "animation-name list length is the length that matters");
+is(cs.marginTop, "25px", "animation-name list length is the length that matters");
+done_div();
+new_div("animation-name: anim2, anim3, anim2; animation-duration: 1s; animation-timing-function: linear; animation-delay: -250ms, -250ms, -750ms, -500ms;");
+is(cs.marginRight, "75px", "animation-name list length is the length that matters, and the last occurrence of a name wins");
+is(cs.marginTop, "25px", "animation-name list length is the length that matters");
 done_div();
 
 SpecialPowers.DOMWindowUtils.restoreNormalRefresh();

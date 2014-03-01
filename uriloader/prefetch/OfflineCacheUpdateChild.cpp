@@ -8,6 +8,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/NeckoCommon.h"
 
 #include "nsIApplicationCacheContainer.h"
 #include "nsIApplicationCacheChannel.h"
@@ -31,6 +32,8 @@
 #include "nsIAsyncVerifyRedirectCallback.h"
 
 using namespace mozilla::ipc;
+using namespace mozilla::net;
+using mozilla::dom::TabChild;
 
 #if defined(PR_LOGGING)
 //
@@ -44,6 +47,7 @@ using namespace mozilla::ipc;
 //
 extern PRLogModuleInfo *gOfflineCacheUpdateLog;
 #endif
+#undef LOG
 #define LOG(args) PR_LOG(gOfflineCacheUpdateLog, 4, args)
 #define LOG_ENABLED() PR_LOG_TEST(gOfflineCacheUpdateLog, 4)
 
@@ -55,6 +59,7 @@ namespace docshell {
 //-----------------------------------------------------------------------------
 
 NS_INTERFACE_MAP_BEGIN(OfflineCacheUpdateChild)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_INTERFACE_MAP_ENTRY(nsIOfflineCacheUpdate)
 NS_INTERFACE_MAP_END
 
@@ -80,6 +85,8 @@ OfflineCacheUpdateChild::OfflineCacheUpdateChild(nsIDOMWindow* aWindow)
     : mState(STATE_UNINITIALIZED)
     , mIsUpgrade(false)
     , mIPCActivated(false)
+    , mAppID(NECKO_NO_APP_ID)
+    , mInBrowser(false)
     , mWindow(aWindow)
     , mByteProgress(0)
 {
@@ -90,7 +97,7 @@ OfflineCacheUpdateChild::~OfflineCacheUpdateChild()
     LOG(("OfflineCacheUpdateChild::~OfflineCacheUpdateChild [%p]", this));
 }
 
-nsresult
+void
 OfflineCacheUpdateChild::GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserver> &aObservers)
 {
     for (int32_t i = 0; i < mWeakObservers.Count(); i++) {
@@ -105,8 +112,6 @@ OfflineCacheUpdateChild::GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserve
     for (int32_t i = 0; i < mObservers.Count(); i++) {
         aObservers.AppendObject(mObservers[i]);
     }
-
-    return NS_OK;
 }
 
 void
@@ -158,7 +163,7 @@ OfflineCacheUpdateChild::AssociateDocument(nsIDOMDocument *aDocument,
     if (!existingCache) {
 #if defined(PR_LOGGING)
         if (LOG_ENABLED()) {
-            nsCAutoString clientID;
+            nsAutoCString clientID;
             if (aApplicationCache) {
                 aApplicationCache->GetClientID(clientID);
             }
@@ -182,7 +187,9 @@ NS_IMETHODIMP
 OfflineCacheUpdateChild::Init(nsIURI *aManifestURI,
                               nsIURI *aDocumentURI,
                               nsIDOMDocument *aDocument,
-                              nsIFile *aCustomProfileDir)
+                              nsIFile *aCustomProfileDir,
+                              uint32_t aAppID,
+                              bool aInBrowser)
 {
     nsresult rv;
 
@@ -223,6 +230,9 @@ OfflineCacheUpdateChild::Init(nsIURI *aManifestURI,
     if (aDocument)
         SetDocument(aDocument);
 
+    mAppID = aAppID;
+    mInBrowser = aInBrowser;
+
     return NS_OK;
 }
 
@@ -234,6 +244,17 @@ OfflineCacheUpdateChild::InitPartial(nsIURI *aManifestURI,
     NS_NOTREACHED("Not expected to do partial offline cache updates"
                   " on the child process");
     // For now leaving this method, we may discover we need it.
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+OfflineCacheUpdateChild::InitForUpdateCheck(nsIURI *aManifestURI,
+                                            uint32_t aAppID,
+                                            bool aInBrowser,
+                                            nsIObserver *aObserver)
+{
+    NS_NOTREACHED("Not expected to do only update checks"
+                  " from the child process");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -302,6 +323,12 @@ OfflineCacheUpdateChild::GetIsUpgrade(bool *aIsUpgrade)
 
 NS_IMETHODIMP
 OfflineCacheUpdateChild::AddDynamicURI(nsIURI *aURI)
+{
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+OfflineCacheUpdateChild::Cancel()
 {
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -382,8 +409,11 @@ OfflineCacheUpdateChild::Schedule()
     item->GetTreeOwner(getter_AddRefs(owner));
 
     nsCOMPtr<nsITabChild> tabchild = do_GetInterface(owner);
-    if (!tabchild) {
-      NS_WARNING("tab is null");
+    // because owner implements nsITabChild, we can assume that it is
+    // the one and only TabChild.
+    TabChild* child = tabchild ? static_cast<TabChild*>(tabchild.get()) : nullptr;
+
+    if (MissingRequiredTabChild(child, "offlinecacheupdate")) {
       return NS_ERROR_FAILURE;
     }
 
@@ -391,10 +421,6 @@ OfflineCacheUpdateChild::Schedule()
     SerializeURI(mManifestURI, manifestURI);
     SerializeURI(mDocumentURI, documentURI);
 
-    // because owner implements nsITabChild, we can assume that it is
-    // the one and only TabChild.
-    mozilla::dom::TabChild* child = static_cast<mozilla::dom::TabChild*>(tabchild.get());
-    
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
     if (observerService) {
@@ -417,7 +443,7 @@ OfflineCacheUpdateChild::Schedule()
     // a reference to us. Will be released in RecvFinish() that identifies 
     // the work has been done.
     child->SendPOfflineCacheUpdateConstructor(this, manifestURI, documentURI,
-                                              mClientID, stickDocument);
+                                              stickDocument);
 
     mIPCActivated = true;
     this->AddRef();
@@ -445,8 +471,7 @@ OfflineCacheUpdateChild::RecvAssociateDocuments(const nsCString &cacheGroupId,
     }
 
     nsCOMArray<nsIOfflineCacheUpdateObserver> observers;
-    rv = GatherObservers(observers);
-    NS_ENSURE_SUCCESS(rv, rv);
+    GatherObservers(observers);
 
     for (int32_t i = 0; i < observers.Count(); i++)
         observers[i]->ApplicationCacheAvailable(cache);
@@ -477,8 +502,7 @@ OfflineCacheUpdateChild::RecvNotifyStateEvent(const uint32_t &event,
     }
 
     nsCOMArray<nsIOfflineCacheUpdateObserver> observers;
-    nsresult rv = GatherObservers(observers);
-    NS_ENSURE_SUCCESS(rv, rv);
+    GatherObservers(observers);
 
     for (int32_t i = 0; i < observers.Count(); i++)
         observers[i]->UpdateStateChanged(this, event);

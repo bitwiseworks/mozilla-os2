@@ -38,12 +38,11 @@ public:
 
   // Accessible
   virtual mozilla::a11y::role NativeRole();
-  virtual nsresult GetAttributesInternal(nsIPersistentProperties *aAttributes);
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
                                    EWhichChildAtPoint aWhichChild);
 
   virtual void InvalidateChildren();
-  virtual bool AppendChild(Accessible* aAccessible);
+  virtual bool InsertChildAt(uint32_t aIdx, Accessible* aChild) MOZ_OVERRIDE;
   virtual bool RemoveChild(Accessible* aAccessible);
 
   // ActionAccessible

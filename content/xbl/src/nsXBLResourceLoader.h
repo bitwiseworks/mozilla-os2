@@ -3,10 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsCOMArray.h"
-#include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"
 
 class nsIContent;
@@ -15,27 +15,10 @@ class nsIScriptContext;
 class nsSupportsHashtable;
 class nsXBLPrototypeResources;
 class nsXBLPrototypeBinding;
+struct nsXBLResource;
 
 // *********************************************************************/
 // The XBLResourceLoader class
-
-struct nsXBLResource {
-  nsXBLResource* mNext;
-  nsIAtom* mType;
-  nsString mSrc;
-
-  nsXBLResource(nsIAtom* aType, const nsAString& aSrc) {
-    MOZ_COUNT_CTOR(nsXBLResource);
-    mNext = nullptr;
-    mType = aType;
-    mSrc = aSrc;
-  }
-
-  ~nsXBLResource() { 
-    MOZ_COUNT_DTOR(nsXBLResource);  
-    NS_CONTENT_DELETE_LIST_MEMBER(nsXBLResource, this, mNext);
-  }
-};
 
 class nsXBLResourceLoader : public nsICSSLoaderObserver
 {
@@ -45,7 +28,7 @@ public:
 
   // nsICSSLoaderObserver
   NS_IMETHOD StyleSheetLoaded(nsCSSStyleSheet* aSheet, bool aWasAlternate,
-                              nsresult aStatus);
+                              nsresult aStatus) MOZ_OVERRIDE;
 
   void LoadResources(bool* aResult);
   void AddResource(nsIAtom* aResourceType, const nsAString& aSrc);

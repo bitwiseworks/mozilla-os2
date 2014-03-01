@@ -10,7 +10,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
 
-import org.mozilla.gecko.sync.Logger;
+import org.mozilla.gecko.background.common.log.Logger;
 
 import ch.boye.httpclientandroidlib.Header;
 import ch.boye.httpclientandroidlib.HttpEntity;
@@ -50,7 +50,7 @@ public class SyncStorageCollectionRequest extends SyncStorageRequest {
   }
 
   @Override
-  protected SyncResourceDelegate makeResourceDelegate(SyncStorageRequest request) {
+  protected BaseResourceDelegate makeResourceDelegate(SyncStorageRequest request) {
     return new SyncCollectionResourceDelegate((SyncStorageCollectionRequest) request);
   }
 

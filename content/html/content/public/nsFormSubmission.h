@@ -5,6 +5,7 @@
 #ifndef nsIFormSubmission_h___
 #define nsIFormSubmission_h___
 
+#include "mozilla/Attributes.h"
 #include "nsISupports.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
@@ -48,9 +49,11 @@ public:
    *
    * @param aName the name of the parameter
    * @param aBlob the file to submit
+   * @param aFilename the filename to be used (not void)
    */
   virtual nsresult AddNameFilePair(const nsAString& aName,
-                                   nsIDOMBlob* aBlob) = 0;
+                                   nsIDOMBlob* aBlob,
+                                   const nsString& aFilename) = 0;
   
   /**
    * Reports whether the instance supports AddIsindex().
@@ -157,11 +160,12 @@ public:
   ~nsFSMultipartFormData();
  
   virtual nsresult AddNameValuePair(const nsAString& aName,
-                                    const nsAString& aValue);
+                                    const nsAString& aValue) MOZ_OVERRIDE;
   virtual nsresult AddNameFilePair(const nsAString& aName,
-                                   nsIDOMBlob* aBlob);
+                                   nsIDOMBlob* aBlob,
+                                   const nsString& aFilename) MOZ_OVERRIDE;
   virtual nsresult GetEncodedSubmission(nsIURI* aURI,
-                                        nsIInputStream** aPostDataStream);
+                                        nsIInputStream** aPostDataStream) MOZ_OVERRIDE;
 
   void GetContentType(nsACString& aContentType)
   {
@@ -169,7 +173,7 @@ public:
       NS_LITERAL_CSTRING("multipart/form-data; boundary=") + mBoundary;
   }
 
-  nsIInputStream* GetSubmissionBody();
+  nsIInputStream* GetSubmissionBody(uint64_t* aContentLength);
 
 protected:
 
@@ -201,6 +205,11 @@ private:
    * submission.
    */
   nsCString mBoundary;
+
+  /**
+   * The total length in bytes of the streams that make up mPostDataStream
+   */
+  uint64_t mTotalLength;
 };
 
 /**

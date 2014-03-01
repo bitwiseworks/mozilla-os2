@@ -7,7 +7,7 @@ var testGenerator = testSteps();
 
 function testSteps()
 {
-  const name = this.window ? this.window ? window.location.pathname : "Splendid Test" : "Splendid Test";
+  const name = this.window ? window.location.pathname : "Splendid Test";
 
   const objectStoreName = "People";
 
@@ -188,7 +188,7 @@ function testSteps()
                   .objectStore(objectStoreName);
   request = objectStore.add({ name: "Bob", height: 62, weight: 170 },
                             "237-23-7738");
-  request.onerror = new ExpectError("ConstraintError", true);
+  request.addEventListener("error", new ExpectError("ConstraintError", true));
   request.onsuccess = unexpectedSuccessHandler;
   event = yield;
 

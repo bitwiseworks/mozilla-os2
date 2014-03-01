@@ -10,7 +10,7 @@ let Ci = Components.interfaces, Cc = Components.classes, Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm")
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Webapps.jsm");
+Cu.import("resource://gre/modules/AppsUtils.jsm");
 
 let gStrings = Services.strings.createBundle("chrome://browser/locale/aboutApps.properties");
 
@@ -37,6 +37,43 @@ function openLink(aElement) {
   } catch (ex) {}
 }
 
+var ContextMenus = {
+  target: null,
+
+  init: function() {
+    document.addEventListener("contextmenu", ContextMenus, false);
+  },
+
+  handleEvent: function(event) {
+    // store the target of context menu events so that we know which app to act on
+    this.target = event.target;
+    while (!this.target.hasAttribute("contextmenu")) {
+      this.target = this.target.parentNode;
+    }
+  },
+
+  addToHomescreen: function() {
+    let manifest = this.target.manifest;
+    let origin = Services.io.newURI(this.target.app.origin, null, null);
+    gChromeWin.WebappsUI.createShortcut(manifest.name, manifest.fullLaunchPath(), gChromeWin.WebappsUI.getBiggestIcon(manifest.icons, origin), "webapp");
+    this.target = null;
+  },
+
+  uninstall: function() {
+    navigator.mozApps.mgmt.uninstall(this.target.app);
+
+    let manifest = this.target.manifest;
+    gChromeWin.sendMessageToJava({
+      type: "Shortcut:Remove",
+      title: manifest.name,
+      url: manifest.fullLaunchPath(),
+      origin: this.target.app.origin,
+      shortcutType: "webapp"
+    });
+    this.target = null;
+  }
+}
+
 function onLoad(aEvent) {
   try {
     let formatter = Cc["@mozilla.org/toolkit/URLFormatterService;1"].getService(Ci.nsIURLFormatter);
@@ -49,36 +86,7 @@ function onLoad(aEvent) {
   navigator.mozApps.mgmt.onuninstall = onUninstall;
   updateList();
 
-  let contextmenus = gChromeWin.NativeWindow.contextmenus;
-  AppsUI.shortcut = contextmenus.add(gStrings.GetStringFromName("appsContext.shortcut"), contextmenus.SelectorContext("div[mozApp]"),
-    function(aTarget) {
-      let manifest = aTarget.manifest;
-      let origin = Services.io.newURI(aTarget.app.origin, null, null);
-      gChromeWin.WebappsUI.createShortcut(manifest.name, manifest.fullLaunchPath(), gChromeWin.WebappsUI.getBiggestIcon(manifest.icons, origin), "webapp");
-    });
-  AppsUI.uninstall = contextmenus.add(gStrings.GetStringFromName("appsContext.uninstall"), contextmenus.SelectorContext("div[mozApp]"),
-    function(aTarget) {
-      aTarget.app.uninstall();
-
-      let manifest = aTarget.manifest;
-      gChromeWin.sendMessageToJava({
-        gecko: {
-          type: "Shortcut:Remove",
-          title: manifest.name,
-          url: manifest.fullLaunchPath(),
-          origin: aTarget.app.origin,
-          shortcutType: "webapp"
-        }
-      });
-    });
-}
-
-function onUnload(aEvent) {
-  let contextmenus = gChromeWin.NativeWindow.contextmenus;
-  if (AppsUI.shortcut)
-    contextmenus.remove(AppsUI.shortcut);
-  if (AppsUI.uninstall)
-    contextmenus.remove(AppsUI.uninstall);
+  ContextMenus.init();
 }
 
 function updateList() {
@@ -98,10 +106,11 @@ function updateList() {
 
 function addApplication(aApp) {
   let list = document.getElementById("appgrid");
-  let manifest = new DOMApplicationManifest(aApp.manifest, aApp.origin);
+  let manifest = new ManifestHelper(aApp.manifest, aApp.origin);
 
   let container = document.createElement("div");
-  container.className = "app";
+  container.className = "app list-item";
+  container.setAttribute("contextmenu", "appmenu");
   container.setAttribute("id", "app-" + aApp.origin);
   container.setAttribute("mozApp", aApp.origin);
   container.setAttribute("title", manifest.name);

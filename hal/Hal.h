@@ -8,6 +8,7 @@
 #define mozilla_Hal_h
 
 #include "mozilla/hal_sandbox/PHal.h"
+#include "mozilla/HalTypes.h"
 #include "base/basictypes.h"
 #include "mozilla/Types.h"
 #include "nsTArray.h"
@@ -15,6 +16,7 @@
 #include "mozilla/dom/battery/Types.h"
 #include "mozilla/dom/network/Types.h"
 #include "mozilla/dom/power/Types.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/hal_sandbox/PHal.h"
 #include "mozilla/dom/ScreenOrientation.h"
 
@@ -47,8 +49,11 @@ typedef Observer<ScreenConfiguration> ScreenConfigurationObserver;
 
 class WindowIdentifier;
 
-extern PRLogModuleInfo *sHalLog;
-#define HAL_LOG(msg) PR_LOG(mozilla::hal::sHalLog, PR_LOG_DEBUG, msg)
+extern PRLogModuleInfo *GetHalLog();
+#define HAL_LOG(msg) PR_LOG(mozilla::hal::GetHalLog(), PR_LOG_DEBUG, msg)
+
+typedef Observer<int64_t> SystemClockChangeObserver;
+typedef Observer<SystemTimezoneChangeInformation> SystemTimezoneChangeObserver;
 
 } // namespace hal
 
@@ -240,22 +245,73 @@ void NotifyNetworkChange(const hal::NetworkInformation& aNetworkInfo);
  * Adjusting system clock.
  * @param aDeltaMilliseconds The difference compared with current system clock.
  */
-void AdjustSystemClock(int32_t aDeltaMilliseconds);
+void AdjustSystemClock(int64_t aDeltaMilliseconds);
 
 /**
  * Set timezone
- * @param aTimezoneSpec The definition can be found in 
+ * @param aTimezoneSpec The definition can be found in
  * http://en.wikipedia.org/wiki/List_of_tz_database_time_zones
  */
 void SetTimezone(const nsCString& aTimezoneSpec);
 
 /**
+ * Get timezone
+ * http://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+ */
+nsCString GetTimezone();
+
+/**
+ * Register observer for system clock changed notification.
+ * @param aObserver The observer that should be added.
+ */
+void RegisterSystemClockChangeObserver(
+  hal::SystemClockChangeObserver* aObserver);
+
+/**
+ * Unregister the observer for system clock changed.
+ * @param aObserver The observer that should be removed.
+ */
+void UnregisterSystemClockChangeObserver(
+  hal::SystemClockChangeObserver* aObserver);
+
+/**
+ * Notify of a change in the system clock.
+ * @param aClockDeltaMS
+ */
+void NotifySystemClockChange(const int64_t& aClockDeltaMS);
+
+/**
+ * Register observer for system timezone changed notification.
+ * @param aObserver The observer that should be added.
+ */
+void RegisterSystemTimezoneChangeObserver(
+  hal::SystemTimezoneChangeObserver* aObserver);
+
+/**
+ * Unregister the observer for system timezone changed.
+ * @param aObserver The observer that should be removed.
+ */
+void UnregisterSystemTimezoneChangeObserver(
+  hal::SystemTimezoneChangeObserver* aObserver);
+
+/**
+ * Notify of a change in the system timezone.
+ * @param aSystemTimezoneChangeInfo
+ */
+void NotifySystemTimezoneChange(
+  const hal::SystemTimezoneChangeInformation& aSystemTimezoneChangeInfo);
+
+/**
  * Reboot the device.
+ *
+ * This API is currently only allowed to be used from the main process.
  */
 void Reboot();
 
 /**
  * Power off the device.
+ *
+ * This API is currently only allowed to be used from the main process.
  */
 void PowerOff();
 
@@ -286,14 +342,25 @@ void RegisterWakeLockObserver(WakeLockObserver* aObserver);
 void UnregisterWakeLockObserver(WakeLockObserver* aObserver);
 
 /**
- * Adjust the internal wake lock counts.
+ * Adjust a wake lock's counts on behalf of a given process.
+ *
+ * In most cases, you shouldn't need to pass the aProcessID argument; the
+ * default of CONTENT_PROCESS_ID_UNKNOWN is probably what you want.
+ *
  * @param aTopic        lock topic
  * @param aLockAdjust   to increase or decrease active locks
  * @param aHiddenAdjust to increase or decrease hidden locks
+ * @param aProcessID    indicates which process we're modifying the wake lock
+ *                      on behalf of.  It is interpreted as
+ *
+ *                      CONTENT_PROCESS_ID_UNKNOWN: The current process
+ *                      CONTENT_PROCESS_ID_MAIN: The root process
+ *                      X: The process with ContentChild::GetID() == X
  */
 void ModifyWakeLock(const nsAString &aTopic,
                     hal::WakeLockControl aLockAdjust,
-                    hal::WakeLockControl aHiddenAdjust);
+                    hal::WakeLockControl aHiddenAdjust,
+                    uint64_t aProcessID = hal::CONTENT_PROCESS_ID_UNKNOWN);
 
 /**
  * Query the wake lock numbers of aTopic.
@@ -356,7 +423,7 @@ void RegisterSwitchObserver(hal::SwitchDevice aDevice, hal::SwitchObserver *aSwi
 void UnregisterSwitchObserver(hal::SwitchDevice aDevice, hal::SwitchObserver *aSwitchObserver);
 
 /**
- * Notify the state of the switch. 
+ * Notify the state of the switch.
  *
  * This API is internal to hal; clients shouldn't call it directly.
  */
@@ -403,13 +470,126 @@ void NotifyAlarmFired();
 bool SetAlarm(int32_t aSeconds, int32_t aNanoseconds);
 
 /**
- * Set the priority of the given process.
+ * Set the priority of the given process.  A process's priority is a two-tuple
+ * consisting of a hal::ProcessPriority value and a hal::ProcessCPUPriority
+ * value.
+ *
+ * Two processes with the same ProcessCPUPriority value don't necessarily have
+ * the same CPU priority; the CPU priority we assign to a process is a function
+ * of its ProcessPriority and ProcessCPUPriority.
  *
  * Exactly what this does will vary between platforms.  On *nix we might give
  * background processes higher nice values.  On other platforms, we might
  * ignore this call entirely.
  */
-void SetProcessPriority(int aPid, hal::ProcessPriority aPriority);
+void SetProcessPriority(int aPid,
+                        hal::ProcessPriority aPriority,
+                        hal::ProcessCPUPriority aCPUPriority);
+
+/**
+ * Register an observer for the FM radio.
+ */
+void RegisterFMRadioObserver(hal::FMRadioObserver* aRadioObserver);
+
+/**
+ * Unregister the observer for the FM radio.
+ */
+void UnregisterFMRadioObserver(hal::FMRadioObserver* aRadioObserver);
+
+/**
+ * Notify observers that a call to EnableFMRadio, DisableFMRadio, or FMRadioSeek
+ * has completed, and indicate what the call returned.
+ */
+void NotifyFMRadioStatus(const hal::FMRadioOperationInformation& aRadioState);
+
+/**
+ * Enable the FM radio and configure it according to the settings in aInfo.
+ */
+void EnableFMRadio(const hal::FMRadioSettings& aInfo);
+
+/**
+ * Disable the FM radio.
+ */
+void DisableFMRadio();
+
+/**
+ * Seek to an available FM radio station.
+ *
+ */
+void FMRadioSeek(const hal::FMRadioSeekDirection& aDirection);
+
+/**
+ * Get the current FM radio settings.
+ */
+void GetFMRadioSettings(hal::FMRadioSettings* aInfo);
+
+/**
+ * Set the FM radio's frequency.
+ */
+void SetFMRadioFrequency(const uint32_t frequency);
+
+/**
+ * Get the FM radio's frequency.
+ */
+uint32_t GetFMRadioFrequency();
+
+/**
+ * Get FM radio power state
+ */
+bool IsFMRadioOn();
+
+/**
+ * Get FM radio signal strength
+ */
+uint32_t GetFMRadioSignalStrength();
+
+/**
+ * Cancel FM radio seeking
+ */
+void CancelFMRadioSeek();
+
+/**
+ * Get FM radio band settings by country.
+ */
+hal::FMRadioSettings GetFMBandSettings(hal::FMRadioCountry aCountry);
+
+/**
+ * Start a watchdog to compulsively shutdown the system if it hangs.
+ * @param aMode Specify how to shutdown the system.
+ * @param aTimeoutSecs Specify the delayed seconds to shutdown the system.
+ *
+ * This API is currently only allowed to be used from the main process.
+ */
+void StartForceQuitWatchdog(hal::ShutdownMode aMode, int32_t aTimeoutSecs);
+
+/**
+ * Perform Factory Reset to wipe out all user data.
+ */
+void FactoryReset();
+
+/**
+ * Start monitoring the status of gamepads attached to the system.
+ */
+void StartMonitoringGamepadStatus();
+
+/**
+ * Stop monitoring the status of gamepads attached to the system.
+ */
+void StopMonitoringGamepadStatus();
+
+/**
+ * Start monitoring disk space for low space situations.
+ *
+ * This API is currently only allowed to be used from the main process.
+ */
+void StartDiskSpaceWatcher();
+
+/**
+ * Stop monitoring disk space for low space situations.
+ *
+ * This API is currently only allowed to be used from the main process.
+ */
+void StopDiskSpaceWatcher();
 
 } // namespace MOZ_HAL_NAMESPACE
 } // namespace mozilla

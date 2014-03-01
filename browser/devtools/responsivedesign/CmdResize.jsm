@@ -4,9 +4,14 @@
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-let EXPORTED_SYMBOLS = [ ];
+const BRAND_SHORT_NAME = Cc["@mozilla.org/intl/stringbundle;1"].
+                         getService(Ci.nsIStringBundleService).
+                         createBundle("chrome://branding/locale/brand.properties").
+                         GetStringFromName("brandShortName");
 
-Cu.import("resource:///modules/devtools/gcli.jsm");
+this.EXPORTED_SYMBOLS = [ ];
+
+Cu.import("resource://gre/modules/devtools/gcli.jsm");
 
 /* Responsive Mode commands */
 gcli.addCommand({
@@ -17,21 +22,45 @@ gcli.addCommand({
 gcli.addCommand({
   name: 'resize on',
   description: gcli.lookup('resizeModeOnDesc'),
-  manual: gcli.lookup('resizeModeManual'),
+  manual: gcli.lookupFormat('resizeModeManual2', [BRAND_SHORT_NAME]),
   exec: gcli_cmd_resize
 });
 
 gcli.addCommand({
   name: 'resize off',
   description: gcli.lookup('resizeModeOffDesc'),
-  manual: gcli.lookup('resizeModeManual'),
+  manual: gcli.lookupFormat('resizeModeManual2', [BRAND_SHORT_NAME]),
   exec: gcli_cmd_resize
 });
 
 gcli.addCommand({
   name: 'resize toggle',
+  buttonId: "command-button-responsive",
+  buttonClass: "command-button",
+  tooltipText: gcli.lookup("resizeModeToggleTooltip"),
   description: gcli.lookup('resizeModeToggleDesc'),
-  manual: gcli.lookup('resizeModeManual'),
+  manual: gcli.lookupFormat('resizeModeManual2', [BRAND_SHORT_NAME]),
+  state: {
+    isChecked: function(aTarget) {
+      let browserWindow = aTarget.tab.ownerDocument.defaultView;
+      let mgr = browserWindow.ResponsiveUI.ResponsiveUIManager;
+      return mgr.isActiveForTab(aTarget.tab);
+    },
+    onChange: function(aTarget, aChangeHandler) {
+      let browserWindow = aTarget.tab.ownerDocument.defaultView;
+      let mgr = browserWindow.ResponsiveUI.ResponsiveUIManager;
+      mgr.on("on", aChangeHandler);
+      mgr.on("off", aChangeHandler);
+    },
+    offChange: function(aTarget, aChangeHandler) {
+      if (aTarget.tab) {
+        let browserWindow = aTarget.tab.ownerDocument.defaultView;
+        let mgr = browserWindow.ResponsiveUI.ResponsiveUIManager;
+        mgr.off("on", aChangeHandler);
+        mgr.off("off", aChangeHandler);
+      }
+    },
+  },
   exec: gcli_cmd_resize
 });
 

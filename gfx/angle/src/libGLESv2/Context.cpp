@@ -10,6 +10,7 @@
 #include "libGLESv2/Context.h"
 
 #include <algorithm>
+#include <sstream>
 
 #include "libEGL/Display.h"
 
@@ -20,11 +21,11 @@
 #include "libGLESv2/ResourceManager.h"
 #include "libGLESv2/Buffer.h"
 #include "libGLESv2/Fence.h"
-#include "libGLESv2/FrameBuffer.h"
+#include "libGLESv2/Framebuffer.h"
 #include "libGLESv2/Program.h"
 #include "libGLESv2/ProgramBinary.h"
 #include "libGLESv2/Query.h"
-#include "libGLESv2/RenderBuffer.h"
+#include "libGLESv2/Renderbuffer.h"
 #include "libGLESv2/Shader.h"
 #include "libGLESv2/Texture.h"
 #include "libGLESv2/VertexDataManager.h"
@@ -35,6 +36,16 @@
 
 namespace gl
 {
+static const char* makeStaticString(const std::string& str)
+{
+    static std::set<std::string> strings;
+    std::set<std::string>::iterator it = strings.find(str);
+    if (it != strings.end())
+      return it->c_str();
+
+    return strings.insert(str).first->c_str();
+}
+
 Context::Context(const egl::Config *config, const gl::Context *shareContext, bool notifyResets, bool robustAccess) : mConfig(config)
 {
     ASSERT(robustAccess == false);   // Unimplemented
@@ -146,6 +157,9 @@ Context::Context(const egl::Config *config, const gl::Context *shareContext, boo
     mState.packAlignment = 4;
     mState.unpackAlignment = 4;
     mState.packReverseRowOrder = false;
+
+    mExtensionString = NULL;
+    mRendererString = NULL;
 
     mVertexDataManager = NULL;
     mIndexDataManager = NULL;
@@ -289,7 +303,7 @@ void Context::makeCurrent(egl::Display *display, egl::Surface *surface)
         };
 
         int max = 0;
-        for (int i = 0; i < sizeof(renderBufferFormats) / sizeof(D3DFORMAT); ++i)
+        for (unsigned int i = 0; i < sizeof(renderBufferFormats) / sizeof(D3DFORMAT); ++i)
         {
             bool *multisampleArray = new bool[D3DMULTISAMPLE_16_SAMPLES + 1];
             mDisplay->getMultiSampleSupport(renderBufferFormats[i], multisampleArray);
@@ -317,7 +331,7 @@ void Context::makeCurrent(egl::Display *display, egl::Surface *surface)
         mSupportsLuminanceAlphaTextures = mDisplay->getLuminanceAlphaTextureSupport();
         mSupportsDepthTextures = mDisplay->getDepthTextureSupport();
         mSupportsTextureFilterAnisotropy = mMaxTextureAnisotropy >= 2.0f;
-
+        mSupportsDerivativeInstructions = (mDeviceCaps.PS20Caps.Caps & D3DPS20CAPS_GRADIENTINSTRUCTIONS) != 0;
         mSupports32bitIndices = mDeviceCaps.MaxVertexIndex >= (1 << 16);
 
         mNumCompressedTextureFormats = 0;
@@ -369,7 +383,7 @@ void Context::makeCurrent(egl::Display *display, egl::Surface *surface)
     {
         depthStencil->Release();
     }
-    
+
     markAllStateDirty();
 }
 
@@ -1572,8 +1586,19 @@ bool Context::getIntegerv(GLenum pname, GLint *params)
             }
         }
         break;
-      case GL_IMPLEMENTATION_COLOR_READ_TYPE:   *params = gl::IMPLEMENTATION_COLOR_READ_TYPE;   break;
-      case GL_IMPLEMENTATION_COLOR_READ_FORMAT: *params = gl::IMPLEMENTATION_COLOR_READ_FORMAT; break;
+      case GL_IMPLEMENTATION_COLOR_READ_TYPE:
+      case GL_IMPLEMENTATION_COLOR_READ_FORMAT:
+        {
+            GLenum format, type;
+            if (getCurrentReadFormatType(&format, &type))
+            {
+                if (pname == GL_IMPLEMENTATION_COLOR_READ_FORMAT)
+                    *params = format;
+                else
+                    *params = type;
+            }
+        }
+        break;
       case GL_MAX_VIEWPORT_DIMS:
         {
             int maxDimension = std::max(getMaximumRenderbufferDimension(), getMaximumTextureDimension());
@@ -1668,7 +1693,7 @@ bool Context::getIntegerv(GLenum pname, GLint *params)
         break;
       case GL_TEXTURE_BINDING_2D:
         {
-            if (mState.activeSampler < 0 || mState.activeSampler > getMaximumCombinedTextureImageUnits() - 1)
+            if (mState.activeSampler > getMaximumCombinedTextureImageUnits() - 1)
             {
                 error(GL_INVALID_OPERATION);
                 return false;
@@ -1679,7 +1704,7 @@ bool Context::getIntegerv(GLenum pname, GLint *params)
         break;
       case GL_TEXTURE_BINDING_CUBE_MAP:
         {
-            if (mState.activeSampler < 0 || mState.activeSampler > getMaximumCombinedTextureImageUnits() - 1)
+            if (mState.activeSampler > getMaximumCombinedTextureImageUnits() - 1)
             {
                 error(GL_INVALID_OPERATION);
                 return false;
@@ -2492,7 +2517,7 @@ void Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height,
         return error(GL_INVALID_OPERATION);
     }
 
-    GLsizei outputPitch = ComputePitch(width, format, type, mState.packAlignment);
+    GLsizei outputPitch = ComputePitch(width, ConvertSizedInternalFormat(format, type), mState.packAlignment);
     // sized query sanity check
     if (bufSize)
     {
@@ -2607,19 +2632,66 @@ void Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height,
         inputPitch = lock.Pitch;
     }
 
+    unsigned int fastPixelSize = 0;
+
+    if (desc.Format == D3DFMT_A8R8G8B8 &&
+        format == GL_BGRA_EXT &&
+        type == GL_UNSIGNED_BYTE)
+    {
+        fastPixelSize = 4;
+    }
+    else if ((desc.Format == D3DFMT_A4R4G4B4 &&
+             format == GL_BGRA_EXT &&
+             type == GL_UNSIGNED_SHORT_4_4_4_4_REV_EXT) ||
+             (desc.Format == D3DFMT_A1R5G5B5 &&
+             format == GL_BGRA_EXT &&
+             type == GL_UNSIGNED_SHORT_1_5_5_5_REV_EXT))
+    {
+        fastPixelSize = 2;
+    }
+    else if (desc.Format == D3DFMT_A16B16G16R16F &&
+             format == GL_RGBA &&
+             type == GL_HALF_FLOAT_OES)
+    {
+        fastPixelSize = 8;
+    }
+    else if (desc.Format == D3DFMT_A32B32G32R32F &&
+             format == GL_RGBA &&
+             type == GL_FLOAT)
+    {
+        fastPixelSize = 16;
+    }
+
     for (int j = 0; j < rect.bottom - rect.top; j++)
     {
-        if (desc.Format == D3DFMT_A8R8G8B8 &&
-            format == GL_BGRA_EXT &&
-            type == GL_UNSIGNED_BYTE)
+        if (fastPixelSize != 0)
         {
-            // Fast path for EXT_read_format_bgra, given
-            // an RGBA source buffer.  Note that buffers with no
-            // alpha go through the slow path below.
-            // Note that this is also the combo exposed by IMPLEMENTATION_COLOR_READ_TYPE/FORMAT
+            // Fast path for formats which require no translation:
+            // D3DFMT_A8R8G8B8 to BGRA/UNSIGNED_BYTE
+            // D3DFMT_A4R4G4B4 to BGRA/UNSIGNED_SHORT_4_4_4_4_REV_EXT
+            // D3DFMT_A1R5G5B5 to BGRA/UNSIGNED_SHORT_1_5_5_5_REV_EXT
+            // D3DFMT_A16B16G16R16F to RGBA/HALF_FLOAT_OES
+            // D3DFMT_A32B32G32R32F to RGBA/FLOAT
+            // 
+            // Note that buffers with no alpha go through the slow path below.
             memcpy(dest + j * outputPitch,
                    source + j * inputPitch,
-                   (rect.right - rect.left) * 4);
+                   (rect.right - rect.left) * fastPixelSize);
+            continue;
+        }
+        else if (desc.Format == D3DFMT_A8R8G8B8 &&
+                 format == GL_RGBA &&
+                 type == GL_UNSIGNED_BYTE)
+        {
+            // Fast path for swapping red with blue
+            for (int i = 0; i < rect.right - rect.left; i++)
+            {
+                unsigned int argb = *(unsigned int*)(source + 4 * i + j * inputPitch);
+                *(unsigned int*)(dest + 4 * i + j * outputPitch) =
+                    (argb & 0xFF00FF00) |       // Keep alpha and green
+                    (argb & 0x00FF0000) >> 16 | // Move red to blue
+                    (argb & 0x000000FF) << 16;  // Move blue to red
+            }
             continue;
         }
 
@@ -2694,14 +2766,10 @@ void Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height,
               case D3DFMT_A16B16G16R16F:
                 {
                     // float formats in D3D are stored rgba, rather than the other way round
-                    float abgr[4];
-
-                    D3DXFloat16To32Array(abgr, (D3DXFLOAT16*)(source + 8 * i + j * inputPitch), 4);
-
-                    a = abgr[3];
-                    b = abgr[2];
-                    g = abgr[1];
-                    r = abgr[0];
+                    r = float16ToFloat32(*((unsigned short*)(source + 8 * i + j * inputPitch) + 0));
+                    g = float16ToFloat32(*((unsigned short*)(source + 8 * i + j * inputPitch) + 1));
+                    b = float16ToFloat32(*((unsigned short*)(source + 8 * i + j * inputPitch) + 2));
+                    a = float16ToFloat32(*((unsigned short*)(source + 8 * i + j * inputPitch) + 3));
                 }
                 break;
               default:
@@ -2772,6 +2840,11 @@ void Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height,
                         ((unsigned short)(31 * b + 0.5f) << 0) |
                         ((unsigned short)(63 * g + 0.5f) << 5) |
                         ((unsigned short)(31 * r + 0.5f) << 11);
+                    break;
+                  case GL_UNSIGNED_BYTE:
+                    dest[3 * i + j * outputPitch + 0] = (unsigned char)(255 * r + 0.5f);
+                    dest[3 * i + j * outputPitch + 1] = (unsigned char)(255 * g + 0.5f);
+                    dest[3 * i + j * outputPitch + 2] = (unsigned char)(255 * b + 0.5f);
                     break;
                   default: UNREACHABLE();
                 }
@@ -3052,7 +3125,7 @@ void Context::drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instan
         return error(GL_INVALID_OPERATION);
     }
 
-    if (!cullSkipsDraw(mode))
+    if (!skipDraw(mode))
     {
         mDisplay->startScene();
         
@@ -3137,12 +3210,12 @@ void Context::drawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid
     applyShaders();
     applyTextures();
 
-    if (!getCurrentProgramBinary()->validateSamplers(false))
+    if (!getCurrentProgramBinary()->validateSamplers(NULL))
     {
         return error(GL_INVALID_OPERATION);
     }
 
-    if (!cullSkipsDraw(mode))
+    if (!skipDraw(mode))
     {
         mDisplay->startScene();
 
@@ -3577,9 +3650,37 @@ bool Context::supportsTextureFilterAnisotropy() const
     return mSupportsTextureFilterAnisotropy;
 }
 
+bool Context::supportsDerivativeInstructions() const
+{
+    return mSupportsDerivativeInstructions;
+}
+
 float Context::getTextureMaxAnisotropy() const
 {
     return mMaxTextureAnisotropy;
+}
+
+bool Context::getCurrentReadFormatType(GLenum *format, GLenum *type)
+{
+    Framebuffer *framebuffer = getReadFramebuffer();
+    if (!framebuffer || framebuffer->completeness() != GL_FRAMEBUFFER_COMPLETE)
+    {
+        return error(GL_INVALID_OPERATION, false);
+    }
+
+    Renderbuffer *renderbuffer = framebuffer->getColorbuffer();
+    if (!renderbuffer)
+    {
+        return error(GL_INVALID_OPERATION, false);
+    }
+
+    if(!dx2es::ConvertReadBufferFormat(renderbuffer->getD3DFormat(), format, type))
+    {
+        ASSERT(false);
+        return false;
+    }
+
+    return true;
 }
 
 void Context::detachBuffer(GLuint buffer)
@@ -3734,9 +3835,31 @@ Texture *Context::getIncompleteTexture(TextureType type)
     return t;
 }
 
-bool Context::cullSkipsDraw(GLenum drawMode)
+bool Context::skipDraw(GLenum drawMode)
 {
-    return mState.cullFace && mState.cullMode == GL_FRONT_AND_BACK && isTriangleMode(drawMode);
+    if (drawMode == GL_POINTS)
+    {
+        // ProgramBinary assumes non-point rendering if gl_PointSize isn't written,
+        // which affects varying interpolation. Since the value of gl_PointSize is
+        // undefined when not written, just skip drawing to avoid unexpected results.
+        if (!getCurrentProgramBinary()->usesPointSize())
+        {
+            // This is stictly speaking not an error, but developers should be 
+            // notified of risking undefined behavior.
+            ERR("Point rendering without writing to gl_PointSize.");
+
+            return true;
+        }
+    }
+    else if (isTriangleMode(drawMode))
+    {
+        if (mState.cullFace && mState.cullMode == GL_FRONT_AND_BACK)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool Context::isTriangleMode(GLenum drawMode)
@@ -3783,124 +3906,144 @@ void Context::setVertexAttribDivisor(GLuint index, GLuint divisor)
 // Vendor extensions
 void Context::initExtensionString()
 {
-    mExtensionString = "";
+    std::string extensionString = "";
 
     // OES extensions
     if (supports32bitIndices())
     {
-        mExtensionString += "GL_OES_element_index_uint ";
+        extensionString += "GL_OES_element_index_uint ";
     }
 
-    mExtensionString += "GL_OES_packed_depth_stencil ";
-    mExtensionString += "GL_OES_get_program_binary ";
-    mExtensionString += "GL_OES_rgb8_rgba8 ";
-    mExtensionString += "GL_OES_standard_derivatives ";
+    extensionString += "GL_OES_packed_depth_stencil ";
+    extensionString += "GL_OES_get_program_binary ";
+    extensionString += "GL_OES_rgb8_rgba8 ";
+    if (supportsDerivativeInstructions())
+    {
+        extensionString += "GL_OES_standard_derivatives ";
+    }
 
     if (supportsFloat16Textures())
     {
-        mExtensionString += "GL_OES_texture_half_float ";
+        extensionString += "GL_OES_texture_half_float ";
     }
     if (supportsFloat16LinearFilter())
     {
-        mExtensionString += "GL_OES_texture_half_float_linear ";
+        extensionString += "GL_OES_texture_half_float_linear ";
     }
     if (supportsFloat32Textures())
     {
-        mExtensionString += "GL_OES_texture_float ";
+        extensionString += "GL_OES_texture_float ";
     }
     if (supportsFloat32LinearFilter())
     {
-        mExtensionString += "GL_OES_texture_float_linear ";
+        extensionString += "GL_OES_texture_float_linear ";
     }
 
     if (supportsNonPower2Texture())
     {
-        mExtensionString += "GL_OES_texture_npot ";
+        extensionString += "GL_OES_texture_npot ";
     }
 
     // Multi-vendor (EXT) extensions
     if (supportsOcclusionQueries())
     {
-        mExtensionString += "GL_EXT_occlusion_query_boolean ";
+        extensionString += "GL_EXT_occlusion_query_boolean ";
     }
 
-    mExtensionString += "GL_EXT_read_format_bgra ";
-    mExtensionString += "GL_EXT_robustness ";
+    extensionString += "GL_EXT_read_format_bgra ";
+    extensionString += "GL_EXT_robustness ";
 
     if (supportsDXT1Textures())
     {
-        mExtensionString += "GL_EXT_texture_compression_dxt1 ";
+        extensionString += "GL_EXT_texture_compression_dxt1 ";
     }
 
     if (supportsTextureFilterAnisotropy())
     {
-        mExtensionString += "GL_EXT_texture_filter_anisotropic ";
+        extensionString += "GL_EXT_texture_filter_anisotropic ";
     }
 
-    mExtensionString += "GL_EXT_texture_format_BGRA8888 ";
-    mExtensionString += "GL_EXT_texture_storage ";
+    extensionString += "GL_EXT_texture_format_BGRA8888 ";
+    extensionString += "GL_EXT_texture_storage ";
 
     // ANGLE-specific extensions
     if (supportsDepthTextures())
     {
-        mExtensionString += "GL_ANGLE_depth_texture ";
+        extensionString += "GL_ANGLE_depth_texture ";
     }
 
-    mExtensionString += "GL_ANGLE_framebuffer_blit ";
+    extensionString += "GL_ANGLE_framebuffer_blit ";
     if (getMaxSupportedSamples() != 0)
     {
-        mExtensionString += "GL_ANGLE_framebuffer_multisample ";
+        extensionString += "GL_ANGLE_framebuffer_multisample ";
     }
 
     if (supportsInstancing())
     {
-        mExtensionString += "GL_ANGLE_instanced_arrays ";
+        extensionString += "GL_ANGLE_instanced_arrays ";
     }
 
-    mExtensionString += "GL_ANGLE_pack_reverse_row_order ";
+    extensionString += "GL_ANGLE_pack_reverse_row_order ";
 
     if (supportsDXT3Textures())
     {
-        mExtensionString += "GL_ANGLE_texture_compression_dxt3 ";
+        extensionString += "GL_ANGLE_texture_compression_dxt3 ";
     }
     if (supportsDXT5Textures())
     {
-        mExtensionString += "GL_ANGLE_texture_compression_dxt5 ";
+        extensionString += "GL_ANGLE_texture_compression_dxt5 ";
     }
 
-    mExtensionString += "GL_ANGLE_texture_usage ";
-    mExtensionString += "GL_ANGLE_translated_shader_source ";
+    extensionString += "GL_ANGLE_texture_usage ";
+    extensionString += "GL_ANGLE_translated_shader_source ";
 
     // Other vendor-specific extensions
     if (supportsEventQueries())
     {
-        mExtensionString += "GL_NV_fence ";
+        extensionString += "GL_NV_fence ";
     }
 
-    std::string::size_type end = mExtensionString.find_last_not_of(' ');
+    std::string::size_type end = extensionString.find_last_not_of(' ');
     if (end != std::string::npos)
     {
-        mExtensionString.resize(end+1);
+        extensionString.resize(end+1);
     }
+
+    mExtensionString = makeStaticString(extensionString);
 }
 
 const char *Context::getExtensionString() const
 {
-    return mExtensionString.c_str();
+    return mExtensionString;
 }
 
 void Context::initRendererString()
 {
     D3DADAPTER_IDENTIFIER9 *identifier = mDisplay->getAdapterIdentifier();
 
-    mRendererString = "ANGLE (";
-    mRendererString += identifier->Description;
-    mRendererString += ")";
+    std::ostringstream rendererString;
+    rendererString << "ANGLE (";
+
+    rendererString << identifier->Description;
+
+    if (mDisplay->isD3d9ExDevice())
+    {
+        rendererString << " Direct3D9Ex";
+    }
+    else
+    {
+        rendererString << " Direct3D9";
+    }
+
+    rendererString << " vs_" << D3DSHADER_VERSION_MAJOR(mDeviceCaps.VertexShaderVersion) << "_" << D3DSHADER_VERSION_MINOR(mDeviceCaps.VertexShaderVersion);
+    rendererString << " ps_" << D3DSHADER_VERSION_MAJOR(mDeviceCaps.PixelShaderVersion) << "_" << D3DSHADER_VERSION_MINOR(mDeviceCaps.PixelShaderVersion) << ")";
+
+    mRendererString = makeStaticString(rendererString.str());
 }
 
 const char *Context::getRendererString() const
 {
-    return mRendererString.c_str();
+    return mRendererString;
 }
 
 void Context::blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, 

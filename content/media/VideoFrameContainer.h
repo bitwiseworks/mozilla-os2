@@ -14,9 +14,11 @@
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 
-class nsHTMLMediaElement;
-
 namespace mozilla {
+
+namespace dom {
+class HTMLMediaElement;
+}
 
 namespace layers {
 class Image;
@@ -34,18 +36,21 @@ class ImageContainer;
  */
 class VideoFrameContainer {
 public:
-  typedef mozilla::layers::ImageContainer ImageContainer;
-  typedef mozilla::layers::Image Image;
+  typedef layers::ImageContainer ImageContainer;
+  typedef layers::Image Image;
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(VideoFrameContainer)
 
-  VideoFrameContainer(nsHTMLMediaElement* aElement,
+  VideoFrameContainer(dom::HTMLMediaElement* aElement,
                       already_AddRefed<ImageContainer> aContainer);
   ~VideoFrameContainer();
 
   // Call on any thread
   void SetCurrentFrame(const gfxIntSize& aIntrinsicSize, Image* aImage,
                        TimeStamp aTargetTime);
+  void ClearCurrentFrame(bool aResetSize = false);
+  // Reset the VideoFrameContainer
+  void Reset();
   // Time in seconds by which the last painted video frame was late by.
   // E.g. if the last painted frame should have been painted at time t,
   // but was actually painted at t+n, this returns n in seconds. Threadsafe.
@@ -58,7 +63,7 @@ public:
 protected:
   // Non-addreffed pointer to the element. The element calls ForgetElement
   // to clear this reference when the element is destroyed.
-  nsHTMLMediaElement* mElement;
+  dom::HTMLMediaElement* mElement;
   nsRefPtr<ImageContainer> mImageContainer;
 
   // mMutex protects all the fields below.

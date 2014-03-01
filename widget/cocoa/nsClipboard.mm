@@ -431,13 +431,17 @@ nsClipboard::PasteboardDictFromTransferable(nsITransferable* aTransferable)
         continue;
       }
 
-      nsRefPtr<gfxImageSurface> frame;
-      rv = image->CopyFrame(  imgIContainer::FRAME_CURRENT,
-                              imgIContainer::FLAG_SYNC_DECODE,
-                              getter_AddRefs(frame));
-      if (NS_FAILED(rv) || !frame) {
+      nsRefPtr<gfxASurface> surface;
+      image->GetFrame(imgIContainer::FRAME_CURRENT,
+                      imgIContainer::FLAG_SYNC_DECODE,
+                      getter_AddRefs(surface));
+      if (!surface) {
         continue;
-      }      
+      }
+      nsRefPtr<gfxImageSurface> frame(surface->GetAsReadableARGB32ImageSurface());
+      if (!frame) {
+        continue;
+      }
       CGImageRef imageRef = NULL;
       nsresult rv = nsCocoaUtils::CreateCGImageFromSurface(frame, &imageRef);
       if (NS_FAILED(rv) || !imageRef) {
@@ -499,8 +503,8 @@ nsClipboard::PasteboardDictFromTransferable(nsITransferable* aTransferable)
       // The Finder doesn't like getting random binary data aka
       // Unicode, so change it into an escaped URL containing only
       // ASCII.
-      nsCAutoString utf8Data = NS_ConvertUTF16toUTF8(url.get(), url.Length());
-      nsCAutoString escData;
+      nsAutoCString utf8Data = NS_ConvertUTF16toUTF8(url.get(), url.Length());
+      nsAutoCString escData;
       NS_EscapeURL(utf8Data.get(), utf8Data.Length(), esc_OnlyNonASCII|esc_AlwaysCopy, escData);
 
       // printf("Escaped url is %s, length %d\n", escData.get(), escData.Length());

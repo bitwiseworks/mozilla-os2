@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsContentUtils.h"
+#ifndef mozAutoDocUpdate_h_
+#define mozAutoDocUpdate_h_
+
+#include "nsContentUtils.h" // For AddScriptBlocker() and RemoveScriptBlocker().
 #include "nsIDocument.h"
 #include "nsIDocumentObserver.h"
 
@@ -13,7 +16,7 @@
  * in which case no updates will be called.  The constructor also takes a
  * boolean that can be set to false to prevent notifications.
  */
-class NS_STACK_CLASS mozAutoDocUpdate
+class MOZ_STACK_CLASS mozAutoDocUpdate
 {
 public:
   mozAutoDocUpdate(nsIDocument* aDocument, nsUpdateType aUpdateType,
@@ -60,7 +63,7 @@ private:
  * but then have inner mozAutoDocUpdate call the last EndUpdate before.
  * we remove that blocker. See bug 423269.
  */
-class NS_STACK_CLASS mozAutoDocConditionalContentUpdateBatch
+class MOZ_STACK_CLASS mozAutoDocConditionalContentUpdateBatch
 {
 public:
   mozAutoDocConditionalContentUpdateBatch(nsIDocument* aDocument,
@@ -82,3 +85,5 @@ public:
 private:
   nsCOMPtr<nsIDocument> mDocument;
 };
+
+#endif

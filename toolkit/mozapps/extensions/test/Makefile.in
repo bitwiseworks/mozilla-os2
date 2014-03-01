@@ -14,21 +14,6 @@ TESTXPI = $(TESTROOT)/xpcshell/addons
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = test_extensionmanager
-
-ifneq (mobile,$(MOZ_BUILD_APP))
- DIRS +=  \
-    xpinstall \
-    browser \
-    mochitest \
-    $(NULL)
-endif
-
-XPCSHELL_TESTS = \
-  xpcshell \
-  xpcshell-unpack \
-  $(NULL)
-
 include $(topsrcdir)/config/rules.mk
 
 libs::
@@ -38,9 +23,9 @@ libs::
 		$(EXIT_ON_ERROR) \
 		for dir in $(ADDONSRC)/*; do \
 			base=`basename $$dir` ; \
-			(cd $$dir && zip -r $(TESTXPI)/$$base.xpi *) \
+			(cd $$dir && zip -qr $(TESTXPI)/$$base.xpi *) \
 		done \
 	fi
-	cd $(TESTROOT)/xpcshell/ && $(TAR) -cPf - . | (cd $(TESTROOT)/xpcshell-unpack && $(TAR) -xPvf - )
+	cd $(TESTROOT)/xpcshell/ && $(TAR) -cPf - . | (cd $(TESTROOT)/xpcshell-unpack && $(TAR) -xPf - )
 	sed s/head_addons.js/head_addons.js\ head_unpack.js/ $(TESTROOT)/xpcshell-unpack/xpcshell.ini > $(TESTROOT)/xpcshell-unpack/xpcshell.in_
 	mv $(TESTROOT)/xpcshell-unpack/xpcshell.in_ $(TESTROOT)/xpcshell-unpack/xpcshell.ini

@@ -5,67 +5,70 @@
 let win;
 let doc;
 let contentWindow;
+let inspector;
+let toolbox;
 
 let tempScope = {};
-Cu.import("resource:///modules/Services.jsm", tempScope);
+Cu.import("resource://gre/modules/Services.jsm", tempScope);
 let Services = tempScope.Services;
 
-function createDocument()
-{
-  doc.body.innerHTML = '<style type="text/css"> ' +
-    'html { color: #000000; } ' +
-    'span { font-variant: small-caps; color: #000000; } ' +
-    '.nomatches {color: #ff0000;}</style> <div id="first" style="margin: 10em; ' +
-    'font-size: 14pt; font-family: helvetica, sans-serif; color: #AAA">\n' +
-    '<h1>Some header text</h1>\n' +
-    '<p id="salutation" style="font-size: 12pt">hi.</p>\n' +
-    '<p id="body" style="font-size: 12pt">I am a test-case. This text exists ' +
-    'solely to provide some things to <span style="color: yellow">' +
-    'highlight</span> and <span style="font-weight: bold">count</span> ' +
-    'style list-items in the box at right. If you are reading this, ' +
-    'you should go do something else instead. Maybe read a book. Or better ' +
-    'yet, write some test-cases for another bit of code. ' +
-    '<span style="font-style: italic">some text</span></p>\n' +
-    '<p id="closing">more text</p>\n' +
-    '<p>even more text</p>' +
-    '</div>';
-  doc.title = "Rule view style editor link test";
+const STYLESHEET_URL = "data:text/css,"+encodeURIComponent(
+  ["#first {",
+   "color: blue",
+   "}"].join("\n"));
 
-  openInspector();
+const DOCUMENT_URL = "data:text/html,"+encodeURIComponent(
+  ['<html>' +
+   '<head>' +
+   '<title>Rule view style editor link test</title>',
+   '<style type="text/css"> ',
+   'html { color: #000000; } ',
+   'div { font-variant: small-caps; color: #000000; } ',
+   '.nomatches {color: #ff0000;}</style> <div id="first" style="margin: 10em; ',
+   'font-size: 14pt; font-family: helvetica, sans-serif; color: #AAA">',
+   '</style>',
+   '<link rel="stylesheet" type="text/css" href="'+STYLESHEET_URL+'">',
+   '</head>',
+   '<body>',
+   '<h1>Some header text</h1>',
+   '<p id="salutation" style="font-size: 12pt">hi.</p>',
+   '<p id="body" style="font-size: 12pt">I am a test-case. This text exists ',
+   'solely to provide some things to ',
+   '<span style="color: yellow" class="highlight">',
+   'highlight</span> and <span style="font-weight: bold">count</span> ',
+   'style list-items in the box at right. If you are reading this, ',
+   'you should go do something else instead. Maybe read a book. Or better ',
+   'yet, write some test-cases for another bit of code. ',
+   '<span style="font-style: italic">some text</span></p>',
+   '<p id="closing">more text</p>',
+   '<p>even more text</p>',
+   '</div>',
+   '</body>',
+   '</html>'].join("\n"));
+
+function openToolbox() {
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+
+  gDevTools.showToolbox(target, "inspector").then(function(aToolbox) {
+    toolbox = aToolbox;
+    inspector = toolbox.getCurrentPanel();
+    inspector.sidebar.select("ruleview");
+    highlightNode();
+  });
 }
 
-function openInspector()
+function highlightNode()
 {
-  ok(window.InspectorUI, "InspectorUI variable exists");
-  ok(!InspectorUI.inspecting, "Inspector is not highlighting");
-  ok(InspectorUI.store.isEmpty(), "Inspector.store is empty");
-
-  Services.obs.addObserver(inspectorUIOpen,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-  InspectorUI.openInspectorUI();
-}
-
-function inspectorUIOpen()
-{
-  Services.obs.removeObserver(inspectorUIOpen,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-
-  // Make sure the inspector is open.
-  ok(InspectorUI.inspecting, "Inspector is highlighting");
-  ok(!InspectorUI.isSidebarOpen, "Inspector Sidebar is not open");
-  ok(!InspectorUI.store.isEmpty(), "InspectorUI.store is not empty");
-  is(InspectorUI.store.length, 1, "Inspector.store.length = 1");
-
   // Highlight a node.
   let div = content.document.getElementsByTagName("div")[0];
-  InspectorUI.inspectNode(div);
-  InspectorUI.stopInspecting();
-  is(InspectorUI.selection, div, "selection matches the div element");
 
-  InspectorUI.currentInspector.once("sidebaractivated-ruleview", testInlineStyle);
-
-  InspectorUI.sidebar.show();
-  InspectorUI.sidebar.activatePanel("ruleview");
+  inspector.selection.once("new-node", function() {
+    is(inspector.selection.node, div, "selection matches the div element");
+    testInlineStyle();
+  });
+  executeSoon(function() {
+    inspector.selection.setNode(div);
+  });
 }
 
 function testInlineStyle()
@@ -85,10 +88,15 @@ function testInlineStyle()
         is(windowType, "navigator:view-source", "view source window is open");
         win.close();
         Services.ww.unregisterNotification(onWindow);
-        testInlineStyleSheet();
+        executeSoon(() => {
+          testInlineStyleSheet();
+        });
       });
     });
-    EventUtils.synthesizeMouseAtCenter(getLinkByIndex(0), { }, contentWindow);
+
+    let link = getLinkByIndex(0);
+    link.scrollIntoView();
+    link.click();
   });
 }
 
@@ -96,50 +104,44 @@ function testInlineStyleSheet()
 {
   info("clicking an inline stylesheet");
 
-  Services.ww.registerNotification(function onWindow(aSubject, aTopic) {
-    if (aTopic != "domwindowopened") {
-      return;
-    }
+  toolbox.once("styleeditor-ready", function(id, aToolbox) {
+    let panel = toolbox.getCurrentPanel();
 
-    win = aSubject.QueryInterface(Ci.nsIDOMWindow);
-    win.addEventListener("load", function windowLoad() {
-      win.removeEventListener("load", windowLoad);
-
-      let windowType = win.document.documentElement.getAttribute("windowtype");
-      is(windowType, "Tools:StyleEditor", "style editor window is open");
-
-      win.styleEditorChrome.addChromeListener({
-        onEditorAdded: function checkEditor(aChrome, aEditor) {
-          if (!aEditor.sourceEditor) {
-            aEditor.addActionListener({
-              onAttach: function (aEditor) {
-                aEditor.removeActionListener(this);
-                validateStyleEditorSheet(aEditor);
-              }
-            });
-          } else {
-            validateStyleEditorSheet(aEditor);
-          }
-        }
+    panel.UI.once("editor-selected", (event, editor) => {
+      validateStyleEditorSheet(editor, 0);
+      executeSoon(() => {
+        testExternalStyleSheet(toolbox);
       });
-
-      Services.ww.unregisterNotification(onWindow);
     });
   });
 
-  EventUtils.synthesizeMouse(getLinkByIndex(1), 5, 5, { }, contentWindow);
+  let link = getLinkByIndex(2);
+  link.scrollIntoView();
+  link.click();
 }
 
-function validateStyleEditorSheet(aEditor)
+function testExternalStyleSheet(toolbox) {
+  info ("clicking an external stylesheet");
+
+  let panel = toolbox.getCurrentPanel();
+  panel.UI.once("editor-selected", (event, editor) => {
+    is(toolbox.currentToolId, "styleeditor", "style editor tool selected");
+    validateStyleEditorSheet(editor, 1);
+    finishUp();
+  });
+
+  toolbox.selectTool("inspector").then(function () {
+    let link = getLinkByIndex(1);
+    link.scrollIntoView();
+    link.click();
+  });
+}
+
+function validateStyleEditorSheet(aEditor, aExpectedSheetIndex)
 {
   info("validating style editor stylesheet");
-
-  let sheet = doc.styleSheets[0];
-
-  is(aEditor.styleSheet, sheet, "loaded stylesheet matches document stylesheet");
-  win.close();
-
-  finishup();
+  let sheet = doc.styleSheets[aExpectedSheetIndex];
+  is(aEditor.styleSheet.href, sheet.href, "loaded stylesheet matches document stylesheet");
 }
 
 function getLinkByIndex(aIndex)
@@ -150,12 +152,10 @@ function getLinkByIndex(aIndex)
   return links[aIndex];
 }
 
-function finishup()
+function finishUp()
 {
-  InspectorUI.sidebar.hide();
-  InspectorUI.closeInspectorUI();
   gBrowser.removeCurrentTab();
-  doc = contentWindow = win = null;
+  contentWindow = doc = inspector = toolbox = win = null;
   finish();
 }
 
@@ -168,8 +168,8 @@ function test()
     gBrowser.selectedBrowser.removeEventListener(evt.type, arguments.callee,
       true);
     doc = content.document;
-    waitForFocus(createDocument, content);
+    waitForFocus(openToolbox, content);
   }, true);
 
-  content.location = "data:text/html,<p>Rule view style editor link test</p>";
+  content.location = DOCUMENT_URL;
 }

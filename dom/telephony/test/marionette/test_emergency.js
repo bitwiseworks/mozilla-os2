@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-MARIONETTE_TIMEOUT = 10000;
+MARIONETTE_TIMEOUT = 60000;
 
 SpecialPowers.addPermission("telephony", true, document);
 
@@ -21,7 +21,12 @@ function verifyInitialState() {
   runEmulatorCmd("gsm list", function(result) {
     log("Initial call list: " + result);
     is(result[0], "OK");
-    dial();
+    if (result[0] == "OK") {
+      dial();
+    } else {
+      log("Call exists from a previous test, failing out.");
+      cleanUp();
+    }
   });
 }
 
@@ -38,12 +43,18 @@ function dial() {
   is(telephony.calls.length, 1);
   is(telephony.calls[0], outgoing);
 
-  runEmulatorCmd("gsm list", function(result) {
-    log("Call list is now: " + result);
-    is(result[0], "outbound to  " + number + "        : unknown");
-    is(result[1], "OK");
-    answer();
-  });
+  outgoing.onalerting = function onalerting(event) {
+    log("Received 'onalerting' call event.");
+    is(outgoing, event.call);
+    is(outgoing.state, "alerting");
+
+    runEmulatorCmd("gsm list", function(result) {
+      log("Call list is now: " + result);
+      is(result[0], "outbound to  " + number + "        : ringing");
+      is(result[1], "OK");
+      answer();
+    });
+  };
 }
 
 function answer() {

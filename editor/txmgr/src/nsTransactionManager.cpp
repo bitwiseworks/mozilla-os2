@@ -32,17 +32,15 @@ nsTransactionManager::~nsTransactionManager()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsTransactionManager)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsTransactionManager)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMARRAY(mListeners)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mListeners)
   tmp->mDoStack.DoUnlink();
   tmp->mUndoStack.DoUnlink();
   tmp->mRedoStack.DoUnlink();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsTransactionManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMARRAY(mListeners)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListeners)
   tmp->mDoStack.DoTraverse(cb);
   tmp->mUndoStack.DoTraverse(cb);
   tmp->mRedoStack.DoTraverse(cb);
@@ -76,14 +74,14 @@ nsTransactionManager::DoTransaction(nsITransaction *aTransaction)
     return NS_OK;
   }
 
-  result = BeginTransaction(aTransaction);
+  result = BeginTransaction(aTransaction, nullptr);
 
   if (NS_FAILED(result)) {
     DidDoNotify(aTransaction, result);
     return result;
   }
 
-  result = EndTransaction();
+  result = EndTransaction(false);
 
   nsresult result2 = DidDoNotify(aTransaction, result);
 
@@ -216,7 +214,7 @@ nsTransactionManager::Clear()
 }
 
 NS_IMETHODIMP
-nsTransactionManager::BeginBatch()
+nsTransactionManager::BeginBatch(nsISupports* aData)
 {
   nsresult result;
 
@@ -237,7 +235,7 @@ nsTransactionManager::BeginBatch()
     return NS_OK;
   }
 
-  result = BeginTransaction(0);
+  result = BeginTransaction(0, aData);
   
   nsresult result2 = DidBeginBatchNotify(result);
 
@@ -248,7 +246,7 @@ nsTransactionManager::BeginBatch()
 }
 
 NS_IMETHODIMP
-nsTransactionManager::EndBatch()
+nsTransactionManager::EndBatch(bool aAllowEmpty)
 {
   nsCOMPtr<nsITransaction> ti;
   nsresult result;
@@ -260,7 +258,7 @@ nsTransactionManager::EndBatch()
   //
   //      For now, we can detect this case by checking the value of the
   //      dummy transaction's mTransaction field. If it is our dummy
-  //      transaction, it should be NULL. This may not be true in the
+  //      transaction, it should be nullptr. This may not be true in the
   //      future when we allow users to execute a transaction when beginning
   //      a batch!!!!
 
@@ -286,7 +284,7 @@ nsTransactionManager::EndBatch()
     return NS_OK;
   }
 
-  result = EndTransaction();
+  result = EndTransaction(aAllowEmpty);
 
   nsresult result2 = DidEndBatchNotify(result);
 
@@ -455,6 +453,50 @@ nsTransactionManager::GetRedoList(nsITransactionList **aTransactionList)
   return (! *aTransactionList) ? NS_ERROR_OUT_OF_MEMORY : NS_OK;
 }
 
+nsresult
+nsTransactionManager::BatchTopUndo()
+{
+  if (mUndoStack.GetSize() < 2) {
+    // Not enough transactions to merge into one batch.
+    return NS_OK;
+  }
+
+  nsRefPtr<nsTransactionItem> lastUndo;
+  nsRefPtr<nsTransactionItem> previousUndo;
+
+  lastUndo = mUndoStack.Pop();
+  MOZ_ASSERT(lastUndo, "There should be at least two transactions.");
+
+  previousUndo = mUndoStack.Peek();
+  MOZ_ASSERT(previousUndo, "There should be at least two transactions.");
+
+  nsresult result = previousUndo->AddChild(lastUndo);
+
+  // Transfer data from the transactions that is going to be
+  // merged to the transaction that it is being merged with.
+  nsCOMArray<nsISupports>& lastData = lastUndo->GetData();
+  nsCOMArray<nsISupports>& previousData = previousUndo->GetData();
+  NS_ENSURE_TRUE(previousData.AppendObjects(lastData), NS_ERROR_UNEXPECTED);
+  lastData.Clear();
+
+  return result;
+}
+
+nsresult
+nsTransactionManager::RemoveTopUndo()
+{
+  nsRefPtr<nsTransactionItem> lastUndo;
+
+  lastUndo = mUndoStack.Peek();
+  if (!lastUndo) {
+    return NS_OK;
+  }
+
+  lastUndo = mUndoStack.Pop();
+
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsTransactionManager::AddListener(nsITransactionListener *aListener)
 {
@@ -471,14 +513,14 @@ nsTransactionManager::RemoveListener(nsITransactionListener *aListener)
   return mListeners.RemoveObject(aListener) ? NS_OK : NS_ERROR_FAILURE;
 }
 
-nsresult
+NS_IMETHODIMP
 nsTransactionManager::ClearUndoStack()
 {
   mUndoStack.Clear();
   return NS_OK;
 }
 
-nsresult
+NS_IMETHODIMP
 nsTransactionManager::ClearRedoStack()
 {
   mRedoStack.Clear();
@@ -717,13 +759,19 @@ nsTransactionManager::DidMergeNotify(nsITransaction *aTop,
 }
 
 nsresult
-nsTransactionManager::BeginTransaction(nsITransaction *aTransaction)
+nsTransactionManager::BeginTransaction(nsITransaction *aTransaction,
+                                       nsISupports *aData)
 {
   nsresult result = NS_OK;
 
   // XXX: POSSIBLE OPTIMIZATION
   //      We could use a factory that pre-allocates/recycles transaction items.
   nsRefPtr<nsTransactionItem> tx = new nsTransactionItem(aTransaction);
+
+  if (aData) {
+    nsCOMArray<nsISupports>& data = tx->GetData();
+    data.AppendObject(aData);
+  }
 
   if (!tx) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -742,7 +790,7 @@ nsTransactionManager::BeginTransaction(nsITransaction *aTransaction)
 }
 
 nsresult
-nsTransactionManager::EndTransaction()
+nsTransactionManager::EndTransaction(bool aAllowEmpty)
 {
   nsresult result              = NS_OK;
 
@@ -753,7 +801,7 @@ nsTransactionManager::EndTransaction()
 
   nsCOMPtr<nsITransaction> tint = tx->GetTransaction();
 
-  if (!tint) {
+  if (!tint && !aAllowEmpty) {
     int32_t nc = 0;
 
     // If we get here, the transaction must be a dummy batch transaction

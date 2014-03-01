@@ -6,8 +6,6 @@
 #include "jsfun.h"
 #include "jscntxt.h"
 
-#include "jsobjinlines.h"
-
 #ifdef MOZ_TRACE_JSCALLS
 
 static int depth = 0;
@@ -136,7 +134,7 @@ JSContext *createContext()
 {
     JSContext *cx = JSAPITest::createContext();
     if (cx)
-        JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_METHODJIT | JSOPTION_PCCOUNT);
+        JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_BASELINE | JSOPTION_ION | JSOPTION_PCCOUNT);
     return cx;
 }
 

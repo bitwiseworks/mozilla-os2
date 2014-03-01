@@ -6,28 +6,19 @@
 #ifndef nsPluginTags_h_
 #define nsPluginTags_h_
 
+#include "mozilla/Attributes.h"
 #include "nscore.h"
-#include "prtypes.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "nsIPluginTag.h"
 #include "nsNPAPIPluginInstance.h"
-#include "nsISupportsArray.h"
 #include "nsITimer.h"
+#include "nsIDOMMimeType.h"
 
 class nsPluginHost;
 struct PRLibrary;
 struct nsPluginInfo;
-
-// Remember that flags are written out to pluginreg.dat, be careful
-// changing their meaning.
-#define NS_PLUGIN_FLAG_ENABLED      0x0001    // is this plugin enabled?
-// no longer used                   0x0002    // reuse only if regenerating pluginreg.dat
-#define NS_PLUGIN_FLAG_FROMCACHE    0x0004    // this plugintag info was loaded from cache
-// no longer used                   0x0008    // reuse only if regenerating pluginreg.dat
-#define NS_PLUGIN_FLAG_BLOCKLISTED  0x0010    // this is a blocklisted plugin
-#define NS_PLUGIN_FLAG_CLICKTOPLAY  0x0020    // this is a click-to-play plugin
 
 // A linked-list of plugin information that is used for instantiating plugins
 // and reflecting plugin information into JavaScript.
@@ -36,7 +27,15 @@ class nsPluginTag : public nsIPluginTag
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIPLUGINTAG
-  
+
+  // These must match the STATE_* values in nsIPluginTag.idl
+  enum PluginState {
+    ePluginState_Disabled = 0,
+    ePluginState_Clicktoplay = 1,
+    ePluginState_Enabled = 2,
+    ePluginState_MaxValue = 3,
+  };
+
   nsPluginTag(nsPluginTag* aPluginTag);
   nsPluginTag(nsPluginInfo* aPluginInfo);
   nsPluginTag(const char* aName,
@@ -51,18 +50,27 @@ public:
               int64_t aLastModifiedTime = 0,
               bool aArgsAreUTF8 = false);
   virtual ~nsPluginTag();
-  
-  void SetHost(nsPluginHost * aHost);
+
   void TryUnloadPlugin(bool inShutdown);
-  void Mark(uint32_t mask);
-  void UnMark(uint32_t mask);
-  bool HasFlag(uint32_t flag);
-  uint32_t Flags();
-  bool HasSameNameAndMimes(const nsPluginTag *aPluginTag) const;
+
+  // plugin is enabled and not blocklisted
+  bool IsActive();
+
   bool IsEnabled();
-  
+  void SetEnabled(bool enabled);
+  bool IsClicktoplay();
+  bool IsBlocklisted();
+
+  PluginState GetPluginState();
+  void SetPluginState(PluginState state);
+
+  // import legacy flags from plugin registry into the preferences
+  void ImportFlagsToPrefs(uint32_t flag);
+
+  bool HasSameNameAndMimes(const nsPluginTag *aPluginTag) const;
+  nsCString GetNiceFileName();
+
   nsRefPtr<nsPluginTag> mNext;
-  nsPluginHost *mPluginHost;
   nsCString     mName; // UTF-8
   nsCString     mDescription; // UTF-8
   nsTArray<nsCString> mMimeTypes; // UTF-8
@@ -77,14 +85,66 @@ public:
   nsCString     mVersion;  // UTF-8
   int64_t       mLastModifiedTime;
   nsCOMPtr<nsITimer> mUnloadTimer;
+
+  uint32_t      GetBlocklistState();
+  void          InvalidateBlocklistState();
+
 private:
-  uint32_t      mFlags;
+  nsCString     mNiceFileName; // UTF-8
+  uint16_t      mCachedBlocklistState;
+  bool          mCachedBlocklistStateValid;
 
   void InitMime(const char* const* aMimeTypes,
                 const char* const* aMimeDescriptions,
                 const char* const* aExtensions,
                 uint32_t aVariantCount);
   nsresult EnsureMembersAreUTF8();
+};
+
+class DOMMimeTypeImpl : public nsIDOMMimeType {
+public:
+  NS_DECL_ISUPPORTS
+
+  DOMMimeTypeImpl(nsPluginTag* aTag, uint32_t aMimeTypeIndex)
+  {
+    if (!aTag)
+      return;
+    CopyUTF8toUTF16(aTag->mMimeDescriptions[aMimeTypeIndex], mDescription);
+    CopyUTF8toUTF16(aTag->mExtensions[aMimeTypeIndex], mSuffixes);
+    CopyUTF8toUTF16(aTag->mMimeTypes[aMimeTypeIndex], mType);
+  }
+
+  virtual ~DOMMimeTypeImpl() {
+  }
+
+  NS_METHOD GetDescription(nsAString& aDescription) MOZ_OVERRIDE
+  {
+    aDescription.Assign(mDescription);
+    return NS_OK;
+  }
+
+  NS_METHOD GetEnabledPlugin(nsIDOMPlugin** aEnabledPlugin) MOZ_OVERRIDE
+  {
+    // this has to be implemented by the DOM version.
+    *aEnabledPlugin = nullptr;
+    return NS_OK;
+  }
+
+  NS_METHOD GetSuffixes(nsAString& aSuffixes) MOZ_OVERRIDE
+  {
+    aSuffixes.Assign(mSuffixes);
+    return NS_OK;
+  }
+
+  NS_METHOD GetType(nsAString& aType) MOZ_OVERRIDE
+  {
+    aType.Assign(mType);
+    return NS_OK;
+  }
+private:
+  nsString mDescription;
+  nsString mSuffixes;
+  nsString mType;
 };
 
 #endif // nsPluginTags_h_

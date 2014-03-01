@@ -43,9 +43,8 @@ DECL_TAG_LIST(gAreaParent,{eHTMLTag_map})
 DECL_TAG_LIST(gParamParents,{eHTMLTag_applet COMMA eHTMLTag_object})
 DECL_TAG_LIST(gTRParents,{eHTMLTag_tbody COMMA eHTMLTag_tfoot COMMA eHTMLTag_thead COMMA eHTMLTag_table})
 DECL_TAG_LIST(gTREndParents,{eHTMLTag_tbody COMMA eHTMLTag_tfoot COMMA eHTMLTag_thead COMMA eHTMLTag_table COMMA eHTMLTag_applet})
-#ifdef MOZ_MEDIA
 DECL_TAG_LIST(gSourceParents,{eHTMLTag_video COMMA eHTMLTag_audio})
-#endif
+DECL_TAG_LIST(gTrackParents,{eHTMLTag_video COMMA eHTMLTag_audio})
 
 //*********************************************************************************************
 //  Next, define the set of taglists for tags with special kids...
@@ -90,10 +89,8 @@ DECL_TAG_LIST(gTableElemKids,{eHTMLTag_form COMMA eHTMLTag_noscript COMMA eHTMLT
 DECL_TAG_LIST(gTRKids,{eHTMLTag_td COMMA eHTMLTag_th COMMA eHTMLTag_form COMMA eHTMLTag_script})// Removed INPUT - Ref. Bug 20087, 25382 |  Removed MAP to fix 58942
 DECL_TAG_LIST(gTBodyKids,{eHTMLTag_tr COMMA eHTMLTag_form}) // Removed INPUT - Ref. Bug 20087, 25382
 DECL_TAG_LIST(gULKids,{eHTMLTag_li COMMA eHTMLTag_p})
-#ifdef MOZ_MEDIA
-DECL_TAG_LIST(gVideoKids,{eHTMLTag_source})
-DECL_TAG_LIST(gAudioKids,{eHTMLTag_source})
-#endif
+DECL_TAG_LIST(gVideoKids,{eHTMLTag_source COMMA eHTMLTag_track})
+DECL_TAG_LIST(gAudioKids,{eHTMLTag_source COMMA eHTMLTag_track})
 
 //*********************************************************************************************
 // The following tag lists are used to define common set of root notes for the HTML elements...
@@ -234,7 +231,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*special props, prop-range*/       0,kDefaultPropRange,
     /*special parents,kids*/            0,0,
   },
-#if defined(MOZ_MEDIA)
   {
     /*tag*/                             eHTMLTag_audio,
     /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
@@ -244,7 +240,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*special props, prop-range*/       0,kDefaultPropRange,
     /*special parents,kids*/            0,&gAudioKids,
   },
-#endif
   {
     /*tag*/                             eHTMLTag_b,
     /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
@@ -296,15 +291,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*rootnodes,endrootnodes*/          &gRootTags,&gRootTags,
     /*autoclose starttags and endtags*/ 0,0,0,0,
     /*parent,incl,exclgroups*/          kFontStyle, (kInlineEntity|kSelf), kNone,
-    /*special props, prop-range*/       0, kDefaultPropRange,
-    /*special parents,kids*/            0,0,
-  },
-  {
-    /*tag*/                             eHTMLTag_blink,
-    /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
-    /*rootnodes,endrootnodes*/          &gRootTags,&gRootTags,
-    /*autoclose starttags and endtags*/ 0,0,0,0,
-    /*parent,incl,exclgroups*/          kFontStyle, (kFlowEntity|kSelf), kNone,
     /*special props, prop-range*/       0, kDefaultPropRange,
     /*special parents,kids*/            0,0,
   },
@@ -406,6 +392,15 @@ const nsHTMLElement gHTMLElements[] = {
     /*parent,incl,exclgroups*/          kNone, kNone, kNone,
     /*special props, prop-range*/       kNoPropagate,kDefaultPropRange,
     /*special parents,kids*/            &gInTable,&gColgroupKids,
+  },
+  {
+    /*tag*/                             eHTMLTag_data,
+    /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
+    /*rootnodes,endrootnodes*/          &gRootTags,&gRootTags,
+    /*autoclose starttags and endtags*/ 0,0,0,0,
+    /*parent,incl,exclgroups*/          kPhrase, (kSelf|kInlineEntity), kNone,
+    /*special props, prop-range*/       0, kDefaultPropRange,
+    /*special parents,kids*/            0,0,
   },
   {
     /*tag*/                             eHTMLTag_datalist,
@@ -787,6 +782,15 @@ const nsHTMLElement gHTMLElements[] = {
     /*special parents,kids*/            0,0,
   },
   {
+    /*tag*/                             eHTMLTag_main,
+    /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
+    /*rootnodes,endrootnodes*/          &gRootTags,&gRootTags,
+    /*autoclose starttags and endtags*/ 0,0,0,0,
+    /*parent,incl,exclgroups*/          kBlock, (kSelf|kFlowEntity), kNone,
+    /*special props, prop-range*/       0,kDefaultPropRange,
+    /*special parents,kids*/            0,0,
+  },
+  {
     /*tag*/                             eHTMLTag_map,
     /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
     /*rootnodes,endrootnodes*/          &gRootTags,&gRootTags,
@@ -1056,7 +1060,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*special props, prop-range*/       0, kDefaultPropRange,
     /*special parents,kids*/            0,0,
   },
-#if defined(MOZ_MEDIA)
   {
     /*tag*/                             eHTMLTag_source,
     /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
@@ -1066,7 +1069,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*special props, prop-range*/       kNonContainer,kNoPropRange,
     /*special parents,kids*/            &gSourceParents,0,
   },
-#endif
   {
     
           // I made span a special% tag again, (instead of inline).
@@ -1193,6 +1195,24 @@ const nsHTMLElement gHTMLElements[] = {
     /*special parents,kids*/            &gInTable,&gTableElemKids,
   },
   {
+    /*tag*/                             eHTMLTag_template,
+    /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
+    /*rootnodes,endrootnodes*/          &gRootTags,&gRootTags,
+    /*autoclose starttags and endtags*/ 0,0,0,0,
+    /*parent,incl,exclgroups*/          kNone, kNone, kNone,
+    /*special props, prop-range*/       0,kDefaultPropRange,
+    /*special parents,kids*/            0,0,
+  },
+  {
+    /*tag*/                             eHTMLTag_time,
+    /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
+    /*rootnodes,endrootnodes*/          &gRootTags,&gRootTags,
+    /*autoclose starttags and endtags*/ 0,0,0,0,
+    /*parent,incl,exclgroups*/          kPhrase, (kSelf|kInlineEntity), kNone,
+    /*special props, prop-range*/       0, kDefaultPropRange,
+    /*special parents,kids*/            0,0,
+  },
+  {
     /*tag*/                             eHTMLTag_title,
     /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
     /*rootnodes,endrootnodes*/          &gInHead,&gInHead,
@@ -1209,6 +1229,15 @@ const nsHTMLElement gHTMLElements[] = {
     /*parent,incl,exclgroups*/          kNone, kNone, kInlineEntity,
     /*special props, prop-range*/       (kBadContentWatch|kNoStyleLeaksIn|kNoStyleLeaksOut), kNoPropRange,
     /*special parents,kids*/            &gTRParents,&gTRKids,
+  },
+  {
+    /*tag*/                             eHTMLTag_track,
+    /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
+    /*rootnodes,endrootnodes*/          &gTrackParents,&gTrackParents,
+    /*autoclose starttags and endtags*/ &gPAutoClose, 0, 0,0,
+    /*parent,incl,exclgroups*/          kSpecial, kNone, kNone,
+    /*special props, prop-range*/       kNonContainer,kNoPropRange,
+    /*special parents,kids*/            &gTrackParents,0,
   },
   {
     /*tag*/                             eHTMLTag_tt,
@@ -1246,7 +1275,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*special props, prop-range*/       0,kDefaultPropRange,
     /*special parents,kids*/            0,0,
   },
-#if defined(MOZ_MEDIA)
   {
     /*tag*/                             eHTMLTag_video,
     /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
@@ -1256,7 +1284,6 @@ const nsHTMLElement gHTMLElements[] = {
     /*special props, prop-range*/       0,kDefaultPropRange,
     /*special parents,kids*/            0,&gVideoKids,
   },
-#endif
   {
     /*tag*/                             eHTMLTag_wbr,
     /*req-parent excl-parent*/          eHTMLTag_unknown,eHTMLTag_unknown,
@@ -1782,7 +1809,6 @@ bool nsHTMLElement::IsResidualStyleTag(eHTMLTags aChild) {
     case eHTMLTag_b:
     case eHTMLTag_bdo:     
     case eHTMLTag_big:       
-    case eHTMLTag_blink:
     case eHTMLTag_del:
     case eHTMLTag_em:
     case eHTMLTag_font:    

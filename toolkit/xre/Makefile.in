@@ -12,41 +12,19 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
+USE_RCS_MK=1
+include $(topsrcdir)/config/makefiles/makeutils.mk
+
 milestone_txt = $(topsrcdir)/config/milestone.txt
 
-MODULE = xulapp
 LIBRARY_NAME = xulapp_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 
 FORCE_STATIC_LIB = 1
 
-XPIDLSRCS = \
-  nsINativeAppSupport.idl \
-  $(NULL)
-
-ifeq ($(OS_ARCH),WINNT)
-XPIDLSRCS += nsIWinAppHelper.idl
-endif
-
-CPPSRCS = \
-  nsAppRunner.cpp \
-  nsConsoleWriter.cpp \
-  nsXREDirProvider.cpp \
-  nsNativeAppSupportBase.cpp \
-  CreateAppData.cpp \
-  nsSigHandlers.cpp \
-  nsEmbedFunctions.cpp \
-  ProfileReset.cpp \
-  $(NULL)
-
 ifeq ($(MOZ_GL_DEFAULT_PROVIDER),GLX)
 DEFINES += -DUSE_GLX_TEST
-CPPSRCS += glxtest.cpp
-endif
-
-ifdef MOZ_INSTRUMENT_EVENT_LOOP
-CPPSRCS += EventTracer.cpp
-EXPORTS += EventTracer.h
 endif
 
 DEFINES += -DIMPL_XREAPI \
@@ -55,38 +33,15 @@ DEFINES += -DIMPL_XREAPI \
 
 ifdef MOZ_UPDATER
 ifneq (android,$(MOZ_WIDGET_TOOLKIT))
-CPPSRCS += nsUpdateDriver.cpp
 DEFINES += -DMOZ_UPDATER
 endif
 endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
-CPPSRCS += nsNativeAppSupportWin.cpp
-CPPSRCS += nsWindowsDllBlocklist.cpp
 DEFINES += -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE
-EXPORTS += nsWindowsDllInterceptor.h
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
 CMMSRCS = nsNativeAppSupportCocoa.mm
-EXPORTS += MacQuirks.h
-else
-ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
-CPPSRCS += nsNativeAppSupportOS2.cpp
-else
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
-CPPSRCS += nsNativeAppSupportUnix.cpp
-else
-ifeq ($(MOZ_WIDGET_TOOLKIT),qt)
-MOCSRCS += moc_nsNativeAppSupportQt.cpp
-CPPSRCS += $(MOCSRCS)
-CPPSRCS += nsNativeAppSupportQt.cpp
-CPPSRCS += nsQAppInstance.cpp
-EXPORTS += nsQAppInstance.h
-else
-CPPSRCS += nsNativeAppSupportDefault.cpp
-endif
-endif
-endif
 endif
 endif
 
@@ -94,16 +49,10 @@ ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
 CMMSRCS += MacLaunchHelper.mm
 CMMSRCS += MacApplicationDelegate.mm
 CMMSRCS += MacAutoreleasePool.mm
-CPPSRCS += nsCommandLineServiceMac.cpp
 ENABLE_CXX_EXCEPTIONS = 1
 endif
 
-ifdef MOZ_X11
-CPPSRCS += nsX11ErrorHandler.cpp
-endif
-
 ifeq ($(MOZ_WIDGET_TOOLKIT),android)
-CPPSRCS += nsAndroidStartup.cpp
 DEFINES += -DANDROID_PACKAGE_NAME='"$(ANDROID_PACKAGE_NAME)"'
 endif
 
@@ -124,6 +73,29 @@ SHARED_LIBRARY_LIBS += $(DEPTH)/widget/xremoteclient/$(LIB_PREFIX)xremote_client
 LOCAL_INCLUDES += -I$(topsrcdir)/widget/xremoteclient
 endif
 
+ifneq (,$(MOZ_CRASHREPORTER)$(MOZ_ENABLE_PROFILER_SPS))
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/$(LIB_PREFIX)breakpad_common_s.$(LIB_SUFFIX) \
+  $(NULL)
+
+ifeq ($(OS_ARCH),Darwin)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/mac/$(LIB_PREFIX)breakpad_mac_common_s.$(LIB_SUFFIX)
+  $(NULL)
+endif
+ifeq ($(OS_ARCH),Linux)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/linux/$(LIB_PREFIX)breakpad_linux_common_s.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+endif
+
+ifdef MOZ_ENABLE_PROFILER_SPS
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/processor/$(LIB_PREFIX)breakpad_sps_common_s.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+
 ifdef MOZ_CRASHREPORTER
 SHARED_LIBRARY_LIBS += $(DEPTH)/toolkit/crashreporter/$(LIB_PREFIX)exception_handler_s.$(LIB_SUFFIX)
 ifeq ($(OS_ARCH),WINNT)
@@ -136,8 +108,7 @@ SHARED_LIBRARY_LIBS += \
   $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/$(LIB_PREFIX)minidump_file_writer_s.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/mac/crash_generation/$(LIB_PREFIX)crash_generation_s.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/mac/handler/$(LIB_PREFIX)exception_handler_s.$(LIB_SUFFIX) \
-  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/$(LIB_PREFIX)breakpad_common_s.$(LIB_SUFFIX) \
-  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/mac/$(LIB_PREFIX)breakpad_mac_common_s.$(LIB_SUFFIX)
+  $(NULL)
 endif
 
 ifeq ($(OS_ARCH),Linux)
@@ -146,8 +117,6 @@ SHARED_LIBRARY_LIBS += \
   $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/linux/handler/$(LIB_PREFIX)exception_handler_s.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/linux/minidump_writer/$(LIB_PREFIX)minidump_writer_s.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/crashreporter/google-breakpad/src/client/$(LIB_PREFIX)minidump_file_writer_s.$(LIB_SUFFIX) \
-  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/$(LIB_PREFIX)breakpad_common_s.$(LIB_SUFFIX) \
-  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/linux/$(LIB_PREFIX)breakpad_linux_common_s.$(LIB_SUFFIX) \
   $(NULL)
 endif
 
@@ -161,29 +130,23 @@ SHARED_LIBRARY_LIBS += \
 endif
 endif
 
-TEST_DIRS += test
-
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
 LOCAL_INCLUDES += \
+  -I$(topsrcdir)/testing/gtest/mozilla \
+  -I$(srcdir)/../profile \
   -I$(topsrcdir)/dom/ipc \
   -I$(topsrcdir)/toolkit/crashreporter \
   -I$(topsrcdir)/dom/base \
   -I$(topsrcdir)/xpcom/build \
-  -I$(topsrcdir)/xpcom/io \
-  $(NULL)
-
-LOCAL_INCLUDES += \
-  -I$(srcdir) \
-  -I$(srcdir)/../profile \
   -I$(topsrcdir)/config \
   $(NULL)
 
 CXXFLAGS += $(TK_CFLAGS) $(MOZ_DBUS_CFLAGS) $(MOZ_DBUS_GLIB_CFLAGS)
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+ifdef MOZ_WIDGET_GTK
 CXXFLAGS += $(MOZ_PANGO_CFLAGS)
 endif
 
@@ -220,20 +183,11 @@ ifdef MOZ_SOURCE_STAMP
 
   INIARGS = --sourcestamp=$(MOZ_SOURCE_STAMP)
 
-  # strip a trailing slash from the repo URL because it's not always present,
-  # and we want to construct a working URL in buildconfig.html
-  SOURCE_REPO := $(firstword $(shell hg --repository $(topsrcdir) showconfig paths.default 2>/dev/null))
-  SOURCE_REPO := $(strip $(SOURCE_REPO))
-  SOURCE_REPO := $(patsubst ssh://%,http://%,$(SOURCE_REPO))
-  SOURCE_REPO := $(patsubst %/,%,$(SOURCE_REPO))
-
-  # command set should change based on revision control use.
-  # warn for now in case (git, bzr, ...) is in use.
-  $(call warnIfEmpty,SOURCE_REPO) 
+  source_repo := $(call getSourceRepo)
 
   # extra sanity check for old versions of hg, no showconfig support
-  ifeq (http,$(patsubst http%,http,$(SOURCE_REPO)))
-    INIARGS += --sourcerepo=$(SOURCE_REPO)
+  ifneq (,$(filter http%,$(source_repo)))
+    INIARGS += --sourcerepo=$(source_repo)
   endif
 
 endif # MOZ_SOURCE_STAMP
@@ -250,7 +204,7 @@ endif
 
 DEFINES += -DAPP_VERSION=$(MOZ_APP_VERSION)
 
-DEFINES += -DAPP_ID=$(MOZ_APP_ID)
+DEFINES += -DAPP_ID="$(MOZ_APP_ID)"
 
 $(srcdir)/nsAppRunner.cpp: $(DEPTH)/config/buildid $(milestone_txt)
 

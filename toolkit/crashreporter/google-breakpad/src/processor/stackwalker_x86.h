@@ -1,4 +1,4 @@
-// -*- mode: c++ -*- 
+// -*- mode: c++ -*-
 
 // Copyright (c) 2010 Google Inc.
 // All rights reserved.
@@ -40,6 +40,7 @@
 #ifndef PROCESSOR_STACKWALKER_X86_H__
 #define PROCESSOR_STACKWALKER_X86_H__
 
+#include <vector>
 
 #include "google_breakpad/common/breakpad_types.h"
 #include "google_breakpad/common/minidump_format.h"
@@ -58,60 +59,46 @@ class StackwalkerX86 : public Stackwalker {
   // register state corresponding to the innermost called frame to be
   // included in the stack.  The other arguments are passed directly through
   // to the base Stackwalker constructor.
-  StackwalkerX86(const SystemInfo *system_info,
-                 const MDRawContextX86 *context,
-                 MemoryRegion *memory,
-                 const CodeModules *modules,
-                 SymbolSupplier *supplier,
-                 SourceLineResolverInterface *resolver);
+  StackwalkerX86(const SystemInfo* system_info,
+                 const MDRawContextX86* context,
+                 MemoryRegion* memory,
+                 const CodeModules* modules,
+                 StackFrameSymbolizer* frame_symbolizer);
 
  private:
   // A STACK CFI-driven frame walker for the X86.
-  typedef SimpleCFIWalker<u_int32_t, MDRawContextX86> CFIWalker;
+  typedef SimpleCFIWalker<uint32_t, MDRawContextX86> CFIWalker;
 
   // Implementation of Stackwalker, using x86 context (%ebp, %esp, %eip) and
   // stack conventions (saved %ebp at [%ebp], saved %eip at 4[%ebp], or
   // alternate conventions as guided by any WindowsFrameInfo available for the
   // code in question.).
-  virtual StackFrame *GetContextFrame();
-  virtual StackFrame *GetCallerFrame(const CallStack *stack);
+  virtual StackFrame* GetContextFrame();
+  virtual StackFrame* GetCallerFrame(const CallStack* stack);
 
   // Use windows_frame_info (derived from STACK WIN and FUNC records)
   // to construct the frame that called frames.back(). The caller
   // takes ownership of the returned frame. Return NULL on failure.
-  StackFrameX86 *GetCallerByWindowsFrameInfo(
+  StackFrameX86* GetCallerByWindowsFrameInfo(
       const vector<StackFrame*> &frames,
-      WindowsFrameInfo *windows_frame_info);
+      WindowsFrameInfo* windows_frame_info);
 
   // Use cfi_frame_info (derived from STACK CFI records) to construct
   // the frame that called frames.back(). The caller takes ownership
   // of the returned frame. Return NULL on failure.
-  StackFrameX86 *GetCallerByCFIFrameInfo(const vector<StackFrame*> &frames,
-                                         CFIFrameInfo *cfi_frame_info);
+  StackFrameX86* GetCallerByCFIFrameInfo(const vector<StackFrame*> &frames,
+                                         CFIFrameInfo* cfi_frame_info);
 
   // Assuming a traditional frame layout --- where the caller's %ebp
   // has been pushed just after the return address and the callee's
   // %ebp points to the saved %ebp --- construct the frame that called
   // frames.back(). The caller takes ownership of the returned frame.
   // Return NULL on failure.
-  StackFrameX86 *GetCallerByEBPAtBase(const vector<StackFrame*> &frames);
-
-  // Scan the stack starting at location_start, looking for an address
-  // that looks like a valid instruction pointer. Addresses must
-  // 1) be contained in the current stack memory
-  // 2) pass the checks in Stackwalker::InstructionAddressSeemsValid
-  //
-  // Returns true if a valid-looking instruction pointer was found.
-  // When returning true, sets location_found to the address at which
-  // the value was found, and eip_found to the value contained at that
-  // location in memory.
-  bool ScanForReturnAddress(u_int32_t location_start,
-                            u_int32_t *location_found,
-                            u_int32_t *eip_found);
+  StackFrameX86* GetCallerByEBPAtBase(const vector<StackFrame*> &frames);
 
   // Stores the CPU context corresponding to the innermost stack frame to
   // be returned by GetContextFrame.
-  const MDRawContextX86 *context_;
+  const MDRawContextX86* context_;
 
   // Our register map, for cfi_walker_.
   static const CFIWalker::RegisterSet cfi_register_map_[];

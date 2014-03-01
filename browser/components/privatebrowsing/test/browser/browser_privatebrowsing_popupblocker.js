@@ -4,35 +4,32 @@
 
 // This test makes sure that private browsing mode disables the remember option
 // for the popup blocker menu.
-
 function test() {
   // initialization
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
+  waitForExplicitFinish();
 
+  let testURI = "http://mochi.test:8888/browser/browser/components/privatebrowsing/test/browser/popup.html";
+  let windowsToClose = [];
   let oldPopupPolicy = gPrefService.getBoolPref("dom.disable_open_during_load");
   gPrefService.setBoolPref("dom.disable_open_during_load", true);
 
-  const TEST_URI = "http://mochi.test:8888/browser/browser/components/privatebrowsing/test/browser/popup.html";
+  function testPopupBlockerMenuItem(aExpectedDisabled, aWindow, aCallback) {
 
-  waitForExplicitFinish();
+    aWindow.gBrowser.addEventListener("DOMUpdatePageReport", function() {
+      aWindow.gBrowser.removeEventListener("DOMUpdatePageReport", arguments.callee, false);
 
-  function testPopupBlockerMenuItem(expectedDisabled, callback) {
-    gBrowser.addEventListener("DOMUpdatePageReport", function() {
-      gBrowser.removeEventListener("DOMUpdatePageReport", arguments.callee, false);
       executeSoon(function() {
-        let notification = gBrowser.getNotificationBox().getNotificationWithValue("popup-blocked");
-
+        let notification = aWindow.gBrowser.getNotificationBox().getNotificationWithValue("popup-blocked");
         ok(notification, "The notification box should be displayed");
 
         function checkMenuItem(callback) {
           dump("CMI: in\n");
-          document.addEventListener("popupshown", function(event) {
+          aWindow.document.addEventListener("popupshown", function(event) {
             dump("CMI: popupshown\n");
-            document.removeEventListener("popupshown", arguments.callee, false);
+            aWindow.document.removeEventListener("popupshown", arguments.callee, false);
 
-            if (expectedDisabled)
-              is(document.getElementById("blockedPopupAllowSite").getAttribute("disabled"), "true",
+            if (aExpectedDisabled)
+              is(aWindow.document.getElementById("blockedPopupAllowSite").getAttribute("disabled"), "true",
                  "The allow popups menu item should be disabled");
 
             event.originalTarget.hidePopup();
@@ -44,25 +41,46 @@ function test() {
         }
 
         checkMenuItem(function() {
-          gBrowser.removeTab(tab);
-          callback();
+          aCallback();
         });
         notification.querySelector("button").doCommand();
       });
+
     }, false);
 
-    let tab = gBrowser.addTab(TEST_URI);
-    gBrowser.selectedTab = tab;
+    aWindow.gBrowser.selectedBrowser.loadURI(testURI);
   }
 
-  testPopupBlockerMenuItem(false, function() {
-    pb.privateBrowsingEnabled = true;
-    testPopupBlockerMenuItem(true, function() {
-      pb.privateBrowsingEnabled = false;
-      testPopupBlockerMenuItem(false, function() {
-        gPrefService.setBoolPref("dom.disable_open_during_load", oldPopupPolicy);
-        finish();
-      });
+  function finishTest() {
+    // cleanup
+    gPrefService.setBoolPref("dom.disable_open_during_load", oldPopupPolicy);
+    finish();
+  };
+
+  function testOnWindow(options, callback) {
+    let win = OpenBrowserWindow(options);
+    win.addEventListener("load", function onLoad() {
+      win.removeEventListener("load", onLoad, false);
+      windowsToClose.push(win);
+      executeSoon(function() callback(win));
+    }, false);
+  };
+
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(win) {
+      win.close();
     });
+  });
+
+  testOnWindow({}, function(win) {
+    testPopupBlockerMenuItem(false, win,
+      testOnWindow({private: true}, function(win) {
+        testPopupBlockerMenuItem(true, win,
+          testOnWindow({}, function(win) {
+            testPopupBlockerMenuItem(false, win, finishTest);
+          })
+        );
+      })
+    );
   });
 }

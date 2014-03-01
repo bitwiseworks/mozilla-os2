@@ -9,23 +9,18 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = jsctypes
 MODULE_NAME = jsctypes
-GRE_MODULE = 1
 
 EXTRA_JS_MODULES = \
     ctypes.jsm \
     $(NULL)
 
-LIBRARY_NAME = jsctypes
 LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
 IS_COMPONENT = 1
 
-CPPSRCS = \
-    ctypes.cpp \
-    $(NULL)
-
-TEST_DIRS += tests
+LOCAL_INCLUDES := \
+  -I$(topsrcdir)/js/xpconnect/loader \
+  $(NULL)
 
 include $(topsrcdir)/config/rules.mk

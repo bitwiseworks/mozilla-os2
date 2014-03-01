@@ -2,6 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Equivalent to 0600 permissions; used for saved Sync Recovery Key.
+// This constant can be replaced when the equivalent values are available to
+// chrome JS; see Bug 433295 and Bug 757351.
+const PERMISSIONS_RWUSR = 0x180;
+
 // Weave should always exist before before this file gets included.
 let gSyncUtils = {
   get bundle() {
@@ -27,8 +32,8 @@ let gSyncUtils = {
 
   changeName: function changeName(input) {
     // Make sure to update to a modified name, e.g., empty-string -> default
-    Weave.Clients.localName = input.value;
-    input.value = Weave.Clients.localName;
+    Weave.Service.clientsEngine.localName = input.value;
+    input.value = Weave.Service.clientsEngine.localName;
   },
 
   openChange: function openChange(type, duringSetup) {
@@ -151,26 +156,28 @@ let gSyncUtils = {
     let dialogTitle = this.bundle.GetStringFromName("save.recoverykey.title");
     let defaultSaveName = this.bundle.GetStringFromName("save.recoverykey.defaultfilename");
     this._preparePPiframe(elid, function(iframe) {
-      let filepicker = Cc["@mozilla.org/filepicker;1"]
-                         .createInstance(Ci.nsIFilePicker);
-      filepicker.init(window, dialogTitle, Ci.nsIFilePicker.modeSave);
-      filepicker.appendFilters(Ci.nsIFilePicker.filterHTML);
-      filepicker.defaultString = defaultSaveName;
-      let rv = filepicker.show();
-      if (rv == Ci.nsIFilePicker.returnOK
-          || rv == Ci.nsIFilePicker.returnReplace) {
-        let stream = Cc["@mozilla.org/network/file-output-stream;1"]
-                       .createInstance(Ci.nsIFileOutputStream);
-        stream.init(filepicker.file, -1, 0600, 0);
+      let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+      let fpCallback = function fpCallback_done(aResult) {
+        if (aResult == Ci.nsIFilePicker.returnOK ||
+            aResult == Ci.nsIFilePicker.returnReplace) {
+          let stream = Cc["@mozilla.org/network/file-output-stream;1"].
+                       createInstance(Ci.nsIFileOutputStream);
+          stream.init(fp.file, -1, PERMISSIONS_RWUSR, 0);
 
-        let serializer = new XMLSerializer();
-        let output = serializer.serializeToString(iframe.contentDocument);
-        output = output.replace(/<!DOCTYPE (.|\n)*?]>/,
-          '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" ' +
-          '"DTD/xhtml1-strict.dtd">');
-        output = Weave.Utils.encodeUTF8(output);
-        stream.write(output, output.length);
-      }
+          let serializer = new XMLSerializer();
+          let output = serializer.serializeToString(iframe.contentDocument);
+          output = output.replace(/<!DOCTYPE (.|\n)*?]>/,
+            '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" ' +
+            '"DTD/xhtml1-strict.dtd">');
+          output = Weave.Utils.encodeUTF8(output);
+          stream.write(output, output.length);
+        }
+      };
+
+      fp.init(window, dialogTitle, Ci.nsIFilePicker.modeSave);
+      fp.appendFilters(Ci.nsIFilePicker.filterHTML);
+      fp.defaultString = defaultSaveName;
+      fp.open(fpCallback);
       return false;
     });
   },
@@ -191,11 +198,11 @@ let gSyncUtils = {
 
     if (!el2)
       valid = val1.length >= Weave.MIN_PASS_LENGTH;
-    else if (val1 && val1 == Weave.Identity.username)
+    else if (val1 && val1 == Weave.Service.identity.username)
       error = "change.password.pwSameAsUsername";
-    else if (val1 && val1 == Weave.Identity.account)
+    else if (val1 && val1 == Weave.Service.identity.account)
       error = "change.password.pwSameAsEmail";
-    else if (val1 && val1 == Weave.Identity.basicPassword)
+    else if (val1 && val1 == Weave.Service.identity.basicPassword)
       error = "change.password.pwSameAsPassword";
     else if (val1 && val2) {
       if (val1 == val2 && val1.length >= Weave.MIN_PASS_LENGTH)

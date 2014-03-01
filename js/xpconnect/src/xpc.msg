@@ -62,6 +62,7 @@ XPC_MSG_DEF(NS_ERROR_XPC_BAD_INITIALIZER_NAME           , "Bad initializer name 
 XPC_MSG_DEF(NS_ERROR_XPC_HAS_BEEN_SHUTDOWN              , "Operation failed because the XPConnect subsystem has been shutdown")
 XPC_MSG_DEF(NS_ERROR_XPC_CANT_MODIFY_PROP_ON_WN         , "Cannot modify properties of a WrappedNative")
 XPC_MSG_DEF(NS_ERROR_XPC_BAD_CONVERT_JS_ZERO_ISNOT_NULL , "Could not convert JavaScript argument - 0 was passed, expected object. Did you mean null?")
+XPC_MSG_DEF(NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE       , "It's illegal to pass a CPOW to native code")
 
 
 /* common global codes (from nsError.h) */
@@ -188,3 +189,23 @@ XPC_MSG_DEF(NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED, "Clearing site data by tim
 
 /* character converter related codes (from nsIUnicodeDecoder.h) */
 XPC_MSG_DEF(NS_ERROR_ILLEGAL_INPUT                  , "The input characters have illegal sequences")
+
+/* Codes related to signd jars */
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_NOT_SIGNED          , "The JAR is not signed.")
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_MODIFIED_ENTRY      , "An entry in the JAR has been modified after the JAR was signed.")
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_UNSIGNED_ENTRY      , "An entry in the JAR has not been signed.")
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_ENTRY_MISSING       , "An entry is missing from the JAR file.")
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_WRONG_SIGNATURE     , "The JAR's signature is wrong.")
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE     , "An entry in the JAR is too large.")
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_ENTRY_INVALID       , "An entry in the JAR is invalid.")
+XPC_MSG_DEF(NS_ERROR_SIGNED_JAR_MANIFEST_INVALID    , "The JAR's manifest or signature file is invalid.")
+
+/* Codes for printing-related errors. */
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE , "No printers available.")
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND       , "The selected printer could not be found.")
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_COULD_NOT_OPEN_FILE  , "Failed to open output file for print to file.")
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_STARTDOC             , "Printing failed while starting the print job.")
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_ENDDOC               , "Printing failed while completing the print job.")
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_STARTPAGE            , "Printing failed while starting a new page.")
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_DOC_IS_BUSY          , "Cannot print this document yet, it is still being loaded.")
+XPC_MSG_DEF(NS_ERROR_GFX_PRINTER_NO_XUL               , "Printing XUL documents is not supported.") // bugs 136185 & 240490

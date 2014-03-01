@@ -33,7 +33,14 @@
 static const PRUnichar kUTF16[] = { 'U', 'T', 'F', '-', '1', '6', '\0' };
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *gExpatDriverLog = PR_NewLogModule("expatdriver");
+static PRLogModuleInfo *
+GetExpatDriverLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("expatdriver");
+  return sLog;
+}
 #endif
 
 /***************************** EXPAT CALL BACKS ******************************/
@@ -293,7 +300,7 @@ GetLocalDTDURI(const nsCatalogData* aCatalogData, nsIURI* aDTD,
 {
   NS_ASSERTION(aDTD, "Null parameter.");
 
-  nsCAutoString fileName;
+  nsAutoCString fileName;
   if (aCatalogData) {
     // remap the DTD to a known local DTD
     fileName.Assign(aCatalogData->mLocalDTD);
@@ -315,7 +322,7 @@ GetLocalDTDURI(const nsCatalogData* aCatalogData, nsIURI* aDTD,
     }
   }
 
-  nsCAutoString respath("resource://gre/res/dtd/");
+  nsAutoCString respath("resource://gre/res/dtd/");
   respath += fileName;
   NS_NewURI(aResult, respath);
 }
@@ -780,7 +787,7 @@ nsExpatDriver::OpenInputStreamFromExternalDTD(const PRUnichar* aFPIStr,
     return NS_ERROR_CONTENT_BLOCKED;
   }
 
-  nsCAutoString absURL;
+  nsAutoCString absURL;
   uri->GetSpec(absURL);
 
   CopyUTF8toUTF16(absURL, aAbsURL);
@@ -928,9 +935,9 @@ nsExpatDriver::HandleError()
   nsCOMPtr<nsIScriptError> serr(do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
   nsresult rv = NS_ERROR_FAILURE;
   if (serr) {
-    rv = serr->InitWithWindowID(description.get(),
-                                mURISpec.get(),
-                                mLastLine.get(),
+    rv = serr->InitWithWindowID(description,
+                                mURISpec,
+                                mLastLine,
                                 lineNumber, colNumber,
                                 nsIScriptError::errorFlag, "malformed-xml",
                                 mInnerWindowID);
@@ -1031,7 +1038,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
   nsScannerIterator end;
   aScanner.EndReading(end);
 
-  PR_LOG(gExpatDriverLog, PR_LOG_DEBUG,
+  PR_LOG(GetExpatDriverLog(), PR_LOG_DEBUG,
          ("Remaining in expat's buffer: %i, remaining in scanner: %i.",
           mExpatBuffered, Distance(start, end)));
 
@@ -1053,7 +1060,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
 
 #if defined(PR_LOGGING) || defined (DEBUG)
       if (blocked) {
-        PR_LOG(gExpatDriverLog, PR_LOG_DEBUG,
+        PR_LOG(GetExpatDriverLog(), PR_LOG_DEBUG,
                ("Resuming Expat, will parse data remaining in Expat's "
                 "buffer.\nContent of Expat's buffer:\n-----\n%s\n-----\n",
                 NS_ConvertUTF16toUTF8(currentExpatPosition.get(),
@@ -1062,7 +1069,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
       else {
         NS_ASSERTION(mExpatBuffered == Distance(currentExpatPosition, end),
                      "Didn't pass all the data to Expat?");
-        PR_LOG(gExpatDriverLog, PR_LOG_DEBUG,
+        PR_LOG(GetExpatDriverLog(), PR_LOG_DEBUG,
                ("Last call to Expat, will parse data remaining in Expat's "
                 "buffer.\nContent of Expat's buffer:\n-----\n%s\n-----\n",
                 NS_ConvertUTF16toUTF8(currentExpatPosition.get(),
@@ -1074,7 +1081,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
       buffer = start.get();
       length = uint32_t(start.size_forward());
 
-      PR_LOG(gExpatDriverLog, PR_LOG_DEBUG,
+      PR_LOG(GetExpatDriverLog(), PR_LOG_DEBUG,
              ("Calling Expat, will parse data remaining in Expat's buffer and "
               "new data.\nContent of Expat's buffer:\n-----\n%s\n-----\nNew "
               "data:\n-----\n%s\n-----\n",
@@ -1114,7 +1121,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
     mExpatBuffered += length - consumed;
 
     if (BlockedOrInterrupted()) {
-      PR_LOG(gExpatDriverLog, PR_LOG_DEBUG,
+      PR_LOG(GetExpatDriverLog(), PR_LOG_DEBUG,
              ("Blocked or interrupted parser (probably for loading linked "
               "stylesheets or scripts)."));
 
@@ -1175,7 +1182,7 @@ nsExpatDriver::ConsumeToken(nsScanner& aScanner, bool& aFlushTokens)
   aScanner.SetPosition(currentExpatPosition, true);
   aScanner.Mark();
 
-  PR_LOG(gExpatDriverLog, PR_LOG_DEBUG,
+  PR_LOG(GetExpatDriverLog(), PR_LOG_DEBUG,
          ("Remaining in expat's buffer: %i, remaining in scanner: %i.",
           mExpatBuffered, Distance(currentExpatPosition, end)));
 

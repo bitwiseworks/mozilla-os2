@@ -53,7 +53,7 @@ nsAsyncStreamCopier::IsComplete(nsresult *status)
 void
 nsAsyncStreamCopier::Complete(nsresult status)
 {
-    LOG(("nsAsyncStreamCopier::Complete [this=%x status=%x]\n", this, status));
+    LOG(("nsAsyncStreamCopier::Complete [this=%p status=%x]\n", this, status));
 
     nsCOMPtr<nsIRequestObserver> observer;
     nsCOMPtr<nsISupports> ctx;
@@ -67,9 +67,7 @@ nsAsyncStreamCopier::Complete(nsresult status)
 
             // setup OnStopRequest callback and release references...
             observer = mObserver;
-            ctx = mObserverContext;
             mObserver = nullptr;
-            mObserverContext = nullptr;
         }
     }
 
@@ -219,14 +217,14 @@ nsAsyncStreamCopier::Init(nsIInputStream *source,
 NS_IMETHODIMP
 nsAsyncStreamCopier::AsyncCopy(nsIRequestObserver *observer, nsISupports *ctx)
 {
-    LOG(("nsAsyncStreamCopier::AsyncCopy [this=%x observer=%x]\n", this, observer));
+    LOG(("nsAsyncStreamCopier::AsyncCopy [this=%p observer=%x]\n", this, observer));
 
     NS_ASSERTION(mSource && mSink, "not initialized");
     nsresult rv;
 
     if (observer) {
         // build proxy for observer events
-        rv = NS_NewRequestObserverProxy(getter_AddRefs(mObserver), observer);
+        rv = NS_NewRequestObserverProxy(getter_AddRefs(mObserver), observer, ctx);
         if (NS_FAILED(rv)) return rv;
     }
 
@@ -234,9 +232,8 @@ nsAsyncStreamCopier::AsyncCopy(nsIRequestObserver *observer, nsISupports *ctx)
     // will be reported via OnStopRequest.
     mIsPending = true;
 
-    mObserverContext = ctx;
     if (mObserver) {
-        rv = mObserver->OnStartRequest(this, mObserverContext);
+        rv = mObserver->OnStartRequest(this, nullptr);
         if (NS_FAILED(rv))
             Cancel(rv);
     }

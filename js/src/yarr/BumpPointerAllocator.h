@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99 ft=cpp:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * ***** BEGIN LICENSE BLOCK *****
  * Copyright (C) 2010 Apple Inc. All rights reserved.
@@ -27,8 +27,8 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef BumpPointerAllocator_h
-#define BumpPointerAllocator_h
+#ifndef yarr_BumpPointerAllocator_h
+#define yarr_BumpPointerAllocator_h
 
 #include "PageAllocation.h"
 
@@ -94,6 +94,18 @@ public:
             return this;
         }
         return deallocCrossPool(this, position);
+    }
+
+    size_t sizeOfNonHeapData() const
+    {
+        ASSERT(!m_previous);
+        size_t n = 0;
+        const BumpPointerPool *curr = this;
+        while (curr) {
+            n += m_allocation.size();
+            curr = curr->m_next;
+        }
+        return n;
     }
 
 private:
@@ -249,6 +261,11 @@ public:
             m_head->shrink();
     }
 
+    size_t sizeOfNonHeapData() const
+    {
+        return m_head ? m_head->sizeOfNonHeapData() : 0;
+    }
+
 private:
     BumpPointerPool* m_head;
 };
@@ -257,4 +274,4 @@ private:
 
 using WTF::BumpPointerAllocator;
 
-#endif // BumpPointerAllocator_h
+#endif /* yarr_BumpPointerAllocator_h */

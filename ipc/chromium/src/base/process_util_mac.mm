@@ -43,7 +43,7 @@ bool LaunchApp(const std::vector<std::string>& argv,
                bool wait, ProcessHandle* process_handle,
                ProcessArchitecture arch) {
   return LaunchApp(argv, fds_to_remap, env_vars_to_set,
-                   SAME_PRIVILEGES_AS_PARENT,
+                   PRIVILEGES_INHERIT,
                    wait, process_handle);
 }
 
@@ -186,6 +186,10 @@ bool LaunchApp(const CommandLine& cl,
   // TODO(playmobil): Do we need to respect the start_hidden flag?
   file_handle_mapping_vector no_files;
   return LaunchApp(cl.argv(), no_files, wait, process_handle);
+}
+
+void SetCurrentProcessPrivileges(ChildPrivileges privs) {
+
 }
 
 NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,

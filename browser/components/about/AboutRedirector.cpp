@@ -17,9 +17,7 @@ NS_IMPL_ISUPPORTS1(AboutRedirector, nsIAboutModule)
 struct RedirEntry {
   const char* id;
   const char* url;
-  uint32_t flags;  // See nsIAboutModule.  The URI_SAFE_FOR_UNTRUSTED_CONTENT
-                   // flag does double duty here -- if it's not set, we don't
-                   // drop chrome privileges.
+  uint32_t flags;
 };
 
 /*
@@ -34,7 +32,7 @@ struct RedirEntry {
  */
 static RedirEntry kRedirMap[] = {
 #ifdef MOZ_SAFE_BROWSING
-  { "blocked", "chrome://browser/content/safebrowsing/blockedSite.xhtml",
+  { "blocked", "chrome://browser/content/blockedSite.xhtml",
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
     nsIAboutModule::ALLOW_SCRIPT |
     nsIAboutModule::HIDE_FROM_ABOUTABOUT },
@@ -80,13 +78,19 @@ static RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT },
   { "preferences", "chrome://browser/content/preferences/in-content/preferences.xul",
     nsIAboutModule::ALLOW_SCRIPT },
+  { "downloads", "chrome://browser/content/downloads/contentAreaDownloadsView.xul",
+    nsIAboutModule::ALLOW_SCRIPT },
+#ifdef MOZ_SERVICES_HEALTHREPORT
+  { "healthreport", "chrome://browser/content/abouthealthreport/abouthealth.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT },
+#endif
 };
 static const int kRedirTotal = NS_ARRAY_LENGTH(kRedirMap);
 
-static nsCAutoString
+static nsAutoCString
 GetAboutModuleName(nsIURI *aURI)
 {
-  nsCAutoString path;
+  nsAutoCString path;
   aURI->GetPath(path);
 
   int32_t f = path.FindChar('#');
@@ -107,7 +111,7 @@ AboutRedirector::NewChannel(nsIURI *aURI, nsIChannel **result)
   NS_ENSURE_ARG_POINTER(aURI);
   NS_ASSERTION(result, "must not be null");
 
-  nsCAutoString path = GetAboutModuleName(aURI);
+  nsAutoCString path = GetAboutModuleName(aURI);
 
   nsresult rv;
   nsCOMPtr<nsIIOService> ioService = do_GetIOService(&rv);
@@ -122,28 +126,6 @@ AboutRedirector::NewChannel(nsIURI *aURI, nsIChannel **result)
 
       tempChannel->SetOriginalURI(aURI);
 
-      // Keep the page from getting unnecessary privileges unless it needs them
-      if (kRedirMap[i].flags & nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT) {
-        if (path.EqualsLiteral("feeds")) {
-          nsCOMPtr<nsIScriptSecurityManager> securityManager =
-            do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-          NS_ENSURE_SUCCESS(rv, rv);
-  
-          nsCOMPtr<nsIPrincipal> principal;
-          rv = securityManager->GetNoAppCodebasePrincipal(aURI, getter_AddRefs(principal));
-          NS_ENSURE_SUCCESS(rv, rv);
-  
-          rv = tempChannel->SetOwner(principal);
-        }
-        else {
-          // Setting the owner to null means that we'll go through the normal
-          // path in GetChannelPrincipal and create a codebase principal based
-          // on the channel's originalURI
-          rv = tempChannel->SetOwner(nullptr);
-          NS_ENSURE_SUCCESS(rv, rv);
-        }
-      }
-
       NS_ADDREF(*result = tempChannel);
       return rv;
     }
@@ -157,7 +139,7 @@ AboutRedirector::GetURIFlags(nsIURI *aURI, uint32_t *result)
 {
   NS_ENSURE_ARG_POINTER(aURI);
 
-  nsCAutoString name = GetAboutModuleName(aURI);
+  nsAutoCString name = GetAboutModuleName(aURI);
 
   for (int i = 0; i < kRedirTotal; i++) {
     if (name.Equals(kRedirMap[i].id)) {

@@ -5,7 +5,6 @@
 
 
 #include "mozilla/layers/ImageBridgeChild.h"
-#include "mozilla/layers/ImageContainerChild.h"
 
 #include "ImageContainer.h"
 #include "GonkIOSurfaceImage.h"
@@ -17,6 +16,8 @@
 #include "gfxSharedImageSurface.h"
 #include "yuv_convert.h"
 #include "gfxUtils.h"
+#include "gfxPlatform.h"
+#include "mozilla/layers/ImageClient.h"
 
 #ifdef XP_MACOSX
 #include "mozilla/gfx/QuartzSupport.h"
@@ -26,8 +27,8 @@
 #include "gfxD2DSurface.h"
 #include "gfxWindowsPlatform.h"
 #include <d3d10_1.h>
-
 #include "d3d10/ImageLayerD3D10.h"
+#include "D3D9SurfaceImage.h"
 #endif
 
 using namespace mozilla::ipc;
@@ -69,15 +70,15 @@ ImageFactory::CreateImage(const ImageFormat *aFormats,
     img = new SharedTextureImage();
     return img.forget();
   }
-#ifdef XP_MACOSX
-  if (FormatInList(aFormats, aNumFormats, MAC_IO_SURFACE)) {
-    img = new MacIOSurfaceImage();
-    return img.forget();
-  }
-#endif
 #ifdef MOZ_WIDGET_GONK
   if (FormatInList(aFormats, aNumFormats, GONK_IO_SURFACE)) {
     img = new GonkIOSurfaceImage();
+    return img.forget();
+  }
+#endif
+#ifdef XP_WIN
+  if (FormatInList(aFormats, aNumFormats, D3D9_RGB32_TEXTURE)) {
+    img = new D3D9SurfaceImage();
     return img.forget();
   }
 #endif
@@ -115,7 +116,7 @@ BufferRecycleBin::GetBuffer(uint32_t aSize)
   return result;
 }
 
-ImageContainer::ImageContainer(int flag) 
+ImageContainer::ImageContainer(int flag)
 : mReentrantMonitor("ImageContainer.mReentrantMonitor"),
   mPaintCount(0),
   mPreviousImagePainted(false),
@@ -124,18 +125,20 @@ ImageContainer::ImageContainer(int flag)
   mRemoteData(nullptr),
   mRemoteDataMutex(nullptr),
   mCompositionNotifySink(nullptr),
-  mImageContainerChild(nullptr)
+  mImageClient(nullptr)
 {
   if (flag == ENABLE_ASYNC && ImageBridgeChild::IsCreated()) {
-    mImageContainerChild = 
-      ImageBridgeChild::GetSingleton()->CreateImageContainerChild();
+    // the refcount of this ImageClient is 1. we don't use a RefPtr here because the refcount
+    // of this class must be done on the ImageBridge thread.
+    mImageClient = ImageBridgeChild::GetSingleton()->CreateImageClient(BUFFER_IMAGE_BUFFERED).drop();
+    MOZ_ASSERT(mImageClient);
   }
 }
 
 ImageContainer::~ImageContainer()
 {
-  if (mImageContainerChild) {
-    mImageContainerChild->DispatchStop();
+  if (IsAsync()) {
+    ImageBridgeChild::DispatchReleaseImageClient(mImageClient);
   }
 }
 
@@ -144,10 +147,18 @@ ImageContainer::CreateImage(const ImageFormat *aFormats,
                             uint32_t aNumFormats)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+
+  if (mImageClient) {
+    nsRefPtr<Image> img = mImageClient->CreateImage((uint32_t*)aFormats,
+                                                            aNumFormats);
+    if (img) {
+      return img.forget();
+    }
+  }
   return mImageFactory->CreateImage(aFormats, aNumFormats, mScaleHint, mRecycleBin);
 }
 
-void 
+void
 ImageContainer::SetCurrentImageInternal(Image *aImage)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
@@ -171,15 +182,18 @@ void
 ImageContainer::SetCurrentImage(Image *aImage)
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-
-  if (mImageContainerChild) {
+  if (IsAsync()) {
     if (aImage) {
-      mImageContainerChild->SendImageAsync(this, aImage);
+      ImageBridgeChild::DispatchImageClientUpdate(mImageClient, this);
     } else {
-      mImageContainerChild->DispatchSetIdle();
+      // here we used to have a SetIdle() call on the image bridge to tell
+      // the compositor that the video element is not going to be seen for
+      // moment and that it can release its shared memory. It was causing
+      // crashes so it has been removed.
+      // This may be reimplemented after 858914 lands.
     }
   }
-  
+
   SetCurrentImageInternal(aImage);
 }
 
@@ -187,22 +201,22 @@ void
 ImageContainer::SetCurrentImageInTransaction(Image *aImage)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
-  NS_ASSERTION(!mImageContainerChild, "Should use async image transfer with ImageBridge.");
-  
+  NS_ASSERTION(!mImageClient, "Should use async image transfer with ImageBridge.");
+
   SetCurrentImageInternal(aImage);
 }
 
 bool ImageContainer::IsAsync() const {
-  return mImageContainerChild != nullptr;
+  return mImageClient != nullptr;
 }
 
 uint64_t ImageContainer::GetAsyncContainerID() const
 {
   NS_ASSERTION(IsAsync(),"Shared image ID is only relevant to async ImageContainers");
   if (IsAsync()) {
-    return mImageContainerChild->GetID();
+    return mImageClient->GetAsyncID();
   } else {
-    return 0; // zero is always an invalid SharedImageID
+    return 0; // zero is always an invalid AsyncID
   }
 }
 
@@ -394,6 +408,7 @@ ImageContainer::EnsureActiveImage()
 PlanarYCbCrImage::PlanarYCbCrImage(BufferRecycleBin *aRecycleBin)
   : Image(nullptr, PLANAR_YCBCR)
   , mBufferSize(0)
+  , mOffscreenFormat(gfxASurface::ImageFormatUnknown)
   , mRecycleBin(aRecycleBin)
 {
 }
@@ -445,7 +460,7 @@ PlanarYCbCrImage::CopyData(const Data& aData)
                 mData.mYStride * mData.mYSize.height;
 
   // get new buffer
-  mBuffer = AllocateBuffer(mBufferSize); 
+  mBuffer = AllocateBuffer(mBufferSize);
   if (!mBuffer)
     return;
 
@@ -469,6 +484,32 @@ PlanarYCbCrImage::SetData(const Data &aData)
   CopyData(aData);
 }
 
+gfxASurface::gfxImageFormat
+PlanarYCbCrImage::GetOffscreenFormat()
+{
+  return mOffscreenFormat == gfxASurface::ImageFormatUnknown ?
+    gfxPlatform::GetPlatform()->GetOffscreenFormat() :
+    mOffscreenFormat;
+}
+
+void
+PlanarYCbCrImage::SetDataNoCopy(const Data &aData)
+{
+  mData = aData;
+  mSize = aData.mPicSize;
+}
+
+uint8_t*
+PlanarYCbCrImage::AllocateAndGetNewBuffer(uint32_t aSize)
+{
+  // update buffer size
+  mBufferSize = aSize;
+
+  // get new buffer
+  mBuffer = AllocateBuffer(mBufferSize); 
+  return mBuffer;
+}
+
 already_AddRefed<gfxASurface>
 PlanarYCbCrImage::GetAsSurface()
 {
@@ -478,7 +519,6 @@ PlanarYCbCrImage::GetAsSurface()
   }
 
   gfxASurface::gfxImageFormat format = GetOffscreenFormat();
-
   gfxIntSize size(mSize);
   gfxUtils::GetYCbCrToRGBDestFormatAndSize(mData, format, size);
   if (size.width > PlanarYCbCrImage::MAX_DIMENSION ||
@@ -496,48 +536,8 @@ PlanarYCbCrImage::GetAsSurface()
 
   mSurface = imageSurface;
 
-  return imageSurface.forget().get();
+  return imageSurface.forget();
 }
-
-#ifdef XP_MACOSX
-void
-MacIOSurfaceImage::SetData(const Data& aData)
-{
-  mIOSurface = MacIOSurface::LookupSurface(aData.mIOSurface->GetIOSurfaceID());
-  mSize = gfxIntSize(mIOSurface->GetWidth(), mIOSurface->GetHeight());
-}
-
-already_AddRefed<gfxASurface>
-MacIOSurfaceImage::GetAsSurface()
-{
-  mIOSurface->Lock();
-  size_t bytesPerRow = mIOSurface->GetBytesPerRow();
-  size_t ioWidth = mIOSurface->GetWidth();
-  size_t ioHeight = mIOSurface->GetHeight();
-
-  unsigned char* ioData = (unsigned char*)mIOSurface->GetBaseAddress();
-
-  nsRefPtr<gfxImageSurface> imgSurface =
-    new gfxImageSurface(gfxIntSize(ioWidth, ioHeight), gfxASurface::ImageFormatARGB32);
-
-  for (int i = 0; i < ioHeight; i++) {
-    memcpy(imgSurface->Data() + i * imgSurface->Stride(),
-           ioData + i * bytesPerRow, ioWidth * 4);
-  }
-
-  mIOSurface->Unlock();
-
-  return imgSurface.forget();
-}
-
-void
-MacIOSurfaceImage::Update(ImageContainer* aContainer)
-{
-  if (mUpdateCallback) {
-    mUpdateCallback(aContainer, mPluginInstanceOwner);
-  }
-}
-#endif
 
 already_AddRefed<gfxASurface>
 RemoteBitmapImage::GetAsSurface()

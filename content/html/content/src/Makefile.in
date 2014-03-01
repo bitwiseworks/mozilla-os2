@@ -10,97 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkconhtmlcon_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY	= 1
 FAIL_ON_WARNINGS = 1
-
-
-EXPORTS		= \
-		nsGenericHTMLElement.h \
-		nsHTMLIFrameElement.h \
-		nsClientRect.h \
-		nsHTMLDNSPrefetch.h \
-		nsTimeRanges.h \
-		$(NULL)
-
-CPPSRCS		= \
-		HTMLPropertiesCollection.cpp \
-		nsClientRect.cpp \
-		nsHTMLDNSPrefetch.cpp \
-		nsGenericHTMLElement.cpp \
-		nsGenericHTMLFrameElement.cpp \
-		nsFormSubmission.cpp \
-		nsTextEditorState.cpp \
-		nsHTMLElement.cpp \
-		nsHTMLAnchorElement.cpp \
-		nsHTMLAreaElement.cpp \
-		nsHTMLBRElement.cpp \
-		nsHTMLBodyElement.cpp \
-		nsHTMLButtonElement.cpp \
-		nsHTMLCanvasElement.cpp \
-		nsHTMLDataListElement.cpp \
-		nsHTMLDivElement.cpp \
-		nsHTMLFieldSetElement.cpp \
-		nsHTMLFontElement.cpp \
-		nsHTMLFormElement.cpp \
-		nsHTMLFrameElement.cpp \
-		nsHTMLFrameSetElement.cpp \
-		nsHTMLHRElement.cpp \
-		nsHTMLHeadingElement.cpp \
-		nsHTMLIFrameElement.cpp \
-		nsHTMLImageElement.cpp \
-		nsHTMLInputElement.cpp \
-		nsHTMLLIElement.cpp \
-		nsHTMLLabelElement.cpp \
-		nsHTMLLegendElement.cpp \
-		nsHTMLLinkElement.cpp \
-		nsHTMLMapElement.cpp \
-		nsHTMLMenuElement.cpp \
-		nsHTMLMenuItemElement.cpp \
-		nsHTMLMetaElement.cpp \
-		nsHTMLMeterElement.cpp \
-		nsHTMLModElement.cpp \
-		nsHTMLObjectElement.cpp \
-		nsHTMLOListElement.cpp \
-		nsHTMLSharedObjectElement.cpp \
-		nsHTMLOptionElement.cpp \
-		nsHTMLOptGroupElement.cpp \
-		nsHTMLOutputElement.cpp \
-		nsHTMLParagraphElement.cpp \
-		nsHTMLPreElement.cpp \
-		nsHTMLProgressElement.cpp \
-		nsHTMLScriptElement.cpp \
-		nsHTMLSelectElement.cpp \
-		nsHTMLSharedElement.cpp \
-		nsHTMLSpanElement.cpp \
-		nsHTMLStyleElement.cpp \
-		nsHTMLTableElement.cpp \
-		nsHTMLTableCaptionElement.cpp \
-		nsHTMLTableCellElement.cpp \
-		nsHTMLTableColElement.cpp \
-		nsHTMLTableRowElement.cpp \
-		nsHTMLTableSectionElement.cpp \
-		nsHTMLTextAreaElement.cpp \
-		nsHTMLTitleElement.cpp \
-		nsHTMLUnknownElement.cpp \
-		nsDOMValidityState.cpp \
-		nsIConstraintValidation.cpp \
-		nsRadioVisitor.cpp \
-		nsDOMStringMap.cpp \
-		$(NULL)
-
-ifdef MOZ_MEDIA
-CPPSRCS		+= \
-		nsHTMLAudioElement.cpp \
-		nsHTMLMediaElement.cpp \
-		nsMediaError.cpp \
-		nsMediaFragmentURIParser.cpp \
-		nsHTMLSourceElement.cpp \
-		nsTimeRanges.cpp \
-		nsHTMLVideoElement.cpp \
-		$(NULL)
-endif
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -109,6 +22,7 @@ include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 INCLUDES	+= \
+		-I$(srcdir)/../../document/src \
 		-I$(srcdir)/../../../base/src \
 		-I$(srcdir)/../../../events/src \
 		-I$(srcdir)/../../../xbl/src \
@@ -122,8 +36,12 @@ INCLUDES	+= \
 		-I$(srcdir)/../../../../editor/libeditor/base \
 		-I$(srcdir)/../../../../editor/libeditor/text \
 		-I$(srcdir)/../../../../editor/txmgr/src \
+		-I$(srcdir)/../../../../netwerk/base/src \
 		-I$(srcdir) \
 		-I$(topsrcdir)/xpcom/ds \
+		-I$(topsrcdir)/content/media/ \
 		$(NULL)
 
-DEFINES += -D_IMPL_NS_LAYOUT
+DEFINES		+= \
+		-D_IMPL_NS_LAYOUT \
+		$(NULL)

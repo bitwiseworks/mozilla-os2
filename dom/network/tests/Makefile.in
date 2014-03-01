@@ -11,9 +11,6 @@ relativesrcdir   = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS = \
-  $(NULL)
-
 MOCHITEST_FILES = \
   test_network_basics.html \
   test_tcpsocket_default_permissions.html \
@@ -21,8 +18,13 @@ MOCHITEST_FILES = \
   test_tcpsocket_enabled_with_perm.html \
   $(NULL)
 
-MODULE = test_dom_socket
-
-XPCSHELL_TESTS = unit
+ifdef MOZ_B2G_RIL
+MOCHITEST_FILES = \
+  test_networkstats_basics.html \
+  test_networkstats_disabled.html \
+  test_networkstats_enabled_no_perm.html \
+  test_networkstats_enabled_perm.html \
+  $(NULL)
+endif
 
 include $(topsrcdir)/config/rules.mk

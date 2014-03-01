@@ -7,14 +7,16 @@
 
 function test() {
   // initialization
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
+  const TEST_URL = "http://mochi.test:8888/browser/browser/components/" +
+                   "privatebrowsing/test/browser/" +
+                   "browser_privatebrowsing_cookieacceptdialog.html";
+  const BLANK_URL = "http://mochi.test:8888/";
   let cp = Cc["@mozilla.org/embedcomp/cookieprompt-service;1"].
            getService(Ci.nsICookiePromptService);
 
   waitForExplicitFinish();
 
-  function checkRememberOption(expectedDisabled, callback) {
+  function checkRememberOption(expectedDisabled, aWindow, callback) {
     function observer(aSubject, aTopic, aData) {
       if (aTopic != "domwindowopened")
         return;
@@ -36,8 +38,7 @@ function test() {
             ok(!remember.hasAttribute("disabled"),
                "The checkbox should not be disabled");
 
-          win.close();
-          callback();
+          waitForWindowClose(win, callback);
         });
       }, false);
     }
@@ -59,23 +60,102 @@ function test() {
       expiry: time,
       isHttpOnly: true,
       QueryInterface: function(iid) {
-        const validIIDs = [Ci.nsISupports,
-                           Ci.nsICookie,
-                           Ci.nsICookie2];
+        const validIIDs = [Ci.nsISupports, Ci.nsICookie, Ci.nsICookie2];
         for (var i = 0; i < validIIDs.length; ++i)
           if (iid == validIIDs[i])
             return this;
         throw Cr.NS_ERROR_NO_INTERFACE;
       }
     };
-    cp.cookieDialog(window, cookie, "mozilla.org", 10, false, remember);
+    cp.cookieDialog(aWindow, cookie, "mozilla.org", 10, false, remember);
   }
 
-  checkRememberOption(false, function() {
-    pb.privateBrowsingEnabled = true;
-    checkRememberOption(true, function() {
-      pb.privateBrowsingEnabled = false;
-      checkRememberOption(false, finish);
+  function checkSettingDialog(aIsPrivateWindow, aWindow, aCallback) {
+    let selectedBrowser = aWindow.gBrowser.selectedBrowser;
+
+    function onLoad() {
+      if (aWindow.content.location.href != TEST_URL) {
+        selectedBrowser.loadURI(TEST_URL);
+        return;
+      }
+      selectedBrowser.removeEventListener("load", onLoad, true);
+      Services.ww.unregisterNotification(observer);
+
+      ok(aIsPrivateWindow,
+         "Confirm setting dialog is not displayed for private window");
+
+      executeSoon(aCallback);
+    }
+    selectedBrowser.addEventListener("load", onLoad, true);
+
+    function observer(aSubject, aTopic, aData) {
+      if (aTopic != "domwindowopened")
+        return;
+      selectedBrowser.removeEventListener("load", onLoad, true);
+      Services.ww.unregisterNotification(observer);
+      ok(!aIsPrivateWindow,
+         "Confirm setting dialog is displayed for normal window");
+      let win = aSubject.QueryInterface(Ci.nsIDOMWindow);
+      executeSoon(function () {
+        info("Wait for window close");
+        waitForWindowClose(win, aCallback);
+      });
+    }
+    Services.ww.registerNotification(observer);
+
+    selectedBrowser.loadURI(TEST_URL);
+  }
+
+  let windowsToClose = [];
+  function testOnWindow(aIsPrivate, aCallback) {
+    whenNewWindowLoaded({private: aIsPrivate}, function(aWin) {
+      windowsToClose.push(aWin);
+      let selectedBrowser = aWin.gBrowser.selectedBrowser;
+      selectedBrowser.addEventListener("load", function onLoad() {
+        if (aWin.content.location.href != BLANK_URL) {
+          selectedBrowser.loadURI(BLANK_URL);
+          return;
+        }
+        selectedBrowser.removeEventListener("load", onLoad, true);
+        executeSoon(function() aCallback(aWin));
+      }, true);
+      selectedBrowser.loadURI(BLANK_URL);
+    });
+  }
+
+  registerCleanupFunction(function() {
+    Services.prefs.clearUserPref("network.cookie.lifetimePolicy");
+    windowsToClose.forEach(function(aWin) {
+      aWin.close();
     });
   });
+
+  // Ask all cookies
+  Services.prefs.setIntPref("network.cookie.lifetimePolicy", 1);
+
+  testOnWindow(false, function(aWin) {
+    info("Test on public window");
+    checkRememberOption(false, aWin, function() {
+      checkSettingDialog(false, aWin, function() {
+        testOnWindow(true, function(aPrivWin) {
+          info("Test on private window");
+          checkRememberOption(true, aPrivWin, function() {
+            checkSettingDialog(true, aPrivWin, finish);
+          });
+        });
+      });
+    });
+  });
+}
+
+function waitForWindowClose(aWin, aCallback) {
+  function observer(aSubject, aTopic, aData) {
+    if (aTopic == "domwindowclosed") {
+      info("Window closed");
+      Services.ww.unregisterNotification(observer);
+      executeSoon(aCallback);
+    }
+  }
+  Services.ww.registerNotification(observer);
+  aWin.close();
 }

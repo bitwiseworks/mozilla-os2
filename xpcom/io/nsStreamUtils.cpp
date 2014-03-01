@@ -6,6 +6,7 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/Attributes.h"
 #include "nsStreamUtils.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIPipe.h"
 #include "nsIEventTarget.h"
@@ -45,10 +46,9 @@ private:
         bool val;
         nsresult rv = mTarget->IsOnCurrentThread(&val);
         if (NS_FAILED(rv) || !val) {
-            nsCOMPtr<nsIInputStreamCallback> event;
-            NS_NewInputStreamReadyEvent(getter_AddRefs(event), mCallback,
-                                        mTarget);
-            mCallback = 0;
+            nsCOMPtr<nsIInputStreamCallback> event =
+                NS_NewInputStreamReadyEvent(mCallback, mTarget);
+            mCallback = nullptr;
             if (event) {
                 rv = event->OnInputStreamReady(nullptr);
                 if (NS_FAILED(rv)) {
@@ -124,10 +124,9 @@ private:
         bool val;
         nsresult rv = mTarget->IsOnCurrentThread(&val);
         if (NS_FAILED(rv) || !val) {
-            nsCOMPtr<nsIOutputStreamCallback> event;
-            NS_NewOutputStreamReadyEvent(getter_AddRefs(event), mCallback,
-                                         mTarget);
-            mCallback = 0;
+            nsCOMPtr<nsIOutputStreamCallback> event =
+                NS_NewOutputStreamReadyEvent(mCallback, mTarget);
+            mCallback = nullptr;
             if (event) {
                 rv = event->OnOutputStreamReady(nullptr);
                 if (NS_FAILED(rv)) {
@@ -175,32 +174,26 @@ NS_IMPL_THREADSAFE_ISUPPORTS2(nsOutputStreamReadyEvent, nsIRunnable,
 
 //-----------------------------------------------------------------------------
 
-nsresult
-NS_NewInputStreamReadyEvent(nsIInputStreamCallback **event,
-                            nsIInputStreamCallback *callback,
+already_AddRefed<nsIInputStreamCallback>
+NS_NewInputStreamReadyEvent(nsIInputStreamCallback *callback,
                             nsIEventTarget *target)
 {
     NS_ASSERTION(callback, "null callback");
     NS_ASSERTION(target, "null target");
-    nsInputStreamReadyEvent *ev = new nsInputStreamReadyEvent(callback, target);
-    if (!ev)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(*event = ev);
-    return NS_OK;
+    nsRefPtr<nsInputStreamReadyEvent> ev =
+        new nsInputStreamReadyEvent(callback, target);
+    return ev.forget();
 }
 
-nsresult
-NS_NewOutputStreamReadyEvent(nsIOutputStreamCallback **event,
-                             nsIOutputStreamCallback *callback,
+already_AddRefed<nsIOutputStreamCallback>
+NS_NewOutputStreamReadyEvent(nsIOutputStreamCallback *callback,
                              nsIEventTarget *target)
 {
     NS_ASSERTION(callback, "null callback");
     NS_ASSERTION(target, "null target");
-    nsOutputStreamReadyEvent *ev = new nsOutputStreamReadyEvent(callback, target);
-    if (!ev)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(*event = ev);
-    return NS_OK;
+    nsRefPtr<nsOutputStreamReadyEvent> ev =
+        new nsOutputStreamReadyEvent(callback, target);
+    return ev.forget();
 }
 
 //-----------------------------------------------------------------------------
@@ -217,6 +210,7 @@ public:
     nsAStreamCopier()
         : mLock("nsAStreamCopier.mLock")
         , mCallback(nullptr)
+        , mProgressCallback(nullptr)
         , mClosure(nullptr)
         , mChunkSize(0)
         , mEventInProcess(false)
@@ -241,7 +235,8 @@ public:
                    void *closure,
                    uint32_t chunksize,
                    bool closeSource,
-                   bool closeSink)
+                   bool closeSink,
+                   nsAsyncCopyProgressFun progressCallback)
     {
         mSource = source;
         mSink = sink;
@@ -251,6 +246,7 @@ public:
         mChunkSize = chunksize;
         mCloseSource = closeSource;
         mCloseSink = closeSink;
+        mProgressCallback = progressCallback;
 
         mAsyncSource = do_QueryInterface(mSource);
         mAsyncSink = do_QueryInterface(mSink);
@@ -285,6 +281,9 @@ public:
             bool copyFailed = false;
             if (!canceled) {
                 uint32_t n = DoCopy(&sourceCondition, &sinkCondition);
+                if (n > 0 && mProgressCallback) {
+                    mProgressCallback(mClosure, n);
+                }
                 copyFailed = NS_FAILED(sourceCondition) ||
                              NS_FAILED(sinkCondition) || n == 0;
 
@@ -449,6 +448,7 @@ protected:
     nsCOMPtr<nsIEventTarget>       mTarget;
     Mutex                          mLock;
     nsAsyncCopyCallbackFun         mCallback;
+    nsAsyncCopyProgressFun         mProgressCallback;
     void                          *mClosure;
     uint32_t                       mChunkSize;
     bool                           mEventInProcess;
@@ -562,7 +562,8 @@ NS_AsyncCopy(nsIInputStream         *source,
              void                   *closure,
              bool                    closeSource,
              bool                    closeSink,
-             nsISupports           **aCopierCtx)
+             nsISupports           **aCopierCtx,
+             nsAsyncCopyProgressFun  progressCallback)
 {
     NS_ASSERTION(target, "non-null target required");
 
@@ -580,7 +581,7 @@ NS_AsyncCopy(nsIInputStream         *source,
     // Start() takes an owning ref to the copier...
     NS_ADDREF(copier);
     rv = copier->Start(source, sink, target, callback, closure, chunkSize,
-                       closeSource, closeSink);
+                       closeSource, closeSink, progressCallback);
 
     if (aCopierCtx) {
         *aCopierCtx = static_cast<nsISupports*>(
@@ -621,11 +622,11 @@ NS_ConsumeStream(nsIInputStream *stream, uint32_t maxCount, nsACString &result)
         if (avail64 == 0)
             break;
 
-        uint32_t avail = (uint32_t)NS_MIN<uint64_t>(avail64, maxCount);
+        uint32_t avail = (uint32_t)XPCOM_MIN<uint64_t>(avail64, maxCount);
 
         // resize result buffer
         uint32_t length = result.Length();
-        if (avail > PR_UINT32_MAX - length)
+        if (avail > UINT32_MAX - length)
             return NS_ERROR_FILE_TOO_BIG;
         
         result.SetLength(length + avail);

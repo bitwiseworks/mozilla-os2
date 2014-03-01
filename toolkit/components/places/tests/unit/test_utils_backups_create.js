@@ -15,6 +15,8 @@ const SUFFIX = ".json";
 const NUMBER_OF_BACKUPS = 10;
 
 function run_test() {
+  do_test_pending();
+
   // Generate random dates.
   var dateObj = new Date();
   var dates = [];
@@ -31,7 +33,7 @@ function run_test() {
   dates.sort();
 
   // Get and cleanup the backups folder.
-  var bookmarksBackupDir = PlacesUtils.backups.folder;
+  var bookmarksBackupDir = PlacesBackups.folder;
 
   // Fake backups are created backwards to ensure we won't consider file
   // creation time.
@@ -55,31 +57,35 @@ function run_test() {
     return LOCALIZED_PREFIX + aValue;
   }
 
-  PlacesUtils.backups.create(Math.floor(dates.length/2));
-  // Add today's backup.
-  dates.push(dateObj.toLocaleFormat("%Y-%m-%d"));
+  Task.spawn(function() {
+    yield PlacesBackups.create(Math.floor(dates.length/2));
+    // Add today's backup.
+    dates.push(dateObj.toLocaleFormat("%Y-%m-%d"));
 
-  // Check backups.
-  for (var i = 0; i < dates.length; i++) {
-    let backupFilename;
-    let shouldExist;
-    if (i > Math.floor(dates.length/2)) {
-      backupFilename = PREFIX + dates[i] + SUFFIX;
-      shouldExist = true;
+    // Check backups.
+    for (var i = 0; i < dates.length; i++) {
+      let backupFilename;
+      let shouldExist;
+      if (i > Math.floor(dates.length/2)) {
+        backupFilename = PREFIX + dates[i] + SUFFIX;
+        shouldExist = true;
+      }
+      else {
+        backupFilename = LOCALIZED_PREFIX + dates[i] + SUFFIX;
+        shouldExist = false;
+      }
+      var backupFile = bookmarksBackupDir.clone();
+      backupFile.append(backupFilename);
+      if (backupFile.exists() != shouldExist)
+        do_throw("Backup should " + (shouldExist ? "" : "not") + " exist: " + backupFilename);
     }
-    else {
-      backupFilename = LOCALIZED_PREFIX + dates[i] + SUFFIX;
-      shouldExist = false;
-    }
-    var backupFile = bookmarksBackupDir.clone();
-    backupFile.append(backupFilename);
-    if (backupFile.exists() != shouldExist)
-      do_throw("Backup should " + (shouldExist ? "" : "not") + " exist: " + backupFilename);
-  }
 
-  // Cleanup backups folder.
-  bookmarksBackupDir.remove(true);
-  do_check_false(bookmarksBackupDir.exists());
-  // Recreate the folder.
-  PlacesUtils.backups.folder;
+    // Cleanup backups folder.
+    bookmarksBackupDir.remove(true);
+    do_check_false(bookmarksBackupDir.exists());
+    // Recreate the folder.
+    PlacesBackups.folder;
+
+    do_test_finished();
+  });
 }

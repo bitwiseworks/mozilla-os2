@@ -20,13 +20,16 @@
 #include <string.h>
 #include "nsBinaryStream.h"
 #include "nsCRT.h"
-#include "nsIStreamBufferAccess.h"
 #include "prlong.h"
 #include "nsString.h"
 #include "nsISerializable.h"
 #include "nsIClassInfo.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIURI.h" // for NS_IURI_IID
+#include "mozilla/Endian.h"
+
+#include "jsapi.h"
+#include "jsfriendapi.h"
 
 NS_IMPL_ISUPPORTS3(nsBinaryOutputStream, nsIObjectOutputStream, nsIBinaryOutputStream, nsIOutputStream)
 
@@ -111,14 +114,14 @@ nsBinaryOutputStream::Write8(uint8_t aByte)
 NS_IMETHODIMP
 nsBinaryOutputStream::Write16(uint16_t a16)
 {
-    a16 = NS_SWAP16(a16);
+    a16 = mozilla::NativeEndian::swapToBigEndian(a16);
     return WriteFully((const char*)&a16, sizeof a16);
 }
 
 NS_IMETHODIMP
 nsBinaryOutputStream::Write32(uint32_t a32)
 {
-    a32 = NS_SWAP32(a32);
+    a32 = mozilla::NativeEndian::swapToBigEndian(a32);
     return WriteFully((const char*)&a32, sizeof a32);
 }
 
@@ -128,7 +131,7 @@ nsBinaryOutputStream::Write64(uint64_t a64)
     nsresult rv;
     uint32_t bytesWritten;
 
-    a64 = NS_SWAP64(a64);
+    a64 = mozilla::NativeEndian::swapToBigEndian(a64);
     rv = Write(reinterpret_cast<char*>(&a64), sizeof a64, &bytesWritten);
     if (NS_FAILED(rv)) return rv;
     if (bytesWritten != sizeof a64)
@@ -190,9 +193,8 @@ nsBinaryOutputStream::WriteWStringZ(const PRUnichar* aString)
         if (!copy)
             return NS_ERROR_OUT_OF_MEMORY;
     }
-    NS_ASSERTION((PRUptrdiff(aString) & 0x1) == 0, "aString not properly aligned");
-    for (uint32_t i = 0; i < length; i++)
-        copy[i] = NS_SWAP16(aString[i]);
+    NS_ASSERTION((uintptr_t(aString) & 0x1) == 0, "aString not properly aligned");
+    mozilla::NativeEndian::copyAndSwapToBigEndian(copy, aString, length);
     rv = WriteBytes(reinterpret_cast<const char*>(copy), byteCount);
     if (copy != temp)
         moz_free(copy);
@@ -469,7 +471,7 @@ nsBinaryInputStream::Read16(uint16_t* a16)
     if (NS_FAILED(rv)) return rv;
     if (bytesRead != sizeof *a16)
         return NS_ERROR_FAILURE;
-    *a16 = NS_SWAP16(*a16);
+    *a16 = mozilla::NativeEndian::swapFromBigEndian(*a16);
     return rv;
 }
 
@@ -483,7 +485,7 @@ nsBinaryInputStream::Read32(uint32_t* a32)
     if (NS_FAILED(rv)) return rv;
     if (bytesRead != sizeof *a32)
         return NS_ERROR_FAILURE;
-    *a32 = NS_SWAP32(*a32);
+    *a32 = mozilla::NativeEndian::swapFromBigEndian(*a32);
     return rv;
 }
 
@@ -497,7 +499,7 @@ nsBinaryInputStream::Read64(uint64_t* a64)
     if (NS_FAILED(rv)) return rv;
     if (bytesRead != sizeof *a64)
         return NS_ERROR_FAILURE;
-    *a64 = NS_SWAP64(*a64);
+    *a64 = mozilla::NativeEndian::swapFromBigEndian(*a64);
     return rv;
 }
 
@@ -603,9 +605,7 @@ WriteSegmentToString(nsIInputStream* aStream,
         char bytes[2] = { closure->mCarryoverByte, *aFromSegment };
         *cursor = *(PRUnichar*)bytes;
         // Now the little endianness dance
-#ifdef IS_LITTLE_ENDIAN
-        *cursor = (PRUnichar) NS_SWAP16(*cursor);
-#endif
+        mozilla::NativeEndian::swapToBigEndianInPlace(cursor, 1);
         ++cursor;
         
         // now skip past the first byte of the buffer.. code from here
@@ -625,12 +625,10 @@ WriteSegmentToString(nsIInputStream* aStream,
     uint32_t segmentLength = aCount / sizeof(PRUnichar);
 
     // copy all data into our aligned buffer.  byte swap if necessary.
+    // cursor may be unaligned, so we cannot use copyAndSwapToBigEndian directly
     memcpy(cursor, unicodeSegment, segmentLength * sizeof(PRUnichar));
     PRUnichar *end = cursor + segmentLength;
-#ifdef IS_LITTLE_ENDIAN
-    for (; cursor < end; ++cursor)
-        *cursor = (PRUnichar) NS_SWAP16(*cursor);
-#endif
+    mozilla::NativeEndian::swapToBigEndianInPlace(cursor, segmentLength);
     closure->mWriteCursor = end;
 
     // remember this is the modifed aCount and aFromSegment,
@@ -662,7 +660,7 @@ nsBinaryInputStream::ReadString(nsAString& aString)
     }
 
     // pre-allocate output buffer, and get direct access to buffer...
-    if (!EnsureStringLength(aString, length))
+    if (!aString.SetLength(length, mozilla::fallible_t()))
         return NS_ERROR_OUT_OF_MEMORY;
 
     nsAString::iterator start;
@@ -713,6 +711,31 @@ NS_IMETHODIMP
 nsBinaryInputStream::ReadByteArray(uint32_t aLength, uint8_t* *_rval)
 {
     return ReadBytes(aLength, reinterpret_cast<char **>(_rval));
+}
+
+NS_IMETHODIMP
+nsBinaryInputStream::ReadArrayBuffer(uint32_t aLength, const JS::Value& aBuffer, JSContext* cx)
+{
+    if (!aBuffer.isObject()) {
+        return NS_ERROR_FAILURE;
+    }
+    JS::RootedObject buffer(cx, &aBuffer.toObject());
+    if (!JS_IsArrayBufferObject(buffer) ||
+        JS_GetArrayBufferByteLength(buffer) < aLength) {
+        return NS_ERROR_FAILURE;
+    }
+    uint8_t* data = JS_GetArrayBufferData(&aBuffer.toObject());
+    if (!data) {
+        return NS_ERROR_FAILURE;
+    }
+
+    uint32_t bytesRead;
+    nsresult rv = Read(reinterpret_cast<char*>(data), aLength, &bytesRead);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (bytesRead != aLength) {
+        return NS_ERROR_FAILURE;
+    }
+    return NS_OK;
 }
 
 NS_IMETHODIMP

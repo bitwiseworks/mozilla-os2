@@ -9,15 +9,12 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = accessibility
 LIBRARY_NAME = accessibility_toolkit_uia_s
 EXPORT_LIBRARY = ..
 LIBXUL_LIBRARY = 1
-
-
-CPPSRCS += \
-  uiaRawElmProvider.cpp \
-  $(NULL)
+# The midl generated code include Windows headers which defines min and max
+# macros which conflicts with std::min/max.  Suppress the macros:
+OS_CXXFLAGS += -DNOMINMAX
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -27,10 +24,14 @@ include $(topsrcdir)/config/rules.mk
 
 LOCAL_INCLUDES += \
   -I$(srcdir) \
+  -I$(srcdir)/../msaa \
   -I$(srcdir)/../../base \
   -I$(srcdir)/../../generic \
   -I$(srcdir)/../../html \
-  -I$(srcdir)/../../msaa \
   -I$(srcdir)/../../xpcom \
   -I$(srcdir)/../../xul \
   $(NULL)
+
+ifdef A11Y_LOG
+  DEFINES += -DA11Y_LOG
+endif

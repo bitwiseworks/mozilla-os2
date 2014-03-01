@@ -168,7 +168,7 @@ bool CheckHeader(const void * pHdr)
 	const Sfnt::OffsetSubTable * pOffsetTable  
 		= reinterpret_cast<const Sfnt::OffsetSubTable *>(pHdr);
 
-	return be::swap(pOffsetTable->scaler_type) == Sfnt::OffsetSubTable::TrueTypeWin;
+	return pHdr && be::swap(pOffsetTable->scaler_type) == Sfnt::OffsetSubTable::TrueTypeWin;
 }
 
 /*----------------------------------------------------------------------------------------------
@@ -709,10 +709,8 @@ int PostLookup(const void * pPost, size_t lPostSize, const void * pMaxp,
 				if (be::swap(pTable2->glyph_name_index[nGlyphId]) == iPostName)
 					return nGlyphId;
 			}
-			return -1; // no glyph with this standard name
 		}
 
-		else
 		{ // did not match a standard name, search font specific names
 			size_t nStrSizeGoal = strlen(pPostName);
 			const char * pFirstGlyphName = reinterpret_cast<const char *>(
@@ -875,13 +873,14 @@ const void * FindCmapSubtable(const void * pCmap, int nPlatformId, /* =3 */ int 
 /*----------------------------------------------------------------------------------------------
 	Check the Microsoft Unicode subtable for expected values
 ----------------------------------------------------------------------------------------------*/
-bool CheckCmap31Subtable(const void * pCmap31)
+bool CheckCmapSubtable4(const void * pCmapSubtable4)
 {
-	const Sfnt::CmapSubTable * pTable = reinterpret_cast<const Sfnt::CmapSubTable *>(pCmap31);
+    if (!pCmapSubtable4) return false;
+	const Sfnt::CmapSubTable * pTable = reinterpret_cast<const Sfnt::CmapSubTable *>(pCmapSubtable4);
 	// Bob H says ome freeware TT fonts have version 1 (eg, CALIGULA.TTF) 
 	// so don't check subtable version. 21 Mar 2002 spec changes version to language.
     if (be::swap(pTable->format) != 4) return false;
-    const Sfnt::CmapSubTableFormat4 * pTable4 = reinterpret_cast<const Sfnt::CmapSubTableFormat4 *>(pCmap31);
+    const Sfnt::CmapSubTableFormat4 * pTable4 = reinterpret_cast<const Sfnt::CmapSubTableFormat4 *>(pCmapSubtable4);
     uint16 length = be::swap(pTable4->length);
     if (length < sizeof(Sfnt::CmapSubTableFormat4))
         return false;
@@ -898,9 +897,9 @@ bool CheckCmap31Subtable(const void * pCmap31)
 	(Actually this code only depends on subtable being format 4.)
 	Return 0 if the Unicode ID is not in the subtable.
 ----------------------------------------------------------------------------------------------*/
-gid16 Cmap31Lookup(const void * pCmap31, int nUnicodeId, int rangeKey)
+gid16 CmapSubtable4Lookup(const void * pCmapSubtabel4, unsigned int nUnicodeId, int rangeKey)
 {
-	const Sfnt::CmapSubTableFormat4 * pTable = reinterpret_cast<const Sfnt::CmapSubTableFormat4 *>(pCmap31);
+	const Sfnt::CmapSubTableFormat4 * pTable = reinterpret_cast<const Sfnt::CmapSubTableFormat4 *>(pCmapSubtabel4);
 
 	uint16 nSeg = be::swap(pTable->seg_count_x2) >> 1;
   
@@ -955,11 +954,11 @@ gid16 Cmap31Lookup(const void * pCmap31, int nUnicodeId, int rangeKey)
             return (uint16)(idDelta + nUnicodeId); // must use modulus 2^16
 
         // Look up value in glyphIdArray
-        size_t offset = (nUnicodeId - chStart) + (idRangeOffset >> 1) +
-                (reinterpret_cast<const uint16 *>(pMid) - reinterpret_cast<const uint16 *>(pTable));
-        if (offset * 2 >= pTable->length)
+        const ptrdiff_t offset = (nUnicodeId - chStart) + (idRangeOffset >> 1) +
+                (pMid - reinterpret_cast<const uint16 *>(pTable));
+        if (offset * 2 >= be::swap<uint16>(pTable->length))
             return 0;
-        gid16 nGlyphId = be::peek<uint16>(pMid + (nUnicodeId - chStart) + (idRangeOffset >> 1));
+        gid16 nGlyphId = be::peek<uint16>(reinterpret_cast<const uint16 *>(pTable)+offset);
         // If this value is 0, return 0. Else add the idDelta
         return nGlyphId ? nGlyphId + idDelta : 0;
     }
@@ -973,7 +972,7 @@ gid16 Cmap31Lookup(const void * pCmap31, int nUnicodeId, int rangeKey)
 	pRangeKey is an optional key that is used to optimize the search; its value is the range
 	in which the character is found.
 ----------------------------------------------------------------------------------------------*/
-unsigned int Cmap31NextCodepoint(const void *pCmap31, unsigned int nUnicodeId, int * pRangeKey)
+unsigned int CmapSubtable4NextCodepoint(const void *pCmap31, unsigned int nUnicodeId, int * pRangeKey)
 {
 	const Sfnt::CmapSubTableFormat4 * pTable = reinterpret_cast<const Sfnt::CmapSubTableFormat4 *>(pCmap31);
 
@@ -1034,12 +1033,13 @@ unsigned int Cmap31NextCodepoint(const void *pCmap31, unsigned int nUnicodeId, i
 /*----------------------------------------------------------------------------------------------
 	Check the Microsoft UCS-4 subtable for expected values.
 ----------------------------------------------------------------------------------------------*/
-bool CheckCmap310Subtable(const void *pCmap310)
+bool CheckCmapSubtable12(const void *pCmapSubtable12)
 {
-	const Sfnt::CmapSubTable * pTable = reinterpret_cast<const Sfnt::CmapSubTable *>(pCmap310);
+    if (!pCmapSubtable12)  return false;
+	const Sfnt::CmapSubTable * pTable = reinterpret_cast<const Sfnt::CmapSubTable *>(pCmapSubtable12);
     if (be::swap(pTable->format) != 12)
         return false;
-    const Sfnt::CmapSubTableFormat12 * pTable12 = reinterpret_cast<const Sfnt::CmapSubTableFormat12 *>(pCmap310);
+    const Sfnt::CmapSubTableFormat12 * pTable12 = reinterpret_cast<const Sfnt::CmapSubTableFormat12 *>(pCmapSubtable12);
     uint32 length = be::swap(pTable12->length);
     if (length < sizeof(Sfnt::CmapSubTableFormat12))
         return false;
@@ -1053,7 +1053,7 @@ bool CheckCmap310Subtable(const void *pCmap310)
 	(Actually this code only depends on subtable being format 12.)
 	Return 0 if the Unicode ID is not in the subtable.
 ----------------------------------------------------------------------------------------------*/
-gid16 Cmap310Lookup(const void * pCmap310, unsigned int uUnicodeId, int rangeKey)
+gid16 CmapSubtable12Lookup(const void * pCmap310, unsigned int uUnicodeId, int rangeKey)
 {
 	const Sfnt::CmapSubTableFormat12 * pTable = reinterpret_cast<const Sfnt::CmapSubTableFormat12 *>(pCmap310);
 
@@ -1081,7 +1081,7 @@ gid16 Cmap310Lookup(const void * pCmap310, unsigned int uUnicodeId, int rangeKey
 	pRangeKey is an optional key that is used to optimize the search; its value is the range
 	in which the character is found.
 ----------------------------------------------------------------------------------------------*/
-unsigned int Cmap310NextCodepoint(const void *pCmap310, unsigned int nUnicodeId, int * pRangeKey)
+unsigned int CmapSubtable12NextCodepoint(const void *pCmap310, unsigned int nUnicodeId, int * pRangeKey)
 {
 	const Sfnt::CmapSubTableFormat12 * pTable = reinterpret_cast<const Sfnt::CmapSubTableFormat12 *>(pCmap310);
 

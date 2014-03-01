@@ -17,8 +17,13 @@
 #include <EGL/egl.h>
 #include <d3d9.h>
 
+#include <string>
 #include <map>
+#ifdef _MSC_VER
 #include <hash_map>
+#else
+#include <unordered_map>
+#endif
 
 #include "common/angleutils.h"
 #include "common/RefCountObject.h"
@@ -75,8 +80,8 @@ enum
     MAX_FRAGMENT_UNIFORM_VECTORS_SM3 = 224 - 3,
     MAX_DRAW_BUFFERS = 1,
 
-    IMPLEMENTATION_COLOR_READ_FORMAT = GL_BGRA_EXT,
-    IMPLEMENTATION_COLOR_READ_TYPE = GL_UNSIGNED_BYTE
+    GL_BGRA4_ANGLEX = 0x6ABC,
+    GL_BGR5_A1_ANGLEX = 0x6ABD
 };
 
 enum QueryType
@@ -504,6 +509,9 @@ class Context
     bool supportsNonPower2Texture() const;
     bool supportsInstancing() const;
     bool supportsTextureFilterAnisotropy() const;
+    bool supportsDerivativeInstructions() const;
+
+    bool getCurrentReadFormatType(GLenum *format, GLenum *type);
 
     float getTextureMaxAnisotropy() const;
 
@@ -533,7 +541,7 @@ class Context
 
     Texture *getIncompleteTexture(TextureType type);
 
-    bool cullSkipsDraw(GLenum drawMode);
+    bool skipDraw(GLenum drawMode);
     bool isTriangleMode(GLenum drawMode);
 
     void initExtensionString();
@@ -548,20 +556,28 @@ class Context
     BindingPointer<Texture2D> mTexture2DZero;
     BindingPointer<TextureCubeMap> mTextureCubeMapZero;
 
-    typedef stdext::hash_map<GLuint, Framebuffer*> FramebufferMap;
+#ifndef HASH_MAP
+# ifdef _MSC_VER
+#  define HASH_MAP stdext::hash_map
+# else
+#  define HASH_MAP std::unordered_map
+# endif
+#endif
+
+    typedef HASH_MAP<GLuint, Framebuffer*> FramebufferMap;
     FramebufferMap mFramebufferMap;
     HandleAllocator mFramebufferHandleAllocator;
 
-    typedef stdext::hash_map<GLuint, Fence*> FenceMap;
+    typedef HASH_MAP<GLuint, Fence*> FenceMap;
     FenceMap mFenceMap;
     HandleAllocator mFenceHandleAllocator;
 
-    typedef stdext::hash_map<GLuint, Query*> QueryMap;
+    typedef HASH_MAP<GLuint, Query*> QueryMap;
     QueryMap mQueryMap;
     HandleAllocator mQueryHandleAllocator;
 
-    std::string mExtensionString;
-    std::string mRendererString;
+    const char *mExtensionString;
+    const char *mRendererString;
 
     VertexDataManager *mVertexDataManager;
     IndexDataManager *mIndexDataManager;
@@ -630,6 +646,7 @@ class Context
     bool mSupportsDepthTextures;
     bool mSupports32bitIndices;
     bool mSupportsTextureFilterAnisotropy;
+    bool mSupportsDerivativeInstructions;
     int mNumCompressedTextureFormats;
 
     // state caching flags

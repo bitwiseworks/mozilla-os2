@@ -14,7 +14,6 @@
 #include "nsIChannel.h"
 #include "nsICachingChannel.h"
 #include "nsICacheEntryDescriptor.h"
-#include "nsCharsetAlias.h"
 #include "nsICharsetConverterManager.h"
 #include "nsIInputStream.h"
 #include "CNavDTD.h"
@@ -34,15 +33,18 @@
 #include "nsNetUtil.h"
 #include "nsScriptLoader.h"
 #include "nsDataHashtable.h"
-#include "nsIThreadPool.h"
 #include "nsXPCOMCIDInternal.h"
 #include "nsMimeTypes.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/Mutex.h"
 #include "nsParserConstants.h"
 #include "nsCharsetSource.h"
+#include "nsContentUtils.h"
+
+#include "mozilla/dom/EncodingUtils.h"
 
 using namespace mozilla;
+using mozilla::dom::EncodingUtils;
 
 #define NS_PARSER_FLAG_PARSER_ENABLED         0x00000002
 #define NS_PARSER_FLAG_OBSERVERS_ENABLED      0x00000004
@@ -243,18 +245,16 @@ nsParser::Cleanup()
   NS_ASSERTION(!(mFlags & NS_PARSER_FLAG_PENDING_CONTINUE_EVENT), "bad");
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsParser)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsParser)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mDTD)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mSink)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mObserver)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDTD)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSink)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mObserver)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsParser)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mDTD)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mSink)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mObserver)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDTD)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSink)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mObserver)
   CParserContext *pc = tmp->mParserContext;
   while (pc) {
     cb.NoteXPCOMChild(pc->mTokenizer);
@@ -682,7 +682,7 @@ VerifyPublicIDs()
       }
     }
     for (i = 0; i < ELEMENTS_OF(kPublicIDs); ++i) {
-      nsCAutoString lcPubID(kPublicIDs[i].name);
+      nsAutoCString lcPubID(kPublicIDs[i].name);
       ToLowerCase(lcPubID);
       if (nsCRT::strcmp(kPublicIDs[i].name, lcPubID.get()) != 0) {
         NS_NOTREACHED("doctype not lower case");
@@ -726,7 +726,7 @@ DetermineHTMLParseMode(const nsString& aBuffer,
     } else {
       // We have to check our list of public IDs to see what to do.
       // Yes, we want UCS2 to ASCII lossy conversion.
-      nsCAutoString publicID;
+      nsAutoCString publicID;
       publicID.AssignWithConversion(publicIDUCS2);
 
       // See comment above definition of kPublicIDs about case
@@ -791,15 +791,7 @@ DetermineParseMode(const nsString& aBuffer, nsDTDMode& aParseMode,
 {
   if (aMimeType.EqualsLiteral(TEXT_HTML)) {
     DetermineHTMLParseMode(aBuffer, aParseMode, aDocType);
-  } else if (aMimeType.EqualsLiteral(TEXT_PLAIN) ||
-             aMimeType.EqualsLiteral(TEXT_CACHE_MANIFEST) ||
-             aMimeType.EqualsLiteral(TEXT_CSS) ||
-             aMimeType.EqualsLiteral(APPLICATION_JAVASCRIPT) ||
-             aMimeType.EqualsLiteral(APPLICATION_XJAVASCRIPT) ||
-             aMimeType.EqualsLiteral(APPLICATION_JSON) ||
-             aMimeType.EqualsLiteral(TEXT_ECMASCRIPT) ||
-             aMimeType.EqualsLiteral(APPLICATION_ECMASCRIPT) ||
-             aMimeType.EqualsLiteral(TEXT_JAVASCRIPT)) {
+  } else if (nsContentUtils::IsPlainTextType(aMimeType)) {
     aDocType = ePlainText;
     aParseMode = eDTDMode_quirks;
   } else { // Some form of XML
@@ -1107,6 +1099,7 @@ nsParser::ContinueInterruptedParsing()
   // the reenabling process, hold a reference to ourselves.
   nsresult result=NS_OK;
   nsCOMPtr<nsIParser> kungFuDeathGrip(this);
+  nsCOMPtr<nsIContentSink> sinkDeathGrip(mSink);
 
 #ifdef DEBUG
   if (!(mFlags & NS_PARSER_FLAG_PARSER_ENABLED)) {
@@ -1199,7 +1192,7 @@ void nsParser::HandleParserContinueEvent(nsParserContinueEvent *ev)
 bool
 nsParser::IsInsertionPointDefined()
 {
-  return true;
+  return false;
 }
 
 void
@@ -1243,15 +1236,14 @@ nsParser::Parse(nsIURI* aURL,
   mObserver = aListener;
 
   if (aURL) {
-    nsCAutoString spec;
+    nsAutoCString spec;
     nsresult rv = aURL->GetSpec(spec);
     if (rv != NS_OK) {
       return rv;
     }
     NS_ConvertUTF8toUTF16 theName(spec);
 
-    nsScanner* theScanner = new nsScanner(theName, false, mCharset,
-                                          mCharsetSource);
+    nsScanner* theScanner = new nsScanner(theName, false);
     CParserContext* pc = new CParserContext(mParserContext, theScanner, aKey,
                                             mCommand, aListener);
     if (pc && theScanner) {
@@ -1311,7 +1303,7 @@ nsParser::Parse(const nsAString& aSourceBuffer,
     if (!pc) {
       // Only make a new context if we don't have one, OR if we do, but has a
       // different context key.
-      nsScanner* theScanner = new nsScanner(mUnusedInput, mCharset, mCharsetSource);
+      nsScanner* theScanner = new nsScanner(mUnusedInput);
       NS_ENSURE_TRUE(theScanner, NS_ERROR_OUT_OF_MEMORY);
 
       eAutoDetectResult theStatus = eUnknownDetect;
@@ -1659,7 +1651,7 @@ nsParser::OnStartRequest(nsIRequest *request, nsISupports* aContext)
   mDTD = nullptr;
 
   nsresult rv;
-  nsCAutoString contentType;
+  nsAutoCString contentType;
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(request);
   if (channel) {
     rv = channel->GetContentType(contentType);
@@ -1673,11 +1665,6 @@ nsParser::OnStartRequest(nsIRequest *request, nsISupports* aContext)
   return rv;
 }
 
-
-#define UTF16_BOM "UTF-16"
-#define UTF16_BE "UTF-16BE"
-#define UTF16_LE "UTF-16LE"
-#define UTF8 "UTF-8"
 
 static inline bool IsSecondMarker(unsigned char aChar)
 {
@@ -1693,146 +1680,87 @@ static inline bool IsSecondMarker(unsigned char aChar)
 }
 
 static bool
-DetectByteOrderMark(const unsigned char* aBytes, int32_t aLen,
-                    nsCString& oCharset, int32_t& oCharsetSource)
+ExtractCharsetFromXmlDeclaration(const unsigned char* aBytes, int32_t aLen,
+                                 nsCString& oCharset)
 {
- oCharsetSource= kCharsetFromAutoDetection;
- oCharset.Truncate();
- // See http://www.w3.org/TR/2000/REC-xml-20001006#sec-guessing
- // for details
- // Also, MS Win2K notepad now generate 3 bytes BOM in UTF8 as UTF8 signature
- // We need to check that
- // UCS2 BOM FEFF = UTF8 EF BB BF
- switch(aBytes[0])
-	 {
-   case 0x00:
-     if((0x3C==aBytes[1]) && (0x00==aBytes[2])) {
-        // 00 3C 00
-        if(IsSecondMarker(aBytes[3])) {
-           // 00 3C 00 SM UTF-16,  big-endian, no Byte Order Mark 
-           oCharset.Assign(UTF16_BE); 
-           oCharsetSource = kCharsetFromByteOrderMark;
-        } 
-     }
-   break;
-   case 0x3C:
-     if(0x00==aBytes[1] && (0x00==aBytes[3])) {
-        // 3C 00 XX 00
-        if(IsSecondMarker(aBytes[2])) {
-           // 3C 00 SM 00 UTF-16,  little-endian, no Byte Order Mark 
-           oCharset.Assign(UTF16_LE); 
-           oCharsetSource = kCharsetFromByteOrderMark;
-        } 
-     // For html, meta tag detector is invoked before this so that we have 
-     // to deal only with XML here.
-     } else if(                     (0x3F==aBytes[1]) &&
-               (0x78==aBytes[2]) && (0x6D==aBytes[3]) &&
-               (0 == PL_strncmp("<?xml", (char*)aBytes, 5 ))) {
-       // 3C 3F 78 6D
-       // ASCII characters are in their normal positions, so we can safely
-       // deal with the XML declaration in the old C way
-       // The shortest string so far (strlen==5):
-       // <?xml
-       int32_t i;
-       bool versionFound = false, encodingFound = false;
-       for (i=6; i < aLen && !encodingFound; ++i) {
-         // end of XML declaration?
-         if ((((char*)aBytes)[i] == '?') && 
-           ((i+1) < aLen) &&
-           (((char*)aBytes)[i+1] == '>')) {
-           break;
-         }
-         // Version is required.
-         if (!versionFound) {
-           // Want to avoid string comparisons, hence looking for 'n'
-           // and only if found check the string leading to it. Not
-           // foolproof, but fast.
-           // The shortest string allowed before this is  (strlen==13):
-           // <?xml version
-           if ((((char*)aBytes)[i] == 'n') &&
-             (i >= 12) && 
-             (0 == PL_strncmp("versio", (char*)(aBytes+i-6), 6 ))) {
-             // Fast forward through version
-             char q = 0;
-             for (++i; i < aLen; ++i) {
-               char qi = ((char*)aBytes)[i];
-               if (qi == '\'' || qi == '"') {
-                 if (q && q == qi) {
-                   //  ending quote
-                   versionFound = true;
-                   break;
-                 } else {
-                   // Starting quote
-                   q = qi;
-                 }
-               }
-             }
-           }
-         } else {
-           // encoding must follow version
-           // Want to avoid string comparisons, hence looking for 'g'
-           // and only if found check the string leading to it. Not
-           // foolproof, but fast.
-           // The shortest allowed string before this (strlen==26):
-           // <?xml version="1" encoding
-           if ((((char*)aBytes)[i] == 'g') &&
-             (i >= 25) && 
-             (0 == PL_strncmp("encodin", (char*)(aBytes+i-7), 7 ))) {
-             int32_t encStart = 0;
-             char q = 0;
-             for (++i; i < aLen; ++i) {
-               char qi = ((char*)aBytes)[i];
-               if (qi == '\'' || qi == '"') {
-                 if (q && q == qi) {
-                   int32_t count = i - encStart;
-                   // encoding value is invalid if it is UTF-16
-                   if (count > 0 && 
-                     (0 != PL_strcmp("UTF-16", (char*)(aBytes+encStart)))) {
-                     oCharset.Assign((char*)(aBytes+encStart),count);
-                     oCharsetSource = kCharsetFromMetaTag;
-                   }
-                   encodingFound = true;
-                   break;
-                 } else {
-                   encStart = i+1;
-                   q = qi;
-                 }
-               }
-             }
-           }
-         } // if (!versionFound)
-       } // for
-     }
-   break;
-   case 0xEF:  
-     if((0xBB==aBytes[1]) && (0xBF==aBytes[2])) {
-        // EF BB BF
-        // Win2K UTF-8 BOM
-        oCharset.Assign(UTF8); 
-        oCharsetSource= kCharsetFromByteOrderMark;
-     }
-   break;
-   case 0xFE:
-     if(0xFF==aBytes[1]) {
-        // FE FF UTF-16, big-endian 
-        oCharset.Assign(UTF16_BOM); 
-        oCharsetSource= kCharsetFromByteOrderMark;
-     }
-   break;
-   case 0xFF:
-     if(0xFE==aBytes[1]) {
-       // FF FE
-       // UTF-16, little-endian 
-       oCharset.Assign(UTF16_BOM); 
-       oCharsetSource= kCharsetFromByteOrderMark;
-     }
-   break;
-   // case 0x4C: if((0x6F==aBytes[1]) && ((0xA7==aBytes[2] && (0x94==aBytes[3])) {
-   //   We do not care EBCIDIC here....
-   // }
-   // break;
- }  // switch
- return !oCharset.IsEmpty();
+  // This code is rather pointless to have. Might as well reuse expat as
+  // seen in nsHtml5StreamParser. -- hsivonen
+  oCharset.Truncate();
+  if ((aLen >= 5) &&
+      ('<' == aBytes[0]) &&
+      ('?' == aBytes[1]) &&
+      ('x' == aBytes[2]) &&
+      ('m' == aBytes[3]) &&
+      ('l' == aBytes[4])) {
+    int32_t i;
+    bool versionFound = false, encodingFound = false;
+    for (i = 6; i < aLen && !encodingFound; ++i) {
+      // end of XML declaration?
+      if ((((char*) aBytes)[i] == '?') &&
+          ((i + 1) < aLen) &&
+          (((char*) aBytes)[i + 1] == '>')) {
+        break;
+      }
+      // Version is required.
+      if (!versionFound) {
+        // Want to avoid string comparisons, hence looking for 'n'
+        // and only if found check the string leading to it. Not
+        // foolproof, but fast.
+        // The shortest string allowed before this is  (strlen==13):
+        // <?xml version
+        if ((((char*) aBytes)[i] == 'n') &&
+            (i >= 12) &&
+            (0 == PL_strncmp("versio", (char*) (aBytes + i - 6), 6))) {
+          // Fast forward through version
+          char q = 0;
+          for (++i; i < aLen; ++i) {
+            char qi = ((char*) aBytes)[i];
+            if (qi == '\'' || qi == '"') {
+              if (q && q == qi) {
+                //  ending quote
+                versionFound = true;
+                break;
+              } else {
+                // Starting quote
+                q = qi;
+              }
+            }
+          }
+        }
+      } else {
+        // encoding must follow version
+        // Want to avoid string comparisons, hence looking for 'g'
+        // and only if found check the string leading to it. Not
+        // foolproof, but fast.
+        // The shortest allowed string before this (strlen==26):
+        // <?xml version="1" encoding
+        if ((((char*) aBytes)[i] == 'g') && (i >= 25) && (0 == PL_strncmp(
+            "encodin", (char*) (aBytes + i - 7), 7))) {
+          int32_t encStart = 0;
+          char q = 0;
+          for (++i; i < aLen; ++i) {
+            char qi = ((char*) aBytes)[i];
+            if (qi == '\'' || qi == '"') {
+              if (q && q == qi) {
+                int32_t count = i - encStart;
+                // encoding value is invalid if it is UTF-16
+                if (count > 0 && PL_strncasecmp("UTF-16",
+                    (char*) (aBytes + encStart), count)) {
+                  oCharset.Assign((char*) (aBytes + encStart), count);
+                }
+                encodingFound = true;
+                break;
+              } else {
+                encStart = i + 1;
+                q = qi;
+              }
+            }
+          }
+        }
+      } // if (!versionFound)
+    } // for
+  }
+  return !oCharset.IsEmpty();
 }
 
 inline const char
@@ -1841,131 +1769,6 @@ GetNextChar(nsACString::const_iterator& aStart,
 {
   NS_ASSERTION(aStart != aEnd, "end of buffer");
   return (++aStart != aEnd) ? *aStart : '\0';
-}
-
-bool
-nsParser::DetectMetaTag(const char* aBytes,
-                        int32_t aLen,
-                        nsCString& aCharset,
-                        int32_t& aCharsetSource)
-{
-  aCharsetSource= kCharsetFromMetaTag;
-  aCharset.SetLength(0);
-
-  // XXX Only look inside HTML documents for now. For XML
-  // documents we should be looking inside the XMLDecl.
-  if (!mParserContext->mMimeType.EqualsLiteral(TEXT_HTML)) {
-    return false;
-  }
-
-  // Fast and loose parsing to determine if we have a complete
-  // META tag in this block, looking upto 2k into it.
-  const nsASingleFragmentCString& str =
-      Substring(aBytes, aBytes + NS_MIN(aLen, 2048));
-  // XXXldb Should be const_char_iterator when FindInReadable supports it.
-  nsACString::const_iterator begin, end;
-
-  str.BeginReading(begin);
-  str.EndReading(end);
-  nsACString::const_iterator currPos(begin);
-  nsACString::const_iterator tokEnd;
-  nsACString::const_iterator tagEnd(begin);
-
-  while (currPos != end) {
-    if (!FindCharInReadable('<', currPos, end))
-      break; // no tag found in this buffer
-
-    if (GetNextChar(currPos, end) == '!') {
-      if (GetNextChar(currPos, end) != '-' ||
-          GetNextChar(currPos, end) != '-') {
-        // If we only see a <! not followed by --, just skip to the next >.
-        if (!FindCharInReadable('>', currPos, end)) {
-          return false; // No more tags to follow.
-        }
-
-        // Continue searching for a meta tag following this "comment".
-        ++currPos;
-        continue;
-      }
-
-      // Found MDO ( <!-- ). Now search for MDC ( --[*s]> )
-      bool foundMDC = false;
-      bool foundMatch = false;
-      while (!foundMDC) {
-        if (GetNextChar(currPos, end) == '-' &&
-            GetNextChar(currPos, end) == '-') {
-          foundMatch = !foundMatch; // toggle until we've matching "--"
-        } else if (currPos == end) {
-          return false; // Couldn't find --[*s]> in this buffer
-        } else if (foundMatch && *currPos == '>') {
-          foundMDC = true; // found comment end delimiter.
-          ++currPos;
-        }
-      }
-      continue; // continue searching for META tag.
-    }
-
-    // Find the end of the tag, break if incomplete
-    tagEnd = currPos;
-    if (!FindCharInReadable('>', tagEnd, end))
-      break;
-
-    // If this is not a META tag, continue to next loop
-    if ( (*currPos != 'm' && *currPos != 'M') ||
-         (*(++currPos) != 'e' && *currPos != 'E') ||
-         (*(++currPos) != 't' && *currPos != 'T') ||
-         (*(++currPos) != 'a' && *currPos != 'A') ||
-         !nsCRT::IsAsciiSpace(*(++currPos))) {
-      currPos = tagEnd;
-      continue;
-    }
-
-    // If could not find "charset" in this tag, skip this tag and try next
-    tokEnd = tagEnd;
-    if (!CaseInsensitiveFindInReadable(NS_LITERAL_CSTRING("CHARSET"),
-                                       currPos, tokEnd)) {
-      currPos = tagEnd;
-      continue;
-    }
-    currPos = tokEnd;
-
-    // skip spaces before '='
-    while (*currPos == kSpace || *currPos == kNewLine ||
-           *currPos == kCR || *currPos == kTab) {
-      ++currPos;
-    }
-    // skip '='
-    if (*currPos != '=') {
-      currPos = tagEnd;
-      continue;
-    }
-    ++currPos;
-    // skip spaces after '='
-    while (*currPos == kSpace || *currPos == kNewLine ||
-           *currPos == kCR || *currPos == kTab) {
-      ++currPos;
-    }
-
-    // skip open quote
-    if (*currPos == '\'' || *currPos == '\"')
-      ++currPos;
-
-    // find the end of charset string
-    tokEnd = currPos;
-    while (*tokEnd != '\'' && *tokEnd != '\"' && tokEnd != tagEnd)
-      ++tokEnd;
-
-    // return true if we successfully got something for charset
-    if (currPos != tokEnd) {
-      aCharset.Assign(currPos.get(), tokEnd.get() - currPos.get());
-      return true;
-    }
-
-    // Nothing specified as charset, continue next loop
-    currPos = tagEnd;
-  }
-
-  return false;
 }
 
 static NS_METHOD
@@ -2003,7 +1806,8 @@ ParserWriteFunc(nsIInputStream* in,
 {
   nsresult result;
   ParserWriteStruct* pws = static_cast<ParserWriteStruct*>(closure);
-  const char* buf = fromRawSegment;
+  const unsigned char* buf =
+    reinterpret_cast<const unsigned char*> (fromRawSegment);
   uint32_t theNumRead = count;
 
   if (!pws) {
@@ -2011,47 +1815,36 @@ ParserWriteFunc(nsIInputStream* in,
   }
 
   if (pws->mNeedCharsetCheck) {
-    int32_t guessSource;
-    nsCAutoString guess;
-    nsCAutoString preferred;
-
     pws->mNeedCharsetCheck = false;
-    if (pws->mParser->DetectMetaTag(buf, theNumRead, guess, guessSource) ||
-        ((count >= 4) &&
-         DetectByteOrderMark((const unsigned char*)buf,
-                             theNumRead, guess, guessSource))) {
-      result = nsCharsetAlias::GetPreferred(guess, preferred);
-      // Only continue if it's a recognized charset and not
-      // one of a designated set that we ignore.
-      if (NS_SUCCEEDED(result) &&
-          ((kCharsetFromByteOrderMark == guessSource) ||
-           (!preferred.EqualsLiteral("UTF-16") &&
-            !preferred.EqualsLiteral("UTF-16BE") &&
-            !preferred.EqualsLiteral("UTF-16LE")))) {
-        guess = preferred;
-        pws->mParser->SetDocumentCharset(guess, guessSource);
-        pws->mParser->SetSinkCharset(preferred);
-        nsCOMPtr<nsICachingChannel> channel(do_QueryInterface(pws->mRequest));
-        if (channel) {
-          nsCOMPtr<nsISupports> cacheToken;
-          channel->GetCacheToken(getter_AddRefs(cacheToken));
-          if (cacheToken) {
-            nsCOMPtr<nsICacheEntryDescriptor> cacheDescriptor(do_QueryInterface(cacheToken));
-            if (cacheDescriptor) {
-#ifdef DEBUG
-              nsresult rv =
-#endif
-                cacheDescriptor->SetMetaDataElement("charset",
-                                                    guess.get());
-              NS_ASSERTION(NS_SUCCEEDED(rv),"cannot SetMetaDataElement");
-            }
-          }
+    int32_t source;
+    nsAutoCString preferred;
+    nsAutoCString maybePrefer;
+    pws->mParser->GetDocumentCharset(preferred, source);
+
+    // This code was bogus when I found it. It expects the BOM or the XML
+    // declaration to be entirely in the first network buffer. -- hsivonen
+    if (nsContentUtils::CheckForBOM(buf, count, maybePrefer)) {
+      // The decoder will swallow the BOM. The UTF-16 will re-sniff for
+      // endianness. The value of preferred is now either "UTF-8" or "UTF-16".
+      preferred.Assign(maybePrefer);
+      source = kCharsetFromByteOrderMark;
+    } else if (source < kCharsetFromChannel) {
+      nsAutoCString declCharset;
+
+      if (ExtractCharsetFromXmlDeclaration(buf, count, declCharset)) {
+        if (EncodingUtils::FindEncodingForLabel(declCharset, maybePrefer)) {
+          preferred.Assign(maybePrefer);
+          source = kCharsetFromMetaTag;
         }
       }
     }
+
+    pws->mParser->SetDocumentCharset(preferred, source);
+    pws->mParser->SetSinkCharset(preferred);
+
   }
 
-  result = pws->mScanner->Append(buf, theNumRead, pws->mRequest);
+  result = pws->mScanner->Append(fromRawSegment, theNumRead, pws->mRequest);
   if (NS_SUCCEEDED(result)) {
     *writeCount = count;
   }
@@ -2061,7 +1854,7 @@ ParserWriteFunc(nsIInputStream* in,
 
 nsresult
 nsParser::OnDataAvailable(nsIRequest *request, nsISupports* aContext,
-                          nsIInputStream *pIStream, uint32_t sourceOffset,
+                          nsIInputStream *pIStream, uint64_t sourceOffset,
                           uint32_t aLength)
 {
   NS_PRECONDITION((eOnStart == mParserContext->mStreamListenerState ||
@@ -2103,8 +1896,7 @@ nsParser::OnDataAvailable(nsIRequest *request, nsISupports* aContext,
 
     uint32_t totalRead;
     ParserWriteStruct pws;
-    pws.mNeedCharsetCheck =
-      (0 == sourceOffset) && (mCharsetSource < kCharsetFromMetaTag);
+    pws.mNeedCharsetCheck = true;
     pws.mParser = this;
     pws.mScanner = theContext->mScanner;
     pws.mRequest = request;
@@ -2118,6 +1910,8 @@ nsParser::OnDataAvailable(nsIRequest *request, nsISupports* aContext,
     // non-whitespace data
     if (IsOkToProcessNetworkData() &&
         theContext->mScanner->FirstNonWhitespacePosition() >= 0) {
+      nsCOMPtr<nsIParser> kungFuDeathGrip(this);
+      nsCOMPtr<nsIContentSink> sinkDeathGrip(mSink);
       mProcessingNetworkData = true;
       if (mSink) {
         mSink->WillParse();

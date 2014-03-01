@@ -8,9 +8,8 @@
 #include "nsISupportsImpl.h"
 #include "nsIURIRefObject.h"
 #include "nscore.h"
-#include "prtypes.h"
 
-class nsIDOMNamedNodeMap;
+class nsIDOMMozNamedAttrMap;
 class nsIDOMNode;
 
 #ifndef nsHTMLURIRefObject_h__
@@ -35,7 +34,7 @@ public:
 
 protected:
   nsCOMPtr<nsIDOMNode> mNode;
-  nsCOMPtr<nsIDOMNamedNodeMap> mAttributes;
+  nsCOMPtr<nsIDOMMozNamedAttrMap> mAttributes;
   uint32_t mCurAttrIndex;
   uint32_t mAttributeCnt;
 };

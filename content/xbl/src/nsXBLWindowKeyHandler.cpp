@@ -9,7 +9,6 @@
 #include "nsIContent.h"
 #include "nsIAtom.h"
 #include "nsIDOMKeyEvent.h"
-#include "nsIDOMEventTarget.h"
 #include "nsXBLService.h"
 #include "nsIServiceManager.h"
 #include "nsGkAtoms.h"
@@ -31,12 +30,14 @@
 #include "nsGUIEvent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/Element.h"
+#include "nsEventStateManager.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 static nsINativeKeyBindings *sNativeEditorBindings = nullptr;
 
-class nsXBLSpecialDocInfo
+class nsXBLSpecialDocInfo : public nsIObserver
 {
 public:
   nsRefPtr<nsXBLDocumentInfo> mHTMLBindings;
@@ -48,6 +49,9 @@ public:
   bool mInitialized;
 
 public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+
   void LoadDocInfo();
   void GetAllHandlers(const char* aType,
                       nsXBLPrototypeHandler** handler,
@@ -57,16 +61,38 @@ public:
                    nsXBLPrototypeHandler** aResult);
 
   nsXBLSpecialDocInfo() : mInitialized(false) {}
+
+  virtual ~nsXBLSpecialDocInfo() {}
+
 };
 
 const char nsXBLSpecialDocInfo::sHTMLBindingStr[] =
   "chrome://global/content/platformHTMLBindings.xml";
+
+NS_IMPL_ISUPPORTS1(nsXBLSpecialDocInfo, nsIObserver)
+
+NS_IMETHODIMP
+nsXBLSpecialDocInfo::Observe(nsISupports* aSubject,
+                             const char* aTopic,
+                             const PRUnichar* aData)
+{
+  MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"), "wrong topic");
+
+  // On shutdown, clear our fields to avoid an extra cycle collection.
+  mHTMLBindings = nullptr;
+  mUserHTMLBindings = nullptr;
+  mInitialized = false;
+  nsContentUtils::UnregisterShutdownObserver(this);
+
+  return NS_OK;
+}
 
 void nsXBLSpecialDocInfo::LoadDocInfo()
 {
   if (mInitialized)
     return;
   mInitialized = true;
+  nsContentUtils::RegisterShutdownObserver(this);
 
   nsXBLService* xblService = nsXBLService::GetInstance();
   if (!xblService)
@@ -124,7 +150,7 @@ nsXBLSpecialDocInfo::GetAllHandlers(const char* aType,
                                     nsXBLPrototypeHandler** aUserHandler)
 {
   if (mUserHTMLBindings) {
-    nsCAutoString type(aType);
+    nsAutoCString type(aType);
     type.Append("User");
     GetHandlers(mUserHTMLBindings, type, aUserHandler);
   }
@@ -138,7 +164,7 @@ nsXBLSpecialDocInfo* nsXBLWindowKeyHandler::sXBLSpecialDocInfo = nullptr;
 uint32_t nsXBLWindowKeyHandler::sRefCnt = 0;
 
 nsXBLWindowKeyHandler::nsXBLWindowKeyHandler(nsIDOMElement* aElement,
-                                             nsIDOMEventTarget* aTarget)
+                                             EventTarget* aTarget)
   : mTarget(aTarget),
     mHandler(nullptr),
     mUserHandler(nullptr)
@@ -155,8 +181,7 @@ nsXBLWindowKeyHandler::~nsXBLWindowKeyHandler()
 
   --sRefCnt;
   if (!sRefCnt) {
-    delete sXBLSpecialDocInfo;
-    sXBLSpecialDocInfo = nullptr;
+    NS_IF_RELEASE(sXBLSpecialDocInfo);
   }
 }
 
@@ -208,7 +233,7 @@ BuildHandlerChain(nsIContent* aContent, nsXBLPrototypeHandler** aResult)
 nsresult
 nsXBLWindowKeyHandler::EnsureHandlers(bool *aIsEditor)
 {
-  nsCOMPtr<nsIDOMElement> el = GetElement();
+  nsCOMPtr<Element> el = GetElement();
   NS_ENSURE_STATE(!mWeakPtrForElement || el);
   if (el) {
     // We are actually a XUL <keyset>.
@@ -221,13 +246,9 @@ nsXBLWindowKeyHandler::EnsureHandlers(bool *aIsEditor)
     nsCOMPtr<nsIContent> content(do_QueryInterface(el));
     BuildHandlerChain(content, &mHandler);
   } else { // We are an XBL file of handlers.
-    if (!sXBLSpecialDocInfo)
-      sXBLSpecialDocInfo = new nsXBLSpecialDocInfo();
     if (!sXBLSpecialDocInfo) {
-      if (aIsEditor) {
-        *aIsEditor = false;
-      }
-      return NS_ERROR_OUT_OF_MEMORY;
+      sXBLSpecialDocInfo = new nsXBLSpecialDocInfo();
+      NS_ADDREF(sXBLSpecialDocInfo);
     }
     sXBLSpecialDocInfo->LoadDocInfo();
 
@@ -280,7 +301,7 @@ nsresult
 nsXBLWindowKeyHandler::WalkHandlers(nsIDOMKeyEvent* aKeyEvent, nsIAtom* aEventType)
 {
   bool prevent;
-  aKeyEvent->GetPreventDefault(&prevent);
+  aKeyEvent->GetDefaultPrevented(&prevent);
   if (prevent)
     return NS_OK;
 
@@ -294,12 +315,12 @@ nsXBLWindowKeyHandler::WalkHandlers(nsIDOMKeyEvent* aKeyEvent, nsIAtom* aEventTy
   bool isEditor;
   nsresult rv = EnsureHandlers(&isEditor);
   NS_ENSURE_SUCCESS(rv, rv);
-  
-  nsCOMPtr<nsIDOMElement> el = GetElement();
+
+  nsCOMPtr<Element> el = GetElement();
   if (!el) {
     if (mUserHandler) {
       WalkHandlersInternal(aKeyEvent, aEventType, mUserHandler);
-      aKeyEvent->GetPreventDefault(&prevent);
+      aKeyEvent->GetDefaultPrevented(&prevent);
       if (prevent)
         return NS_OK; // Handled by the user bindings. Our work here is done.
     }
@@ -358,6 +379,14 @@ nsXBLWindowKeyHandler::HandleEvent(nsIDOMEvent* aEvent)
   nsCOMPtr<nsIAtom> eventTypeAtom = do_GetAtom(eventType);
   NS_ENSURE_TRUE(eventTypeAtom, NS_ERROR_OUT_OF_MEMORY);
 
+  if (!mWeakPtrForElement) {
+    nsCOMPtr<mozilla::dom::Element> originalTarget =
+      do_QueryInterface(aEvent->GetInternalNSEvent()->originalTarget);
+    if (nsEventStateManager::IsRemoteTarget(originalTarget)) {
+      return NS_OK;
+    }
+  }
+
   return WalkHandlers(keyEvent, eventTypeAtom);
 }
 
@@ -406,7 +435,7 @@ nsXBLWindowKeyHandler::IsEditor()
   nsIDocShell *docShell = piwin->GetDocShell();
   nsCOMPtr<nsIPresShell> presShell;
   if (docShell)
-    docShell->GetPresShell(getter_AddRefs(presShell));
+    presShell = docShell->GetPresShell();
 
   if (presShell) {
     return presShell->GetSelectionFlags() == nsISelectionDisplay::DISPLAY_ALL;
@@ -470,10 +499,10 @@ nsXBLWindowKeyHandler::WalkHandlersAndExecute(nsIDOMKeyEvent* aKeyEvent,
     // and that it has something to do (oncommand of the <key> or its
     // <command> is non-empty).
     nsCOMPtr<nsIContent> elt = currHandler->GetHandlerElement();
-    nsCOMPtr<nsIDOMElement> commandElt;
+    nsCOMPtr<Element> commandElt;
 
     // See if we're in a XUL doc.
-    nsCOMPtr<nsIDOMElement> el = GetElement();
+    nsCOMPtr<Element> el = GetElement();
     if (el && elt) {
       // We are.  Obtain our command attribute.
       nsAutoString command;
@@ -511,10 +540,10 @@ nsXBLWindowKeyHandler::WalkHandlersAndExecute(nsIDOMKeyEvent* aKeyEvent,
       }
     }
 
-    nsCOMPtr<nsIDOMEventTarget> piTarget;
-    nsCOMPtr<nsIDOMElement> element = GetElement();
+    nsCOMPtr<EventTarget> piTarget;
+    nsCOMPtr<Element> element = GetElement();
     if (element) {
-      piTarget = do_QueryInterface(commandElt);
+      piTarget = commandElt;
     } else {
       piTarget = mTarget;
     }
@@ -528,24 +557,19 @@ nsXBLWindowKeyHandler::WalkHandlersAndExecute(nsIDOMKeyEvent* aKeyEvent,
   return false;
 }
 
-already_AddRefed<nsIDOMElement>
+already_AddRefed<Element>
 nsXBLWindowKeyHandler::GetElement()
 {
-  nsCOMPtr<nsIDOMElement> element = do_QueryReferent(mWeakPtrForElement);
-  nsIDOMElement* el = nullptr;
-  element.swap(el);
-  return el;
+  nsCOMPtr<Element> element = do_QueryReferent(mWeakPtrForElement);
+  return element.forget();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////
 
-nsresult
-NS_NewXBLWindowKeyHandler(nsIDOMElement* aElement, nsIDOMEventTarget* aTarget,
-                          nsXBLWindowKeyHandler** aResult)
+already_AddRefed<nsXBLWindowKeyHandler>
+NS_NewXBLWindowKeyHandler(nsIDOMElement* aElement, EventTarget* aTarget)
 {
-  *aResult = new nsXBLWindowKeyHandler(aElement, aTarget);
-  if (!*aResult)
-    return NS_ERROR_OUT_OF_MEMORY;
-  NS_ADDREF(*aResult);
-  return NS_OK;
+  nsRefPtr<nsXBLWindowKeyHandler> result =
+    new nsXBLWindowKeyHandler(aElement, aTarget);
+  return result.forget();
 }

@@ -9,19 +9,7 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = loginmgr
-
-XPIDLSRCS = \
-  nsILoginInfo.idl \
-  nsILoginManager.idl \
-  nsILoginManagerCrypto.idl \
-  nsILoginManagerIEMigrationHelper.idl \
-  nsILoginManagerPrompter.idl \
-  nsILoginManagerStorage.idl \
-  nsILoginMetaInfo.idl \
-  $(NULL)
-
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
   crypto-SDR.js \
   nsLoginInfo.js \
   nsLoginManager.js \
@@ -30,10 +18,8 @@ EXTRA_COMPONENTS = \
   storage-Legacy.js \
   $(NULL)
 
-EXTRA_PP_COMPONENTS = \
-  storage-mozStorage.js \
+EXTRA_JS_MODULES = \
+  LoginManagerContent.jsm \
   $(NULL)
-
-TEST_DIRS += test
 
 include $(topsrcdir)/config/rules.mk

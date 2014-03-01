@@ -6,20 +6,32 @@
 #ifndef __NS_SVGFILTERSELEMENT_H__
 #define __NS_SVGFILTERSELEMENT_H__
 
+#include "mozilla/Attributes.h"
 #include "gfxImageSurface.h"
 #include "gfxRect.h"
-#include "nsIDOMSVGFilters.h"
-#include "nsIDOMSVGURIReference.h"
 #include "nsIFrame.h"
 #include "nsImageLoadingContent.h"
 #include "nsSVGLength2.h"
 #include "nsSVGString.h"
-#include "nsSVGStylableElement.h"
+#include "nsSVGElement.h"
 #include "SVGAnimatedPreserveAspectRatio.h"
+#include "nsSVGNumber2.h"
+#include "nsSVGNumberPair.h"
 
 class nsSVGFilterInstance;
 class nsSVGFilterResource;
 class nsSVGNumberPair;
+
+inline float DOT(const float* a, const float* b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+inline void NORMALIZE(float* vec) {
+  float norm = sqrt(DOT(vec, vec));
+  vec[0] /= norm;
+  vec[1] /= norm;
+  vec[2] /= norm;
+}
 
 struct nsSVGStringInfo {
   nsSVGStringInfo(const nsSVGString* aString,
@@ -30,7 +42,7 @@ struct nsSVGStringInfo {
   nsSVGElement* mElement;
 };
 
-typedef nsSVGStylableElement nsSVGFEBase;
+typedef nsSVGElement nsSVGFEBase;
 
 #define NS_SVG_FE_CID \
 { 0x60483958, 0xd229, 0x4a77, \
@@ -42,7 +54,6 @@ typedef nsSVGStylableElement nsSVGFEBase;
  * derive from SVGFEUnstyledElement instead
  */
 class nsSVGFE : public nsSVGFEBase
-//, public nsIDOMSVGFilterPrimitiveStandardAttributes
 {
   friend class nsSVGFilterInstance;
 
@@ -119,16 +130,20 @@ public:
   virtual bool SubregionIsUnionOfRegions() { return true; }
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_SVG_FE_CID)
-  
+
   // interfaces:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMSVGFILTERPRIMITIVESTANDARDATTRIBUTES
 
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   // nsSVGElement interface
-  virtual bool HasValidDimensions() const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE = 0;
+
+  virtual bool HasValidDimensions() const MOZ_OVERRIDE;
+
+  bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE
+    { return !(aFlags & ~(eCONTENT | eFILTER)); }
 
   virtual nsSVGString& GetResultImageName() = 0;
   // Return a list of all image names used as sources. Default is to
@@ -182,11 +197,18 @@ public:
   static nsIntRect GetMaxRect() {
     // Try to avoid overflow errors dealing with this rect. It will
     // be intersected with some other reasonable-sized rect eventually.
-    return nsIntRect(PR_INT32_MIN/2, PR_INT32_MIN/2, PR_INT32_MAX, PR_INT32_MAX);
+    return nsIntRect(INT32_MIN/2, INT32_MIN/2, INT32_MAX, INT32_MAX);
   }
 
   operator nsISupports*() { return static_cast<nsIContent*>(this); }
-  
+
+  // WebIDL
+  already_AddRefed<mozilla::dom::SVGAnimatedLength> X();
+  already_AddRefed<mozilla::dom::SVGAnimatedLength> Y();
+  already_AddRefed<mozilla::dom::SVGAnimatedLength> Width();
+  already_AddRefed<mozilla::dom::SVGAnimatedLength> Height();
+  already_AddRefed<mozilla::dom::SVGAnimatedString> Result();
+
 protected:
   virtual bool OperatesOnPremultipledAlpha(int32_t) { return true; }
 
@@ -198,109 +220,17 @@ protected:
     nsIFrame* frame = GetPrimaryFrame();
     if (!frame) return false;
 
-    nsStyleContext* style = frame->GetStyleContext();
-    return style->GetStyleSVG()->mColorInterpolationFilters ==
+    nsStyleContext* style = frame->StyleContext();
+    return style->StyleSVG()->mColorInterpolationFilters ==
              NS_STYLE_COLOR_INTERPOLATION_SRGB;
   }
 
   // nsSVGElement specializations:
-  virtual LengthAttributesInfo GetLengthInfo();
+  virtual LengthAttributesInfo GetLengthInfo() MOZ_OVERRIDE;
 
-  // nsIDOMSVGFitlerPrimitiveStandardAttributes values
-  enum { X, Y, WIDTH, HEIGHT };
+  enum { ATTR_X, ATTR_Y, ATTR_WIDTH, ATTR_HEIGHT };
   nsSVGLength2 mLengthAttributes[4];
   static LengthInfo sLengthInfo[4];
-};
-
-typedef nsSVGFE nsSVGFEImageElementBase;
-
-class nsSVGFEImageElement : public nsSVGFEImageElementBase,
-                            public nsIDOMSVGFEImageElement,
-                            public nsIDOMSVGURIReference,
-                            public nsImageLoadingContent
-{
-  friend class SVGFEImageFrame;
-
-protected:
-  friend nsresult NS_NewSVGFEImageElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo> aNodeInfo);
-  nsSVGFEImageElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual ~nsSVGFEImageElement();
-
-public:
-  virtual bool SubregionIsUnionOfRegions() { return false; }
-
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // FE Base
-  NS_FORWARD_NSIDOMSVGFILTERPRIMITIVESTANDARDATTRIBUTES(nsSVGFEImageElementBase::)
-
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect);
-  virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
-  virtual nsSVGString& GetResultImageName() { return mStringAttributes[RESULT]; }
-  virtual nsIntRect ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-          const nsSVGFilterInstance& aInstance);
-
-  NS_DECL_NSIDOMSVGFEIMAGEELEMENT
-  NS_DECL_NSIDOMSVGURIREFERENCE
-
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGFEImageElementBase::)
-
-  NS_FORWARD_NSIDOMNODE(nsSVGFEImageElementBase::)
-  NS_FORWARD_NSIDOMELEMENT(nsSVGFEImageElementBase::)
-
-  // nsIContent
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify);
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent,
-                              bool aCompileEventHandlers);
-  virtual void UnbindFromTree(bool aDeep, bool aNullParent);
-  virtual nsEventStates IntrinsicState() const;
-
-  // imgIDecoderObserver
-  NS_IMETHOD OnStopDecode(imgIRequest *aRequest, nsresult status,
-                          const PRUnichar *statusArg);
-  // imgIContainerObserver
-  NS_IMETHOD FrameChanged(imgIRequest* aRequest,
-                          imgIContainer *aContainer,
-                          const nsIntRect *aDirtyRect);
-  // imgIContainerObserver
-  NS_IMETHOD OnStartContainer(imgIRequest *aRequest,
-                              imgIContainer *aContainer);
-
-  void MaybeLoadSVGImage();
-
-  virtual nsXPCClassInfo* GetClassInfo();
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-private:
-  // Invalidate users of the filter containing this element.
-  void Invalidate();
-
-  nsresult LoadSVGImage(bool aForce, bool aNotify);
-
-protected:
-  virtual bool OperatesOnSRGB(nsSVGFilterInstance*,
-                                int32_t, Image*) { return true; }
-
-  virtual SVGAnimatedPreserveAspectRatio *GetPreserveAspectRatio();
-  virtual StringAttributesInfo GetStringInfo();
-
-  enum { RESULT, HREF };
-  nsSVGString mStringAttributes[2];
-  static StringInfo sStringInfo[2];
-
-  SVGAnimatedPreserveAspectRatio mPreserveAspectRatio;
 };
 
 typedef nsSVGElement SVGFEUnstyledElementBase;
@@ -312,10 +242,85 @@ protected:
     : SVGFEUnstyledElementBase(aNodeInfo) {}
 
 public:
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE = 0;
+
   // returns true if changes to the attribute should cause us to
   // repaint the filter
   virtual bool AttributeAffectsRendering(
           int32_t aNameSpaceID, nsIAtom* aAttribute) const = 0;
 };
+
+//------------------------------------------------------------
+
+typedef nsSVGFE nsSVGFELightingElementBase;
+
+class nsSVGFELightingElement : public nsSVGFELightingElementBase
+{
+protected:
+  nsSVGFELightingElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+    : nsSVGFELightingElementBase(aNodeInfo) {}
+
+public:
+  // interfaces:
+  NS_DECL_ISUPPORTS_INHERITED
+
+  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
+                          const nsTArray<const Image*>& aSources,
+                          const Image* aTarget,
+                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual bool AttributeAffectsRendering(
+          int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
+  virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
+  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources) MOZ_OVERRIDE;
+  // XXX shouldn't we have ComputeTargetBBox here, since the output can
+  // extend beyond the bounds of the inputs thanks to the convolution kernel?
+  virtual void ComputeNeededSourceBBoxes(const nsIntRect& aTargetBBox,
+          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
+  virtual nsIntRect ComputeChangeBBox(const nsTArray<nsIntRect>& aSourceChangeBoxes,
+          const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
+
+  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGFELightingElementBase::)
+
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
+
+protected:
+  virtual bool OperatesOnSRGB(nsSVGFilterInstance*,
+                              int32_t, Image*) MOZ_OVERRIDE { return true; }
+  virtual void
+  LightPixel(const float *N, const float *L,
+             nscolor color, uint8_t *targetData) = 0;
+
+  virtual NumberAttributesInfo GetNumberInfo() MOZ_OVERRIDE;
+  virtual NumberPairAttributesInfo GetNumberPairInfo() MOZ_OVERRIDE;
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
+
+  enum { SURFACE_SCALE, DIFFUSE_CONSTANT, SPECULAR_CONSTANT, SPECULAR_EXPONENT };
+  nsSVGNumber2 mNumberAttributes[4];
+  static NumberInfo sNumberInfo[4];
+
+  enum { KERNEL_UNIT_LENGTH };
+  nsSVGNumberPair mNumberPairAttributes[1];
+  static NumberPairInfo sNumberPairInfo[1];
+
+  enum { RESULT, IN1 };
+  nsSVGString mStringAttributes[2];
+  static StringInfo sStringInfo[2];
+};
+
+void
+CopyDataRect(uint8_t *aDest, const uint8_t *aSrc, uint32_t aStride,
+             const nsIntRect& aDataRect);
+
+inline void
+CopyRect(const nsSVGFE::Image* aDest, const nsSVGFE::Image* aSrc, const nsIntRect& aDataRect)
+{
+  NS_ASSERTION(aDest->mImage->Stride() == aSrc->mImage->Stride(), "stride mismatch");
+  NS_ASSERTION(aDest->mImage->GetSize() == aSrc->mImage->GetSize(), "size mismatch");
+  NS_ASSERTION(nsIntRect(0, 0, aDest->mImage->Width(), aDest->mImage->Height()).Contains(aDataRect),
+               "aDataRect out of bounds");
+
+  CopyDataRect(aDest->mImage->Data(), aSrc->mImage->Data(),
+               aSrc->mImage->Stride(), aDataRect);
+}
 
 #endif

@@ -838,6 +838,14 @@ LoginManagerStorage_mozStorage.prototype = {
 
 
     /*
+     * isLoggedIn
+     */
+    get isLoggedIn() {
+        return this._crypto.isLoggedIn;
+    },
+
+
+    /*
      * _sendNotification
      *
      * Send a notification when stored data is changed.
@@ -1681,4 +1689,4 @@ LoginManagerStorage_mozStorage.prototype = {
 }; // end of nsLoginManagerStorage_mozStorage implementation
 
 let component = [LoginManagerStorage_mozStorage];
-var NSGetFactory = XPCOMUtils.generateNSGetFactory(component);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

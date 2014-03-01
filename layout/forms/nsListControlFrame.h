@@ -16,15 +16,16 @@
 //#define DO_PIXELS
 #endif
 
+#include "mozilla/Attributes.h"
 #include "nsGfxScrollFrame.h"
 #include "nsIFormControlFrame.h"
 #include "nsIListControlFrame.h"
 #include "nsISelectControlFrame.h"
 #include "nsIDOMEventListener.h"
-#include "nsIContent.h"
 #include "nsAutoPtr.h"
 #include "nsSelectsAreaFrame.h"
 
+class nsIContent;
 class nsIDOMHTMLSelectElement;
 class nsIDOMHTMLOptionsCollection;
 class nsIDOMHTMLOptionElement;
@@ -50,124 +51,119 @@ public:
     // nsIFrame
   NS_IMETHOD HandleEvent(nsPresContext* aPresContext,
                          nsGUIEvent* aEvent,
-                         nsEventStatus* aEventStatus);
+                         nsEventStatus* aEventStatus) MOZ_OVERRIDE;
   
   NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList);
+                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
 
-  virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext);
-  virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext);
+  virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
+  virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 
   NS_IMETHOD Reflow(nsPresContext*          aCX,
                     nsHTMLReflowMetrics&     aDesiredSize,
                     const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus);
+                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD Init(nsIContent*      aContent,
-                   nsIFrame*        aParent,
-                   nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
   NS_IMETHOD DidReflow(nsPresContext*           aPresContext, 
                        const nsHTMLReflowState*  aReflowState, 
-                       nsDidReflowStatus         aStatus);
-  virtual void DestroyFrom(nsIFrame* aDestructRoot);
+                       nsDidReflowStatus         aStatus) MOZ_OVERRIDE;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  virtual nsIFrame* GetContentInsertionFrame();
+  virtual nsIFrame* GetContentInsertionFrame() MOZ_OVERRIDE;
 
   /**
    * Get the "type" of the frame
    *
    * @see nsGkAtoms::scrollFrame
    */
-  virtual nsIAtom* GetType() const;
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsHTMLScrollFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock));
   }
 
-  virtual void InvalidateInternal(const nsRect& aDamageRect,
-                                  nscoord aX, nscoord aY, nsIFrame* aForChild,
-                                  uint32_t aFlags);
-
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const;
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
     // nsIFormControlFrame
-  virtual nsresult SetFormProperty(nsIAtom* aName, const nsAString& aValue);
-  virtual nsresult GetFormProperty(nsIAtom* aName, nsAString& aValue) const; 
-  virtual void SetFocus(bool aOn = true, bool aRepaint = false);
+  virtual nsresult SetFormProperty(nsIAtom* aName, const nsAString& aValue) MOZ_OVERRIDE;
+  virtual void SetFocus(bool aOn = true, bool aRepaint = false) MOZ_OVERRIDE;
 
-  virtual nsGfxScrollFrameInner::ScrollbarStyles GetScrollbarStyles() const;
-  virtual bool ShouldPropagateComputedHeightToScrolledContent() const;
+  virtual nsGfxScrollFrameInner::ScrollbarStyles GetScrollbarStyles() const MOZ_OVERRIDE;
+  virtual bool ShouldPropagateComputedHeightToScrolledContent() const MOZ_OVERRIDE;
 
     // for accessibility purposes
 #ifdef ACCESSIBILITY
-  virtual already_AddRefed<Accessible> CreateAccessible();
+  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
-    // nsContainerFrame
-  virtual int GetSkipSides() const;
-
     // nsIListControlFrame
-  virtual void SetComboboxFrame(nsIFrame* aComboboxFrame);
-  virtual int32_t GetSelectedIndex();
-  virtual already_AddRefed<nsIContent> GetCurrentOption();
+  virtual void SetComboboxFrame(nsIFrame* aComboboxFrame) MOZ_OVERRIDE;
+  virtual int32_t GetSelectedIndex() MOZ_OVERRIDE;
+  virtual already_AddRefed<nsIContent> GetCurrentOption() MOZ_OVERRIDE;
 
   /**
    * Gets the text of the currently selected item.
    * If the there are zero items then an empty string is returned
    * If there is nothing selected, then the 0th item's text is returned.
    */
-  virtual void GetOptionText(int32_t aIndex, nsAString & aStr);
+  virtual void GetOptionText(int32_t aIndex, nsAString & aStr) MOZ_OVERRIDE;
 
-  virtual void CaptureMouseEvents(bool aGrabMouseEvents);
-  virtual nscoord GetHeightOfARow();
-  virtual int32_t GetNumberOfOptions();  
-  virtual void AboutToDropDown();
+  virtual void CaptureMouseEvents(bool aGrabMouseEvents) MOZ_OVERRIDE;
+  virtual nscoord GetHeightOfARow() MOZ_OVERRIDE;
+  virtual uint32_t GetNumberOfOptions() MOZ_OVERRIDE;
+  virtual void AboutToDropDown() MOZ_OVERRIDE;
 
   /**
-   * @note This method might destroy |this|.
+   * @note This method might destroy the frame, pres shell and other objects.
    */
-  virtual void AboutToRollup();
+  virtual void AboutToRollup() MOZ_OVERRIDE;
 
   /**
    * Dispatch a DOM onchange event synchroniously.
-   * @note This method might destroy |this|.
+   * @note This method might destroy the frame, pres shell and other objects.
    */
-  virtual void FireOnChange();
+  virtual void FireOnChange() MOZ_OVERRIDE;
 
   /**
    * Makes aIndex the selected option of a combobox list.
-   * @note This method might destroy |this|.
+   * @note This method might destroy the frame, pres shell and other objects.
    */
-  virtual void ComboboxFinish(int32_t aIndex);
-  virtual void OnContentReset();
+  virtual void ComboboxFinish(int32_t aIndex) MOZ_OVERRIDE;
+  virtual void OnContentReset() MOZ_OVERRIDE;
 
   // nsISelectControlFrame
-  NS_IMETHOD AddOption(int32_t index);
-  NS_IMETHOD RemoveOption(int32_t index);
-  NS_IMETHOD DoneAddingChildren(bool aIsDone);
+  NS_IMETHOD AddOption(int32_t index) MOZ_OVERRIDE;
+  NS_IMETHOD RemoveOption(int32_t index) MOZ_OVERRIDE;
+  NS_IMETHOD DoneAddingChildren(bool aIsDone) MOZ_OVERRIDE;
 
   /**
    * Gets the content (an option) by index and then set it as
    * being selected or not selected.
    */
-  NS_IMETHOD OnOptionSelected(int32_t aIndex, bool aSelected);
-  NS_IMETHOD OnSetSelectedIndex(int32_t aOldIndex, int32_t aNewIndex);
+  NS_IMETHOD OnOptionSelected(int32_t aIndex, bool aSelected) MOZ_OVERRIDE;
+  NS_IMETHOD OnSetSelectedIndex(int32_t aOldIndex, int32_t aNewIndex) MOZ_OVERRIDE;
 
-  // mouse event listeners (both )
-  nsresult MouseDown(nsIDOMEvent* aMouseEvent); // might destroy |this|
-  nsresult MouseUp(nsIDOMEvent* aMouseEvent);   // might destroy |this|
+  /**
+   * Mouse event listeners.
+   * @note These methods might destroy the frame, pres shell and other objects.
+   */
+  nsresult MouseDown(nsIDOMEvent* aMouseEvent);
+  nsresult MouseUp(nsIDOMEvent* aMouseEvent);
   nsresult MouseMove(nsIDOMEvent* aMouseEvent);
   nsresult DragMove(nsIDOMEvent* aMouseEvent);
-  nsresult KeyPress(nsIDOMEvent* aKeyEvent);    // might destroy |this|
+  nsresult KeyPress(nsIDOMEvent* aKeyEvent);
 
   /**
    * Returns the options collection for aContent, if any.
@@ -245,7 +241,7 @@ public:
   /**
    * Dropdowns need views
    */
-  virtual bool NeedsView() { return IsInDropDownMode(); }
+  virtual bool NeedsView() MOZ_OVERRIDE { return IsInDropDownMode(); }
 
   /**
    * Frees statics owned by this class.
@@ -264,6 +260,7 @@ public:
 protected:
   /**
    * Updates the selected text in a combobox and then calls FireOnChange().
+   * @note This method might destroy the frame, pres shell and other objects.
    * Returns false if calling it destroyed |this|.
    */
   bool       UpdateSelection();
@@ -278,12 +275,18 @@ protected:
 
   /**
    * Toggles (show/hide) the combobox dropdown menu.
-   * @note This method might destroy |this|.
+   * @note This method might destroy the frame, pres shell and other objects.
    */
   void       DropDownToggleKey(nsIDOMEvent* aKeyEvent);
 
   nsresult   IsOptionDisabled(int32_t anIndex, bool &aIsDisabled);
+  /**
+   * @note This method might destroy the frame, pres shell and other objects.
+   */
   nsresult   ScrollToFrame(nsIContent * aOptElement);
+  /**
+   * @note This method might destroy the frame, pres shell and other objects.
+   */
   nsresult   ScrollToIndex(int32_t anIndex);
 
   /**
@@ -375,11 +378,20 @@ protected:
                                        bool aValue,
                                        bool aClearAll);
   bool     ToggleOptionSelectedFromFrame(int32_t aIndex);
+  /**
+   * @note This method might destroy the frame, pres shell and other objects.
+   */
   bool     SingleSelection(int32_t aClickedIndex, bool aDoToggle);
   bool     ExtendedSelection(int32_t aStartIndex, int32_t aEndIndex,
                              bool aClearAll);
+  /**
+   * @note This method might destroy the frame, pres shell and other objects.
+   */
   bool     PerformSelection(int32_t aClickedIndex, bool aIsShift,
                             bool aIsControl);
+  /**
+   * @note This method might destroy the frame, pres shell and other objects.
+   */
   bool     HandleListSelection(nsIDOMEvent * aDOMEvent, int32_t selectedIndex);
   void     InitSelectionRange(int32_t aClickedIndex);
 
@@ -392,6 +404,11 @@ protected:
   nscoord HeightOfARow() {
     return GetOptionsContainer()->HeightOfARow();
   }
+
+  /**
+   * @return how many displayable options/optgroups this frame has.
+   */
+  uint32_t GetNumberOfRows();
   
   // Data Members
   int32_t      mStartSelectionIndex;

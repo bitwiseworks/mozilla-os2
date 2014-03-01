@@ -10,10 +10,11 @@
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDebug.h"
-#include "nsIDOMSVGNumberList.h"
 #include "nsTArray.h"
 #include "SVGNumberList.h"
+#include "nsIDOMSVGNumber.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/ErrorResult.h"
 
 class nsSVGElement;
 
@@ -38,7 +39,7 @@ class DOMSVGNumber;
  *
  * Our DOM items are created lazily on demand as and when script requests them.
  */
-class DOMSVGNumberList MOZ_FINAL : public nsIDOMSVGNumberList,
+class DOMSVGNumberList MOZ_FINAL : public nsISupports,
                                    public nsWrapperCache
 {
   friend class DOMSVGNumber;
@@ -46,7 +47,6 @@ class DOMSVGNumberList MOZ_FINAL : public nsIDOMSVGNumberList,
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGNumberList)
-  NS_DECL_NSIDOMSVGNUMBERLIST
 
   DOMSVGNumberList(DOMSVGAnimatedNumberList *aAList,
                    const SVGNumberList &aInternalList)
@@ -71,8 +71,8 @@ public:
     }
   }
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   nsISupports* GetParentObject()
   {
@@ -83,7 +83,7 @@ public:
    * This will normally be the same as InternalList().Length(), except if we've
    * hit OOM in which case our length will be zero.
    */
-  uint32_t Length() const {
+  uint32_t LengthNoFlush() const {
     NS_ABORT_IF_FALSE(mItems.Length() == 0 ||
                       mItems.Length() == InternalList().Length(),
                       "DOM wrapper's list length is out of sync");
@@ -92,6 +92,45 @@ public:
 
   /// Called to notify us to syncronize our length and detach excess items.
   void InternalListLengthWillChange(uint32_t aNewLength);
+
+  uint32_t NumberOfItems() const
+  {
+    if (IsAnimValList()) {
+      Element()->FlushAnimations();
+    }
+    return LengthNoFlush();
+  }
+  void Clear(ErrorResult& error);
+  already_AddRefed<nsIDOMSVGNumber> Initialize(nsIDOMSVGNumber *newItem,
+                                               ErrorResult& error);
+  nsIDOMSVGNumber* GetItem(uint32_t index, ErrorResult& error)
+  {
+    bool found;
+    nsIDOMSVGNumber* item = IndexedGetter(index, found, error);
+    if (!found) {
+      error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    }
+    return item;
+  }
+  nsIDOMSVGNumber* IndexedGetter(uint32_t index, bool& found,
+                                 ErrorResult& error);
+  already_AddRefed<nsIDOMSVGNumber> InsertItemBefore(nsIDOMSVGNumber *newItem,
+                                                     uint32_t index,
+                                                     ErrorResult& error);
+  already_AddRefed<nsIDOMSVGNumber> ReplaceItem(nsIDOMSVGNumber *newItem,
+                                                uint32_t index,
+                                                ErrorResult& error);
+  already_AddRefed<nsIDOMSVGNumber> RemoveItem(uint32_t index,
+                                               ErrorResult& error);
+  already_AddRefed<nsIDOMSVGNumber> AppendItem(nsIDOMSVGNumber *newItem,
+                                               ErrorResult& error)
+  {
+    return InsertItemBefore(newItem, LengthNoFlush(), error);
+  }
+  uint32_t Length() const
+  {
+    return NumberOfItems();
+  }
 
 private:
 
@@ -128,7 +167,7 @@ private:
 
   // Weak refs to our DOMSVGNumber items. The items are friends and take care
   // of clearing our pointer to them when they die.
-  nsTArray<DOMSVGNumber*> mItems;
+  FallibleTArray<DOMSVGNumber*> mItems;
 
   nsRefPtr<DOMSVGAnimatedNumberList> mAList;
 };

@@ -11,6 +11,7 @@
 #include "nsHTMLParts.h"
 #include "nsContainerFrame.h"
 #include "nsGenericHTMLElement.h"
+#include "nsAttrValueInlines.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsIDocument.h"
@@ -20,12 +21,15 @@
 #include "nsNetUtil.h"
 #include "prprf.h"
 #include "nsDisplayList.h"
+#include "nsCounterManager.h"
 
 #include "imgILoader.h"
 #include "imgIContainer.h"
+#include "imgRequestProxy.h"
 
 #include "nsIServiceManager.h"
 #include "nsIComponentManager.h"
+#include <algorithm>
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -85,7 +89,7 @@ nsBulletFrame::IsEmpty()
 bool
 nsBulletFrame::IsSelfEmpty() 
 {
-  return GetStyleList()->mListStyleType == NS_STYLE_LIST_STYLE_NONE;
+  return StyleList()->mListStyleType == NS_STYLE_LIST_STYLE_NONE;
 }
 
 /* virtual */ void
@@ -93,7 +97,7 @@ nsBulletFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
   nsFrame::DidSetStyleContext(aOldStyleContext);
 
-  imgIRequest *newRequest = GetStyleList()->GetListStyleImage();
+  imgRequestProxy *newRequest = StyleList()->GetListStyleImage();
 
   if (newRequest) {
 
@@ -115,17 +119,25 @@ nsBulletFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
         newURI->Equals(oldURI, &same);
         if (same) {
           needNewRequest = false;
-        } else {
-          nsLayoutUtils::DeregisterImageRequest(PresContext(), mImageRequest,
-                                                &mRequestRegistered);
-          mImageRequest->CancelAndForgetObserver(NS_ERROR_FAILURE);
-          mImageRequest = nullptr;
         }
       }
     }
 
     if (needNewRequest) {
+      nsRefPtr<imgRequestProxy> oldRequest = mImageRequest;
       newRequest->Clone(mListener, getter_AddRefs(mImageRequest));
+
+      // Deregister the old request. We wait until after Clone is done in case
+      // the old request and the new request are the same underlying image
+      // accessed via different URLs.
+      if (oldRequest) {
+        nsLayoutUtils::DeregisterImageRequest(PresContext(), oldRequest,
+                                              &mRequestRegistered);
+        oldRequest->CancelAndForgetObserver(NS_ERROR_FAILURE);
+        oldRequest = nullptr;
+      }
+
+      // Register the new request.
       if (mImageRequest) {
         nsLayoutUtils::RegisterImageRequestIfAnimated(PresContext(),
                                                       mImageRequest,
@@ -154,7 +166,7 @@ nsBulletFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
         bool hadBullet = oldStyleList->GetListStyleImage() ||
             oldStyleList->mListStyleType != NS_STYLE_LIST_STYLE_NONE;
 
-        const nsStyleList* newStyleList = GetStyleList();
+        const nsStyleList* newStyleList = StyleList();
         bool hasBullet = newStyleList->GetListStyleImage() ||
             newStyleList->mListStyleType != NS_STYLE_LIST_STYLE_NONE;
 
@@ -167,6 +179,19 @@ nsBulletFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   }
 #endif
 }
+
+class nsDisplayBulletGeometry : public nsDisplayItemGenericGeometry
+{
+public:
+  nsDisplayBulletGeometry(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder)
+    : nsDisplayItemGenericGeometry(aItem, aBuilder)
+  {
+    nsBulletFrame* f = static_cast<nsBulletFrame*>(aItem->Frame());
+    mOrdinal = f->GetOrdinal();
+  }
+
+  int32_t mOrdinal;
+};
 
 class nsDisplayBullet : public nsDisplayItem {
 public:
@@ -198,34 +223,68 @@ public:
     bool snap;
     return GetBounds(aBuilder, &snap);
   }
+
+  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder)
+  {
+    return new nsDisplayBulletGeometry(this, aBuilder);
+  }
+
+  virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                         const nsDisplayItemGeometry* aGeometry,
+                                         nsRegion *aInvalidRegion)
+  {
+    const nsDisplayBulletGeometry* geometry = static_cast<const nsDisplayBulletGeometry*>(aGeometry);
+    nsBulletFrame* f = static_cast<nsBulletFrame*>(mFrame);
+
+    if (f->GetOrdinal() != geometry->mOrdinal) {
+      bool snap;
+      aInvalidRegion->Or(geometry->mBounds, GetBounds(aBuilder, &snap));
+      return;
+    }
+
+    nsCOMPtr<imgIContainer> image = f->GetImage();
+    if (aBuilder->ShouldSyncDecodeImages() && image && !image->IsDecoded()) {
+      // If we are going to do a sync decode and we are not decoded then we are
+      // going to be drawing something different from what is currently there,
+      // so we add our bounds to the invalid region.
+      bool snap;
+      aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
+    }
+
+    return nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
+  }
 };
 
 void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder,
                             nsRenderingContext* aCtx)
 {
+  uint32_t flags = imgIContainer::FLAG_NONE;
+  if (aBuilder->ShouldSyncDecodeImages()) {
+    flags |= imgIContainer::FLAG_SYNC_DECODE;
+  }
   static_cast<nsBulletFrame*>(mFrame)->
-    PaintBullet(*aCtx, ToReferenceFrame(), mVisibleRect);
+    PaintBullet(*aCtx, ToReferenceFrame(), mVisibleRect, flags);
 }
 
-NS_IMETHODIMP
+void
 nsBulletFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists)
 {
   if (!IsVisibleForPainting(aBuilder))
-    return NS_OK;
+    return;
 
   DO_GLOBAL_REFLOW_COUNT_DSP("nsBulletFrame");
   
-  return aLists.Content()->AppendNewToTop(
-      new (aBuilder) nsDisplayBullet(aBuilder, this));
+  aLists.Content()->AppendNewToTop(
+    new (aBuilder) nsDisplayBullet(aBuilder, this));
 }
 
 void
 nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
-                           const nsRect& aDirtyRect)
+                           const nsRect& aDirtyRect, uint32_t aFlags)
 {
-  const nsStyleList* myList = GetStyleList();
+  const nsStyleList* myList = StyleList();
   uint8_t listStyleType = myList->mListStyleType;
 
   if (myList->GetListStyleImage() && mImageRequest) {
@@ -241,7 +300,7 @@ nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
                     mRect.height - (mPadding.top + mPadding.bottom));
         nsLayoutUtils::DrawSingleImage(&aRenderingContext,
              imageCon, nsLayoutUtils::GetGraphicsFilterForFrame(this),
-             dest + aPt, aDirtyRect, imgIContainer::FLAG_NONE);
+             dest + aPt, aDirtyRect, nullptr, aFlags);
         return;
       }
     }
@@ -352,8 +411,12 @@ nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
 
 int32_t
 nsBulletFrame::SetListItemOrdinal(int32_t aNextOrdinal,
-                                  bool* aChanged)
+                                  bool* aChanged,
+                                  int32_t aIncrement)
 {
+  MOZ_ASSERT(aIncrement == 1 || aIncrement == -1,
+             "We shouldn't have weird increments here");
+
   // Assume that the ordinal comes from the caller
   int32_t oldOrdinal = mOrdinal;
   mOrdinal = aNextOrdinal;
@@ -376,7 +439,7 @@ nsBulletFrame::SetListItemOrdinal(int32_t aNextOrdinal,
 
   *aChanged = oldOrdinal != mOrdinal;
 
-  return mOrdinal + 1;
+  return nsCounterManager::IncrementCounter(mOrdinal, aIncrement);
 }
 
 
@@ -405,8 +468,12 @@ static bool DecimalLeadingZeroToText(int32_t ordinal, nsString& result)
 static bool OtherDecimalToText(int32_t ordinal, PRUnichar zeroChar, nsString& result)
 {
    PRUnichar diff = zeroChar - PRUnichar('0');
+   // We're going to be appending to whatever is in "result" already, so make
+   // sure to only munge the new bits.  Note that we can't just grab the pointer
+   // to the new stuff here, since appending to the string can realloc.
+   size_t offset = result.Length();
    DecimalToText(ordinal, result);
-   PRUnichar* p = result.BeginWriting();
+   PRUnichar* p = result.BeginWriting() + offset;
    if (ordinal < 0) {
      // skip the leading '-'
      ++p;
@@ -418,12 +485,16 @@ static bool OtherDecimalToText(int32_t ordinal, PRUnichar zeroChar, nsString& re
 static bool TamilToText(int32_t ordinal,  nsString& result)
 {
    PRUnichar diff = 0x0BE6 - PRUnichar('0');
+   // We're going to be appending to whatever is in "result" already, so make
+   // sure to only munge the new bits.  Note that we can't just grab the pointer
+   // to the new stuff here, since appending to the string can realloc.
+   size_t offset = result.Length();
    DecimalToText(ordinal, result); 
    if (ordinal < 1 || ordinal > 9999) {
      // Can't do those in this system.
      return false;
    }
-   PRUnichar* p = result.BeginWriting();
+   PRUnichar* p = result.BeginWriting() + offset;
    for(; '\0' != *p ; p++) 
       if(*p != PRUnichar('0'))
          *p += diff;
@@ -1227,7 +1298,7 @@ bool
 nsBulletFrame::GetListItemText(const nsStyleList& aListStyle,
                                nsString& result)
 {
-  const nsStyleVisibility* vis = GetStyleVisibility();
+  const nsStyleVisibility* vis = StyleVisibility();
 
   NS_ASSERTION(aListStyle.mListStyleType != NS_STYLE_LIST_STYLE_NONE &&
                aListStyle.mListStyleType != NS_STYLE_LIST_STYLE_DISC &&
@@ -1265,7 +1336,7 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
   // Reset our padding.  If we need it, we'll set it below.
   mPadding.SizeTo(0, 0, 0, 0);
   
-  const nsStyleList* myList = GetStyleList();
+  const nsStyleList* myList = StyleList();
   nscoord ascent;
 
   RemoveStateBits(BULLET_FRAME_IMAGE_LOADING);
@@ -1309,7 +1380,7 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
     case NS_STYLE_LIST_STYLE_CIRCLE:
     case NS_STYLE_LIST_STYLE_SQUARE:
       ascent = fm->MaxAscent();
-      bulletSize = NS_MAX(nsPresContext::CSSPixelsToAppUnits(MIN_BULLET_SIZE),
+      bulletSize = std::max(nsPresContext::CSSPixelsToAppUnits(MIN_BULLET_SIZE),
                           NSToCoordRound(0.8f * (float(ascent) / 2.0f)));
       mPadding.bottom = NSToCoordRound(float(ascent) / 8.0f);
       aMetrics.width = mPadding.right + bulletSize;
@@ -1426,9 +1497,36 @@ nsBulletFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
   return metrics.width;
 }
 
+NS_IMETHODIMP
+nsBulletFrame::Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData)
+{
+  if (aType == imgINotificationObserver::SIZE_AVAILABLE) {
+    nsCOMPtr<imgIContainer> image;
+    aRequest->GetImage(getter_AddRefs(image));
+    return OnStartContainer(aRequest, image);
+  }
 
-NS_IMETHODIMP nsBulletFrame::OnStartContainer(imgIRequest *aRequest,
-                                              imgIContainer *aImage)
+  if (aType == imgINotificationObserver::FRAME_UPDATE) {
+    // The image has changed.
+    // Invalidate the entire content area. Maybe it's not optimal but it's simple and
+    // always correct, and I'll be a stunned mullet if it ever matters for performance
+    InvalidateFrame();
+  }
+
+  if (aType == imgINotificationObserver::IS_ANIMATED) {
+    // Register the image request with the refresh driver now that we know it's
+    // animated.
+    if (aRequest == mImageRequest) {
+      nsLayoutUtils::RegisterImageRequest(PresContext(), mImageRequest,
+                                          &mRequestRegistered);
+    }
+  }
+
+  return NS_OK;
+}
+
+nsresult nsBulletFrame::OnStartContainer(imgIRequest *aRequest,
+                                         imgIContainer *aImage)
 {
   if (!aImage) return NS_ERROR_INVALID_ARG;
   if (!aRequest) return NS_ERROR_INVALID_ARG;
@@ -1467,60 +1565,6 @@ NS_IMETHODIMP nsBulletFrame::OnStartContainer(imgIRequest *aRequest,
   // 'cleaned up' by the Request when it is destroyed, but only then.
   aRequest->IncrementAnimationConsumers();
   
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsBulletFrame::OnDataAvailable(imgIRequest *aRequest,
-                                             bool aCurrentFrame,
-                                             const nsIntRect *aRect)
-{
-  // The image has changed.
-  // Invalidate the entire content area. Maybe it's not optimal but it's simple and
-  // always correct, and I'll be a stunned mullet if it ever matters for performance
-  Invalidate(nsRect(0, 0, mRect.width, mRect.height));
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsBulletFrame::OnStopDecode(imgIRequest *aRequest,
-                                          nsresult aStatus,
-                                          const PRUnichar *aStatusArg)
-{
-  // XXX should the bulletframe do anything if the image failed to load?
-  //     it didn't in the old code...
-
-#if 0
-  if (NS_FAILED(aStatus)) {
-    // We failed to load the image. Notify the pres shell
-    if (NS_FAILED(aStatus) && (mImageRequest == aRequest || !mImageRequest)) {
-      imageFailed = true;
-    }
-  }
-#endif
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsBulletFrame::OnImageIsAnimated(imgIRequest* aRequest)
-{
-  // Register the image request with the refresh driver now that we know it's
-  // animated.
-  if (aRequest == mImageRequest) {
-    nsLayoutUtils::RegisterImageRequest(PresContext(), mImageRequest,
-                                        &mRequestRegistered);
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsBulletFrame::FrameChanged(imgIRequest *aRequest,
-                                          imgIContainer *aContainer,
-                                          const nsIntRect *aDirtyRect)
-{
-  // Invalidate the entire content area. Maybe it's not optimal but it's simple and
-  // always correct.
-  Invalidate(nsRect(0, 0, mRect.width, mRect.height));
-
   return NS_OK;
 }
 
@@ -1579,6 +1623,18 @@ nsBulletFrame::SetFontSizeInflation(float aInflation)
   Properties().Set(FontSizeInflationProperty(), u.p);
 }
 
+already_AddRefed<imgIContainer>
+nsBulletFrame::GetImage() const
+{
+  if (mImageRequest && StyleList()->GetListStyleImage()) {
+    nsCOMPtr<imgIContainer> imageCon;
+    mImageRequest->GetImage(getter_AddRefs(imageCon));
+    return imageCon.forget();
+  }
+
+  return nullptr;
+}
+
 nscoord
 nsBulletFrame::GetBaseline() const
 {
@@ -1589,7 +1645,7 @@ nsBulletFrame::GetBaseline() const
     nsRefPtr<nsFontMetrics> fm;
     nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm),
                                           GetFontSizeInflation());
-    const nsStyleList* myList = GetStyleList();
+    const nsStyleList* myList = StyleList();
     switch (myList->mListStyleType) {
       case NS_STYLE_LIST_STYLE_NONE:
         break;
@@ -1599,7 +1655,7 @@ nsBulletFrame::GetBaseline() const
       case NS_STYLE_LIST_STYLE_SQUARE:
         ascent = fm->MaxAscent();
         bottomPadding = NSToCoordRound(float(ascent) / 8.0f);
-        ascent = NS_MAX(nsPresContext::CSSPixelsToAppUnits(MIN_BULLET_SIZE),
+        ascent = std::max(nsPresContext::CSSPixelsToAppUnits(MIN_BULLET_SIZE),
                         NSToCoordRound(0.8f * (float(ascent) / 2.0f)));
         ascent += bottomPadding;
         break;
@@ -1619,7 +1675,7 @@ nsBulletFrame::GetBaseline() const
 
 
 
-NS_IMPL_ISUPPORTS2(nsBulletListener, imgIDecoderObserver, imgIContainerObserver)
+NS_IMPL_ISUPPORTS1(nsBulletListener, imgINotificationObserver)
 
 nsBulletListener::nsBulletListener() :
   mFrame(nullptr)
@@ -1630,49 +1686,10 @@ nsBulletListener::~nsBulletListener()
 {
 }
 
-NS_IMETHODIMP nsBulletListener::OnStartContainer(imgIRequest *aRequest,
-                                                 imgIContainer *aImage)
+NS_IMETHODIMP
+nsBulletListener::Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect* aData)
 {
   if (!mFrame)
     return NS_ERROR_FAILURE;
-
-  return mFrame->OnStartContainer(aRequest, aImage);
-}
-
-NS_IMETHODIMP nsBulletListener::OnDataAvailable(imgIRequest *aRequest,
-                                                bool aCurrentFrame,
-                                                const nsIntRect *aRect)
-{
-  if (!mFrame)
-    return NS_OK;
-
-  return mFrame->OnDataAvailable(aRequest, aCurrentFrame, aRect);
-}
-
-NS_IMETHODIMP nsBulletListener::OnStopDecode(imgIRequest *aRequest,
-                                             nsresult status,
-                                             const PRUnichar *statusArg)
-{
-  if (!mFrame)
-    return NS_OK;
-  
-  return mFrame->OnStopDecode(aRequest, status, statusArg);
-}
-
-NS_IMETHODIMP nsBulletListener::OnImageIsAnimated(imgIRequest *aRequest)
-{
-  if (!mFrame)
-    return NS_OK;
-
-  return mFrame->OnImageIsAnimated(aRequest);
-}
-
-NS_IMETHODIMP nsBulletListener::FrameChanged(imgIRequest *aRequest,
-                                             imgIContainer *aContainer,
-                                             const nsIntRect *aDirtyRect)
-{
-  if (!mFrame)
-    return NS_OK;
-
-  return mFrame->FrameChanged(aRequest, aContainer, aDirtyRect);
+  return mFrame->Notify(aRequest, aType, aData);
 }

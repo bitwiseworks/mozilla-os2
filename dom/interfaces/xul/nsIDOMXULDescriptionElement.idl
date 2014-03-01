@@ -6,7 +6,7 @@
 
 #include "nsIDOMXULElement.idl"
 
-[scriptable, uuid(31063E54-678C-442C-B487-D87F4C3E4751)]
+[scriptable, uuid(7a3be943-dfc0-4b7f-8b5e-692bbce0ce47)]
 interface nsIDOMXULDescriptionElement : nsIDOMXULElement {
   attribute boolean disabled;
   attribute boolean crop;

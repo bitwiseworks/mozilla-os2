@@ -10,145 +10,193 @@ Note: removes both source and destination directory before starting. Do not
       use with outstanding changes in either directory.
 """
 
+from __future__ import print_function, unicode_literals
+
 import os
 import shutil
-import string
 import subprocess
 import sys
 
 import parseManifest
-import writeMakefile
+import writeBuildFiles
 
-def parseManifestFile(dest, dir):
-  subdirs, mochitests, _, __, supportfiles = parseManifest.parseManifestFile("hg-%s/%s/MANIFEST" % (dest, dir))
-  return subdirs, mochitests, supportfiles
+def readManifests(iden, dirs):
+    def parseManifestFile(iden, path):
+        pathstr = "hg-%s/%s/MANIFEST" % (iden, path)
+        subdirs, mochitests, reftests, _, supportfiles = parseManifest.parseManifestFile(pathstr)
+        return subdirs, mochitests, reftests, supportfiles
+
+    data = []
+    for path in dirs:
+        subdirs, mochitests, reftests, supportfiles = parseManifestFile(iden, path)
+        data.append({
+          "path": path,
+          "mochitests": mochitests,
+          "reftests": reftests,
+          "supportfiles": supportfiles,
+        })
+        data.extend(readManifests(iden, ["%s/%s" % (path, d) for d in subdirs]))
+    return data
+
 
 def getData(confFile):
-  """This function parses a file of the form
-  URL of remote repository|Name of the destination directory
-  First directory of tests
-  ...
-  Last directory of tests"""
-  repo = ""
-  dest = ""
-  directories = []
-  try:
-    fp = open(confFile, "rb")
-    first = True
-    for line in fp:
-      if first:
-        idx = line.index("|")
-        repo = line[:idx].strip()
-        dest = line[idx + 1:].strip()
-        first = False
-      else:
-        directories.append(line.strip())
-  finally:
-    fp.close()
-    return repo, dest, directories
+    """This function parses a file of the form
+    (hg or git)|URL of remote repository|identifier for the local directory
+    First directory of tests
+    ...
+    Last directory of tests"""
+    vcs = ""
+    url = ""
+    iden = ""
+    directories = []
+    try:
+        with open(confFile, 'r') as fp:
+            first = True
+            for line in fp:
+                if first:
+                    vcs, url, iden = line.strip().split("|")
+                    first = False
+                else:
+                    directories.append(line.strip())
+    finally:
+        return vcs, url, iden, directories
 
-def makePath(a, b):
-  if not b:
-    # Empty directory, i.e., the repository root.
-    return a
-  return "%s/%s" % (a, b)
 
-def copy(thissrcdir, dest, directories):
-  """Copy mochitests and support files from the external HG directory to their
-  place in mozilla-central.
-  """
-  print "Copying %s..." % (directories, )
-  for d in directories:
-    dirtocreate = dest
+def makePathInternal(a, b):
+    if not b:
+        # Empty directory, i.e., the repository root.
+        return a
+    return "%s/%s" % (a, b)
 
-    subdirs, mochitests, supportfiles = parseManifestFile(dest, d)
-    sourcedir = makePath("hg-%s" % dest, d)
-    destdir = makePath(dest, d)
-    os.makedirs(destdir)
 
-    for mochitest in mochitests:
-      shutil.copy("%s/%s" % (sourcedir, mochitest), "%s/test_%s" % (destdir, mochitest))
-    for support in supportfiles:
-      shutil.copy("%s/%s" % (sourcedir, support), "%s/%s" % (destdir, support))
+def makeSourcePath(a, b):
+    """Make a path in the source (upstream) directory."""
+    return makePathInternal("hg-%s" % a, b)
 
-    if len(subdirs):
-      if d:
-        importDirs(thissrcdir, dest, ["%s/%s" % (d, subdir) for subdir in subdirs])
-      else:
-        # Empty directory, i.e., the repository root
-        importDirs(thissrcdir, dest, subdirs)
 
-def printMakefile(dest, directories):
-  """Create a .mk file to be included into the main Makefile.in, which lists the
-  directories with tests.
-  """
-  print "Creating .mk..."
-  path = dest + ".mk"
-  fp = open(path, "wb")
-  fp.write("DIRS += \\\n")
-  fp.write(writeMakefile.makefileString([makePath(dest, d) for d in directories]))
-  fp.write("\n")
-  fp.close()
-  subprocess.check_call(["hg", "add", path])
+def makeDestPath(a, b):
+    """Make a path in the destination (mozilla-central) directory, shortening as
+    appropriate."""
+    def shorten(path):
+        path = path.replace('dom-tree-accessors', 'dta')
+        path = path.replace('document.getElementsByName', 'doc.gEBN')
+        path = path.replace('requirements-for-implementations', 'implreq')
+        path = path.replace('other-elements-attributes-and-apis', 'oeaaa')
+        return path
 
-def printMakefiles(thissrcdir, dest, directories):
-  """Create Makefile.in files for each directory that contains tests we import.
-  """
-  print "Creating Makefile.ins..."
-  for d in directories:
-    if d:
-      path = "%s/%s" % (dest, d)
-    else:
-      # Empty directory, i.e., the repository root
-      path = dest
-    print "Creating Makefile.in in %s..." % (path, )
+    return shorten(makePathInternal(a, b))
 
-    subdirs, mochitests, supportfiles = parseManifestFile(dest, d)
 
-    abspath = "%s/%s" % (thissrcdir, path)
-    files = ["test_%s" % (mochitest, ) for mochitest in mochitests]
-    files.extend(supportfiles)
+def extractReftestFiles(reftests):
+    """Returns the set of files referenced in the reftests argument"""
+    files = set()
+    for line in reftests:
+        files.update([line[1], line[2]])
+    return files
 
-    result = writeMakefile.substMakefile("importTestsuite.py", abspath, subdirs, files)
 
-    fp = open(path + "/Makefile.in", "wb")
-    fp.write(result)
-    fp.close()
+def copy(dest, directories):
+    """Copy mochitests and support files from the external HG directory to their
+    place in mozilla-central.
+    """
+    print("Copying tests...")
+    for d in directories:
+        sourcedir = makeSourcePath(dest, d["path"])
+        destdir = makeDestPath(dest, d["path"])
+        os.makedirs(destdir)
+
+        reftestfiles = extractReftestFiles(d["reftests"])
+
+        for mochitest in d["mochitests"]:
+            shutil.copy("%s/%s" % (sourcedir, mochitest), "%s/test_%s" % (destdir, mochitest))
+        for reftest in sorted(reftestfiles):
+            shutil.copy("%s/%s" % (sourcedir, reftest), "%s/%s" % (destdir, reftest))
+        for support in d["supportfiles"]:
+            shutil.copy("%s/%s" % (sourcedir, support), "%s/%s" % (destdir, support))
+
+def printMozbuildFile(dest, directories):
+    """Create a .mozbuild file to be included into the main moz.build, which
+    lists the directories with tests.
+    """
+    print("Creating mozbuild...")
+    path = dest + ".mozbuild"
+    with open(path, 'w') as fh:
+        normalized = [makeDestPath(dest, d["path"]) for d in directories]
+        result = writeBuildFiles.substMozbuild("importTestsuite.py",
+            normalized)
+        fh.write(result)
+
+    subprocess.check_call(["hg", "add", path])
+
+def printBuildFiles(dest, directories):
+    """Create Makefile.in files for each directory that contains tests we import.
+    """
+    print("Creating build files...")
+    for d in directories:
+        path = makeDestPath(dest, d["path"])
+
+        files = ["test_%s" % (mochitest, ) for mochitest in d["mochitests"]]
+        files.extend(d["supportfiles"])
+
+        with open(path + "/Makefile.in", "w") as fh:
+            result = writeBuildFiles.substMakefile("importTestsuite.py", files)
+            fh.write(result)
+
+        with open(path + "/moz.build", "w") as fh:
+            result = writeBuildFiles.substMozbuild("importTestsuite.py", [])
+            fh.write(result)
+
+        if d["reftests"]:
+            with open(path + "/reftest.list", "w") as fh:
+                result = writeBuildFiles.substReftestList("importTestsuite.py",
+                    d["reftests"])
+                fh.write(result)
+
 
 def hgadd(dest, directories):
-  """Inform hg of the files in |directories|."""
-  print "hg addremoving..."
-  for d in directories:
-    subprocess.check_call(["hg", "addremove", "%s/%s" % (dest, d)])
+    """Inform hg of the files in |directories|."""
+    print("hg addremoving...")
+    for d in directories:
+        subprocess.check_call(["hg", "addremove", makeDestPath(dest, d)])
 
-def importDirs(thissrcdir, dest, directories):
-  copy(thissrcdir, dest, directories)
-  printMakefiles(thissrcdir, dest, directories)
+def removeAndCloneRepo(vcs, url, dest):
+    """Replaces the repo at dest by a fresh clone from url using vcs"""
+    assert vcs in ('hg', 'git')
 
-def importRepo(confFile, thissrcdir):
-  try:
-    repo, dest, directories = getData(confFile)
-    hgdest = "hg-%s" % (dest, )
-    print "Going to clone %s to %s..." % (repo, hgdest)
-    print "Removing %s..." % dest
-    subprocess.check_call(["rm", "--recursive", "--force", dest])
-    print "Removing %s..." % hgdest
-    subprocess.check_call(["rm", "--recursive", "--force", hgdest])
-    print "Cloning %s to %s..." % (repo, hgdest)
-    subprocess.check_call(["hg", "clone", repo, hgdest])
-    print "Going to import %s..." % (directories, )
-    importDirs(thissrcdir, dest, directories)
-    printMakefile(dest, directories)
-    hgadd(dest, directories)
-    print "Removing %s again..." % hgdest
-    subprocess.check_call(["rm", "--recursive", "--force", hgdest])
-  except subprocess.CalledProcessError, e:
-    print e.returncode
-  finally:
-    print "Done"
+    print("Removing %s..." % dest)
+    subprocess.check_call(["rm", "-rf", dest])
+
+    print("Cloning %s to %s with %s..." % (url, dest, vcs))
+    subprocess.check_call([vcs, "clone", url, dest])
+
+def importRepo(confFile):
+    try:
+        vcs, url, iden, directories = getData(confFile)
+        dest = iden
+        hgdest = "hg-%s" % iden
+
+        print("Removing %s..." % dest)
+        subprocess.check_call(["rm", "-rf", dest])
+
+        removeAndCloneRepo(vcs, url, hgdest)
+
+        data = readManifests(iden, directories)
+        print("Going to import %s..." % [d["path"] for d in data])
+
+        copy(dest, data)
+        printBuildFiles(dest, data)
+        printMozbuildFile(dest, data)
+        hgadd(dest, directories)
+        print("Removing %s again..." % hgdest)
+        subprocess.check_call(["rm", "-rf", hgdest])
+    except subprocess.CalledProcessError as e:
+        print(e.returncode)
+    finally:
+        print("Done")
 
 if __name__ == "__main__":
-  if len(sys.argv) != 2:
-    print "Need one argument."
-  else:
-    importRepo(sys.argv[1], "dom/imptests")
+    if len(sys.argv) != 2:
+        print("Need one argument.")
+    else:
+        importRepo(sys.argv[1])
+

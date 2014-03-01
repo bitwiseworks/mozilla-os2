@@ -8,7 +8,7 @@
 #include "xptcprivate.h"
 #include "xptiprivate.h"
 
-#if (__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 4))
+#ifdef __GNUC__
 /* This tells gcc3.4+ not to optimize away symbols.
  * @see http://gcc.gnu.org/gcc-3.4/changes.html
  */
@@ -21,11 +21,11 @@
 #endif
 
 /* Specify explicitly a symbol for this function, don't try to guess the c++ mangled symbol.  */
-static nsresult PrepareAndDispatch(nsXPTCStubBase* self, uint32 methodIndex, uint32_t* args) asm("_PrepareAndDispatch")
+static nsresult PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args) asm("_PrepareAndDispatch")
 DONT_DROP_OR_WARN;
 
 static nsresult
-PrepareAndDispatch(nsXPTCStubBase* self, uint32 methodIndex, uint32_t* args)
+PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args)
 {
 #define PARAM_BUFFER_COUNT     16
 

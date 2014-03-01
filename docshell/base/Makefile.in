@@ -10,76 +10,14 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = docshell
+FAIL_ON_WARNINGS := 1
 LIBRARY_NAME   = basedocshell_s
-GRE_MODULE     = 1
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 
 ifdef MOZ_TOOLKIT_SEARCH
 DEFINES += -DMOZ_TOOLKIT_SEARCH
 endif
-
-SDK_XPIDLSRCS = \
-  nsIClipboardCommands.idl \
-  $(NULL)
-
-XPIDLSRCS = \
-  nsCDefaultURIFixup.idl \
-  nsIDocShell.idl \
-  nsIDocShellLoadInfo.idl \
-  nsIDocShellTreeItem.idl \
-  nsIDocShellTreeNode.idl \
-  nsIDocShellTreeOwner.idl \
-  nsIDocShellHistory.idl \
-  nsIGlobalHistory2.idl \
-  nsIMarkupDocumentViewer.idl \
-  nsIScrollable.idl \
-  nsITextScroll.idl \
-  nsIDocCharset.idl \
-  nsIWebNavigation.idl \
-  nsIWebNavigationInfo.idl \
-  nsIContentViewer.idl \
-  nsIContentViewerEdit.idl \
-  nsIContentViewerFile.idl \
-  nsIURIFixup.idl \
-  nsIEditorDocShell.idl \
-  nsIWebPageDescriptor.idl \
-  nsIDownloadHistory.idl \
-  nsILoadContext.idl \
-  nsIRefreshURI.idl \
-  nsIContentViewerContainer.idl \
-  nsIDocumentLoaderFactory.idl \
-  nsIPrivacyTransitionObserver.idl \
-  $(NULL)
-
-EXPORTS = \
-  nsDocShellLoadTypes.h \
-  nsILinkHandler.h \
-  nsIWebShellServices.h \
-  SerializedLoadContext.h \
-  $(NULL)
-
-EXPORTS_NAMESPACES = mozilla
-
-EXPORTS_mozilla = \
-  IHistory.h \
-  LoadContext.h \
-  $(NULL)
-
-CPPSRCS = \
-  nsDocShell.cpp \
-  nsDocShellLoadInfo.cpp \
-  nsDocShellEditorData.cpp \
-  nsDocShellTransferableHooks.cpp \
-  nsDocShellEnumerator.cpp \
-  nsDSURIContentListener.cpp \
-  nsDefaultURIFixup.cpp \
-  nsWebNavigationInfo.cpp \
-  nsAboutRedirector.cpp \
-  nsDownloadHistory.cpp \
-  SerializedLoadContext.cpp \
-  LoadContext.cpp \
-  $(NULL)
 
 # we don't want the shared lib, but we want to force the creation of a
 # static lib.

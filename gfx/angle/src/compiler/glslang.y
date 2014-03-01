@@ -1,6 +1,6 @@
 /*
 //
-// Copyright (c) 2002-2010 The ANGLE Project Authors. All rights reserved.
+// Copyright (c) 2002-2013 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -37,6 +37,9 @@ WHICH GENERATES THE GLSL ES PARSER (glslang_tab.cpp AND glslang_tab.h).
 #include "compiler/SymbolTable.h"
 #include "compiler/ParseHelper.h"
 #include "GLSLANG/ShaderLang.h"
+
+#define YYENABLE_NLS 0
+#define YYLTYPE_IS_TRIVIAL 1
 
 #define YYLEX_PARAM context->scanner
 %}
@@ -242,36 +245,36 @@ postfix_expression
         }
         if ($1->getType().getQualifier() == EvqConst && $3->getQualifier() == EvqConst) {
             if ($1->isArray()) { // constant folding for arrays
-                $$ = context->addConstArrayNode($3->getAsConstantUnion()->getUnionArrayPointer()->getIConst(), $1, $2.line);
+                $$ = context->addConstArrayNode($3->getAsConstantUnion()->getIConst(0), $1, $2.line);
             } else if ($1->isVector()) {  // constant folding for vectors
                 TVectorFields fields;
                 fields.num = 1;
-                fields.offsets[0] = $3->getAsConstantUnion()->getUnionArrayPointer()->getIConst(); // need to do it this way because v.xy sends fields integer array
+                fields.offsets[0] = $3->getAsConstantUnion()->getIConst(0); // need to do it this way because v.xy sends fields integer array
                 $$ = context->addConstVectorNode(fields, $1, $2.line);
             } else if ($1->isMatrix()) { // constant folding for matrices
-                $$ = context->addConstMatrixNode($3->getAsConstantUnion()->getUnionArrayPointer()->getIConst(), $1, $2.line);
+                $$ = context->addConstMatrixNode($3->getAsConstantUnion()->getIConst(0), $1, $2.line);
             }
         } else {
             if ($3->getQualifier() == EvqConst) {
-                if (($1->isVector() || $1->isMatrix()) && $1->getType().getNominalSize() <= $3->getAsConstantUnion()->getUnionArrayPointer()->getIConst() && !$1->isArray() ) {
+                if (($1->isVector() || $1->isMatrix()) && $1->getType().getNominalSize() <= $3->getAsConstantUnion()->getIConst(0) && !$1->isArray() ) {
                     std::stringstream extraInfoStream;
-                    extraInfoStream << "field selection out of range '" << $3->getAsConstantUnion()->getUnionArrayPointer()->getIConst() << "'";
+                    extraInfoStream << "field selection out of range '" << $3->getAsConstantUnion()->getIConst(0) << "'";
                     std::string extraInfo = extraInfoStream.str();
                     context->error($2.line, "", "[", extraInfo.c_str());
                     context->recover();
                 } else {
                     if ($1->isArray()) {
                         if ($1->getType().getArraySize() == 0) {
-                            if ($1->getType().getMaxArraySize() <= $3->getAsConstantUnion()->getUnionArrayPointer()->getIConst()) {
-                                if (context->arraySetMaxSize($1->getAsSymbolNode(), $1->getTypePointer(), $3->getAsConstantUnion()->getUnionArrayPointer()->getIConst(), true, $2.line))
+                            if ($1->getType().getMaxArraySize() <= $3->getAsConstantUnion()->getIConst(0)) {
+                                if (context->arraySetMaxSize($1->getAsSymbolNode(), $1->getTypePointer(), $3->getAsConstantUnion()->getIConst(0), true, $2.line))
                                     context->recover();
                             } else {
                                 if (context->arraySetMaxSize($1->getAsSymbolNode(), $1->getTypePointer(), 0, false, $2.line))
                                     context->recover();
                             }
-                        } else if ( $3->getAsConstantUnion()->getUnionArrayPointer()->getIConst() >= $1->getType().getArraySize()) {
+                        } else if ( $3->getAsConstantUnion()->getIConst(0) >= $1->getType().getArraySize()) {
                             std::stringstream extraInfoStream;
-                            extraInfoStream << "array index out of range '" << $3->getAsConstantUnion()->getUnionArrayPointer()->getIConst() << "'";
+                            extraInfoStream << "array index out of range '" << $3->getAsConstantUnion()->getIConst(0) << "'";
                             std::string extraInfo = extraInfoStream.str();
                             context->error($2.line, "", "[", extraInfo.c_str());
                             context->recover();
@@ -337,18 +340,10 @@ postfix_expression
                 else
                     $$->setType(TType($1->getBasicType(), $1->getPrecision(), EvqConst, (int) (*$3.string).size()));
             } else {
-                if (fields.num == 1) {
-                    ConstantUnion *unionArray = new ConstantUnion[1];
-                    unionArray->setIConst(fields.offsets[0]);
-                    TIntermTyped* index = context->intermediate.addConstantUnion(unionArray, TType(EbtInt, EbpUndefined, EvqConst), $3.line);
-                    $$ = context->intermediate.addIndex(EOpIndexDirect, $1, index, $2.line);
-                    $$->setType(TType($1->getBasicType(), $1->getPrecision()));
-                } else {
-                    TString vectorString = *$3.string;
-                    TIntermTyped* index = context->intermediate.addSwizzle(fields, $3.line);
-                    $$ = context->intermediate.addIndex(EOpVectorSwizzle, $1, index, $2.line);
-                    $$->setType(TType($1->getBasicType(), $1->getPrecision(), EvqTemporary, (int) vectorString.size()));
-                }
+                TString vectorString = *$3.string;
+                TIntermTyped* index = context->intermediate.addSwizzle(fields, $3.line);
+                $$ = context->intermediate.addIndex(EOpVectorSwizzle, $1, index, $2.line);
+                $$->setType(TType($1->getBasicType(), $1->getPrecision(), EvqTemporary, (int) vectorString.size()));
             }
         } else if ($1->isMatrix()) {
             TMatrixFields fields;
@@ -529,7 +524,7 @@ function_call
                     $$->getAsAggregate()->setName(fnCandidate->getMangledName());
 
                     TQualifier qual;
-                    for (int i = 0; i < fnCandidate->getParamCount(); ++i) {
+                    for (size_t i = 0; i < fnCandidate->getParamCount(); ++i) {
                         qual = fnCandidate->getParam(i).type->getQualifier();
                         if (qual == EvqOut || qual == EvqInOut) {
                             if (context->lValueErrorCheck($$->getLine(), "assign", $$->getAsAggregate()->getSequence()[i]->getAsTyped())) {
@@ -970,7 +965,7 @@ declaration
         prototype->setType(function.getReturnType());
         prototype->setName(function.getName());
         
-        for (int i = 0; i < function.getParamCount(); i++)
+        for (size_t i = 0; i < function.getParamCount(); i++)
         {
             const TParameter &param = function.getParam(i);
             if (param.name != 0)
@@ -996,7 +991,14 @@ declaration
         $$ = $1.intermAggregate;
     }
     | PRECISION precision_qualifier type_specifier_no_prec SEMICOLON {
-        context->symbolTable.setDefaultPrecision( $3.type, $2 );
+        if (($2 == EbpHigh) && (context->shaderType == SH_FRAGMENT_SHADER) && !context->fragmentPrecisionHigh) {
+            context->error($1.line, "precision is not supported in fragment shader", "highp");
+            context->recover();
+        }
+        if (!context->symbolTable.setDefaultPrecision( $3, $2 )) {
+            context->error($1.line, "illegal type argument for default precision qualifier", getBasicString($3.type));
+            context->recover();
+        }
         $$ = 0;
     }
     ;
@@ -1017,7 +1019,7 @@ function_prototype
                 context->error($2.line, "overloaded functions must have the same return type", $1->getReturnType().getBasicString());
                 context->recover();
             }
-            for (int i = 0; i < prevDec->getParamCount(); ++i) {
+            for (size_t i = 0; i < prevDec->getParamCount(); ++i) {
                 if (prevDec->getParam(i).type->getQualifier() != $1->getParam(i).type->getQualifier()) {
                     context->error($2.line, "overloaded functions must have the same parameter qualifiers", $1->getParam(i).type->getQualifierString());
                     context->recover();
@@ -1208,7 +1210,7 @@ init_declarator_list
         if (context->structQualifierErrorCheck($3.line, $$.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($3.line, *$3.string, $$.type))
+        if (context->nonInitConstErrorCheck($3.line, *$3.string, $$.type, false))
             context->recover();
 
         TVariable* variable = 0;
@@ -1221,7 +1223,7 @@ init_declarator_list
         if (context->structQualifierErrorCheck($3.line, $1.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type))
+        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type, true))
             context->recover();
 
         $$ = $1;
@@ -1239,7 +1241,7 @@ init_declarator_list
         if (context->structQualifierErrorCheck($3.line, $1.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type))
+        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type, true))
             context->recover();
 
         $$ = $1;
@@ -1293,7 +1295,7 @@ single_declaration
         if (context->structQualifierErrorCheck($2.line, $$.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($2.line, *$2.string, $$.type))
+        if (context->nonInitConstErrorCheck($2.line, *$2.string, $$.type, false))
             context->recover();
             
             $$.type = $1;
@@ -1324,7 +1326,7 @@ single_declaration
         if (context->structQualifierErrorCheck($2.line, $1))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($2.line, *$2.string, $1))
+        if (context->nonInitConstErrorCheck($2.line, *$2.string, $1, true))
             context->recover();
 
         $$.type = $1;
@@ -2087,7 +2089,7 @@ function_definition
         // knows where to find parameters.
         //
         TIntermAggregate* paramNodes = new TIntermAggregate;
-        for (int i = 0; i < function->getParamCount(); i++) {
+        for (size_t i = 0; i < function->getParamCount(); i++) {
             const TParameter& param = function->getParam(i);
             if (param.name != 0) {
                 TVariable *variable = new TVariable(param.name, *param.type);
@@ -2147,4 +2149,3 @@ function_definition
 int glslang_parse(TParseContext* context) {
     return yyparse(context);
 }
-

@@ -7,31 +7,45 @@
 #ifndef nsDOMStringMap_h
 #define nsDOMStringMap_h
 
-#include "nsIDOMDOMStringMap.h"
-
 #include "nsCycleCollectionParticipant.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "nsString.h"
+#include "nsWrapperCache.h"
+#include "nsGenericHTMLElement.h"
+#include "jsfriendapi.h"
 
-class nsGenericHTMLElement;
+namespace mozilla {
+class ErrorResult;
+}
 
-class nsDOMStringMap : public nsIDOMDOMStringMap
+class nsDOMStringMap : public nsStubMutationObserver,
+                       public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_NSIDOMDOMSTRINGMAP
-  NS_DECL_CYCLE_COLLECTION_CLASS(nsDOMStringMap)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsDOMStringMap)
+
+  NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
+
+  nsINode* GetParentObject()
+  {
+    return mElement;
+  }
 
   nsDOMStringMap(nsGenericHTMLElement* aElement);
 
-  // GetDataPropList is not defined in IDL due to difficulty
-  // of returning arrays in IDL. Instead, we cast to this
-  // class if this method needs to be called.
-  nsresult GetDataPropList(nsTArray<nsString>& aResult);
+  // WebIDL API
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  void NamedGetter(const nsAString& aProp, bool& found,
+                   mozilla::dom::DOMString& aResult) const;
+  void NamedSetter(const nsAString& aProp, const nsAString& aValue,
+                   mozilla::ErrorResult& rv);
+  void NamedDeleter(const nsAString& aProp, bool &found);
+  void GetSupportedNames(nsTArray<nsString>& aNames);
 
-  nsresult RemovePropInternal(nsIAtom* aAttr);
-  nsGenericHTMLElement* GetElement();
+  js::ExpandoAndGeneration mExpandoAndGeneration;
 
 private:
   virtual ~nsDOMStringMap();
@@ -40,8 +54,8 @@ protected:
   nsRefPtr<nsGenericHTMLElement> mElement;
   // Flag to guard against infinite recursion.
   bool mRemovingProp;
-  bool DataPropToAttr(const nsAString& aProp, nsAString& aResult);
-  bool AttrToDataProp(const nsAString& aAttr, nsAString& aResult);
+  static bool DataPropToAttr(const nsAString& aProp, nsAutoString& aResult);
+  static bool AttrToDataProp(const nsAString& aAttr, nsAutoString& aResult);
 };
 
 #endif

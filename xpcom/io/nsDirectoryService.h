@@ -9,8 +9,8 @@
 #include "nsIDirectoryService.h"
 #include "nsHashtable.h"
 #include "nsIFile.h"
-#include "nsISupportsArray.h"
 #include "nsIAtom.h"
+#include "nsTArray.h"
 #include "mozilla/Attributes.h"
 
 #define NS_XPCOM_INIT_CURRENT_PROCESS_DIR       "MozBinD"   // Can be used to set NS_XPCOM_CURRENT_PROCESS_DIR
@@ -37,7 +37,7 @@ class nsDirectoryService MOZ_FINAL : public nsIDirectoryService,
   nsDirectoryService();
    ~nsDirectoryService();
 
-  static nsresult RealInit();
+  static void RealInit();
   void RegisterCategoryProviders();
 
   static nsresult
@@ -50,7 +50,7 @@ private:
     
     static bool ReleaseValues(nsHashKey* key, void* data, void* closure);
     nsSupportsHashtable mHashtable;
-    nsCOMPtr<nsISupportsArray> mProviders;
+    nsTArray<nsCOMPtr<nsIDirectoryServiceProvider> > mProviders;
 
 public:
 

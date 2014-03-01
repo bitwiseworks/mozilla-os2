@@ -30,6 +30,12 @@ const UNEXPECTED_NOTIFICATIONS = [
 
 const URL = "ftp://localhost/clearHistoryOnShutdown/";
 
+// Send the profile-after-change notification to the form history component to ensure
+// that it has been initialized.
+var formHistoryStartup = Cc["@mozilla.org/satchel/form-history-startup;1"].
+                         getService(Ci.nsIObserver);
+formHistoryStartup.observe(null, "profile-after-change", null);
+
 let notificationIndex = 0;
 
 let notificationsObserver = {
@@ -73,6 +79,10 @@ let notificationsObserver = {
 let timeInMicroseconds = Date.now() * 1000;
 
 function run_test() {
+  run_next_test();
+}
+
+add_task(function test_execute() {
   do_test_pending();
 
   print("Initialize browserglue before Places");
@@ -96,14 +106,13 @@ function run_test() {
   Services.prefs.setBoolPref("privacy.sanitize.sanitizeOnShutdown", true);
 
   print("Add visits.");
-  URIS.forEach(function(aUrl) {
-    PlacesUtils.history.addVisit(uri(aUrl), timeInMicroseconds++, null,
-                                 PlacesUtils.history.TRANSITION_TYPED,
-                                 false, 0);
-  });
+  for (let aUrl of URIS) {
+    yield promiseAddVisits({uri: uri(aUrl), visitDate: timeInMicroseconds++,
+                            transition: PlacesUtils.history.TRANSITION_TYPED})
+  }
   print("Add cache.");
   storeCache(URL, "testData");
-}
+});
 
 function run_test_continue()
 {

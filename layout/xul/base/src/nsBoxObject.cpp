@@ -13,7 +13,7 @@
 #include "nsIDocShell.h"
 #include "nsReadableUtils.h"
 #include "nsDOMClassInfoID.h"
-#include "nsIView.h"
+#include "nsView.h"
 #ifdef MOZ_XUL
 #include "nsIDOMXULElement.h"
 #else
@@ -21,7 +21,6 @@
 #endif
 #include "nsLayoutUtils.h"
 #include "nsISupportsPrimitives.h"
-#include "prtypes.h"
 #include "nsSupportsPrimitives.h"
 #include "mozilla/dom/Element.h"
 
@@ -32,8 +31,6 @@ using namespace mozilla::dom;
 // Static member variable initialization
 
 // Implement our nsISupports methods
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsBoxObject)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsBoxObject)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsBoxObject)
@@ -48,7 +45,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsBoxObject)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(BoxObject)
 NS_INTERFACE_MAP_END
 
-PR_STATIC_CALLBACK(PLDHashOperator)
+static PLDHashOperator
 PropertyTraverser(const nsAString& aKey, nsISupports* aProperty, void* userArg)
 {
   nsCycleCollectionTraversalCallback *cb = 
@@ -187,12 +184,12 @@ nsBoxObject::GetOffsetRect(nsIntRect& aRect)
     }
   
     // For the origin, add in the border for the frame
-    const nsStyleBorder* border = frame->GetStyleBorder();
+    const nsStyleBorder* border = frame->StyleBorder();
     origin.x += border->GetComputedBorderWidth(NS_SIDE_LEFT);
     origin.y += border->GetComputedBorderWidth(NS_SIDE_TOP);
 
     // And subtract out the border for the parent
-    const nsStyleBorder* parentBorder = parent->GetStyleBorder();
+    const nsStyleBorder* parentBorder = parent->StyleBorder();
     origin.x -= parentBorder->GetComputedBorderWidth(NS_SIDE_LEFT);
     origin.y -= parentBorder->GetComputedBorderWidth(NS_SIDE_TOP);
 

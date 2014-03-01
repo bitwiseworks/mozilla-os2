@@ -26,7 +26,6 @@
 #include "nsRDFCID.h"
 #include "nsXULCommandDispatcher.h"
 #include "prlog.h"
-#include "nsIDOMEventTarget.h"
 #include "nsGUIEvent.h"
 #include "nsContentUtils.h"
 #include "nsReadableUtils.h"
@@ -56,8 +55,6 @@ nsXULCommandDispatcher::~nsXULCommandDispatcher()
   Disconnect();
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULCommandDispatcher)
-
 // QueryInterface implementation for nsXULCommandDispatcher
 
 DOMCI_DATA(XULCommandDispatcher, nsXULCommandDispatcher)
@@ -77,7 +74,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULCommandDispatcher)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULCommandDispatcher)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mDocument)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument)
   Updater* updater = tmp->mUpdaters;
   while (updater) {
     cb.NoteXPCOMChild(updater->mElement);
@@ -100,7 +97,7 @@ already_AddRefed<nsPIWindowRoot>
 nsXULCommandDispatcher::GetWindowRoot()
 {
   if (mDocument) {
-    nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(mDocument->GetScriptGlobalObject()));
+    nsCOMPtr<nsPIDOMWindow> window(mDocument->GetWindow());
     if (window) {
       return window->GetTopWindowRoot();
     }
@@ -272,7 +269,7 @@ nsXULCommandDispatcher::AddCommandUpdater(nsIDOMElement* aElement,
 
 #ifdef DEBUG
       if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
-        nsCAutoString eventsC, targetsC, aeventsC, atargetsC; 
+        nsAutoCString eventsC, targetsC, aeventsC, atargetsC; 
         eventsC.AssignWithConversion(updater->mEvents);
         targetsC.AssignWithConversion(updater->mTargets);
         CopyUTF16toUTF8(aEvents, aeventsC);
@@ -300,7 +297,7 @@ nsXULCommandDispatcher::AddCommandUpdater(nsIDOMElement* aElement,
   }
 #ifdef DEBUG
   if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
-    nsCAutoString aeventsC, atargetsC; 
+    nsAutoCString aeventsC, atargetsC; 
     CopyUTF16toUTF8(aEvents, aeventsC);
     CopyUTF16toUTF8(aTargets, atargetsC);
 
@@ -335,7 +332,7 @@ nsXULCommandDispatcher::RemoveCommandUpdater(nsIDOMElement* aElement)
     if (updater->mElement == aElement) {
 #ifdef DEBUG
       if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
-        nsCAutoString eventsC, targetsC; 
+        nsAutoCString eventsC, targetsC; 
         eventsC.AssignWithConversion(updater->mEvents);
         targetsC.AssignWithConversion(updater->mTargets);
         PR_LOG(gLog, PR_LOG_NOTICE,
@@ -401,7 +398,7 @@ nsXULCommandDispatcher::UpdateCommands(const nsAString& aEventName)
 
 #ifdef DEBUG
     if (PR_LOG_TEST(gLog, PR_LOG_NOTICE)) {
-      nsCAutoString aeventnameC; 
+      nsAutoCString aeventnameC; 
       CopyUTF16toUTF8(aEventName, aeventnameC);
       PR_LOG(gLog, PR_LOG_NOTICE,
              ("xulcmd[%p] update %p event=%s",

@@ -16,9 +16,16 @@
 using namespace mozilla;
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *sLog = PR_NewLogModule("nsThreadPool");
+static PRLogModuleInfo *
+GetThreadPoolLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("nsThreadPool");
+  return sLog;
+}
 #endif
-#define LOG(args) PR_LOG(sLog, PR_LOG_DEBUG, args)
+#define LOG(args) PR_LOG(GetThreadPoolLog(), PR_LOG_DEBUG, args)
 
 // DESIGN:
 //  o  Allocate anonymous threads.
@@ -63,7 +70,7 @@ nsThreadPool::PutEvent(nsIRunnable *event)
 
     LOG(("THRD-P(%p) put [%d %d %d]\n", this, mIdleCount, mThreads.Count(),
          mThreadLimit));
-    NS_ASSERTION(mIdleCount <= (uint32_t) mThreads.Count(), "oops");
+    MOZ_ASSERT(mIdleCount <= (uint32_t) mThreads.Count(), "oops");
 
     // Make sure we have a thread to service this event.
     if (mIdleCount == 0 && mThreads.Count() < (int32_t) mThreadLimit)
@@ -109,7 +116,7 @@ nsThreadPool::ShutdownThread(nsIThread *thread)
   // This method is responsible for calling Shutdown on |thread|.  This must be
   // done from some other thread, so we use the main thread of the application.
 
-  NS_ASSERTION(!NS_IsMainThread(), "wrong thread");
+  MOZ_ASSERT(!NS_IsMainThread(), "wrong thread");
 
   nsRefPtr<nsIRunnable> r = NS_NewRunnableMethod(thread, &nsIThread::Shutdown);
   NS_DispatchToMainThread(r);
@@ -278,7 +285,10 @@ nsThreadPool::SetThreadLimit(uint32_t value)
   mThreadLimit = value;
   if (mIdleThreadLimit > mThreadLimit)
     mIdleThreadLimit = mThreadLimit;
-  mon.NotifyAll();  // wake up threads so they observe this change
+
+  if (static_cast<uint32_t>(mThreads.Count()) > mThreadLimit) {
+    mon.NotifyAll();  // wake up threads so they observe this change
+  }
   return NS_OK;
 }
 
@@ -296,7 +306,11 @@ nsThreadPool::SetIdleThreadLimit(uint32_t value)
   mIdleThreadLimit = value;
   if (mIdleThreadLimit > mThreadLimit)
     mIdleThreadLimit = mThreadLimit;
-  mon.NotifyAll();  // wake up threads so they observe this change
+
+  // Do we need to kill some idle threads?
+  if (mIdleCount > mIdleThreadLimit) {
+    mon.NotifyAll();  // wake up threads so they observe this change
+  }
   return NS_OK;
 }
 
@@ -311,8 +325,13 @@ NS_IMETHODIMP
 nsThreadPool::SetIdleThreadTimeout(uint32_t value)
 {
   ReentrantMonitorAutoEnter mon(mEvents.GetReentrantMonitor());
+  uint32_t oldTimeout = mIdleThreadTimeout;
   mIdleThreadTimeout = value;
-  mon.NotifyAll();  // wake up threads so they observe this change
+
+  // Do we need to notify any idle threads that their sleep time has shortened?
+  if (mIdleThreadTimeout < oldTimeout && mIdleCount > 0) {
+    mon.NotifyAll();  // wake up threads so they observe this change
+  }
   return NS_OK;
 }
 

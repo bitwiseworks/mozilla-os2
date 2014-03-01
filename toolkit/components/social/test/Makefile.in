@@ -10,12 +10,9 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-# mochitest tests
-DIRS += browser \
-	$(NULL)
+ifdef MOZ_SOCIAL
+# social is turned off for android
 
-XPCSHELL_TESTS = \
-  xpcshell \
-  $(NULL)
+endif
 
 include $(topsrcdir)/config/rules.mk

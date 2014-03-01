@@ -54,6 +54,14 @@ amManager.prototype = {
   },
 
   /**
+   * @see amIAddonManager.idl
+   */
+  mapURIToAddonID: function AMC_mapURIToAddonID(uri, id) {
+    id.value = AddonManager.mapURIToAddonID(uri);
+    return !!id.value;
+  },
+
+  /**
    * @see amIWebInstaller.idl
    */
   isInstallEnabled: function AMC_isInstallEnabled(aMimetype, aReferer) {
@@ -94,7 +102,7 @@ amManager.prototype = {
         return;
       }
       let uri = aUris.shift();
-      AddonManager.getInstallForURL(uri, function(aInstall) {
+      AddonManager.getInstallForURL(uri, function buildNextInstall_getInstallForURL(aInstall) {
         function callCallback(aUri, aStatus) {
           try {
             aCallback.onInstallEnded(aUri, aStatus);
@@ -108,22 +116,22 @@ amManager.prototype = {
           installs.push(aInstall);
           if (aCallback) {
             aInstall.addListener({
-              onDownloadCancelled: function(aInstall) {
+              onDownloadCancelled: function buildNextInstall_onDownloadCancelled(aInstall) {
                 callCallback(uri, USER_CANCELLED);
               },
 
-              onDownloadFailed: function(aInstall) {
+              onDownloadFailed: function buildNextInstall_onDownloadFailed(aInstall) {
                 if (aInstall.error == AddonManager.ERROR_CORRUPT_FILE)
                   callCallback(uri, CANT_READ_ARCHIVE);
                 else
                   callCallback(uri, DOWNLOAD_ERROR);
               },
 
-              onInstallFailed: function(aInstall) {
+              onInstallFailed: function buildNextInstall_onInstallFailed(aInstall) {
                 callCallback(uri, EXECUTION_ERROR);
               },
 
-              onInstallEnded: function(aInstall, aStatus) {
+              onInstallEnded: function buildNextInstall_onInstallEnded(aInstall, aStatus) {
                 callCallback(uri, SUCCESS);
               }
             });
@@ -150,7 +158,7 @@ amManager.prototype = {
    * Listens to requests from child processes for InstallTrigger
    * activity, and sends back callbacks.
    */
-  receiveMessage: function(aMessage) {
+  receiveMessage: function AMC_receiveMessage(aMessage) {
     var payload = aMessage.json;
     var referer = Services.io.newURI(payload.referer, null, null);
     switch (aMessage.name) {
@@ -191,7 +199,7 @@ amManager.prototype = {
 
   classID: Components.ID("{4399533d-08d1-458c-a87a-235f74451cfa}"),
   _xpcom_factory: {
-    createInstance: function(aOuter, aIid) {
+    createInstance: function AMC_createInstance(aOuter, aIid) {
       if (aOuter != null)
         throw Components.Exception("Component does not support aggregation",
                                    Cr.NS_ERROR_NO_AGGREGATION);
@@ -201,9 +209,10 @@ amManager.prototype = {
       return gSingleton.QueryInterface(aIid);
     }
   },
-  QueryInterface: XPCOMUtils.generateQI([Ci.amIWebInstaller,
+  QueryInterface: XPCOMUtils.generateQI([Ci.amIAddonManager,
+                                         Ci.amIWebInstaller,
                                          Ci.nsITimerCallback,
                                          Ci.nsIObserver])
 };
 
-var NSGetFactory = XPCOMUtils.generateNSGetFactory([amManager]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([amManager]);

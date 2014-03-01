@@ -1,24 +1,27 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79 ft=cpp:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsscriptinlines_h___
-#define jsscriptinlines_h___
+#ifndef jsscriptinlines_h
+#define jsscriptinlines_h
 
 #include "jsautooplen.h"
 #include "jscntxt.h"
 #include "jsfun.h"
 #include "jsopcode.h"
 #include "jsscript.h"
-#include "jsscope.h"
 
+#include "jit/AsmJS.h"
+#include "jit/BaselineJIT.h"
 #include "vm/GlobalObject.h"
 #include "vm/RegExpObject.h"
+#include "vm/Shape.h"
 
-#include "jsscopeinlines.h"
+#include "jscompartmentinlines.h"
+
+#include "vm/Shape-inl.h"
 
 namespace js {
 
@@ -45,11 +48,13 @@ CurrentScriptFileLineOrigin(JSContext *cx, const char **file, unsigned *linenop,
                             LineOption opt = NOT_CALLED_FROM_JSOP_EVAL)
 {
     if (opt == CALLED_FROM_JSOP_EVAL) {
-        JS_ASSERT(JSOp(*cx->regs().pc) == JSOP_EVAL);
-        JS_ASSERT(*(cx->regs().pc + JSOP_EVAL_LENGTH) == JSOP_LINENO);
-        JSScript *script = cx->fp()->script();
-        *file = script->filename;
-        *linenop = GET_UINT16(cx->regs().pc + JSOP_EVAL_LENGTH);
+        JSScript *script = NULL;
+        jsbytecode *pc = NULL;
+        types::TypeScript::GetPcScript(cx, &script, &pc);
+        JS_ASSERT(JSOp(*pc) == JSOP_EVAL);
+        JS_ASSERT(*(pc + JSOP_EVAL_LENGTH) == JSOP_LINENO);
+        *file = script->filename();
+        *linenop = GET_UINT16(pc + JSOP_EVAL_LENGTH);
         *origin = script->originPrincipals;
         return;
     }
@@ -61,34 +66,42 @@ inline void
 ScriptCounts::destroy(FreeOp *fop)
 {
     fop->free_(pcCountsVector);
+    fop->delete_(ionCounts);
 }
 
 inline void
-MarkScriptFilename(JSRuntime *rt, const char *filename)
+MarkScriptBytecode(JSRuntime *rt, const jsbytecode *bytecode)
 {
     /*
-     * As an invariant, a ScriptFilenameEntry should not be 'marked' outside of
-     * a GC. Since SweepScriptFilenames is only called during a full gc,
+     * As an invariant, a ScriptBytecodeEntry should not be 'marked' outside of
+     * a GC. Since SweepScriptBytecodes is only called during a full gc,
      * to preserve this invariant, only mark during a full gc.
      */
     if (rt->gcIsFull)
-        ScriptFilenameEntry::fromFilename(filename)->marked = true;
+        SharedScriptData::fromBytecode(bytecode)->marked = true;
 }
+
+void
+SetFrameArgumentsObject(JSContext *cx, AbstractFramePtr frame,
+                        HandleScript script, JSObject *argsobj);
 
 } // namespace js
 
 inline void
 JSScript::setFunction(JSFunction *fun)
 {
+    JS_ASSERT(fun->isTenured());
     function_ = fun;
 }
 
 inline JSFunction *
 JSScript::getFunction(size_t index)
 {
-    JSObject *funobj = getObject(index);
-    JS_ASSERT(funobj->isFunction() && funobj->toFunction()->isInterpreted());
-    return funobj->toFunction();
+    JSFunction *fun = &getObject(index)->as<JSFunction>();
+#ifdef DEBUG
+    JS_ASSERT_IF(fun->isNative(), IsAsmJSModuleNative(fun->native()));
+#endif
+    return fun;
 }
 
 inline JSFunction *
@@ -98,14 +111,24 @@ JSScript::getCallerFunction()
     return getFunction(0);
 }
 
-inline JSObject *
+inline JSFunction *
+JSScript::functionOrCallerFunction()
+{
+    if (function())
+        return function();
+    if (savedCallerFun)
+        return getCallerFunction();
+    return NULL;
+}
+
+inline js::RegExpObject *
 JSScript::getRegExp(size_t index)
 {
     js::ObjectArray *arr = regexps();
     JS_ASSERT(uint32_t(index) < arr->length);
     JSObject *obj = arr->vector[index];
-    JS_ASSERT(obj->isRegExp());
-    return obj;
+    JS_ASSERT(obj->is<js::RegExpObject>());
+    return (js::RegExpObject *) obj;
 }
 
 inline bool
@@ -120,17 +143,6 @@ JSScript::isEmpty() const
     return JSOp(*pc) == JSOP_STOP;
 }
 
-inline bool
-JSScript::hasGlobal() const
-{
-    /*
-     * Make sure that we don't try to query information about global objects
-     * which have had their scopes cleared. compileAndGo code should not run
-     * anymore against such globals.
-     */
-    return compileAndGo && !global().isCleared();
-}
-
 inline js::GlobalObject &
 JSScript::global() const
 {
@@ -141,43 +153,18 @@ JSScript::global() const
     return *compartment()->maybeGlobal();
 }
 
-inline bool
-JSScript::hasClearedGlobal() const
-{
-    JS_ASSERT(types);
-    return global().isCleared();
-}
-
-#ifdef JS_METHODJIT
-inline bool
-JSScript::ensureHasMJITInfo(JSContext *cx)
-{
-    if (mJITInfo)
-        return true;
-    mJITInfo = cx->new_<JITScriptSet>();
-    return mJITInfo != NULL;
-}
-
-inline void
-JSScript::destroyMJITInfo(js::FreeOp *fop)
-{
-    fop->delete_(mJITInfo);
-    mJITInfo = NULL;
-}
-#endif /* JS_METHODJIT */
-
 inline void
 JSScript::writeBarrierPre(JSScript *script)
 {
 #ifdef JSGC_INCREMENTAL
-    if (!script)
+    if (!script || !script->runtime()->needsBarrier())
         return;
 
-    JSCompartment *comp = script->compartment();
-    if (comp->needsBarrier()) {
-        JS_ASSERT(!comp->rt->isHeapBusy());
+    JS::Zone *zone = script->zone();
+    if (zone->needsBarrier()) {
+        JS_ASSERT(!zone->rt->isHeapMajorCollecting());
         JSScript *tmp = script;
-        MarkScriptUnbarriered(comp->barrierTracer(), &tmp, "write barrier");
+        MarkScriptUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
         JS_ASSERT(tmp == script);
     }
 #endif
@@ -188,4 +175,66 @@ JSScript::writeBarrierPost(JSScript *script, void *addr)
 {
 }
 
-#endif /* jsscriptinlines_h___ */
+/* static */ inline void
+js::LazyScript::writeBarrierPre(js::LazyScript *lazy)
+{
+#ifdef JSGC_INCREMENTAL
+    if (!lazy)
+        return;
+
+    JS::Zone *zone = lazy->zone();
+    if (zone->needsBarrier()) {
+        JS_ASSERT(!zone->rt->isHeapMajorCollecting());
+        js::LazyScript *tmp = lazy;
+        MarkLazyScriptUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
+        JS_ASSERT(tmp == lazy);
+    }
+#endif
+}
+
+inline JSPrincipals *
+JSScript::principals()
+{
+    return compartment()->principals;
+}
+
+inline JSFunction *
+JSScript::originalFunction() const {
+    if (!isCallsiteClone)
+        return NULL;
+    return &enclosingScopeOrOriginalFunction_->as<JSFunction>();
+}
+
+inline void
+JSScript::setOriginalFunctionObject(JSObject *fun) {
+    JS_ASSERT(isCallsiteClone);
+    JS_ASSERT(fun->is<JSFunction>());
+    enclosingScopeOrOriginalFunction_ = fun;
+}
+
+inline void
+JSScript::setIonScript(js::jit::IonScript *ionScript) {
+    if (hasIonScript())
+        js::jit::IonScript::writeBarrierPre(tenuredZone(), ion);
+    ion = ionScript;
+    updateBaselineOrIonRaw();
+}
+
+inline void
+JSScript::setParallelIonScript(js::jit::IonScript *ionScript) {
+    if (hasParallelIonScript())
+        js::jit::IonScript::writeBarrierPre(tenuredZone(), parallelIon);
+    parallelIon = ionScript;
+}
+
+inline void
+JSScript::setBaselineScript(js::jit::BaselineScript *baselineScript) {
+#ifdef JS_ION
+    if (hasBaselineScript())
+        js::jit::BaselineScript::writeBarrierPre(tenuredZone(), baseline);
+#endif
+    baseline = baselineScript;
+    updateBaselineOrIonRaw();
+}
+
+#endif /* jsscriptinlines_h */

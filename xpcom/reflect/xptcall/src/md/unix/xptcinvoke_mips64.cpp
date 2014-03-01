@@ -11,7 +11,7 @@
 #error "This code is for MIPS N32 only"
 #endif
 
-extern "C" uint32
+extern "C" uint32_t
 invoke_count_words(uint32_t paramCount, nsXPTCVariant* s)
 {
     return paramCount;
@@ -128,13 +128,13 @@ invoke_copy_to_stack(uint64_t* d, uint32_t paramCount,
     }
 }
 
-extern "C" nsresult _NS_InvokeByIndex_P(nsISupports* that, uint32_t methodIndex,
+extern "C" nsresult _NS_InvokeByIndex(nsISupports* that, uint32_t methodIndex,
                                         uint32_t paramCount,
                                         nsXPTCVariant* params);
 
 EXPORT_XPCOM_API(nsresult)
-NS_InvokeByIndex_P(nsISupports* that, uint32_t methodIndex,
+NS_InvokeByIndex(nsISupports* that, uint32_t methodIndex,
                    uint32_t paramCount, nsXPTCVariant* params)
 {
-    return _NS_InvokeByIndex_P(that, methodIndex, paramCount, params);
+    return _NS_InvokeByIndex(that, methodIndex, paramCount, params);
 }

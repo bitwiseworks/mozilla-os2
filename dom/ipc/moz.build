@@ -1,0 +1,59 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'cocoa':
+    TEST_DIRS += ['tests']
+
+MODULE = 'dom'
+
+EXPORTS += [
+    'PCOMContentPermissionRequestChild.h',
+    'nsICachedFileDescriptorListener.h',
+]
+
+EXPORTS.mozilla.dom.ipc += [
+    'Blob.h',
+    'nsIRemoteBlob.h',
+]
+
+EXPORTS.mozilla.dom += [
+    'ContentChild.h',
+    'ContentParent.h',
+    'ContentProcess.h',
+    'CrashReporterChild.h',
+    'CrashReporterParent.h',
+    'PermissionMessageUtils.h',
+    'StructuredCloneUtils.h',
+    'TabChild.h',
+    'TabContext.h',
+    'TabMessageUtils.h',
+    'TabParent.h',
+]
+
+EXPORTS.mozilla += [
+    'AppProcessChecker.h',
+    'PreallocatedProcessManager.h',
+    'ProcessPriorityManager.h',
+]
+
+CPP_SOURCES += [
+    'AppProcessChecker.cpp',
+    'Blob.cpp',
+    'ContentProcess.cpp',
+    'ContentParent.cpp',
+    'ContentChild.cpp',
+    'CrashReporterParent.cpp',
+    'CrashReporterChild.cpp',
+    'PermissionMessageUtils.cpp',
+    'PreallocatedProcessManager.cpp',
+    'ProcessPriorityManager.cpp',
+    'StructuredCloneUtils.cpp',
+    'TabParent.cpp',
+    'TabChild.cpp',
+    'TabContext.cpp',
+    'TabMessageUtils.cpp',
+]
+

@@ -8,12 +8,15 @@ const IGNORE = ["escapeAddonURI", "shouldAutoUpdate", "getStartupChanges",
                 "addTypeListener", "removeTypeListener",
                 "addAddonListener", "removeAddonListener",
                 "addInstallListener", "removeInstallListener",
-                "addManagerListener", "removeManagerListener"];
+                "addManagerListener", "removeManagerListener",
+                "mapURIToAddonID"];
 
 const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "AddonScreenshot", "AddonType", "startup", "shutdown",
                         "registerProvider", "unregisterProvider",
-                        "addStartupChange", "removeStartupChange"];
+                        "addStartupChange", "removeStartupChange",
+                        "recordTimestamp", "recordSimpleMeasure",
+                        "getSimpleMeasures"];
 
 function test_functions() {
   for (let prop in AddonManager) {

@@ -19,16 +19,27 @@ class FilteringWrapper : public Base {
     FilteringWrapper(unsigned flags);
     virtual ~FilteringWrapper();
 
-    virtual bool getPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id, bool set, js::PropertyDescriptor *desc) MOZ_OVERRIDE;
-    virtual bool getOwnPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id, bool set, js::PropertyDescriptor *desc) MOZ_OVERRIDE;
-    virtual bool getOwnPropertyNames(JSContext *cx, JSObject *wrapper, js::AutoIdVector &props) MOZ_OVERRIDE;
-    virtual bool enumerate(JSContext *cx, JSObject *wrapper, js::AutoIdVector &props) MOZ_OVERRIDE;
-    virtual bool keys(JSContext *cx, JSObject *wrapper, js::AutoIdVector &props) MOZ_OVERRIDE;
-    virtual bool iterate(JSContext *cx, JSObject *proxy, unsigned flags, js::Value *vp) MOZ_OVERRIDE;
+    virtual bool getPropertyDescriptor(JSContext *cx, JS::Handle<JSObject*> wrapper,
+                                       JS::Handle<jsid> id, js::PropertyDescriptor *desc,
+                                       unsigned flags) MOZ_OVERRIDE;
+    virtual bool getOwnPropertyDescriptor(JSContext *cx, JS::Handle<JSObject*> wrapper,
+                                          JS::Handle<jsid> id, js::PropertyDescriptor *desc,
+                                          unsigned flags) MOZ_OVERRIDE;
+    virtual bool getOwnPropertyNames(JSContext *cx, JS::Handle<JSObject*> wrapper,
+                                     js::AutoIdVector &props) MOZ_OVERRIDE;
+    virtual bool enumerate(JSContext *cx, JS::Handle<JSObject*> wrapper,
+                           js::AutoIdVector &props) MOZ_OVERRIDE;
+    virtual bool keys(JSContext *cx, JS::Handle<JSObject*> wrapper,
+                      js::AutoIdVector &props) MOZ_OVERRIDE;
+    virtual bool iterate(JSContext *cx, JS::Handle<JSObject*> wrapper, unsigned flags,
+                         JS::MutableHandle<JS::Value> vp) MOZ_OVERRIDE;
     virtual bool nativeCall(JSContext *cx, JS::IsAcceptableThis test, JS::NativeImpl impl,
                             JS::CallArgs args) MOZ_OVERRIDE;
 
-    virtual bool enter(JSContext *cx, JSObject *wrapper, jsid id, js::Wrapper::Action act, bool *bp) MOZ_OVERRIDE;
+    virtual bool defaultValue(JSContext *cx, JS::Handle<JSObject*> obj, JSType hint, JS::MutableHandleValue vp) MOZ_OVERRIDE;
+
+    virtual bool enter(JSContext *cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
+                       js::Wrapper::Action act, bool *bp) MOZ_OVERRIDE;
 
     static FilteringWrapper singleton;
 };

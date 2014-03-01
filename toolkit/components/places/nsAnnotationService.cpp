@@ -18,9 +18,12 @@
 #include "nsVariant.h"
 #include "mozilla/storage.h"
 
-#include "sampler.h"
+#include "GeckoProfiler.h"
+
+#include "nsNetCID.h"
 
 using namespace mozilla;
+using namespace mozilla::places;
 
 #define ENSURE_ANNO_TYPE(_type, _statement)                                    \
   PR_BEGIN_MACRO                                                               \
@@ -45,7 +48,64 @@ const int32_t nsAnnotationService::kAnnoIndex_Type = 7;
 const int32_t nsAnnotationService::kAnnoIndex_DateAdded = 8;
 const int32_t nsAnnotationService::kAnnoIndex_LastModified = 9;
 
-using namespace mozilla::places;
+namespace mozilla {
+namespace places {
+
+////////////////////////////////////////////////////////////////////////////////
+//// AnnotatedResult
+
+AnnotatedResult::AnnotatedResult(const nsCString& aGUID,
+                                 nsIURI* aURI,
+                                 int64_t aItemId,
+                                 const nsACString& aAnnotationName,
+                                 nsIVariant* aAnnotationValue)
+: mGUID(aGUID)
+, mURI(aURI)
+, mItemId(aItemId)
+, mAnnotationName(aAnnotationName)
+, mAnnotationValue(aAnnotationValue)
+{
+}
+
+NS_IMETHODIMP
+AnnotatedResult::GetGuid(nsACString& _guid)
+{
+  _guid = mGUID;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+AnnotatedResult::GetUri(nsIURI** _uri)
+{
+  NS_IF_ADDREF(*_uri = mURI);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+AnnotatedResult::GetItemId(int64_t* _itemId)
+{
+  *_itemId = mItemId;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+AnnotatedResult::GetAnnotationName(nsACString& _annotationName)
+{
+  _annotationName = mAnnotationName;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+AnnotatedResult::GetAnnotationValue(nsIVariant** _annotationValue)
+{
+  NS_IF_ADDREF(*_annotationValue = mAnnotationValue);
+  return NS_OK;
+}
+
+NS_IMPL_ISUPPORTS1(AnnotatedResult, mozIAnnotatedResult)
+
+} // namespace places
+} // namespace mozilla
 
 PLACES_FACTORY_SINGLETON_IMPLEMENTATION(nsAnnotationService, gAnnotationService)
 
@@ -202,7 +262,7 @@ nsAnnotationService::SetItemAnnotation(int64_t aItemId,
                                        int32_t aFlags,
                                        uint16_t aExpiration)
 {
-  SAMPLE_LABEL("AnnotationService", "SetItemAnnotation");
+  PROFILER_LABEL("AnnotationService", "SetItemAnnotation");
   NS_ENSURE_ARG_MIN(aItemId, 1);
   NS_ENSURE_ARG(aValue);
 
@@ -284,9 +344,6 @@ nsAnnotationService::SetPageAnnotationString(nsIURI* aURI,
 {
   NS_ENSURE_ARG(aURI);
 
-  if (InPrivateBrowsingMode())
-    return NS_OK;
-
   nsresult rv = SetAnnotationStringInternal(aURI, 0, aName, aValue,
                                             aFlags, aExpiration);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -358,9 +415,6 @@ nsAnnotationService::SetPageAnnotationInt32(nsIURI* aURI,
                                             uint16_t aExpiration)
 {
   NS_ENSURE_ARG(aURI);
-
-  if (InPrivateBrowsingMode())
-    return NS_OK;
 
   nsresult rv = SetAnnotationInt32Internal(aURI, 0, aName, aValue,
                                            aFlags, aExpiration);
@@ -434,9 +488,6 @@ nsAnnotationService::SetPageAnnotationInt64(nsIURI* aURI,
 {
   NS_ENSURE_ARG(aURI);
 
-  if (InPrivateBrowsingMode())
-    return NS_OK;
-
   nsresult rv = SetAnnotationInt64Internal(aURI, 0, aName, aValue,
                                            aFlags, aExpiration);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -508,9 +559,6 @@ nsAnnotationService::SetPageAnnotationDouble(nsIURI* aURI,
                                              uint16_t aExpiration)
 {
   NS_ENSURE_ARG(aURI);
-
-  if (InPrivateBrowsingMode())
-    return NS_OK;
 
   nsresult rv = SetAnnotationDoubleInternal(aURI, 0, aName, aValue,
                                             aFlags, aExpiration);
@@ -590,9 +638,6 @@ nsAnnotationService::SetPageAnnotationBinary(nsIURI* aURI,
                                              uint16_t aExpiration)
 {
   NS_ENSURE_ARG(aURI);
-
-  if (InPrivateBrowsingMode())
-    return NS_OK;
 
   nsresult rv = SetAnnotationBinaryInternal(aURI, 0, aName, aData, aDataLen,
                                             aMimeType, aFlags, aExpiration);
@@ -1114,7 +1159,7 @@ nsAnnotationService::GetPagesWithAnnotationCOMArray(const nsACString& aName,
   bool hasMore = false;
   while (NS_SUCCEEDED(rv = stmt->ExecuteStep(&hasMore)) &&
          hasMore) {
-    nsCAutoString uristring;
+    nsAutoCString uristring;
     rv = stmt->GetUTF8String(0, uristring);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1160,6 +1205,111 @@ nsAnnotationService::GetItemsWithAnnotation(const nsACString& aName,
   *_resultCount = results.Length();
   for (uint32_t i = 0; i < *_resultCount; i ++) {
     (*_results)[i] = results[i];
+  }
+
+  return NS_OK;
+}
+
+
+NS_IMETHODIMP
+nsAnnotationService::GetAnnotationsWithName(const nsACString& aName,
+                                            uint32_t* _count,
+                                            mozIAnnotatedResult*** _annotations)
+{
+  NS_ENSURE_ARG(!aName.IsEmpty());
+  NS_ENSURE_ARG_POINTER(_annotations);
+
+  *_count = 0;
+  *_annotations = nullptr;
+  nsCOMArray<mozIAnnotatedResult> annotations;
+
+  nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
+    "SELECT h.guid, h.url, -1, a.type, a.content "
+    "FROM moz_anno_attributes n "
+    "JOIN moz_annos a ON n.id = a.anno_attribute_id "
+    "JOIN moz_places h ON h.id = a.place_id "
+    "WHERE n.name = :anno_name "
+    "UNION ALL "
+    "SELECT b.guid, h.url, b.id, a.type, a.content "
+    "FROM moz_anno_attributes n "
+    "JOIN moz_items_annos a ON n.id = a.anno_attribute_id "
+    "JOIN moz_bookmarks b ON b.id = a.item_id "
+    "LEFT JOIN moz_places h ON h.id = b.fk "
+    "WHERE n.name = :anno_name "
+  );
+  NS_ENSURE_STATE(stmt);
+  mozStorageStatementScoper scoper(stmt);
+
+  nsresult rv = stmt->BindUTF8StringByName(NS_LITERAL_CSTRING("anno_name"),
+                                           aName);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  bool hasMore = false;
+  while (NS_SUCCEEDED(rv = stmt->ExecuteStep(&hasMore)) && hasMore) {
+    nsAutoCString guid;
+    rv = stmt->GetUTF8String(0, guid);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIURI> uri;
+    bool uriIsNull = false;
+    rv = stmt->GetIsNull(1, &uriIsNull);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (!uriIsNull) {
+      nsAutoCString url;
+      rv = stmt->GetUTF8String(1, url);
+      NS_ENSURE_SUCCESS(rv, rv);
+      rv = NS_NewURI(getter_AddRefs(uri), url);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+
+    int64_t itemId = stmt->AsInt64(2);
+    int32_t type = stmt->AsInt32(3);
+
+    nsCOMPtr<nsIWritableVariant> variant = new nsVariant();
+    switch (type) {
+      case nsIAnnotationService::TYPE_INT32: {
+        rv = variant->SetAsInt32(stmt->AsInt32(4));
+        break;
+      }
+      case nsIAnnotationService::TYPE_INT64: {
+        rv = variant->SetAsInt64(stmt->AsInt64(4));
+        break;
+      }
+      case nsIAnnotationService::TYPE_DOUBLE: {
+        rv = variant->SetAsDouble(stmt->AsDouble(4));
+        break;
+      }
+      case nsIAnnotationService::TYPE_STRING: {
+        nsAutoString valueString;
+        rv = stmt->GetString(4, valueString);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        rv = variant->SetAsAString(valueString);
+        break;
+      }
+      default:
+        MOZ_ASSERT(false, "Unsupported annotation type");
+        // Move to the next result.
+        continue;
+    }
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<mozIAnnotatedResult> anno = new AnnotatedResult(guid, uri, itemId,
+                                                             aName, variant);
+    NS_ENSURE_TRUE(annotations.AppendObject(anno), NS_ERROR_OUT_OF_MEMORY);
+  }
+
+  // Convert to raw array.
+  if (annotations.Count() == 0)
+    return NS_OK;
+
+  *_annotations = static_cast<mozIAnnotatedResult**>
+    (nsMemory::Alloc(annotations.Count() * sizeof(mozIAnnotatedResult*)));
+  NS_ENSURE_TRUE(*_annotations, NS_ERROR_OUT_OF_MEMORY);
+
+  *_count = annotations.Count();
+  for (uint32_t i = 0; i < *_count; ++i) {
+    NS_ADDREF((*_annotations)[i] = annotations[i]);
   }
 
   return NS_OK;
@@ -1274,7 +1424,7 @@ nsAnnotationService::GetAnnotationNamesTArray(nsIURI* aURI,
   bool hasResult = false;
   while (NS_SUCCEEDED(statement->ExecuteStep(&hasResult)) &&
          hasResult) {
-    nsCAutoString name;
+    nsAutoCString name;
     rv = statement->GetUTF8String(0, name);
     NS_ENSURE_SUCCESS(rv, rv);
     if (!_result->AppendElement(name))
@@ -1498,9 +1648,6 @@ nsAnnotationService::CopyPageAnnotations(nsIURI* aSourceURI,
   NS_ENSURE_ARG(aSourceURI);
   NS_ENSURE_ARG(aDestURI);
 
-  if (InPrivateBrowsingMode())
-    return NS_OK;
-
   mozStorageTransaction transaction(mDB->MainConn(), false);
 
   nsCOMPtr<mozIStorageStatement> sourceStmt = mDB->GetStatement(
@@ -1539,7 +1686,7 @@ nsAnnotationService::CopyPageAnnotations(nsIURI* aSourceURI,
   while (NS_SUCCEEDED(sourceStmt->ExecuteStep(&hasResult)) && hasResult) {
     int64_t sourcePlaceId = sourceStmt->AsInt64(0);
     int64_t annoNameID = sourceStmt->AsInt64(1);
-    nsCAutoString annoName;
+    nsAutoCString annoName;
     rv = sourceStmt->GetUTF8String(2, annoName);
     NS_ENSURE_SUCCESS(rv, rv);
     int64_t annoExistsOnDest = sourceStmt->AsInt64(3);
@@ -1618,7 +1765,7 @@ nsAnnotationService::CopyItemAnnotations(int64_t aSourceItemId,
   bool hasResult;
   while (NS_SUCCEEDED(sourceStmt->ExecuteStep(&hasResult)) && hasResult) {
     int64_t annoNameID = sourceStmt->AsInt64(0);
-    nsCAutoString annoName;
+    nsAutoCString annoName;
     rv = sourceStmt->GetUTF8String(1, annoName);
     NS_ENSURE_SUCCESS(rv, rv);
     int64_t annoExistsOnDest = sourceStmt->AsInt64(2);
@@ -1690,11 +1837,11 @@ nsAnnotationService::GetAnnotationURI(nsIURI* aURI,
   if (aName.IsEmpty())
     return NS_ERROR_INVALID_ARG;
 
-  nsCAutoString annoSpec;
+  nsAutoCString annoSpec;
   nsresult rv = aURI->GetSpec(annoSpec);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   spec.AssignLiteral("moz-anno:");
   spec += aName;
   spec += NS_LITERAL_CSTRING(":");
@@ -1825,14 +1972,6 @@ nsAnnotationService::StartGetAnnotation(nsIURI* aURI,
   getAnnoScoper.Abandon();
 
   return NS_OK;
-}
-
-
-bool
-nsAnnotationService::InPrivateBrowsingMode() const
-{
-  nsNavHistory* history = nsNavHistory::GetHistoryService();
-  return history && history->InPrivateBrowsingMode();
 }
 
 

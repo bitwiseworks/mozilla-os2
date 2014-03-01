@@ -21,7 +21,7 @@ interface nsIEditActionListener;
 interface nsIInlineSpellChecker;
 interface nsITransferable;
 
-[scriptable, uuid(7ad59e28-f3d5-4e14-8ea3-794ad4a86de3)]
+[scriptable, uuid(753b38d1-ee03-4e58-a650-1076ccccdb7f)]
 
 interface nsIEditor  : nsISupports
 {

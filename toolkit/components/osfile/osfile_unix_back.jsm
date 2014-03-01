@@ -11,8 +11,6 @@
 
     throw new Error("osfile_unix_back.jsm cannot be used from the main thread yet");
   }
-  importScripts("resource://gre/modules/osfile/osfile_shared_allthreads.jsm");
-  importScripts("resource://gre/modules/osfile/osfile_unix_allthreads.jsm");
   (function(exports) {
      "use strict";
      if (!exports.OS) {
@@ -108,19 +106,6 @@
        Types.time_t =
          Types.intn_t(OS.Constants.libc.OSFILE_SIZEOF_TIME_T).withName("time_t");
 
-       Types.DIR =
-         new Type("DIR",
-                  ctypes.StructType("DIR"));
-
-       Types.null_or_DIR_ptr =
-         Types.DIR.out_ptr.withName("null_or_DIR*");
-       Types.null_or_DIR_ptr.importFromC = function importFromC(dir) {
-         if (dir == null || dir.isNull()) {
-           return null;
-         }
-         return ctypes.CDataFinalizer(dir, _close_dir);
-       };
-
        // Structure |dirent|
        // Building this type is rather complicated, as its layout varies between
        // variants of Unix. For this reason, we rely on a number of constants
@@ -132,12 +117,23 @@
        //    char[...]   d_name;
        //    };
        {
+         let d_name_extra_size = 0;
+         if (OS.Constants.libc.OSFILE_SIZEOF_DIRENT_D_NAME < 8) {
+           // d_name is defined like "char d_name[1];" on some platforms
+           // (e.g. Solaris), we need to give it more size for our structure.
+           d_name_extra_size = 256;
+         }
+
          let dirent = new OS.Shared.HollowStructure("dirent",
-           OS.Constants.libc.OSFILE_SIZEOF_DIRENT);
-         dirent.add_field_at(OS.Constants.libc.OSFILE_OFFSETOF_DIRENT_D_TYPE,
-           "d_type", ctypes.uint8_t);
+           OS.Constants.libc.OSFILE_SIZEOF_DIRENT + d_name_extra_size);
+         if (OS.Constants.libc.OSFILE_OFFSETOF_DIRENT_D_TYPE != undefined) {
+           // |dirent| doesn't have d_type on some platforms (e.g. Solaris).
+           dirent.add_field_at(OS.Constants.libc.OSFILE_OFFSETOF_DIRENT_D_TYPE,
+             "d_type", ctypes.uint8_t);
+         }
          dirent.add_field_at(OS.Constants.libc.OSFILE_OFFSETOF_DIRENT_D_NAME,
-           "d_name", ctypes.ArrayType(ctypes.char, OS.Constants.libc.OSFILE_SIZEOF_DIRENT_D_NAME));
+           "d_name", ctypes.ArrayType(ctypes.char,
+             OS.Constants.libc.OSFILE_SIZEOF_DIRENT_D_NAME + d_name_extra_size));
 
          // We now have built |dirent|.
          Types.dirent = dirent.getType();
@@ -170,10 +166,47 @@
          stat.add_field_at(OS.Constants.libc.OSFILE_OFFSETOF_STAT_ST_CTIME,
                           "st_ctime", Types.time_t.implementation);
 
+         // To complicate further, MacOS and some BSDs have a field |birthtime|
+         if ("OSFILE_OFFSETOF_STAT_ST_BIRTHTIME" in OS.Constants.libc) {
+           stat.add_field_at(OS.Constants.libc.OSFILE_OFFSETOF_STAT_ST_BIRTHTIME,
+                             "st_birthtime", Types.time_t.implementation);
+         }
+
          stat.add_field_at(OS.Constants.libc.OSFILE_OFFSETOF_STAT_ST_SIZE,
                         "st_size", Types.size_t.implementation);
          Types.stat = stat.getType();
        }
+
+       // Structure |DIR|
+       if ("OSFILE_SIZEOF_DIR" in OS.Constants.libc) {
+         // On platforms for which we need to access the fields of DIR
+         // directly (e.g. because certain functions are implemented
+         // as macros), we need to define DIR as a hollow structure.
+         let DIR = new OS.Shared.HollowStructure(
+           "DIR",
+           OS.Constants.libc.OSFILE_SIZEOF_DIR);
+
+         DIR.add_field_at(
+           OS.Constants.libc.OSFILE_OFFSETOF_DIR_DD_FD,
+           "dd_fd",
+           Types.fd.implementation);
+
+         Types.DIR = DIR.getType();
+       } else {
+         // On other platforms, we keep DIR as a blackbox
+         Types.DIR =
+           new Type("DIR",
+             ctypes.StructType("DIR"));
+       }
+
+       Types.null_or_DIR_ptr =
+         Types.DIR.out_ptr.withName("null_or_DIR*");
+       Types.null_or_DIR_ptr.importFromC = function importFromC(dir) {
+         if (dir == null || dir.isNull()) {
+           return null;
+         }
+         return ctypes.CDataFinalizer(dir, _close_dir);
+       };
 
        // Declare libc functions as functions of |OS.Unix.File|
 
@@ -240,6 +273,20 @@
          declareFFI("dup", ctypes.default_abi,
                     /*return*/ Types.negativeone_or_fd,
                     /*fd*/     Types.fd);
+
+       if ("OSFILE_SIZEOF_DIR" in OS.Constants.libc) {
+         // On platforms for which |dirfd| is a macro
+         UnixFile.dirfd =
+           function dirfd(DIRp) {
+             return Types.DIR.in_ptr.implementation(DIRp).contents.dd_fd;
+           };
+       } else {
+         // On platforms for which |dirfd| is a function
+         UnixFile.dirfd =
+           declareFFI("dirfd", ctypes.default_abi,
+                      /*return*/ Types.negativeone_or_fd,
+                      /*dir*/    Types.DIR.in_ptr);
+       }
 
        UnixFile.chdir =
          declareFFI("chdir", ctypes.default_abi,
@@ -343,7 +390,7 @@
 
        UnixFile.mkstemp =
          declareFFI("mkstemp", ctypes.default_abi,
-                    /*return*/ Types.out_path,
+                    /*return*/ Types.fd,
                     /*template*/Types.out_path);
 
        UnixFile.open =
@@ -468,21 +515,33 @@
                      );
        } else if (OS.Constants.libc._STAT_VER != undefined) {
          const ver = OS.Constants.libc._STAT_VER;
-         // Linux, all widths
+         let xstat_name, lxstat_name, fxstat_name
+         if (OS.Constants.Sys.Name == "SunOS") {
+           // Solaris
+           xstat_name = "_xstat";
+           lxstat_name = "_lxstat";
+           fxstat_name = "_fxstat";
+         } else {
+           // Linux, all widths
+           xstat_name = "__xstat";
+           lxstat_name = "__lxstat";
+           fxstat_name = "__fxstat";
+         }
+
          let xstat =
-           declareFFI("__xstat", ctypes.default_abi,
+           declareFFI(xstat_name, ctypes.default_abi,
                       /*return*/    Types.negativeone_or_nothing,
                       /*_stat_ver*/ Types.int,
                       /*path*/      Types.path,
                       /*buf*/       Types.stat.out_ptr);
          let lxstat =
-           declareFFI("__lxstat", ctypes.default_abi,
+           declareFFI(lxstat_name, ctypes.default_abi,
                       /*return*/    Types.negativeone_or_nothing,
                       /*_stat_ver*/ Types.int,
                       /*path*/      Types.path,
                       /*buf*/       Types.stat.out_ptr);
          let fxstat =
-           declareFFI("__fxstat", ctypes.default_abi,
+           declareFFI(fxstat_name, ctypes.default_abi,
                       /*return*/    Types.negativeone_or_nothing,
                       /*_stat_ver*/ Types.int,
                       /*fd*/        Types.fd,

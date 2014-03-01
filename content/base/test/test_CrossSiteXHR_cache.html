@@ -432,7 +432,7 @@ function runTest() {
   setStateURL = baseURL + "setState=";
 
   var unique = Date.now();
-  for each (test in tests) {
+  for (test of tests) {
     if (test.newTest) {
       unique++;
       continue;
@@ -454,8 +454,10 @@ function runTest() {
             allowMethods: test.allowMethods,
             cacheTime: test.cacheTime };
     xhr = new XMLHttpRequest();
-    xhr.open("POST", setStateURL + escape(sec.toSource()), false);
+    xhr.open("POST", setStateURL + escape(sec.toSource()), true);
+    xhr.onloadend = function() { gen.next(); }
     xhr.send();
+    yield undefined;
 
     loaderWindow.postMessage(req.toSource(), origin);
 
@@ -472,7 +474,7 @@ function runTest() {
       is(res.responseText, "<res>hello pass</res>\n",
          "wrong responseText in test for " + testName);
       is(res.events.join(","),
-         "opening,rs1,sending,rs1,loadstart,rs2,rs3,rs4,load,loadend",
+         "opening,rs1,sending,loadstart,rs2,rs3,rs4,load,loadend",
          "wrong events in test for " + testName);
     }
     else {
@@ -484,7 +486,7 @@ function runTest() {
       is(res.responseText, "",
          "wrong responseText in test for " + testName);
       is(res.events.join(","),
-         "opening,rs1,sending,rs1,loadstart,rs2,rs4,error,loadend",
+         "opening,rs1,sending,loadstart,rs2,rs4,error,loadend",
          "wrong events in test for " + testName);
       is(res.progressEvents, 0,
          "wrong events in test for " + testName);

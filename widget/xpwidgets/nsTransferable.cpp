@@ -52,9 +52,6 @@ uint32_t GetDataForFlavor (const nsTArray<DataStruct>& aArray,
 DataStruct::~DataStruct() 
 { 
   if (mCacheFileName) nsCRT::free(mCacheFileName); 
-
-    //nsIFileSpec * cacheFile = GetFileSpec(mCacheFileName);
-    //cacheFile->Remove();
 }
 
 //-------------------------------------------------------------------------
@@ -176,13 +173,12 @@ DataStruct::ReadCache(nsISupports** aData, uint32_t* aDataLen)
   if ( cacheFile && NS_SUCCEEDED(cacheFile->Exists(&exists)) && exists ) {
     // get the size of the file
     int64_t fileSize;
-    int64_t max32(LL_INIT(0, 0xFFFFFFFF));
+    int64_t max32 = 0xFFFFFFFF;
     cacheFile->GetFileSize(&fileSize);
-    if (LL_CMP(fileSize, >, max32))
+    if (fileSize > max32)
       return NS_ERROR_OUT_OF_MEMORY;
-    uint32_t size;
-    LL_L2UI(size, fileSize);
 
+    uint32_t size = uint32_t(fileSize);
     // create new memory for the large clipboard data
     nsAutoArrayPtr<char> data(new char[size]);
     if ( !data )
@@ -551,7 +547,7 @@ nsTransferable::FlavorsTransferableCanImport(nsISupportsArray **_retval)
         convertedList->GetElementAt ( i, getter_AddRefs(genericFlavor) );
 
         nsCOMPtr<nsISupportsCString> flavorWrapper ( do_QueryInterface (genericFlavor) );
-        nsCAutoString flavorStr;
+        nsAutoCString flavorStr;
         flavorWrapper->GetData( flavorStr );
 
         if (GetDataForFlavor (mDataArray, flavorStr.get())
@@ -597,7 +593,7 @@ nsTransferable::FlavorsTransferableCanExport(nsISupportsArray **_retval)
         convertedList->GetElementAt ( i, getter_AddRefs(genericFlavor) );
 
         nsCOMPtr<nsISupportsCString> flavorWrapper ( do_QueryInterface (genericFlavor) );
-        nsCAutoString flavorStr;
+        nsAutoCString flavorStr;
         flavorWrapper->GetData( flavorStr );
 
         if (GetDataForFlavor (mDataArray, flavorStr.get())

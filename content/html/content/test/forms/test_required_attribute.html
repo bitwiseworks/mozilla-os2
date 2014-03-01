@@ -164,6 +164,10 @@ function checkInputRequiredValidity(type)
     element.value = 'http://mozilla.org/';
   } else if (element.type == 'number') {
     element.value = '42';
+  } else if (element.type == 'date') {
+    element.value = '2010-10-10';
+  } else if (element.type == 'time') {
+    element.value = '21:21';
   } else {
     element.value = 'foo';
   }
@@ -307,8 +311,7 @@ function checkInputRequiredValidityForFile()
                            .getService(Components.interfaces.nsIProperties);
     var testFile = dirSvc.get("ProfD", Components.interfaces.nsIFile);
     testFile.append(fileName);
-    var outStream = Components.
-                    classes["@mozilla.org/network/file-output-stream;1"].
+    var outStream = Components.classes["@mozilla.org/network/file-output-stream;1"].
                     createInstance(Components.interfaces.nsIFileOutputStream);
     outStream.init(testFile, 0x02 | 0x08 | 0x20, // write, create, truncate
                    0666, 0);
@@ -359,24 +362,23 @@ checkTextareaRequiredValidity();
 // First of all, checks for types that make the element barred from
 // constraint validation.
 var typeBarredFromConstraintValidation = ["hidden", "button", "reset", "submit", "image"];
-for each (type in typeRequireNotApply) {
+for (type of typeBarredFromConstraintValidation) {
   checkInputRequiredNotApply(type, true);
 }
 
 // Then, checks for the types which do not use the required attribute.
-// TODO: check 'color' and 'range' when they will be implemented.
-var typeRequireNotApply = [];
-for each (type in typeRequireNotApply) {
+var typeRequireNotApply = ['range', 'color'];
+for (type of typeRequireNotApply) {
   checkInputRequiredNotApply(type, false);
 }
 
 // Now, checking for all types which accept the required attribute.
-// TODO: check 'datetime', 'date', 'month', 'week', 'time' and 'datetime-local'
+// TODO: check 'datetime', 'month', 'week' and 'datetime-local'
 //       when they will be implemented.
 var typeRequireApply = ["text", "password", "search", "tel", "email", "url",
-                        "number"];
+                        "number", "date", "time"];
 
-for each (type in typeRequireApply) {
+for (type of typeRequireApply) {
   checkInputRequiredValidity(type);
 }
 

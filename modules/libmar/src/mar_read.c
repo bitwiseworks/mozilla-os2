@@ -175,10 +175,10 @@ MarFile *mar_open(const char *path) {
 }
 
 #ifdef XP_WIN
-MarFile *mar_wopen(const PRUnichar *path) {
+MarFile *mar_wopen(const wchar_t *path) {
   FILE *fp;
 
-  fp = _wfopen(path, L"rb");
+  _wfopen_s(&fp, path, L"rb");
   if (!fp)
     return NULL;
 
@@ -254,7 +254,7 @@ int get_mar_file_info_fp(FILE *fp,
       return -1;
     }
 
-    /* Read the offset to the index. */
+    /* Read the number of signatures field */
     if (fread(numSignatures, sizeof(*numSignatures), 1, fp) != 1) {
       return -1;
     }
@@ -386,7 +386,7 @@ int
 mar_read_product_info_block(MarFile *mar, 
                             struct ProductInformationBlock *infoBlock)
 {
-  int i, hasAdditionalBlocks, offset, 
+  int i, hasAdditionalBlocks,
     offsetAdditionalBlocks, numAdditionalBlocks,
     additionalBlockSize, additionalBlockID;
   /* The buffer size is 97 bytes because the MAR channel name < 64 bytes, and 

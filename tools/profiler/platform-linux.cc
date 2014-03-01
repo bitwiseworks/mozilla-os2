@@ -1,6 +1,30 @@
 // Copyright (c) 2006-2011 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+//  * Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in
+//    the documentation and/or other materials provided with the
+//    distribution.
+//  * Neither the name of Google, Inc. nor the names of its contributors
+//    may be used to endorse or promote products derived from this
+//    software without specific prior written permission.
+// 
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+// FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+// COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+// INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+// OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+// AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+// OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
 
 /*
 # vim: sw=2
@@ -15,6 +39,7 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <stdlib.h>
+#include <sched.h>
 #ifdef ANDROID
 #include <android/log.h>
 #else
@@ -35,10 +60,16 @@
 #include <errno.h>
 #include <stdarg.h>
 #include "platform.h"
-#include "sps_sampler.h"
+#include "GeckoProfilerImpl.h"
+#include "mozilla/Mutex.h"
+#include "ProfileEntry.h"
+#include "nsThreadUtils.h"
+#include "TableTicker.h"
+#include "UnwinderThread2.h"
 
 #include <string.h>
 #include <stdio.h>
+#include <list>
 
 #define SIGNAL_SAVE_PROFILE SIGUSR2
 
@@ -51,15 +82,68 @@ pid_t gettid()
 }
 #endif
 
-static Sampler* sActiveSampler = NULL;
+#if !defined(ANDROID)
+// Keep track of when any of our threads calls fork(), so we can
+// temporarily disable signal delivery during the fork() call.  Not
+// doing so appears to cause a kind of race, in which signals keep
+// getting delivered to the thread doing fork(), which keeps causing
+// it to fail and be restarted; hence forward progress is delayed a
+// great deal.  A side effect of this is to permanently disable
+// sampling in the child process.  See bug 837390.
 
+// Unfortunately this is only doable on non-Android, since Bionic
+// doesn't have pthread_atfork.
 
-#if !defined(__GLIBC__) && (defined(__arm__) || defined(__thumb__))
+// This records the current state at the time we paused it.
+static bool was_paused = false;
+
+// In the parent, just before the fork, record the pausedness state,
+// and then pause.
+static void paf_prepare(void) {
+  if (Sampler::GetActiveSampler()) {
+    was_paused = Sampler::GetActiveSampler()->IsPaused();
+    Sampler::GetActiveSampler()->SetPaused(true);
+  } else {
+    was_paused = false;
+  }
+}
+
+// In the parent, just after the fork, return pausedness to the
+// pre-fork state.
+static void paf_parent(void) {
+  if (Sampler::GetActiveSampler())
+    Sampler::GetActiveSampler()->SetPaused(was_paused);
+}
+
+// Set up the fork handlers.  This is called just once, at the first
+// call to SenderEntry.
+static void* setup_atfork() {
+  pthread_atfork(paf_prepare, paf_parent, NULL);
+  return NULL;
+}
+#endif /* !defined(ANDROID) */
+
+#ifdef ANDROID
 #include "android-signal-defs.h"
 #endif
 
+struct SamplerRegistry {
+  static void AddActiveSampler(Sampler *sampler) {
+    ASSERT(!SamplerRegistry::sampler);
+    SamplerRegistry::sampler = sampler;
+  }
+  static void RemoveActiveSampler(Sampler *sampler) {
+    SamplerRegistry::sampler = NULL;
+  }
+  static Sampler *sampler;
+};
+
+Sampler *SamplerRegistry::sampler = NULL;
+
+static ThreadProfile* sCurrentThreadProfile = NULL;
+
 static void ProfilerSaveSignalHandler(int signal, siginfo_t* info, void* context) {
-  sActiveSampler->RequestSave();
+  Sampler::GetActiveSampler()->RequestSave();
 }
 
 #ifdef ANDROID
@@ -70,7 +154,7 @@ static void ProfilerSaveSignalHandler(int signal, siginfo_t* info, void* context
 #define V8_HOST_ARCH_X64 1
 #endif
 static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
-  if (!sActiveSampler)
+  if (!Sampler::GetActiveSampler())
     return;
 
   TickSample sample_obj;
@@ -79,7 +163,7 @@ static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
 
 #ifdef ENABLE_SPS_LEAF_DATA
   // If profiling, we extract the current pc and sp.
-  if (sActiveSampler->IsProfiling()) {
+  if (Sampler::GetActiveSampler()->IsProfiling()) {
     // Extracting the sample from the context is extremely machine dependent.
     ucontext_t* ucontext = reinterpret_cast<ucontext_t*>(context);
     mcontext_t& mcontext = ucontext->uc_mcontext;
@@ -93,7 +177,7 @@ static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
     sample->fp = reinterpret_cast<Address>(mcontext.gregs[REG_RBP]);
 #elif V8_HOST_ARCH_ARM
 // An undefined macro evaluates to 0, so this applies to Android's Bionic also.
-#if (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ <= 3))
+#if !defined(ANDROID) && (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ <= 3))
     sample->pc = reinterpret_cast<Address>(mcontext.gregs[R15]);
     sample->sp = reinterpret_cast<Address>(mcontext.gregs[R13]);
     sample->fp = reinterpret_cast<Address>(mcontext.gregs[R11]);
@@ -114,94 +198,111 @@ static void ProfilerSignalHandler(int signal, siginfo_t* info, void* context) {
 #endif
   }
 #endif
+  sample->threadProfile = sCurrentThreadProfile;
   sample->timestamp = mozilla::TimeStamp::Now();
 
-  sActiveSampler->Tick(sample);
+  Sampler::GetActiveSampler()->Tick(sample);
+
+  sCurrentThreadProfile = NULL;
 }
 
-#ifndef XP_MACOSX
-void tgkill(pid_t tgid, pid_t tid, int signalno) {
-  syscall(SYS_tgkill, tgid, tid, signalno);
+int tgkill(pid_t tgid, pid_t tid, int signalno) {
+  return syscall(SYS_tgkill, tgid, tid, signalno);
 }
-#endif
 
-class Sampler::PlatformData : public Malloced {
+class PlatformData : public Malloced {
  public:
-  explicit PlatformData(Sampler* sampler)
-      : sampler_(sampler),
-        signal_handler_installed_(false),
-        vm_tgid_(getpid()),
-#ifndef XP_MACOSX
-        vm_tid_(gettid()),
-#endif
-        signal_sender_launched_(false)
-#ifdef XP_MACOSX
-        , signal_receiver_(pthread_self())
-#endif
-  {
-  }
-
-  void SignalSender() {
-    while (sampler_->IsActive()) {
-      sampler_->HandleSaveRequest();
-
-      if (!sampler_->IsPaused()) {
-#ifdef XP_MACOSX
-        pthread_kill(signal_receiver_, SIGPROF);
-#else
-        // Glibc doesn't provide a wrapper for tgkill(2).
-        tgkill(vm_tgid_, vm_tid_, SIGPROF);
-#endif
-      }
-
-      // Convert ms to us and subtract 100 us to compensate delays
-      // occuring during signal delivery.
-      // TODO measure and confirm this.
-      const useconds_t interval = sampler_->interval_ * 1000 - 100;
-      //int result = usleep(interval);
-      usleep(interval);
-    }
-  }
-
-  Sampler* sampler_;
-  bool signal_handler_installed_;
-  struct sigaction old_sigprof_signal_handler_;
-  struct sigaction old_sigsave_signal_handler_;
-  pid_t vm_tgid_;
-  pid_t vm_tid_;
-  bool signal_sender_launched_;
-  pthread_t signal_sender_thread_;
-#ifdef XP_MACOSX
-  pthread_t signal_receiver_;
-#endif
+  PlatformData()
+  {}
 };
 
-
-static void* SenderEntry(void* arg) {
-  Sampler::PlatformData* data =
-      reinterpret_cast<Sampler::PlatformData*>(arg);
-  data->SignalSender();
-  return 0;
+/* static */ PlatformData*
+Sampler::AllocPlatformData(int aThreadId)
+{
+  return new PlatformData;
 }
 
+/* static */ void
+Sampler::FreePlatformData(PlatformData* aData)
+{
+  delete aData;
+}
 
-Sampler::Sampler(int interval, bool profiling)
+static void* SignalSender(void* arg) {
+# if defined(ANDROID)
+  // pthread_atfork isn't available on Android.
+  void* initialize_atfork = NULL;
+# else
+  // This call is done just once, at the first call to SenderEntry.
+  // It returns NULL.
+  static void* initialize_atfork = setup_atfork();
+# endif
+
+  int vm_tgid_ = getpid();
+
+  while (SamplerRegistry::sampler->IsActive()) {
+    SamplerRegistry::sampler->HandleSaveRequest();
+
+    if (!SamplerRegistry::sampler->IsPaused()) {
+      mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
+      std::vector<ThreadInfo*> threads =
+        SamplerRegistry::sampler->GetRegisteredThreads();
+
+      for (uint32_t i = 0; i < threads.size(); i++) {
+        ThreadInfo* info = threads[i];
+
+        // This will be null if we're not interested in profiling this thread.
+        if (!info->Profile())
+          continue;
+
+        // We use sCurrentThreadProfile the ThreadProfile for the
+        // thread we're profiling to the signal handler
+        sCurrentThreadProfile = info->Profile();
+
+        int threadId = info->ThreadId();
+
+        if (tgkill(vm_tgid_, threadId, SIGPROF) != 0) {
+          printf_stderr("profiler failed to signal tid=%d\n", threadId);
+#ifdef DEBUG
+          abort();
+#endif
+          continue;
+        }
+
+        // Wait for the signal handler to run before moving on to the next one
+        while (sCurrentThreadProfile)
+          sched_yield();
+      }
+    }
+
+    // Convert ms to us and subtract 100 us to compensate delays
+    // occuring during signal delivery.
+    // TODO measure and confirm this.
+    const useconds_t interval =
+      SamplerRegistry::sampler->interval() * 1000 - 100;
+    //int result = usleep(interval);
+    usleep(interval);
+  }
+  return initialize_atfork; // which is guaranteed to be NULL
+}
+
+Sampler::Sampler(int interval, bool profiling, int entrySize)
     : interval_(interval),
       profiling_(profiling),
       paused_(false),
-      active_(false) {
-  data_ = new PlatformData(this);
+      active_(false),
+      entrySize_(entrySize) {
 }
 
 Sampler::~Sampler() {
-  ASSERT(!data_->signal_sender_launched_);
-  delete data_;
+  ASSERT(!signal_sender_launched_);
 }
 
 
 void Sampler::Start() {
-  LOG("Sampler Started");
-  if (sActiveSampler != NULL) return;
+  LOG("Sampler started");
+
+  SamplerRegistry::AddActiveSampler(this);
 
   // Request profiling signals.
   LOG("Request signal");
@@ -209,7 +310,7 @@ void Sampler::Start() {
   sa.sa_sigaction = ProfilerSignalHandler;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESTART | SA_SIGINFO;
-  if (sigaction(SIGPROF, &sa, &data_->old_sigprof_signal_handler_) != 0) {
+  if (sigaction(SIGPROF, &sa, &old_sigprof_signal_handler_) != 0) {
     LOG("Error installing signal");
     return;
   }
@@ -219,25 +320,22 @@ void Sampler::Start() {
   sa2.sa_sigaction = ProfilerSaveSignalHandler;
   sigemptyset(&sa2.sa_mask);
   sa2.sa_flags = SA_RESTART | SA_SIGINFO;
-  if (sigaction(SIGNAL_SAVE_PROFILE, &sa2, &data_->old_sigsave_signal_handler_) != 0) {
+  if (sigaction(SIGNAL_SAVE_PROFILE, &sa2, &old_sigsave_signal_handler_) != 0) {
     LOG("Error installing start signal");
     return;
   }
   LOG("Signal installed");
-  data_->signal_handler_installed_ = true;
+  signal_handler_installed_ = true;
 
   // Start a thread that sends SIGPROF signal to VM thread.
   // Sending the signal ourselves instead of relying on itimer provides
   // much better accuracy.
   SetActive(true);
   if (pthread_create(
-          &data_->signal_sender_thread_, NULL, SenderEntry, data_) == 0) {
-    data_->signal_sender_launched_ = true;
+        &signal_sender_thread_, NULL, SignalSender, NULL) == 0) {
+    signal_sender_launched_ = true;
   }
   LOG("Profiler thread started");
-
-  // Set this sampler as the active sampler.
-  sActiveSampler = this;
 }
 
 
@@ -246,20 +344,62 @@ void Sampler::Stop() {
 
   // Wait for signal sender termination (it will exit after setting
   // active_ to false).
-  if (data_->signal_sender_launched_) {
-    pthread_join(data_->signal_sender_thread_, NULL);
-    data_->signal_sender_launched_ = false;
+  if (signal_sender_launched_) {
+    pthread_join(signal_sender_thread_, NULL);
+    signal_sender_launched_ = false;
   }
+
+  SamplerRegistry::RemoveActiveSampler(this);
 
   // Restore old signal handler
-  if (data_->signal_handler_installed_) {
-    sigaction(SIGNAL_SAVE_PROFILE, &data_->old_sigsave_signal_handler_, 0);
-    sigaction(SIGPROF, &data_->old_sigprof_signal_handler_, 0);
-    data_->signal_handler_installed_ = false;
+  if (signal_handler_installed_) {
+    sigaction(SIGNAL_SAVE_PROFILE, &old_sigsave_signal_handler_, 0);
+    sigaction(SIGPROF, &old_sigprof_signal_handler_, 0);
+    signal_handler_installed_ = false;
+  }
+}
+
+bool Sampler::RegisterCurrentThread(const char* aName,
+                                    PseudoStack* aPseudoStack,
+                                    bool aIsMainThread, void* stackTop)
+{
+  if (!Sampler::sRegisteredThreadsMutex)
+    return false;
+
+  mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
+
+  ThreadInfo* info = new ThreadInfo(aName, gettid(),
+    aIsMainThread, aPseudoStack);
+
+  if (sActiveSampler) {
+    sActiveSampler->RegisterThread(info);
   }
 
-  // This sampler is no longer the active sampler.
-  sActiveSampler = NULL;
+  sRegisteredThreads->push_back(info);
+
+  uwt__register_thread_for_profiling(stackTop);
+  return true;
+}
+
+void Sampler::UnregisterCurrentThread()
+{
+  if (!Sampler::sRegisteredThreadsMutex)
+    return;
+
+  mozilla::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
+
+  int id = gettid();
+
+  for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
+    ThreadInfo* info = sRegisteredThreads->at(i);
+    if (info->ThreadId() == id) {
+      delete info;
+      sRegisteredThreads->erase(sRegisteredThreads->begin() + i);
+      break;
+    }
+  }
+
+  uwt__unregister_thread_for_profiling();
 }
 
 #ifdef ANDROID
@@ -267,8 +407,9 @@ static struct sigaction old_sigstart_signal_handler;
 const int SIGSTART = SIGUSR1;
 
 static void StartSignalHandler(int signal, siginfo_t* info, void* context) {
-  mozilla_sampler_start(PROFILE_DEFAULT_ENTRY, PROFILE_DEFAULT_INTERVAL,
-                        PROFILE_DEFAULT_FEATURES, PROFILE_DEFAULT_FEATURE_COUNT);
+  profiler_start(PROFILE_DEFAULT_ENTRY, PROFILE_DEFAULT_INTERVAL,
+                 PROFILE_DEFAULT_FEATURES, PROFILE_DEFAULT_FEATURE_COUNT,
+                 NULL, 0);
 }
 
 void OS::RegisterStartHandler()
@@ -283,3 +424,4 @@ void OS::RegisterStartHandler()
   }
 }
 #endif
+

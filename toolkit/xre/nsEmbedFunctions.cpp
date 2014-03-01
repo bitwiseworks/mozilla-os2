@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #if defined(MOZ_WIDGET_QT)
 #include "nsQAppInstance.h"
 #endif
@@ -67,14 +69,10 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
 
-#include "mozilla/jsipc/ContextWrapperParent.h"
-
 #include "mozilla/ipc/TestShellParent.h"
 #include "mozilla/ipc/XPCShellEnvironment.h"
 
-#include "mozilla/Util.h" // for DebugOnly
-
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 #ifdef MOZ_IPDL_TESTS
 #include "mozilla/_ipdltest/IPDLUnitTests.h"
@@ -95,9 +93,6 @@ using mozilla::plugins::PluginProcessChild;
 using mozilla::dom::ContentProcess;
 using mozilla::dom::ContentParent;
 using mozilla::dom::ContentChild;
-
-using mozilla::jsipc::PContextWrapperParent;
-using mozilla::jsipc::ContextWrapperParent;
 
 using mozilla::ipc::TestShellParent;
 using mozilla::ipc::TestShellCommandParent;
@@ -282,8 +277,34 @@ XRE_InitChildProcess(int aArgc,
   NS_ENSURE_ARG_MIN(aArgc, 2);
   NS_ENSURE_ARG_POINTER(aArgv);
   NS_ENSURE_ARG_POINTER(aArgv[0]);
-  SAMPLER_INIT();
-  SAMPLE_LABEL("Startup", "XRE_InitChildProcess");
+
+#if defined(XP_WIN)
+  // From the --attach-console support in nsNativeAppSupportWin.cpp, but
+  // here we are a content child process, so we always attempt to attach
+  // to the parent's (ie, the browser's) console.
+  // Try to attach console to the parent process.
+  // It will succeed when the parent process is a command line,
+  // so that stdio will be displayed in it.
+  if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+    // Change std handles to refer to new console handles.
+    // Before doing so, ensure that stdout/stderr haven't been
+    // redirected to a valid file
+    if (_fileno(stdout) == -1 ||
+        _get_osfhandle(fileno(stdout)) == -1)
+        freopen("CONOUT$", "w", stdout);
+    // Merge stderr into CONOUT$ since there isn't any `CONERR$`.
+    // http://msdn.microsoft.com/en-us/library/windows/desktop/ms683231%28v=vs.85%29.aspx
+    if (_fileno(stderr) == -1 ||
+        _get_osfhandle(fileno(stderr)) == -1)
+        freopen("CONOUT$", "w", stderr);
+    if (_fileno(stdin) == -1 || _get_osfhandle(fileno(stdin)) == -1)
+        freopen("CONIN$", "r", stdin);
+  }
+#endif
+
+  char aLocal;
+  profiler_init(&aLocal);
+  PROFILER_LABEL("Startup", "XRE_InitChildProcess");
 
   sChildProcessType = aProcess;
 
@@ -403,8 +424,7 @@ XRE_InitChildProcess(int aArgc,
   // On Win7+, register the application user model id passed in by
   // parent. This insures windows created by the container properly
   // group with the parent app on the Win7 taskbar.
-  const char* const appModelUserId = aArgv[aArgc-1];
-  --aArgc;
+  const char* const appModelUserId = aArgv[--aArgc];
   if (appModelUserId) {
     // '-' implies no support
     if (*appModelUserId != '-') {
@@ -425,6 +445,7 @@ XRE_InitChildProcess(int aArgc,
 
   nsresult rv = XRE_InitCommandLine(aArgc, aArgv);
   if (NS_FAILED(rv)) {
+    profiler_shutdown();
     NS_LogTerm();
     return NS_ERROR_FAILURE;
   }
@@ -460,8 +481,18 @@ XRE_InitChildProcess(int aArgc,
         process = new PluginProcessChild(parentHandle);
         break;
 
-      case GeckoProcessType_Content:
-        process = new ContentProcess(parentHandle);
+      case GeckoProcessType_Content: {
+          process = new ContentProcess(parentHandle);
+          // If passed in grab the application path for xpcom init
+          nsCString appDir;
+          for (int idx = aArgc; idx > 0; idx--) {
+            if (aArgv[idx] && !strcmp(aArgv[idx], "-appdir")) {
+              appDir.Assign(nsDependentCString(aArgv[idx+1]));
+              static_cast<ContentProcess*>(process.get())->SetAppDir(appDir);
+              break;
+            }
+          }
+        }
         break;
 
       case GeckoProcessType_IPDLUnitTest:
@@ -477,6 +508,7 @@ XRE_InitChildProcess(int aArgc,
       }
 
       if (!process->Init()) {
+        profiler_shutdown();
         NS_LogTerm();
         return NS_ERROR_FAILURE;
       }
@@ -491,6 +523,7 @@ XRE_InitChildProcess(int aArgc,
     }
   }
 
+  profiler_shutdown();
   NS_LogTerm();
   return XRE_DeinitCommandLine();
 }
@@ -603,6 +636,7 @@ nsresult
 XRE_RunAppShell()
 {
     nsCOMPtr<nsIAppShell> appShell(do_GetService(kAppShellCID));
+    NS_ENSURE_TRUE(appShell, NS_ERROR_FAILURE);
 #if defined(XP_MACOSX)
     {
       // In content processes that want XPCOM (and hence want
@@ -685,7 +719,8 @@ ContentParent* gContentParent; //long-lived, manually refcounted
 TestShellParent* GetOrCreateTestShellParent()
 {
     if (!gContentParent) {
-        NS_ADDREF(gContentParent = ContentParent::GetNewOrUsed());
+        nsRefPtr<ContentParent> parent = ContentParent::GetNewOrUsed().get();
+        parent.forget(&gContentParent);
     } else if (!gContentParent->IsAlive()) {
         return nullptr;
     }
@@ -702,11 +737,12 @@ XRE_SendTestShellCommand(JSContext* aCx,
                          JSString* aCommand,
                          void* aCallback)
 {
+    JS::RootedString cmd(aCx, aCommand);
     TestShellParent* tsp = GetOrCreateTestShellParent();
     NS_ENSURE_TRUE(tsp, false);
 
     nsDependentJSString command;
-    NS_ENSURE_TRUE(command.init(aCx, aCommand), false);
+    NS_ENSURE_TRUE(command.init(aCx, cmd), false);
 
     if (!aCallback) {
         return tsp->SendExecuteCommand(command);
@@ -716,17 +752,10 @@ XRE_SendTestShellCommand(JSContext* aCx,
         tsp->SendPTestShellCommandConstructor(command));
     NS_ENSURE_TRUE(callback, false);
 
-    jsval callbackVal = *reinterpret_cast<jsval*>(aCallback);
+    JS::Value callbackVal = *reinterpret_cast<JS::Value*>(aCallback);
     NS_ENSURE_TRUE(callback->SetCallback(aCx, callbackVal), false);
 
     return true;
-}
-
-bool
-XRE_GetChildGlobalObject(JSContext* aCx, JSObject** aGlobalP)
-{
-    TestShellParent* tsp = GetOrCreateTestShellParent();
-    return tsp && tsp->GetGlobalJSObject(aCx, aGlobalP);
 }
 
 bool

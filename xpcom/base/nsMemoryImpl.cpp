@@ -10,9 +10,8 @@
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIServiceManager.h"
-#include "nsISupportsArray.h"
+#include "nsISimpleEnumerator.h"
 
-#include "prmem.h"
 #include "prcvar.h"
 #include "pratom.h"
 
@@ -20,6 +19,11 @@
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "mozilla/Services.h"
+
+#ifdef ANDROID
+#include <stdio.h>
+#define LOW_MEMORY_THRESHOLD_KB (384 * 1024)
+#endif
 
 static nsMemoryImpl sGlobalMemory;
 
@@ -54,6 +58,37 @@ nsMemoryImpl::IsLowMemory(bool *result)
 {
     NS_ERROR("IsLowMemory is deprecated.  See bug 592308.");
     *result = false;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMemoryImpl::IsLowMemoryPlatform(bool *result)
+{
+#ifdef ANDROID
+    static int sLowMemory = -1; // initialize to unknown, lazily evaluate to 0 or 1
+    if (sLowMemory == -1) {
+        sLowMemory = 0; // assume "not low memory" in case file operations fail
+        *result = false;
+
+        // check if MemTotal from /proc/meminfo is less than LOW_MEMORY_THRESHOLD_KB
+        FILE* fd = fopen("/proc/meminfo", "r");
+        if (!fd) {
+            return NS_OK;
+        }
+        uint64_t mem = 0;
+        int rv = fscanf(fd, "MemTotal: %lu kB", &mem);
+        if (fclose(fd)) {
+            return NS_OK;
+        }
+        if (rv != 1) {
+            return NS_OK;
+        }
+        sLowMemory = (mem < LOW_MEMORY_THRESHOLD_KB) ? 1 : 0;
+    }
+    *result = (sLowMemory == 1);
+#else
+    *result = false;
+#endif
     return NS_OK;
 }
 

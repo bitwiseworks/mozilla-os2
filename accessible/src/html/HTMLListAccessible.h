@@ -22,7 +22,7 @@ class HTMLListAccessible : public HyperTextAccessibleWrap
 {
 public:
   HTMLListAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-    HyperTextAccessibleWrap(aContent, aDoc) { }
+    HyperTextAccessibleWrap(aContent, aDoc) { mGenericTypes |= eList; }
   virtual ~HTMLListAccessible() { }
 
   // nsISupports
@@ -75,20 +75,18 @@ private:
 class HTMLListBulletAccessible : public LeafAccessible
 {
 public:
-  HTMLListBulletAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-    LeafAccessible(aContent, aDoc) { }
+  HTMLListBulletAccessible(nsIContent* aContent, DocAccessible* aDoc);
   virtual ~HTMLListBulletAccessible() { }
 
   // nsAccessNode
   virtual nsIFrame* GetFrame() const;
-  virtual bool IsPrimaryForNode() const;
 
   // Accessible
   virtual ENameValueFlag Name(nsString& aName);
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
   virtual void AppendTextTo(nsAString& aText, uint32_t aStartOffset = 0,
-                            uint32_t aLength = PR_UINT32_MAX);
+                            uint32_t aLength = UINT32_MAX);
 
   // HTMLListBulletAccessible
 
@@ -98,15 +96,14 @@ public:
   bool IsInside() const;
 };
 
-} // namespace a11y
-} // namespace mozilla
 
-
-inline mozilla::a11y::HTMLLIAccessible*
+inline HTMLLIAccessible*
 Accessible::AsHTMLListItem()
 {
-  return mFlags & eHTMLListItemAccessible ?
-    static_cast<mozilla::a11y::HTMLLIAccessible*>(this) : nullptr;
+  return IsHTMLListItem() ? static_cast<HTMLLIAccessible*>(this) : nullptr;
 }
+
+} // namespace a11y
+} // namespace mozilla
 
 #endif

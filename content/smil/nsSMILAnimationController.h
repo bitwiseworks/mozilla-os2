@@ -6,6 +6,7 @@
 #ifndef NS_SMILANIMATIONCONTROLLER_H_
 #define NS_SMILANIMATIONCONTROLLER_H_
 
+#include "mozilla/Attributes.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
@@ -18,8 +19,13 @@
 #include "nsRefreshDriver.h"
 
 struct nsSMILTargetIdentifier;
-class nsISMILAnimationElement;
 class nsIDocument;
+
+namespace mozilla {
+namespace dom {
+class SVGAnimationElement;
+}
+}
 
 //----------------------------------------------------------------------
 // nsSMILAnimationController
@@ -45,19 +51,19 @@ public:
   void Disconnect();
 
   // nsSMILContainer
-  virtual void Pause(uint32_t aType);
-  virtual void Resume(uint32_t aType);
-  virtual nsSMILTime GetParentTime() const;
+  virtual void Pause(uint32_t aType) MOZ_OVERRIDE;
+  virtual void Resume(uint32_t aType) MOZ_OVERRIDE;
+  virtual nsSMILTime GetParentTime() const MOZ_OVERRIDE;
 
   // nsARefreshObserver
-  NS_IMETHOD_(nsrefcnt) AddRef();
-  NS_IMETHOD_(nsrefcnt) Release();
+  NS_IMETHOD_(nsrefcnt) AddRef() MOZ_OVERRIDE;
+  NS_IMETHOD_(nsrefcnt) Release() MOZ_OVERRIDE;
 
-  virtual void WillRefresh(mozilla::TimeStamp aTime);
+  virtual void WillRefresh(mozilla::TimeStamp aTime) MOZ_OVERRIDE;
 
   // Methods for registering and enumerating animation elements
-  void RegisterAnimationElement(nsISMILAnimationElement* aAnimationElement);
-  void UnregisterAnimationElement(nsISMILAnimationElement* aAnimationElement);
+  void RegisterAnimationElement(mozilla::dom::SVGAnimationElement* aAnimationElement);
+  void UnregisterAnimationElement(mozilla::dom::SVGAnimationElement* aAnimationElement);
 
   // Methods for resampling all animations
   // (A resample performs the same operations as a sample but doesn't advance
@@ -104,7 +110,7 @@ protected:
   // Typedefs
   typedef nsPtrHashKey<nsSMILTimeContainer> TimeContainerPtrKey;
   typedef nsTHashtable<TimeContainerPtrKey> TimeContainerHashtable;
-  typedef nsPtrHashKey<nsISMILAnimationElement> AnimationElementPtrKey;
+  typedef nsPtrHashKey<mozilla::dom::SVGAnimationElement> AnimationElementPtrKey;
   typedef nsTHashtable<AnimationElementPtrKey> AnimationElementHashtable;
 
   struct SampleTimeContainerParams
@@ -121,12 +127,12 @@ protected:
 
   struct GetMilestoneElementsParams
   {
-    nsTArray<nsRefPtr<nsISMILAnimationElement> > mElements;
-    nsSMILMilestone                              mMilestone;
+    nsTArray<nsRefPtr<mozilla::dom::SVGAnimationElement> > mElements;
+    nsSMILMilestone                                        mMilestone;
   };
 
   // Cycle-collection implementation helpers
-  PR_STATIC_CALLBACK(PLDHashOperator) CompositorTableEntryTraverse(
+  static PLDHashOperator CompositorTableEntryTraverse(
       nsSMILCompositor* aCompositor, void* aArg);
 
   // Returns mDocument's refresh driver, if it's got one.
@@ -140,37 +146,37 @@ protected:
   void MaybeStartSampling(nsRefreshDriver* aRefreshDriver);
 
   // Sample-related callbacks and implementation helpers
-  virtual void DoSample();
+  virtual void DoSample() MOZ_OVERRIDE;
   void DoSample(bool aSkipUnchangedContainers);
 
   void RewindElements();
-  PR_STATIC_CALLBACK(PLDHashOperator) RewindNeeded(
+  static PLDHashOperator RewindNeeded(
       TimeContainerPtrKey* aKey, void* aData);
-  PR_STATIC_CALLBACK(PLDHashOperator) RewindAnimation(
+  static PLDHashOperator RewindAnimation(
       AnimationElementPtrKey* aKey, void* aData);
-  PR_STATIC_CALLBACK(PLDHashOperator) ClearRewindNeeded(
+  static PLDHashOperator ClearRewindNeeded(
       TimeContainerPtrKey* aKey, void* aData);
 
   void DoMilestoneSamples();
-  PR_STATIC_CALLBACK(PLDHashOperator) GetNextMilestone(
+  static PLDHashOperator GetNextMilestone(
       TimeContainerPtrKey* aKey, void* aData);
-  PR_STATIC_CALLBACK(PLDHashOperator) GetMilestoneElements(
+  static PLDHashOperator GetMilestoneElements(
       TimeContainerPtrKey* aKey, void* aData);
 
-  PR_STATIC_CALLBACK(PLDHashOperator) SampleTimeContainer(
+  static PLDHashOperator SampleTimeContainer(
       TimeContainerPtrKey* aKey, void* aData);
-  PR_STATIC_CALLBACK(PLDHashOperator) SampleAnimation(
+  static PLDHashOperator SampleAnimation(
       AnimationElementPtrKey* aKey, void* aData);
-  static void SampleTimedElement(nsISMILAnimationElement* aElement,
+  static void SampleTimedElement(mozilla::dom::SVGAnimationElement* aElement,
                                  TimeContainerHashtable* aActiveContainers);
   static void AddAnimationToCompositorTable(
-    nsISMILAnimationElement* aElement, nsSMILCompositorTable* aCompositorTable);
+    mozilla::dom::SVGAnimationElement* aElement, nsSMILCompositorTable* aCompositorTable);
   static bool GetTargetIdentifierForAnimation(
-      nsISMILAnimationElement* aAnimElem, nsSMILTargetIdentifier& aResult);
+      mozilla::dom::SVGAnimationElement* aAnimElem, nsSMILTargetIdentifier& aResult);
 
   // Methods for adding/removing time containers
-  virtual nsresult AddChild(nsSMILTimeContainer& aChild);
-  virtual void     RemoveChild(nsSMILTimeContainer& aChild);
+  virtual nsresult AddChild(nsSMILTimeContainer& aChild) MOZ_OVERRIDE;
+  virtual void     RemoveChild(nsSMILTimeContainer& aChild) MOZ_OVERRIDE;
 
   void FlagDocumentNeedsFlush();
 

@@ -19,7 +19,6 @@
 #include "nsISupportsUtils.h"
 #include "nsITextServicesFilter.h"
 #include "nsRange.h"
-#include "prtypes.h"
 
 //------------------------------------------------------------
 nsFilteredContentIterator::nsFilteredContentIterator(nsITextServicesFilter* aFilter) :
@@ -58,13 +57,14 @@ NS_IMPL_CYCLE_COLLECTION_5(nsFilteredContentIterator,
 nsresult
 nsFilteredContentIterator::Init(nsINode* aRoot)
 {
+  NS_ENSURE_ARG_POINTER(aRoot);
   NS_ENSURE_TRUE(mPreIterator, NS_ERROR_FAILURE);
   NS_ENSURE_TRUE(mIterator, NS_ERROR_FAILURE);
   mIsOutOfRange    = false;
   mDirection       = eForward;
   mCurrentIterator = mPreIterator;
 
-  mRange = new nsRange();
+  mRange = new nsRange(aRoot);
   nsCOMPtr<nsIDOMNode> domNode(do_QueryInterface(aRoot));
   if (domNode) {
     mRange->SelectNode(domNode);
@@ -278,7 +278,7 @@ nsFilteredContentIterator::AdvanceNode(nsIDOMNode* aNode, nsIDOMNode*& aNewNode,
     // The next node was null so we need to walk up the parent(s)
     nsCOMPtr<nsIDOMNode> parent;
     aNode->GetParentNode(getter_AddRefs(parent));
-    NS_ASSERTION(parent, "parent can't be NULL");
+    NS_ASSERTION(parent, "parent can't be nullptr");
 
     // Make sure the parent is in the DOMRange before going further
     bool intersects = ContentIsInTraversalRange(mRange, nextNode, aDir == eForward);

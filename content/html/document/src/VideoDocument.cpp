@@ -7,8 +7,8 @@
 #include "nsGkAtoms.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
-#include "nsHTMLMediaElement.h"
-#include "nsIDocShellTreeItem.h"
+#include "mozilla/dom/HTMLMediaElement.h"
+#include "nsIDocumentInlines.h"
 #include "nsContentUtils.h"
 #include "mozilla/dom/Element.h"
 
@@ -74,7 +74,7 @@ VideoDocument::SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject)
     if (!nsContentUtils::IsChildOfSameType(this) &&
         GetReadyStateEnum() != nsIDocument::READYSTATE_COMPLETE) {
       LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/TopLevelVideoDocument.css"));
-      LinkStylesheet(NS_LITERAL_STRING("chrome://global/skin/TopLevelVideoDocument.css"));
+      LinkStylesheet(NS_LITERAL_STRING("chrome://global/skin/media/TopLevelVideoDocument.css"));
     }
     BecomeInteractive();
   }
@@ -99,11 +99,10 @@ VideoDocument::CreateSyntheticVideoDocument(nsIChannel* aChannel,
   nodeInfo = mNodeInfoManager->GetNodeInfo(nsGkAtoms::video, nullptr,
                                            kNameSpaceID_XHTML,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_FAILURE);
 
-  nsRefPtr<nsHTMLMediaElement> element =
-    static_cast<nsHTMLMediaElement*>(NS_NewHTMLVideoElement(nodeInfo.forget(),
-                                                            NOT_FROM_PARSER));
+  nsRefPtr<HTMLMediaElement> element =
+    static_cast<HTMLMediaElement*>(NS_NewHTMLVideoElement(nodeInfo.forget(),
+                                                          NOT_FROM_PARSER));
   if (!element)
     return NS_ERROR_OUT_OF_MEMORY;
   element->SetAutoplay(true);

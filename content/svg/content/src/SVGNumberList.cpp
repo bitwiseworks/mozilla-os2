@@ -6,16 +6,13 @@
 #include "mozilla/Util.h"
 
 #include "SVGNumberList.h"
-#include "SVGAnimatedNumberList.h"
-#include "nsSVGElement.h"
-#include "nsError.h"
-#include "nsString.h"
-#include "nsSVGUtils.h"
-#include "string.h"
-#include "prdtoa.h"
-#include "nsTextFormatter.h"
 #include "nsCharSeparatedTokenizer.h"
+#include "nsError.h"
 #include "nsMathUtils.h"
+#include "nsString.h"
+#include "nsTextFormatter.h"
+#include "prdtoa.h"
+#include "SVGContentUtils.h"
 
 namespace mozilla {
 
@@ -58,7 +55,7 @@ SVGNumberList::SetValueFromString(const nsAString& aValue)
   nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
     tokenizer(aValue, ',', nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
 
-  nsCAutoString str;  // outside loop to minimize memory churn
+  nsAutoCString str;  // outside loop to minimize memory churn
 
   while (tokenizer.hasMoreTokens()) {
     CopyUTF16toUTF8(tokenizer.nextToken(), str); // NS_ConvertUTF16toUTF8

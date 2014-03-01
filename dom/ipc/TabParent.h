@@ -12,6 +12,7 @@
 #include "jsapi.h"
 #include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/dom/PContentDialogParent.h"
+#include "mozilla/dom/TabContext.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "nsCOMPtr.h"
 #include "nsIAuthPromptProvider.h"
@@ -23,7 +24,7 @@
 
 struct gfxMatrix;
 struct JSContext;
-struct JSObject;
+class JSObject;
 class mozIApplication;
 class nsFrameLoader;
 class nsIDOMElement;
@@ -33,6 +34,7 @@ namespace mozilla {
 
 namespace layers {
 struct FrameMetrics;
+struct TextureFactoryIdentifier;
 }
 
 namespace layout {
@@ -50,26 +52,67 @@ class TabParent : public PBrowserParent
                 , public nsITabParent 
                 , public nsIAuthPromptProvider
                 , public nsISecureBrowserUI
+                , public TabContext
 {
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
+    typedef mozilla::layout::ScrollingBehavior ScrollingBehavior;
 
 public:
-    TabParent(mozIApplication* aApp, bool aIsBrowserElement);
+    TabParent(const TabContext& aContext);
     virtual ~TabParent();
     nsIDOMElement* GetOwnerElement() { return mFrameElement; }
     void SetOwnerElement(nsIDOMElement* aElement);
+
+    /**
+     * Get the mozapptype attribute from this TabParent's owner DOM element.
+     */
+    void GetAppType(nsAString& aOut);
+
+    /**
+     * Returns true iff this TabParent's nsIFrameLoader is visible.
+     *
+     * The frameloader's visibility can be independent of e.g. its docshell's
+     * visibility.
+     */
+    bool IsVisible();
+
     nsIBrowserDOMWindow *GetBrowserDOMWindow() { return mBrowserDOMWindow; }
     void SetBrowserDOMWindow(nsIBrowserDOMWindow* aBrowserDOMWindow) {
         mBrowserDOMWindow = aBrowserDOMWindow;
     }
- 
-    mozIApplication* GetApp() { return mApp; }
-    bool IsBrowserElement() { return mIsBrowserElement; }
+
+    /**
+     * Return the TabParent that has decided it wants to capture an
+     * event series for fast-path dispatch to its subprocess, if one
+     * has.
+     *
+     * DOM event dispatch and widget are free to ignore capture
+     * requests from TabParents; the end result wrt remote content is
+     * (must be) always the same, albeit usually slower without
+     * subprocess capturing.  This allows frontends/widget backends to
+     * "opt in" to faster cross-process dispatch.
+     */
+    static TabParent* GetEventCapturer();
+    /**
+     * If this is the current event capturer, give this a chance to
+     * capture the event.  If it was captured, return true, false
+     * otherwise.  Un-captured events should follow normal DOM
+     * dispatch; captured events should result in no further
+     * processing from the caller of TryCapture().
+     *
+     * It's an error to call TryCapture() if this isn't the event
+     * capturer.
+     */
+    bool TryCapture(const nsGUIEvent& aEvent);
 
     void Destroy();
 
     virtual bool RecvMoveFocus(const bool& aForward);
     virtual bool RecvEvent(const RemoteDOMEvent& aEvent);
+    virtual bool RecvPRenderFrameConstructor(PRenderFrameParent* actor,
+                                             ScrollingBehavior* scrolling,
+                                             TextureFactoryIdentifier* identifier,
+                                             uint64_t* layersId);
     virtual bool RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
                                             const nsString& aURL,
                                             const nsString& aName,
@@ -94,7 +137,8 @@ public:
     virtual bool RecvEndIMEComposition(const bool& aCancel,
                                        nsString* aComposition);
     virtual bool RecvGetInputContext(int32_t* aIMEEnabled,
-                                     int32_t* aIMEOpen);
+                                     int32_t* aIMEOpen,
+                                     intptr_t* aNativeIMEContext);
     virtual bool RecvSetInputContext(const int32_t& aIMEEnabled,
                                      const int32_t& aIMEOpen,
                                      const nsString& aType,
@@ -105,8 +149,12 @@ public:
     virtual bool RecvSetCursor(const uint32_t& aValue);
     virtual bool RecvSetBackgroundColor(const nscolor& aValue);
     virtual bool RecvGetDPI(float* aValue);
+    virtual bool RecvGetDefaultScale(double* aValue);
     virtual bool RecvGetWidgetNativeData(WindowsHandle* aValue);
     virtual bool RecvZoomToRect(const gfxRect& aRect);
+    virtual bool RecvUpdateZoomConstraints(const bool& aAllowZoom,
+                                           const float& aMinZoom,
+                                           const float& aMaxZoom);
     virtual bool RecvContentReceivedTouch(const bool& aPreventDefault);
     virtual PContentDialogParent* AllocPContentDialog(const uint32_t& aType,
                                                       const nsCString& aName,
@@ -127,15 +175,11 @@ public:
     void Show(const nsIntSize& size);
     void UpdateDimensions(const nsRect& rect, const nsIntSize& size);
     void UpdateFrame(const layers::FrameMetrics& aFrameMetrics);
-    void HandleDoubleTap(const nsIntPoint& aPoint);
+    void HandleDoubleTap(const CSSIntPoint& aPoint);
+    void HandleSingleTap(const CSSIntPoint& aPoint);
+    void HandleLongTap(const CSSIntPoint& aPoint);
     void Activate();
     void Deactivate();
-
-    /**
-     * Is this object active?  That is, was Activate() called more recently than
-     * Deactivate()?
-     */
-    bool Active();
 
     void SendMouseEvent(const nsAString& aType, float aX, float aY,
                         int32_t aButton, int32_t aClickCount,
@@ -156,14 +200,13 @@ public:
     virtual bool DeallocPDocumentRenderer(PDocumentRendererParent* actor);
 
     virtual PContentPermissionRequestParent*
-    AllocPContentPermissionRequest(const nsCString& aType, const IPC::Principal& aPrincipal);
+    AllocPContentPermissionRequest(const nsCString& aType, const nsCString& aAccess, const IPC::Principal& aPrincipal);
     virtual bool DeallocPContentPermissionRequest(PContentPermissionRequestParent* actor);
 
     virtual POfflineCacheUpdateParent* AllocPOfflineCacheUpdate(
             const URIParams& aManifestURI,
             const URIParams& aDocumentURI,
-            const nsCString& aClientID,
-            const bool& stickDocument);
+            const bool& stickDocument) MOZ_OVERRIDE;
     virtual bool DeallocPOfflineCacheUpdate(POfflineCacheUpdateParent* actor);
 
     JSBool GetGlobalJSObject(JSContext* cx, JSObject** globalp);
@@ -227,12 +270,10 @@ protected:
     bool AllowContentIME();
 
     virtual PRenderFrameParent* AllocPRenderFrame(ScrollingBehavior* aScrolling,
-                                                  LayersBackend* aBackend,
-                                                  int32_t* aMaxTextureSize,
+                                                  TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                                   uint64_t* aLayersId) MOZ_OVERRIDE;
     virtual bool DeallocPRenderFrame(PRenderFrameParent* aFrame) MOZ_OVERRIDE;
 
-    nsCOMPtr<mozIApplication> mApp;
     // IME
     static TabParent *mIMETabParent;
     nsString mIMECacheText;
@@ -246,19 +287,23 @@ protected:
     uint32_t mIMECompositionStart;
     uint32_t mIMESeqno;
 
+    // The number of event series we're currently capturing.
+    int32_t mEventCaptureDepth;
+
+    nsRect mRect;
+    nsIntSize mDimensions;
+    ScreenOrientation mOrientation;
     float mDPI;
-    bool mActive;
-    bool mIsBrowserElement;
+    double mDefaultScale;
     bool mShown;
+    bool mUpdatedDimensions;
 
 private:
     already_AddRefed<nsFrameLoader> GetFrameLoader() const;
     already_AddRefed<nsIWidget> GetWidget() const;
     layout::RenderFrameParent* GetRenderFrame();
-    void TryCacheDPI();
-    // Return true iff this TabParent was created for a mozbrowser
-    // frame.
-    bool IsForMozBrowser();
+    void TryCacheDPIAndScale();
+
     // When true, we create a pan/zoom controller for our frame and
     // notify it of input events targeting us.
     bool UseAsyncPanZoom();
@@ -268,6 +313,19 @@ private:
     // dispatch to content.
     void MaybeForwardEventToRenderFrame(const nsInputEvent& aEvent,
                                         nsInputEvent* aOutEvent);
+    // The offset for the child process which is sampled at touch start. This
+    // means that the touch events are relative to where the frame was at the
+    // start of the touch. We need to look for a better solution to this
+    // problem see bug 872911.
+    nsIntPoint mChildProcessOffsetAtTouchStart;
+    // When true, we've initiated normal shutdown and notified our
+    // managing PContent.
+    bool mMarkedDestroying;
+    // When true, the TabParent is invalid and we should not send IPC messages
+    // anymore.
+    bool mIsDestroyed;
+    // Whether we have already sent a FileDescriptor for the app package.
+    bool mAppPackageFileDescriptorSent;
 };
 
 } // namespace dom

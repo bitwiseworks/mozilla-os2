@@ -4,38 +4,43 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "RuntimeService.h"
 
+#include "nsIContentSecurityPolicy.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsIObserverService.h"
 #include "nsIPlatformCharset.h"
 #include "nsIPrincipal.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISupportsPriority.h"
 #include "nsITimer.h"
 #include "nsPIDOMWindow.h"
 
+#include <algorithm>
+#include "GeckoProfiler.h"
+#include "jsdbgapi.h"
+#include "jsfriendapi.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/EventTargetBinding.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Util.h"
+#include <Navigator.h>
 #include "nsContentUtils.h"
 #include "nsDOMJSUtils.h"
-#include <Navigator.h>
+#include "nsLayoutStatics.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMPrivate.h"
+#include "OSFileConstants.h"
 #include "xpcpublic.h"
 
 #include "Events.h"
 #include "Worker.h"
 #include "WorkerPrivate.h"
-
-#include "OSFileConstants.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -49,18 +54,15 @@ using mozilla::Preferences;
 // The size of the worker runtime heaps in bytes. May be changed via pref.
 #define WORKER_DEFAULT_RUNTIME_HEAPSIZE 32 * 1024 * 1024
 
+// The size of the worker JS allocation threshold in MB. May be changed via pref.
+#define WORKER_DEFAULT_ALLOCATION_THRESHOLD 30
+
 // The C stack size. We use the same stack size on all platforms for
 // consistency.
 #define WORKER_STACK_SIZE 256 * sizeof(size_t) * 1024
 
-// The stack limit the JS engine will check. 
-#ifdef MOZ_ASAN
-// For ASan, we need more stack space, so we use all that is available
-#define WORKER_CONTEXT_NATIVE_STACK_LIMIT WORKER_STACK_SIZE
-#else
 // Half the size of the actual C stack, to be safe.
 #define WORKER_CONTEXT_NATIVE_STACK_LIMIT 128 * sizeof(size_t) * 1024
-#endif
 
 // The maximum number of threads to use for workers, overridable via pref.
 #define MAX_WORKERS_PER_DOMAIN 10
@@ -68,7 +70,8 @@ using mozilla::Preferences;
 MOZ_STATIC_ASSERT(MAX_WORKERS_PER_DOMAIN >= 1,
                   "We should allow at least one worker per domain.");
 
-// The default number of seconds that close handlers will be allowed to run.
+// The default number of seconds that close handlers will be allowed to run for
+// content workers.
 #define MAX_SCRIPT_RUN_TIME_SEC 10
 
 // The number of seconds that idle threads can hang around before being killed.
@@ -77,10 +80,12 @@ MOZ_STATIC_ASSERT(MAX_WORKERS_PER_DOMAIN >= 1,
 // The maximum number of threads that can be idle at one time.
 #define MAX_IDLE_THREADS 20
 
-#define PREF_WORKERS_ENABLED "dom.workers.enabled"
-#define PREF_WORKERS_MAX_PER_DOMAIN "dom.workers.maxPerDomain"
-#define PREF_WORKERS_GCZEAL "dom.workers.gczeal"
-#define PREF_MAX_SCRIPT_RUN_TIME "dom.max_script_run_time"
+#define PREF_WORKERS_PREFIX "dom.workers."
+#define PREF_WORKERS_ENABLED PREF_WORKERS_PREFIX "enabled"
+#define PREF_WORKERS_MAX_PER_DOMAIN PREF_WORKERS_PREFIX "maxPerDomain"
+
+#define PREF_MAX_SCRIPT_RUN_TIME_CONTENT "dom.max_script_run_time"
+#define PREF_MAX_SCRIPT_RUN_TIME_CHROME "dom.max_chrome_script_run_time"
 
 #define GC_REQUEST_OBSERVER_TOPIC "child-gc-request"
 #define MEMORY_PRESSURE_OBSERVER_TOPIC "memory-pressure"
@@ -98,11 +103,19 @@ MOZ_STATIC_ASSERT(MAX_WORKERS_PER_DOMAIN >= 1,
                                                                                \
     if (!workers.IsEmpty()) {                                                  \
       AutoSafeJSContext cx;                                                    \
+      JSAutoRequest ar(cx);                                                    \
       for (uint32_t index = 0; index < workers.Length(); index++) {            \
         workers[index]-> _func (cx, __VA_ARGS__);                              \
       }                                                                        \
     }                                                                          \
   PR_END_MACRO
+
+// Prefixes for observing preference changes.
+#define PREF_JS_OPTIONS_PREFIX "javascript.options."
+#define PREF_WORKERS_OPTIONS_PREFIX PREF_WORKERS_PREFIX "options."
+#define PREF_MEM_OPTIONS_PREFIX "mem."
+#define PREF_JIT_HARDENING "jit_hardening"
+#define PREF_GCZEAL "gcZeal"
 
 namespace {
 
@@ -115,6 +128,9 @@ uint32_t gMaxWorkersPerDomain = MAX_WORKERS_PER_DOMAIN;
 
 // Does not hold an owning reference.
 RuntimeService* gRuntimeService = nullptr;
+
+// Only non-null during the call to Init.
+RuntimeService* gRuntimeServiceDuringInit = nullptr;
 
 enum {
   ID_Worker = 0,
@@ -143,97 +159,428 @@ const char* gStringChars[] = {
 MOZ_STATIC_ASSERT(NS_ARRAY_LENGTH(gStringChars) == ID_COUNT,
                   "gStringChars should have the right length.");
 
-enum {
-  PREF_strict = 0,
-  PREF_werror,
-  PREF_relimit,
-  PREF_methodjit,
-  PREF_methodjit_always,
-  PREF_typeinference,
-  PREF_allow_xml,
-  PREF_jit_hardening,
-  PREF_mem_max,
-
-#ifdef JS_GC_ZEAL
-  PREF_gczeal,
-#endif
-
-  PREF_COUNT
+class LiteralRebindingCString : public nsDependentCString
+{
+public:
+  template<int N>
+  void RebindLiteral(const char (&aStr)[N])
+  {
+    Rebind(aStr, N-1);
+  }
 };
 
-#define JS_OPTIONS_DOT_STR "javascript.options."
+template <typename T>
+struct PrefTraits;
 
-const char* gPrefsToWatch[] = {
-  JS_OPTIONS_DOT_STR "strict",
-  JS_OPTIONS_DOT_STR "werror",
-  JS_OPTIONS_DOT_STR "relimit",
-  JS_OPTIONS_DOT_STR "methodjit.content",
-  JS_OPTIONS_DOT_STR "methodjit_always",
-  JS_OPTIONS_DOT_STR "typeinference",
-  JS_OPTIONS_DOT_STR "allow_xml",
-  JS_OPTIONS_DOT_STR "jit_hardening",
-  JS_OPTIONS_DOT_STR "mem.max"
+template <>
+struct PrefTraits<bool>
+{
+  typedef bool PrefValueType;
 
-#ifdef JS_GC_ZEAL
-  , PREF_WORKERS_GCZEAL
-#endif
+  static const PrefValueType kDefaultValue = false;
+
+  static inline PrefValueType
+  Get(const char* aPref)
+  {
+    AssertIsOnMainThread();
+    return Preferences::GetBool(aPref);
+  }
+
+  static inline bool
+  Exists(const char* aPref)
+  {
+    AssertIsOnMainThread();
+    return Preferences::GetType(aPref) == nsIPrefBranch::PREF_BOOL;
+  }
 };
 
-MOZ_STATIC_ASSERT(NS_ARRAY_LENGTH(gPrefsToWatch) == PREF_COUNT,
-                  "gPrefsToWatch should have the right length.");
+template <>
+struct PrefTraits<int32_t>
+{
+  typedef int32_t PrefValueType;
 
-int
-PrefCallback(const char* aPrefName, void* aClosure)
+  static const PrefValueType kDefaultValue = 0;
+
+  static inline PrefValueType
+  Get(const char* aPref)
+  {
+    AssertIsOnMainThread();
+    return Preferences::GetInt(aPref);
+  }
+
+  static inline bool
+  Exists(const char* aPref)
+  {
+    AssertIsOnMainThread();
+    return Preferences::GetType(aPref) == nsIPrefBranch::PREF_INT;
+  }
+};
+
+template <typename T>
+T
+GetWorkerPref(const nsACString& aPref,
+              const T aDefault = PrefTraits<T>::kDefaultValue)
 {
   AssertIsOnMainThread();
 
-  RuntimeService* rts = static_cast<RuntimeService*>(aClosure);
-  NS_ASSERTION(rts, "This should never be null!");
+  typedef PrefTraits<T> PrefHelper;
 
-  NS_NAMED_LITERAL_CSTRING(jsOptionStr, JS_OPTIONS_DOT_STR);
+  T result;
 
-  if (!strcmp(aPrefName, gPrefsToWatch[PREF_mem_max])) {
-    int32_t pref = Preferences::GetInt(aPrefName, -1);
-    uint32_t maxBytes = (pref <= 0 || pref >= 0x1000) ?
-                        uint32_t(-1) :
-                        uint32_t(pref) * 1024 * 1024;
-    RuntimeService::SetDefaultJSRuntimeHeapSize(maxBytes);
-    rts->UpdateAllWorkerJSRuntimeHeapSize();
+  nsAutoCString prefName;
+  prefName.AssignLiteral(PREF_WORKERS_OPTIONS_PREFIX);
+  prefName.Append(aPref);
+
+  if (PrefHelper::Exists(prefName.get())) {
+    result = PrefHelper::Get(prefName.get());
   }
-  else if (StringBeginsWith(nsDependentCString(aPrefName), jsOptionStr)) {
-    uint32_t newOptions = kRequiredJSContextOptions;
-    if (Preferences::GetBool(gPrefsToWatch[PREF_strict])) {
-      newOptions |= JSOPTION_STRICT;
-    }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_werror])) {
-      newOptions |= JSOPTION_WERROR;
-    }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_relimit])) {
-      newOptions |= JSOPTION_RELIMIT;
-    }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_methodjit])) {
-      newOptions |= JSOPTION_METHODJIT;
-    }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_methodjit_always])) {
-      newOptions |= JSOPTION_METHODJIT_ALWAYS;
-    }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_typeinference])) {
-      newOptions |= JSOPTION_TYPE_INFERENCE;
-    }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_allow_xml])) {
-      newOptions |= JSOPTION_ALLOW_XML;
-    }
+  else {
+    prefName.AssignLiteral(PREF_JS_OPTIONS_PREFIX);
+    prefName.Append(aPref);
 
-    RuntimeService::SetDefaultJSContextOptions(newOptions);
-    rts->UpdateAllWorkerJSContextOptions();
+    if (PrefHelper::Exists(prefName.get())) {
+      result = PrefHelper::Get(prefName.get());
+    }
+    else {
+      result = aDefault;
+    }
   }
+
+  return result;
+}
+
+int
+LoadJSContextOptions(const char* aPrefName, void* /* aClosure */)
+{
+  AssertIsOnMainThread();
+
+  RuntimeService* rts = RuntimeService::GetService();
+  if (!rts && !gRuntimeServiceDuringInit) {
+    // May be shutting down, just bail.
+    return 0;
+  }
+
+  const nsDependentCString prefName(aPrefName);
+
+  // Several other pref branches will get included here so bail out if there is
+  // another callback that will handle this change.
+  if (StringBeginsWith(prefName,
+                       NS_LITERAL_CSTRING(PREF_JS_OPTIONS_PREFIX
+                                          PREF_MEM_OPTIONS_PREFIX)) ||
+      StringBeginsWith(prefName,
+                       NS_LITERAL_CSTRING(PREF_WORKERS_OPTIONS_PREFIX
+                                          PREF_MEM_OPTIONS_PREFIX)) ||
+      prefName.EqualsLiteral(PREF_JS_OPTIONS_PREFIX PREF_JIT_HARDENING) ||
+      prefName.EqualsLiteral(PREF_WORKERS_OPTIONS_PREFIX PREF_JIT_HARDENING)) {
+    return 0;
+  }
+
 #ifdef JS_GC_ZEAL
-  else if (!strcmp(aPrefName, gPrefsToWatch[PREF_gczeal])) {
-    int32_t gczeal = Preferences::GetInt(gPrefsToWatch[PREF_gczeal]);
-    RuntimeService::SetDefaultGCZeal(uint8_t(clamped(gczeal, 0, 3)));
-    rts->UpdateAllWorkerGCZeal();
+  if (prefName.EqualsLiteral(PREF_JS_OPTIONS_PREFIX PREF_GCZEAL) ||
+      prefName.EqualsLiteral(PREF_WORKERS_OPTIONS_PREFIX PREF_GCZEAL)) {
+    return 0;
   }
 #endif
+
+  // Common options.
+  uint32_t commonOptions = kRequiredJSContextOptions;
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict"))) {
+    commonOptions |= JSOPTION_EXTRA_WARNINGS;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("werror"))) {
+    commonOptions |= JSOPTION_WERROR;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("typeinference"))) {
+    commonOptions |= JSOPTION_TYPE_INFERENCE;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("asmjs"))) {
+    commonOptions |= JSOPTION_ASMJS;
+  }
+
+  // Content options.
+  uint32_t contentOptions = commonOptions;
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("pccounts.content"))) {
+    contentOptions |= JSOPTION_PCCOUNT;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("baselinejit.content"))) {
+    contentOptions |= JSOPTION_BASELINE;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("ion.content"))) {
+    contentOptions |= JSOPTION_ION;
+  }
+
+  // Chrome options.
+  uint32_t chromeOptions = commonOptions;
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("pccounts.chrome"))) {
+    chromeOptions |= JSOPTION_PCCOUNT;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("baselinejit.chrome"))) {
+    chromeOptions |= JSOPTION_BASELINE;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("ion.chrome"))) {
+    chromeOptions |= JSOPTION_ION;
+  }
+#ifdef DEBUG
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict.debug"))) {
+    chromeOptions |= JSOPTION_EXTRA_WARNINGS;
+  }
+#endif
+
+  RuntimeService::SetDefaultJSContextOptions(contentOptions, chromeOptions);
+
+  if (rts) {
+    rts->UpdateAllWorkerJSContextOptions();
+  }
+
+  return 0;
+}
+
+#ifdef JS_GC_ZEAL
+int
+LoadGCZealOptions(const char* /* aPrefName */, void* /* aClosure */)
+{
+  AssertIsOnMainThread();
+
+  RuntimeService* rts = RuntimeService::GetService();
+  if (!rts && !gRuntimeServiceDuringInit) {
+    // May be shutting down, just bail.
+    return 0;
+  }
+
+  int32_t gczeal = GetWorkerPref<int32_t>(NS_LITERAL_CSTRING(PREF_GCZEAL), -1);
+  if (gczeal < 0) {
+    gczeal = 0;
+  }
+
+  int32_t frequency =
+    GetWorkerPref<int32_t>(NS_LITERAL_CSTRING("gcZeal.frequency"), -1);
+  if (frequency < 0) {
+    frequency = JS_DEFAULT_ZEAL_FREQ;
+  }
+
+  RuntimeService::SetDefaultGCZeal(uint8_t(gczeal), uint32_t(frequency));
+
+  if (rts) {
+    rts->UpdateAllWorkerGCZeal();
+  }
+
+  return 0;
+}
+#endif
+
+void
+UpdateCommonJSGCMemoryOption(RuntimeService* aRuntimeService,
+                             const nsACString& aPrefName, JSGCParamKey aKey)
+{
+  AssertIsOnMainThread();
+  NS_ASSERTION(!aPrefName.IsEmpty(), "Empty pref name!");
+
+  int32_t prefValue = GetWorkerPref(aPrefName, -1);
+  uint32_t value =
+    (prefValue <= 0 || prefValue >= 10000) ? 0 : uint32_t(prefValue);
+
+  RuntimeService::SetDefaultJSGCSettings(aKey, value);
+
+  if (aRuntimeService) {
+    aRuntimeService->UpdateAllWorkerMemoryParameter(aKey, value);
+  }
+}
+
+void
+UpdatOtherJSGCMemoryOption(RuntimeService* aRuntimeService,
+                           JSGCParamKey aKey, uint32_t aValue)
+{
+  AssertIsOnMainThread();
+
+  RuntimeService::SetDefaultJSGCSettings(aKey, aValue);
+
+  if (aRuntimeService) {
+    aRuntimeService->UpdateAllWorkerMemoryParameter(aKey, aValue);
+  }
+}
+
+
+int
+LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
+{
+  AssertIsOnMainThread();
+
+  RuntimeService* rts = RuntimeService::GetService();
+
+  if (!rts && !gRuntimeServiceDuringInit) {
+    // May be shutting down, just bail.
+    return 0;
+  }
+
+  NS_NAMED_LITERAL_CSTRING(jsPrefix, PREF_JS_OPTIONS_PREFIX);
+  NS_NAMED_LITERAL_CSTRING(workersPrefix, PREF_WORKERS_OPTIONS_PREFIX);
+
+  const nsDependentCString fullPrefName(aPrefName);
+
+  // Pull out the string that actually distinguishes the parameter we need to
+  // change.
+  nsDependentCSubstring memPrefName;
+  if (StringBeginsWith(fullPrefName, jsPrefix)) {
+    memPrefName.Rebind(fullPrefName, jsPrefix.Length());
+  }
+  else if (StringBeginsWith(fullPrefName, workersPrefix)) {
+    memPrefName.Rebind(fullPrefName, workersPrefix.Length());
+  }
+  else {
+    NS_ERROR("Unknown pref name!");
+    return 0;
+  }
+
+#ifdef DEBUG
+  // During Init() we get called back with a branch string here, so there should
+  // be no just a "mem." pref here.
+  if (!rts) {
+    NS_ASSERTION(memPrefName.EqualsLiteral(PREF_MEM_OPTIONS_PREFIX), "Huh?!");
+  }
+#endif
+
+  // If we're running in Init() then do this for every pref we care about.
+  // Otherwise we just want to update the parameter that changed.
+  for (uint32_t index = rts ? JSSettings::kGCSettingsArraySize - 1 : 0;
+       index < JSSettings::kGCSettingsArraySize;
+       index++) {
+    LiteralRebindingCString matchName;
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "max");
+    if (memPrefName == matchName || (!rts && index == 0)) {
+      int32_t prefValue = GetWorkerPref(matchName, -1);
+      uint32_t value = (prefValue <= 0 || prefValue >= 0x1000) ?
+                       uint32_t(-1) :
+                       uint32_t(prefValue) * 1024 * 1024;
+      UpdatOtherJSGCMemoryOption(rts, JSGC_MAX_BYTES, value);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "high_water_mark");
+    if (memPrefName == matchName || (!rts && index == 1)) {
+      int32_t prefValue = GetWorkerPref(matchName, 128);
+      UpdatOtherJSGCMemoryOption(rts, JSGC_MAX_MALLOC_BYTES,
+                                 uint32_t(prefValue) * 1024 * 1024);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX 
+                            "gc_high_frequency_time_limit_ms");
+    if (memPrefName == matchName || (!rts && index == 2)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName,
+                                   JSGC_HIGH_FREQUENCY_TIME_LIMIT);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
+                            "gc_low_frequency_heap_growth");
+    if (memPrefName == matchName || (!rts && index == 3)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName,
+                                   JSGC_LOW_FREQUENCY_HEAP_GROWTH);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
+                            "gc_high_frequency_heap_growth_min");
+    if (memPrefName == matchName || (!rts && index == 4)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName,
+                                   JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
+                            "gc_high_frequency_heap_growth_max");
+    if (memPrefName == matchName || (!rts && index == 5)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName,
+                                   JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
+                            "gc_high_frequency_low_limit_mb");
+    if (memPrefName == matchName || (!rts && index == 6)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName,
+                                   JSGC_HIGH_FREQUENCY_LOW_LIMIT);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
+                            "gc_high_frequency_high_limit_mb");
+    if (memPrefName == matchName || (!rts && index == 7)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName,
+                                   JSGC_HIGH_FREQUENCY_HIGH_LIMIT);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "analysis_purge_mb");
+    if (memPrefName == matchName || (!rts && index == 8)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName, JSGC_ANALYSIS_PURGE_TRIGGER);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
+                            "gc_allocation_threshold_mb");
+    if (memPrefName == matchName || (!rts && index == 9)) {
+      UpdateCommonJSGCMemoryOption(rts, matchName, JSGC_ALLOCATION_THRESHOLD);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_incremental_slice_ms");
+    if (memPrefName == matchName || (!rts && index == 10)) {
+      int32_t prefValue = GetWorkerPref(matchName, -1);
+      uint32_t value =
+        (prefValue <= 0 || prefValue >= 100000) ? 0 : uint32_t(prefValue);
+      UpdatOtherJSGCMemoryOption(rts, JSGC_SLICE_TIME_BUDGET, value);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_dynamic_heap_growth");
+    if (memPrefName == matchName || (!rts && index == 11)) {
+      bool prefValue = GetWorkerPref(matchName, false);
+      UpdatOtherJSGCMemoryOption(rts, JSGC_DYNAMIC_HEAP_GROWTH,
+                                 prefValue ? 0 : 1);
+      continue;
+    }
+
+    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_dynamic_mark_slice");
+    if (memPrefName == matchName || (!rts && index == 12)) {
+      bool prefValue = GetWorkerPref(matchName, false);
+      UpdatOtherJSGCMemoryOption(rts, JSGC_DYNAMIC_MARK_SLICE,
+                                 prefValue ? 0 : 1);
+      continue;
+    }
+
+#ifdef DEBUG
+    nsAutoCString message("Workers don't support the 'mem.");
+    message.Append(memPrefName);
+    message.AppendLiteral("' preference!");
+    NS_WARNING(message.get());
+#endif
+  }
+
+  return 0;
+}
+
+int
+LoadJITHardeningOption(const char* /* aPrefName */, void* /* aClosure */)
+{
+  AssertIsOnMainThread();
+
+  RuntimeService* rts = RuntimeService::GetService();
+
+  if (!rts && !gRuntimeServiceDuringInit) {
+    // May be shutting down, just bail.
+    return 0;
+  }
+
+  bool value = GetWorkerPref(NS_LITERAL_CSTRING(PREF_JIT_HARDENING), false);
+
+  RuntimeService::SetDefaultJITHardening(value);
+
+  if (rts) {
+    rts->UpdateAllWorkerJITHardening(value);
+  }
+
   return 0;
 }
 
@@ -248,7 +595,162 @@ JSBool
 OperationCallback(JSContext* aCx)
 {
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+
+  // Now is a good time to turn on profiling if it's pending.
+  profiler_js_operation_callback();
+
   return worker->OperationCallback(aCx);
+}
+
+class LogViolationDetailsRunnable : public nsRunnable
+{
+  WorkerPrivate* mWorkerPrivate;
+  nsString mFileName;
+  uint32_t mLineNum;
+  uint32_t mSyncQueueKey;
+
+private:
+  class LogViolationDetailsResponseRunnable : public WorkerSyncRunnable
+  {
+    uint32_t mSyncQueueKey;
+
+  public:
+    LogViolationDetailsResponseRunnable(WorkerPrivate* aWorkerPrivate,
+                                        uint32_t aSyncQueueKey)
+    : WorkerSyncRunnable(aWorkerPrivate, aSyncQueueKey, false),
+      mSyncQueueKey(aSyncQueueKey)
+    {
+      NS_ASSERTION(aWorkerPrivate, "Don't hand me a null WorkerPrivate!");
+    }
+
+    bool
+    WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+    {
+      aWorkerPrivate->StopSyncLoop(mSyncQueueKey, true);
+      return true;
+    }
+
+    bool
+    PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+    {
+      AssertIsOnMainThread();
+      return true;
+    }
+
+    void
+    PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
+                 bool aDispatchResult)
+    {
+      AssertIsOnMainThread();
+    }
+  };
+
+public:
+  LogViolationDetailsRunnable(WorkerPrivate* aWorker,
+                              const nsString& aFileName,
+                              uint32_t aLineNum)
+  : mWorkerPrivate(aWorker),
+    mFileName(aFileName),
+    mLineNum(aLineNum),
+    mSyncQueueKey(0)
+  {
+    NS_ASSERTION(aWorker, "WorkerPrivate cannot be null");
+  }
+
+  bool
+  Dispatch(JSContext* aCx)
+  {
+    AutoSyncLoopHolder syncLoop(mWorkerPrivate);
+    mSyncQueueKey = syncLoop.SyncQueueKey();
+
+    if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
+      JS_ReportError(aCx, "Failed to dispatch to main thread!");
+      return false;
+    }
+
+    return syncLoop.RunAndForget(aCx);
+  }
+
+  NS_IMETHOD
+  Run()
+  {
+    AssertIsOnMainThread();
+
+    nsIContentSecurityPolicy* csp = mWorkerPrivate->GetCSP();
+    if (csp) {
+      NS_NAMED_LITERAL_STRING(scriptSample,
+         "Call to eval() or related function blocked by CSP.");
+      csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
+                               mFileName, scriptSample, mLineNum);
+    }
+
+    nsRefPtr<LogViolationDetailsResponseRunnable> response =
+        new LogViolationDetailsResponseRunnable(mWorkerPrivate, mSyncQueueKey);
+    if (!response->Dispatch(nullptr)) {
+      NS_WARNING("Failed to dispatch response!");
+    }
+
+    return NS_OK;
+  }
+};
+
+JSBool
+ContentSecurityPolicyAllows(JSContext* aCx)
+{
+  WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+  worker->AssertIsOnWorkerThread();
+
+  if (worker->GetReportCSPViolations()) {
+    nsString fileName;
+    uint32_t lineNum = 0;
+
+    JSScript* script;
+    const char* file;
+    if (JS_DescribeScriptedCaller(aCx, &script, &lineNum) &&
+        (file = JS_GetScriptFilename(aCx, script))) {
+      fileName.AssignASCII(file);
+    } else {
+      JS_ReportPendingException(aCx);
+    }
+
+    nsRefPtr<LogViolationDetailsRunnable> runnable =
+        new LogViolationDetailsRunnable(worker, fileName, lineNum);
+
+    if (!runnable->Dispatch(aCx)) {
+      JS_ReportPendingException(aCx);
+    }
+  }
+
+  return worker->IsEvalAllowed();
+}
+
+void
+CTypesActivityCallback(JSContext* aCx,
+                       js::CTypesActivityType aType)
+{
+  WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+  worker->AssertIsOnWorkerThread();
+
+  switch (aType) {
+    case js::CTYPES_CALL_BEGIN:
+      worker->BeginCTypesCall();
+      break;
+
+    case js::CTYPES_CALL_END:
+      worker->EndCTypesCall();
+      break;
+
+    case js::CTYPES_CALLBACK_BEGIN:
+      worker->BeginCTypesCallback();
+      break;
+
+    case js::CTYPES_CALLBACK_END:
+      worker->EndCTypesCallback();
+      break;
+
+    default:
+      MOZ_NOT_REACHED("Unknown type flag!");
+  }
 }
 
 JSContext*
@@ -259,17 +761,48 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate)
 
   // The number passed here doesn't matter, we're about to change it in the call
   // to JS_SetGCParameter.
-  JSRuntime* runtime = JS_NewRuntime(WORKER_DEFAULT_RUNTIME_HEAPSIZE);
+  JSRuntime* runtime =
+    JS_NewRuntime(WORKER_DEFAULT_RUNTIME_HEAPSIZE, JS_NO_HELPER_THREADS);
   if (!runtime) {
     NS_WARNING("Could not create new runtime!");
     return nullptr;
   }
 
+  JSSettings settings;
+  aWorkerPrivate->CopyJSSettings(settings);
+
+  NS_ASSERTION((settings.chrome.options & kRequiredJSContextOptions) ==
+               kRequiredJSContextOptions,
+               "Somehow we lost our required chrome options!");
+  NS_ASSERTION((settings.content.options & kRequiredJSContextOptions) ==
+               kRequiredJSContextOptions,
+               "Somehow we lost our required content options!");
+
+  JSSettings::JSGCSettingsArray& gcSettings = settings.gcSettings;
+
   // This is the real place where we set the max memory for the runtime.
-  JS_SetGCParameter(runtime, JSGC_MAX_BYTES,
-                    aWorkerPrivate->GetJSRuntimeHeapSize());
+  for (uint32_t index = 0; index < ArrayLength(gcSettings); index++) {
+    const JSSettings::JSGCSetting& setting = gcSettings[index];
+    if (setting.IsSet()) {
+      NS_ASSERTION(setting.value, "Can't handle 0 values!");
+      JS_SetGCParameter(runtime, setting.key, setting.value);
+    }
+  }
 
   JS_SetNativeStackQuota(runtime, WORKER_CONTEXT_NATIVE_STACK_LIMIT);
+
+  // Security policy:
+  static JSSecurityCallbacks securityCallbacks = {
+    NULL,
+    ContentSecurityPolicyAllows
+  };
+  JS_SetSecurityCallbacks(runtime, &securityCallbacks);
+
+  // DOM helpers:
+  static js::DOMCallbacks DOMCallbacks = {
+    InstanceClassHasProtoAtDepth
+  };
+  SetDOMCallbacks(runtime, &DOMCallbacks);
 
   JSContext* workerCx = JS_NewContext(runtime, 0);
   if (!workerCx) {
@@ -278,30 +811,26 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate)
     return nullptr;
   }
 
-  JS_SetContextPrivate(workerCx, aWorkerPrivate);
+  JS_SetRuntimePrivate(runtime, aWorkerPrivate);
 
   JS_SetErrorReporter(workerCx, ErrorReporter);
 
   JS_SetOperationCallback(workerCx, OperationCallback);
 
-  NS_ASSERTION((aWorkerPrivate->GetJSContextOptions() &
-                kRequiredJSContextOptions) == kRequiredJSContextOptions,
-               "Somehow we lost our required options!");
-  JS_SetOptions(workerCx, aWorkerPrivate->GetJSContextOptions());
+  js::SetCTypesActivityCallback(runtime, CTypesActivityCallback);
+
+  JS_SetOptions(workerCx,
+                aWorkerPrivate->IsChromeWorker() ? settings.chrome.options :
+                                                   settings.content.options);
+
+  JS_SetJitHardening(runtime, settings.jitHardening);
 
 #ifdef JS_GC_ZEAL
-  {
-    uint8_t zeal = aWorkerPrivate->GetGCZeal();
-    NS_ASSERTION(zeal <= 3, "Bad zeal value!");
-
-    uint32_t frequency = zeal <= 2 ? JS_DEFAULT_ZEAL_FREQ : 1;
-    JS_SetGCZeal(workerCx, zeal, frequency);
-  }
+  JS_SetGCZeal(workerCx, settings.gcZeal, settings.gcZealFrequency);
 #endif
 
-  if (aWorkerPrivate->IsChromeWorker()) {
-    JS_SetVersion(workerCx, JSVERSION_LATEST);
-  }
+  JS_SetDestroyZoneCallback(runtime, XPCStringConvert::FreeZoneCache);
+  JS_SetSweepZoneCallback(runtime, XPCStringConvert::ClearZoneCache);
 
   return workerCx;
 }
@@ -332,12 +861,19 @@ public:
       return NS_ERROR_FAILURE;
     }
 
+    JSRuntime* rt = JS_GetRuntime(cx);
+
+    char aLocal;
+    profiler_register_thread("WebWorker", &aLocal);
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    if (PseudoStack* stack = mozilla_get_pseudo_stack())
+      stack->sampleRuntime(rt);
+#endif
+
     {
       JSAutoRequest ar(cx);
       workerPrivate->DoRunLoop(cx);
     }
-
-    JSRuntime* rt = JS_GetRuntime(cx);
 
     // XXX Bug 666963 - CTypes can create another JSContext for use with
     // closures, and then it holds that context in a reserved slot on the CType
@@ -357,9 +893,14 @@ public:
       JS_DestroyContext(cx);
     }
 
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    if (PseudoStack* stack = mozilla_get_pseudo_stack())
+      stack->sampleRuntime(nullptr);
+#endif
     JS_DestroyRuntime(rt);
 
     workerPrivate->ScheduleDeletion(false);
+    profiler_unregister_thread();
     return NS_OK;
   }
 };
@@ -370,16 +911,10 @@ BEGIN_WORKERS_NAMESPACE
 
 // Entry point for the DOM.
 JSBool
-ResolveWorkerClasses(JSContext* aCx, JSHandleObject aObj, JSHandleId aId, unsigned aFlags,
-                     JSMutableHandleObject aObjp)
+ResolveWorkerClasses(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aId,
+                     unsigned aFlags, JS::MutableHandle<JSObject*> aObjp)
 {
   AssertIsOnMainThread();
-
-  // Don't care about assignments, bail now.
-  if (aFlags & JSRESOLVE_ASSIGNING) {
-    aObjp.set(nullptr);
-    return true;
-  }
 
   // Make sure our strings are interned.
   if (JSID_IS_VOID(gStringIDs[0])) {
@@ -400,16 +935,7 @@ ResolveWorkerClasses(JSContext* aCx, JSHandleObject aObj, JSHandleId aId, unsign
 
   for (uint32_t i = 0; i < ID_COUNT; i++) {
     if (gStringIDs[i] == aId) {
-      nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-      NS_ASSERTION(ssm, "This should never be null!");
-
-      bool enabled;
-      if (NS_FAILED(ssm->IsCapabilityEnabled("UniversalXPConnect", &enabled))) {
-        NS_WARNING("IsCapabilityEnabled failed!");
-        isChrome = false;
-      }
-
-      isChrome = !!enabled;
+      isChrome = nsContentUtils::IsCallerChrome();
 
       // Don't resolve if this is ChromeWorker and we're not chrome. Otherwise
       // always resolve.
@@ -425,7 +951,7 @@ ResolveWorkerClasses(JSContext* aCx, JSHandleObject aObj, JSHandleId aId, unsign
       return true;
     }
 
-    JSObject* eventTarget = EventTargetBinding_workers::GetProtoObject(aCx, aObj, aObj);
+    JSObject* eventTarget = EventTargetBinding_workers::GetProtoObject(aCx, aObj);
     if (!eventTarget) {
       return false;
     }
@@ -473,7 +999,7 @@ SuspendWorkersForWindow(JSContext* aCx, nsPIDOMWindow* aWindow)
 }
 
 void
-ResumeWorkersForWindow(JSContext* aCx, nsPIDOMWindow* aWindow)
+ResumeWorkersForWindow(nsIScriptContext* aCx, nsPIDOMWindow* aWindow)
 {
   AssertIsOnMainThread();
   RuntimeService* runtime = RuntimeService::GetService();
@@ -530,16 +1056,8 @@ WorkerCrossThreadDispatcher::PostTask(WorkerTask* aTask)
 
 END_WORKERS_NAMESPACE
 
-uint32_t RuntimeService::sDefaultJSContextOptions = kRequiredJSContextOptions;
-
-uint32_t RuntimeService::sDefaultJSRuntimeHeapSize =
-  WORKER_DEFAULT_RUNTIME_HEAPSIZE;
-
-int32_t RuntimeService::sCloseHandlerTimeoutSeconds = MAX_SCRIPT_RUN_TIME_SEC;
-
-#ifdef JS_GC_ZEAL
-uint8_t RuntimeService::sDefaultGCZeal = 0;
-#endif
+// This is only touched on the main thread. Initialized in Init() below.
+JSSettings RuntimeService::sDefaultJSSettings;
 
 RuntimeService::RuntimeService()
 : mMutex("RuntimeService::mMutex"), mObserved(false),
@@ -792,12 +1310,15 @@ RuntimeService::ScheduleWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
       JS_ReportError(aCx, "Could not create new thread!");
       return false;
     }
+  }
 
-    nsCOMPtr<nsISupportsPriority> priority = do_QueryInterface(thread);
-    if (!priority ||
-        NS_FAILED(priority->SetPriority(nsISupportsPriority::PRIORITY_LOW))) {
-      NS_WARNING("Could not lower the new thread's priority!");
-    }
+  int32_t priority = aWorkerPrivate->IsChromeWorker() ?
+                     nsISupportsPriority::PRIORITY_NORMAL :
+                     nsISupportsPriority::PRIORITY_LOW;
+
+  nsCOMPtr<nsISupportsPriority> threadPriority = do_QueryInterface(thread);
+  if (!threadPriority || NS_FAILED(threadPriority->SetPriority(priority))) {
+    NS_WARNING("Could not set the thread's priority!");
   }
 
 #ifdef DEBUG
@@ -879,6 +1400,23 @@ RuntimeService::Init()
 {
   AssertIsOnMainThread();
 
+  nsLayoutStatics::AddRef();
+
+  // Initialize JSSettings.
+  if (!sDefaultJSSettings.gcSettings[0].IsSet()) {
+    sDefaultJSSettings.chrome.options = kRequiredJSContextOptions;
+    sDefaultJSSettings.chrome.maxScriptRuntime = -1;
+    sDefaultJSSettings.content.options = kRequiredJSContextOptions;
+    sDefaultJSSettings.content.maxScriptRuntime = MAX_SCRIPT_RUN_TIME_SEC;
+#ifdef JS_GC_ZEAL
+    sDefaultJSSettings.gcZealFrequency = JS_DEFAULT_ZEAL_FREQ;
+    sDefaultJSSettings.gcZeal = 0;
+#endif
+    SetDefaultJSGCSettings(JSGC_MAX_BYTES, WORKER_DEFAULT_RUNTIME_HEAPSIZE);
+    SetDefaultJSGCSettings(JSGC_ALLOCATION_THRESHOLD,
+                           WORKER_DEFAULT_ALLOCATION_THRESHOLD);
+  }
+
   mIdleThreadTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
   NS_ENSURE_STATE(mIdleThreadTimer);
 
@@ -903,26 +1441,64 @@ RuntimeService::Init()
     NS_WARNING("Failed to register for memory pressure notifications!");
   }
 
-  for (uint32_t index = 0; index < ArrayLength(gPrefsToWatch); index++) {
-    if (NS_FAILED(Preferences::RegisterCallback(PrefCallback,
-                                                gPrefsToWatch[index], this))) {
-      NS_WARNING("Failed to register pref callback?!");
-    }
-    PrefCallback(gPrefsToWatch[index], this);
+  NS_ASSERTION(!gRuntimeServiceDuringInit, "This should be null!");
+  gRuntimeServiceDuringInit = this;
+
+  if (NS_FAILED(Preferences::RegisterCallback(
+                                 LoadJSGCMemoryOptions,
+                                 PREF_JS_OPTIONS_PREFIX PREF_MEM_OPTIONS_PREFIX,
+                                 nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                            LoadJSGCMemoryOptions,
+                            PREF_WORKERS_OPTIONS_PREFIX PREF_MEM_OPTIONS_PREFIX,
+                            nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallback(
+                                      LoadJITHardeningOption,
+                                      PREF_JS_OPTIONS_PREFIX PREF_JIT_HARDENING,
+                                      nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                 LoadJITHardeningOption,
+                                 PREF_WORKERS_OPTIONS_PREFIX PREF_JIT_HARDENING,
+                                 nullptr)) ||
+#ifdef JS_GC_ZEAL
+      NS_FAILED(Preferences::RegisterCallback(
+                                             LoadGCZealOptions,
+                                             PREF_JS_OPTIONS_PREFIX PREF_GCZEAL,
+                                             nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                        LoadGCZealOptions,
+                                        PREF_WORKERS_OPTIONS_PREFIX PREF_GCZEAL,
+                                        nullptr)) ||
+#endif
+      NS_FAILED(Preferences::RegisterCallback(LoadJSContextOptions,
+                                              PREF_JS_OPTIONS_PREFIX,
+                                              nullptr)) ||
+      NS_FAILED(Preferences::RegisterCallbackAndCall(
+                                                    LoadJSContextOptions,
+                                                    PREF_WORKERS_OPTIONS_PREFIX,
+                                                    nullptr))) {
+    NS_WARNING("Failed to register pref callbacks!");
   }
+
+  NS_ASSERTION(gRuntimeServiceDuringInit == this, "Should be 'this'!");
+  gRuntimeServiceDuringInit = nullptr;
 
   // We assume atomic 32bit reads/writes. If this assumption doesn't hold on
   // some wacky platform then the worst that could happen is that the close
   // handler will run for a slightly different amount of time.
-  if (NS_FAILED(Preferences::AddIntVarCache(&sCloseHandlerTimeoutSeconds,
-                                            PREF_MAX_SCRIPT_RUN_TIME,
-                                            MAX_SCRIPT_RUN_TIME_SEC))) {
-      NS_WARNING("Failed to register timeout cache?!");
+  if (NS_FAILED(Preferences::AddIntVarCache(
+                                   &sDefaultJSSettings.content.maxScriptRuntime,
+                                   PREF_MAX_SCRIPT_RUN_TIME_CONTENT,
+                                   MAX_SCRIPT_RUN_TIME_SEC)) ||
+      NS_FAILED(Preferences::AddIntVarCache(
+                                    &sDefaultJSSettings.chrome.maxScriptRuntime,
+                                    PREF_MAX_SCRIPT_RUN_TIME_CHROME, -1))) {
+    NS_WARNING("Failed to register timeout cache!");
   }
 
   int32_t maxPerDomain = Preferences::GetInt(PREF_WORKERS_MAX_PER_DOMAIN,
                                              MAX_WORKERS_PER_DOMAIN);
-  gMaxWorkersPerDomain = NS_MAX(0, maxPerDomain);
+  gMaxWorkersPerDomain = std::max(0, maxPerDomain);
 
   mDetectorName = Preferences::GetLocalizedCString("intl.charset.detector");
 
@@ -984,6 +1560,7 @@ RuntimeService::Cleanup()
         NS_ASSERTION(currentThread, "This should never be null!");
 
         AutoSafeJSContext cx;
+        JSAutoRequest ar(cx);
 
         for (uint32_t index = 0; index < workers.Length(); index++) {
           if (!workers[index]->Kill(cx)) {
@@ -1033,8 +1610,39 @@ RuntimeService::Cleanup()
   }
 
   if (mObserved) {
-    for (uint32_t index = 0; index < ArrayLength(gPrefsToWatch); index++) {
-      Preferences::UnregisterCallback(PrefCallback, gPrefsToWatch[index], this);
+    if (NS_FAILED(Preferences::UnregisterCallback(LoadJSContextOptions,
+                                                  PREF_JS_OPTIONS_PREFIX,
+                                                  nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(LoadJSContextOptions,
+                                                  PREF_WORKERS_OPTIONS_PREFIX,
+                                                  nullptr)) ||
+#ifdef JS_GC_ZEAL
+        NS_FAILED(Preferences::UnregisterCallback(
+                                             LoadGCZealOptions,
+                                             PREF_JS_OPTIONS_PREFIX PREF_GCZEAL,
+                                             nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                                        LoadGCZealOptions,
+                                        PREF_WORKERS_OPTIONS_PREFIX PREF_GCZEAL,
+                                        nullptr)) ||
+#endif
+        NS_FAILED(Preferences::UnregisterCallback(
+                                 LoadJSGCMemoryOptions,
+                                 PREF_JS_OPTIONS_PREFIX PREF_MEM_OPTIONS_PREFIX,
+                                 nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                            LoadJSGCMemoryOptions,
+                            PREF_WORKERS_OPTIONS_PREFIX PREF_MEM_OPTIONS_PREFIX,
+                            nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                                      LoadJITHardeningOption,
+                                      PREF_JS_OPTIONS_PREFIX PREF_JIT_HARDENING,
+                                      nullptr)) ||
+        NS_FAILED(Preferences::UnregisterCallback(
+                                 LoadJITHardeningOption,
+                                 PREF_WORKERS_OPTIONS_PREFIX PREF_JIT_HARDENING,
+                                 nullptr))) {
+      NS_WARNING("Failed to unregister pref callbacks!");
     }
 
     if (obs) {
@@ -1054,6 +1662,7 @@ RuntimeService::Cleanup()
   }
 
   CleanupOSFileConstants();
+  nsLayoutStatics::Release();
 }
 
 // static
@@ -1111,7 +1720,6 @@ RuntimeService::CancelWorkersForWindow(JSContext* aCx,
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    AutoSafeJSContext cx(aCx);
     for (uint32_t index = 0; index < workers.Length(); index++) {
       if (!workers[index]->Cancel(aCx)) {
         NS_WARNING("Failed to cancel worker!");
@@ -1130,7 +1738,6 @@ RuntimeService::SuspendWorkersForWindow(JSContext* aCx,
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    AutoSafeJSContext cx(aCx);
     for (uint32_t index = 0; index < workers.Length(); index++) {
       if (!workers[index]->Suspend(aCx)) {
         NS_WARNING("Failed to cancel worker!");
@@ -1140,7 +1747,7 @@ RuntimeService::SuspendWorkersForWindow(JSContext* aCx,
 }
 
 void
-RuntimeService::ResumeWorkersForWindow(JSContext* aCx,
+RuntimeService::ResumeWorkersForWindow(nsIScriptContext* aCx,
                                        nsPIDOMWindow* aWindow)
 {
   AssertIsOnMainThread();
@@ -1149,9 +1756,8 @@ RuntimeService::ResumeWorkersForWindow(JSContext* aCx,
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    AutoSafeJSContext cx(aCx);
     for (uint32_t index = 0; index < workers.Length(); index++) {
-      if (!workers[index]->Resume(aCx)) {
+      if (!workers[index]->SynchronizeAndResume(aCx)) {
         NS_WARNING("Failed to cancel worker!");
       }
     }
@@ -1207,22 +1813,32 @@ RuntimeService::NoteIdleThread(nsIThread* aThread)
 void
 RuntimeService::UpdateAllWorkerJSContextOptions()
 {
-  BROADCAST_ALL_WORKERS(UpdateJSContextOptions, GetDefaultJSContextOptions());
+  BROADCAST_ALL_WORKERS(UpdateJSContextOptions,
+                        sDefaultJSSettings.content.options,
+                        sDefaultJSSettings.chrome.options);
 }
 
 void
-RuntimeService::UpdateAllWorkerJSRuntimeHeapSize()
+RuntimeService::UpdateAllWorkerMemoryParameter(JSGCParamKey aKey,
+                                               uint32_t aValue)
 {
-  BROADCAST_ALL_WORKERS(UpdateJSRuntimeHeapSize, GetDefaultJSRuntimeHeapSize());
+  BROADCAST_ALL_WORKERS(UpdateJSWorkerMemoryParameter, aKey, aValue);
 }
 
 #ifdef JS_GC_ZEAL
 void
 RuntimeService::UpdateAllWorkerGCZeal()
 {
-  BROADCAST_ALL_WORKERS(UpdateGCZeal, GetDefaultGCZeal());
+  BROADCAST_ALL_WORKERS(UpdateGCZeal, sDefaultJSSettings.gcZeal,
+                        sDefaultJSSettings.gcZealFrequency);
 }
 #endif
+
+void
+RuntimeService::UpdateAllWorkerJITHardening(bool aJITHardening)
+{
+  BROADCAST_ALL_WORKERS(UpdateJITHardening, aJITHardening);
+}
 
 void
 RuntimeService::GarbageCollectAllWorkers(bool aShrinking)
@@ -1255,64 +1871,4 @@ RuntimeService::Observe(nsISupports* aSubject, const char* aTopic,
 
   NS_NOTREACHED("Unknown observer topic!");
   return NS_OK;
-}
-
-RuntimeService::AutoSafeJSContext::AutoSafeJSContext(JSContext* aCx)
-: mContext(aCx ? aCx : GetSafeContext())
-{
-  AssertIsOnMainThread();
-
-  if (mContext) {
-    nsIThreadJSContextStack* stack = nsContentUtils::ThreadJSContextStack();
-    NS_ASSERTION(stack, "This should never be null!");
-
-    if (NS_FAILED(stack->Push(mContext))) {
-      NS_ERROR("Couldn't push safe JSContext!");
-      mContext = nullptr;
-      return;
-    }
-
-    JS_BeginRequest(mContext);
-  }
-}
-
-RuntimeService::AutoSafeJSContext::~AutoSafeJSContext()
-{
-  AssertIsOnMainThread();
-
-  if (mContext) {
-    JS_ReportPendingException(mContext);
-
-    JS_EndRequest(mContext);
-
-    nsIThreadJSContextStack* stack = nsContentUtils::ThreadJSContextStack();
-    NS_ASSERTION(stack, "This should never be null!");
-
-    JSContext* cx;
-    if (NS_FAILED(stack->Pop(&cx))) {
-      NS_ERROR("Failed to pop safe context!");
-    }
-    if (cx != mContext) {
-      NS_ERROR("Mismatched context!");
-    }
-  }
-}
-
-// static
-JSContext*
-RuntimeService::AutoSafeJSContext::GetSafeContext()
-{
-  AssertIsOnMainThread();
-
-  nsIThreadJSContextStack* stack = nsContentUtils::ThreadJSContextStack();
-  NS_ASSERTION(stack, "This should never be null!");
-
-  JSContext* cx = stack->GetSafeJSContext();
-  if (!cx) {
-    NS_ERROR("Couldn't get safe JSContext!");
-    return nullptr;
-  }
-
-  NS_ASSERTION(!JS_IsExceptionPending(cx), "Already has an exception?!");
-  return cx;
 }

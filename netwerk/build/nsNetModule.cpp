@@ -5,7 +5,7 @@
 
 #include "necko-config.h"
 
-#define ALLOW_LATE_NSHTTP_H_INCLUDE 1
+#define ALLOW_LATE_HTTPLOG_H_INCLUDE 1
 #include "base/basictypes.h"
 
 #include "nsCOMPtr.h"
@@ -34,6 +34,10 @@
 #include "nsDNSPrefetch.h"
 #include "nsAboutProtocolHandler.h"
 #include "nsXULAppAPI.h"
+#include "nsCategoryCache.h"
+#include "nsIContentSniffer.h"
+#include "nsNetUtil.h"
+#include "mozilla/net/NeckoChild.h"
 
 #include "nsNetCID.h"
 
@@ -44,6 +48,10 @@
 #else
 #define BUILD_BINHEX_DECODER 1
 #endif
+
+typedef nsCategoryCache<nsIContentSniffer> ContentSnifferCache;
+NS_HIDDEN_(ContentSnifferCache*) gNetSniffers = nullptr;
+NS_HIDDEN_(ContentSnifferCache*) gDataSniffers = nullptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -67,6 +75,9 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsSocketTransportService, Init)
 #include "nsServerSocket.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsServerSocket)
 
+#include "nsUDPServerSocket.h"
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsUDPServerSocket)
+
 #include "nsUDPSocketProvider.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsUDPSocketProvider)
 
@@ -82,6 +93,14 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsInputStreamChannel, Init)
 #include "nsDownloader.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDownloader)
 
+#include "BackgroundFileSaver.h"
+namespace mozilla {
+namespace net {
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(BackgroundFileSaverOutputStream, Init)
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(BackgroundFileSaverStreamListener, Init)
+} // namespace net
+} // namespace mozilla
+
 #include "nsSyncStreamListener.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsSyncStreamListener, Init)
 
@@ -90,6 +109,9 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsSafeFileOutputStream)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsFileStream)
 
 NS_GENERIC_AGGREGATED_CONSTRUCTOR_INIT(nsLoadGroup, Init)
+
+#include "ArrayBufferInputStream.h"
+NS_GENERIC_FACTORY_CONSTRUCTOR(ArrayBufferInputStream)
 
 #include "nsEffectiveTLDService.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsEffectiveTLDService, Init)
@@ -106,8 +128,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(RedirectChannelRegistrar)
 extern nsresult
 net_NewIncrementalDownload(nsISupports *, const nsIID &, void **);
 
-#define NS_INCREMENTALDOWNLOAD_CLASSNAME \
-    "nsIncrementalDownload"
 #define NS_INCREMENTALDOWNLOAD_CID \
 { /* a62af1ba-79b3-4896-8aaf-b148bfce4280 */         \
     0xa62af1ba,                                      \
@@ -225,6 +245,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsHttpBasicAuth)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHttpDigestAuth)
 #endif // !NECKO_PROTOCOL_http
 
+#include "mozilla/net/Dashboard.h"
+namespace mozilla {
+namespace net {
+  NS_GENERIC_FACTORY_CONSTRUCTOR(Dashboard)
+}
+}
+
 #ifdef NECKO_PROTOCOL_res
 // resource
 #include "nsResProtocolHandler.h"
@@ -235,10 +262,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsResURL)
 #ifdef NECKO_PROTOCOL_device
 #include "nsDeviceProtocolHandler.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsDeviceProtocolHandler)
-#ifdef MOZ_WIDGET_GONK
-#include "nsB2GProtocolHandler.h"
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsB2GProtocolHandler)
-#endif
 #endif
 
 #ifdef NECKO_PROTOCOL_viewsource
@@ -252,7 +275,7 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsViewSourceHandler)
 
 #ifdef NECKO_PROTOCOL_wyciwyg
 #include "nsWyciwygProtocolHandler.h"
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsWyciwygProtocolHandler)
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsWyciwygProtocolHandler, Init)
 #endif
 
 #ifdef NECKO_PROTOCOL_websocket
@@ -647,12 +670,18 @@ static void nsNetShutdown()
     // Release the Websocket Admission Manager
     mozilla::net::WebSocketChannel::Shutdown();
 #endif // NECKO_PROTOCOL_websocket
+
+    delete gNetSniffers;
+    gNetSniffers = nullptr;
+    delete gDataSniffers;
+    gDataSniffers = nullptr;
 }
 
 NS_DEFINE_NAMED_CID(NS_IOSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_STREAMTRANSPORTSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_SOCKETTRANSPORTSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_SERVERSOCKET_CID);
+NS_DEFINE_NAMED_CID(NS_UDPSERVERSOCKET_CID);
 NS_DEFINE_NAMED_CID(NS_SOCKETPROVIDERSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_DNSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_IDNSERVICE_CID);
@@ -665,6 +694,8 @@ NS_DEFINE_NAMED_CID(NS_INPUTSTREAMCHANNEL_CID);
 NS_DEFINE_NAMED_CID(NS_STREAMLOADER_CID);
 NS_DEFINE_NAMED_CID(NS_UNICHARSTREAMLOADER_CID);
 NS_DEFINE_NAMED_CID(NS_DOWNLOADER_CID);
+NS_DEFINE_NAMED_CID(NS_BACKGROUNDFILESAVEROUTPUTSTREAM_CID);
+NS_DEFINE_NAMED_CID(NS_BACKGROUNDFILESAVERSTREAMLISTENER_CID);
 NS_DEFINE_NAMED_CID(NS_SYNCSTREAMLISTENER_CID);
 NS_DEFINE_NAMED_CID(NS_REQUESTOBSERVERPROXY_CID);
 NS_DEFINE_NAMED_CID(NS_SIMPLESTREAMLISTENER_CID);
@@ -681,11 +712,13 @@ NS_DEFINE_NAMED_CID(NS_STDURLPARSER_CID);
 NS_DEFINE_NAMED_CID(NS_NOAUTHURLPARSER_CID);
 NS_DEFINE_NAMED_CID(NS_AUTHURLPARSER_CID);
 NS_DEFINE_NAMED_CID(NS_STANDARDURL_CID);
+NS_DEFINE_NAMED_CID(NS_ARRAYBUFFERINPUTSTREAM_CID);
 NS_DEFINE_NAMED_CID(NS_BUFFEREDINPUTSTREAM_CID);
 NS_DEFINE_NAMED_CID(NS_BUFFEREDOUTPUTSTREAM_CID);
 NS_DEFINE_NAMED_CID(NS_MIMEINPUTSTREAM_CID);
 NS_DEFINE_NAMED_CID(NS_PROTOCOLPROXYSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_STREAMCONVERTERSERVICE_CID);
+NS_DEFINE_NAMED_CID(NS_DASHBOARD_CID);
 #ifdef BUILD_APPLEFILE_DECODER
 NS_DEFINE_NAMED_CID(NS_APPLEFILEDECODER_CID);
 #endif
@@ -755,9 +788,6 @@ NS_DEFINE_NAMED_CID(NS_DATAPROTOCOLHANDLER_CID);
 #endif
 #ifdef NECKO_PROTOCOL_device
 NS_DEFINE_NAMED_CID(NS_DEVICEPROTOCOLHANDLER_CID);
-#ifdef MOZ_WIDGET_GONK
-NS_DEFINE_NAMED_CID(NS_B2GPROTOCOLHANDLER_CID);
-#endif
 #endif
 #ifdef NECKO_PROTOCOL_viewsource
 NS_DEFINE_NAMED_CID(NS_VIEWSOURCEHANDLER_CID);
@@ -788,6 +818,7 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_STREAMTRANSPORTSERVICE_CID, false, NULL, nsStreamTransportServiceConstructor },
     { &kNS_SOCKETTRANSPORTSERVICE_CID, false, NULL, nsSocketTransportServiceConstructor },
     { &kNS_SERVERSOCKET_CID, false, NULL, nsServerSocketConstructor },
+    { &kNS_UDPSERVERSOCKET_CID, false, NULL, nsUDPServerSocketConstructor },
     { &kNS_SOCKETPROVIDERSERVICE_CID, false, NULL, nsSocketProviderService::Create },
     { &kNS_DNSSERVICE_CID, false, NULL, nsDNSServiceConstructor },
     { &kNS_IDNSERVICE_CID, false, NULL, nsIDNServiceConstructor },
@@ -800,6 +831,10 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_STREAMLOADER_CID, false, NULL, nsStreamLoader::Create },
     { &kNS_UNICHARSTREAMLOADER_CID, false, NULL, nsUnicharStreamLoader::Create },
     { &kNS_DOWNLOADER_CID, false, NULL, nsDownloaderConstructor },
+    { &kNS_BACKGROUNDFILESAVEROUTPUTSTREAM_CID, false, NULL,
+      mozilla::net::BackgroundFileSaverOutputStreamConstructor },
+    { &kNS_BACKGROUNDFILESAVERSTREAMLISTENER_CID, false, NULL,
+      mozilla::net::BackgroundFileSaverStreamListenerConstructor },
     { &kNS_SYNCSTREAMLISTENER_CID, false, NULL, nsSyncStreamListenerConstructor },
     { &kNS_REQUESTOBSERVERPROXY_CID, false, NULL, nsRequestObserverProxyConstructor },
     { &kNS_SIMPLESTREAMLISTENER_CID, false, NULL, nsSimpleStreamListenerConstructor },
@@ -816,11 +851,13 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_NOAUTHURLPARSER_CID, false, NULL, nsNoAuthURLParserConstructor },
     { &kNS_AUTHURLPARSER_CID, false, NULL, nsAuthURLParserConstructor },
     { &kNS_STANDARDURL_CID, false, NULL, nsStandardURLConstructor },
+    { &kNS_ARRAYBUFFERINPUTSTREAM_CID, false, NULL, ArrayBufferInputStreamConstructor },
     { &kNS_BUFFEREDINPUTSTREAM_CID, false, NULL, nsBufferedInputStream::Create },
     { &kNS_BUFFEREDOUTPUTSTREAM_CID, false, NULL, nsBufferedOutputStream::Create },
     { &kNS_MIMEINPUTSTREAM_CID, false, NULL, nsMIMEInputStreamConstructor },
     { &kNS_PROTOCOLPROXYSERVICE_CID, true, NULL, nsProtocolProxyServiceConstructor },
     { &kNS_STREAMCONVERTERSERVICE_CID, false, NULL, CreateNewStreamConvServiceFactory },
+    { &kNS_DASHBOARD_CID, false, NULL, mozilla::net::DashboardConstructor },
 #ifdef BUILD_APPLEFILE_DECODER
     { &kNS_APPLEFILEDECODER_CID, false, NULL, nsAppleFileDecoderConstructor },
 #endif
@@ -890,9 +927,6 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
 #endif
 #ifdef NECKO_PROTOCOL_device
     { &kNS_DEVICEPROTOCOLHANDLER_CID, false, NULL, nsDeviceProtocolHandlerConstructor},
-#ifdef MOZ_WIDGET_GONK
-    { &kNS_B2GPROTOCOLHANDLER_CID, false, NULL, nsB2GProtocolHandlerConstructor},
-#endif
 #endif
 #ifdef NECKO_PROTOCOL_viewsource
     { &kNS_VIEWSOURCEHANDLER_CID, false, NULL, nsViewSourceHandlerConstructor },
@@ -928,6 +962,7 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
     { NS_STREAMTRANSPORTSERVICE_CONTRACTID, &kNS_STREAMTRANSPORTSERVICE_CID },
     { NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &kNS_SOCKETTRANSPORTSERVICE_CID },
     { NS_SERVERSOCKET_CONTRACTID, &kNS_SERVERSOCKET_CID },
+    { NS_UDPSERVERSOCKET_CONTRACTID, &kNS_UDPSERVERSOCKET_CID },
     { NS_SOCKETPROVIDERSERVICE_CONTRACTID, &kNS_SOCKETPROVIDERSERVICE_CID },
     { NS_DNSSERVICE_CONTRACTID, &kNS_DNSSERVICE_CID },
     { NS_IDNSERVICE_CONTRACTID, &kNS_IDNSERVICE_CID },
@@ -939,6 +974,8 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
     { NS_STREAMLOADER_CONTRACTID, &kNS_STREAMLOADER_CID },
     { NS_UNICHARSTREAMLOADER_CONTRACTID, &kNS_UNICHARSTREAMLOADER_CID },
     { NS_DOWNLOADER_CONTRACTID, &kNS_DOWNLOADER_CID },
+    { NS_BACKGROUNDFILESAVEROUTPUTSTREAM_CONTRACTID, &kNS_BACKGROUNDFILESAVEROUTPUTSTREAM_CID },
+    { NS_BACKGROUNDFILESAVERSTREAMLISTENER_CONTRACTID, &kNS_BACKGROUNDFILESAVERSTREAMLISTENER_CID },
     { NS_SYNCSTREAMLISTENER_CONTRACTID, &kNS_SYNCSTREAMLISTENER_CID },
     { NS_REQUESTOBSERVERPROXY_CONTRACTID, &kNS_REQUESTOBSERVERPROXY_CID },
     { NS_SIMPLESTREAMLISTENER_CONTRACTID, &kNS_SIMPLESTREAMLISTENER_CID },
@@ -955,11 +992,13 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
     { NS_NOAUTHURLPARSER_CONTRACTID, &kNS_NOAUTHURLPARSER_CID },
     { NS_AUTHURLPARSER_CONTRACTID, &kNS_AUTHURLPARSER_CID },
     { NS_STANDARDURL_CONTRACTID, &kNS_STANDARDURL_CID },
+    { NS_ARRAYBUFFERINPUTSTREAM_CONTRACTID, &kNS_ARRAYBUFFERINPUTSTREAM_CID },
     { NS_BUFFEREDINPUTSTREAM_CONTRACTID, &kNS_BUFFEREDINPUTSTREAM_CID },
     { NS_BUFFEREDOUTPUTSTREAM_CONTRACTID, &kNS_BUFFEREDOUTPUTSTREAM_CID },
     { NS_MIMEINPUTSTREAM_CONTRACTID, &kNS_MIMEINPUTSTREAM_CID },
     { NS_PROTOCOLPROXYSERVICE_CONTRACTID, &kNS_PROTOCOLPROXYSERVICE_CID },
     { NS_STREAMCONVERTERSERVICE_CONTRACTID, &kNS_STREAMCONVERTERSERVICE_CID },
+    { NS_DASHBOARD_CONTRACTID, &kNS_DASHBOARD_CID },
 #ifdef BUILD_APPLEFILE_DECODER
     { NS_IAPPLEFILEDECODER_CONTRACTID, &kNS_APPLEFILEDECODER_CID },
 #endif
@@ -1034,9 +1073,6 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
 #endif
 #ifdef NECKO_PROTOCOL_device
     { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "moz-device", &kNS_DEVICEPROTOCOLHANDLER_CID },
-#ifdef MOZ_WIDGET_GONK
-    { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "b2g-camera", &kNS_B2GPROTOCOLHANDLER_CID },
-#endif
 #endif
 #ifdef NECKO_PROTOCOL_viewsource
     { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "view-source", &kNS_VIEWSOURCEHANDLER_CID },

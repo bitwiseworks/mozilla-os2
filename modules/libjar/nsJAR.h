@@ -9,7 +9,6 @@
 
 #include "nscore.h"
 #include "pratom.h"
-#include "prmem.h"
 #include "prio.h"
 #include "plstr.h"
 #include "prlog.h"
@@ -25,7 +24,7 @@
 #include "nsHashtable.h"
 #include "nsIZipReader.h"
 #include "nsZipArchive.h"
-#include "nsIPrincipal.h"
+#include "nsICertificatePrincipal.h"
 #include "nsISignatureVerifier.h"
 #include "nsIObserverService.h"
 #include "nsWeakReference.h"
@@ -101,7 +100,7 @@ class nsJAR : public nsIZipReader
     nsRefPtr<nsZipArchive>   mZip;            // The underlying zip archive
     nsObjectHashtable        mManifestData;   // Stores metadata for each entry
     bool                     mParsedManifest; // True if manifest has been parsed
-    nsCOMPtr<nsIPrincipal>   mPrincipal;      // The entity which signed this file
+    nsCOMPtr<nsICertificatePrincipal> mPrincipal; // The entity which signed this file
     int16_t                  mGlobalStatus;   // Global signature verification status
     PRIntervalTime           mReleaseTime;    // used by nsZipReaderCache for flushing entries
     nsZipReaderCache*        mCache;          // if cached, this points to the cache it's contained in

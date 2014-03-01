@@ -126,7 +126,10 @@ void Memory::CiteMemoryIn(test_assembler::Section *section) const {
 Context::Context(const Dump &dump, const MDRawContextX86 &context)
   : Section(dump) {
   // The caller should have properly set the CPU type flag.
-  assert(context.context_flags & MD_CONTEXT_X86);
+  // The high 24 bits identify the CPU.  Note that context records with no CPU
+  // type information can be valid (e.g. produced by ::RtlCaptureContext).
+  assert(((context.context_flags & MD_CONTEXT_CPU_MASK) == 0) ||
+         (context.context_flags & MD_CONTEXT_X86));
   // It doesn't make sense to store x86 registers in big-endian form.
   assert(dump.endianness() == kLittleEndian);
   D32(context.context_flags);
@@ -170,10 +173,29 @@ Context::Context(const Dump &dump, const MDRawContextX86 &context)
   assert(Size() == sizeof(MDRawContextX86));
 }
 
+Context::Context(const Dump &dump, const MDRawContextARM &context)
+  : Section(dump) {
+  // The caller should have properly set the CPU type flag.
+  assert((context.context_flags & MD_CONTEXT_ARM) ||
+         (context.context_flags & MD_CONTEXT_ARM_OLD));
+  // It doesn't make sense to store ARM registers in big-endian form.
+  assert(dump.endianness() == kLittleEndian);
+  D32(context.context_flags);
+  for (int i = 0; i < MD_CONTEXT_ARM_GPR_COUNT; ++i)
+    D32(context.iregs[i]);
+  D32(context.cpsr);
+  D64(context.float_save.fpscr);
+  for (int i = 0; i < MD_FLOATINGSAVEAREA_ARM_FPR_COUNT; ++i)
+    D64(context.float_save.regs[i]);
+  for (int i = 0; i < MD_FLOATINGSAVEAREA_ARM_FPEXTRA_COUNT; ++i)
+    D32(context.float_save.extra[i]);
+  assert(Size() == sizeof(MDRawContextARM));
+}
+
 Thread::Thread(const Dump &dump,
-               u_int32_t thread_id, const Memory &stack, const Context &context,
-               u_int32_t suspend_count, u_int32_t priority_class,
-               u_int32_t priority, u_int64_t teb) : Section(dump) {
+               uint32_t thread_id, const Memory &stack, const Context &context,
+               uint32_t suspend_count, uint32_t priority_class,
+               uint32_t priority, uint64_t teb) : Section(dump) {
   D32(thread_id);
   D32(suspend_count);
   D32(priority_class);
@@ -185,11 +207,11 @@ Thread::Thread(const Dump &dump,
 }
 
 Module::Module(const Dump &dump,
-               u_int64_t base_of_image,
-               u_int32_t size_of_image,
+               uint64_t base_of_image,
+               uint32_t size_of_image,
                const String &name,
-               u_int32_t time_date_stamp,
-               u_int32_t checksum,
+               uint32_t time_date_stamp,
+               uint32_t checksum,
                const MDVSFixedFileInfo &version_info,
                const Section *cv_record,
                const Section *misc_record) : Section(dump) {
@@ -231,12 +253,33 @@ const MDVSFixedFileInfo Module::stock_version_info = {
   MD_VSFIXEDFILEINFO_FILE_SUBTYPE_UNKNOWN, // file_subtype
   0,                                    // file_date_hi
   0                                     // file_date_lo
-};  
+};
 
-Dump::Dump(u_int64_t flags,
+Exception::Exception(const Dump &dump,
+                     const Context &context,
+                     uint32_t thread_id,
+                     uint32_t exception_code,
+                     uint32_t exception_flags,
+                     uint64_t exception_address)
+  : Stream(dump, MD_EXCEPTION_STREAM) {
+  D32(thread_id);
+  D32(0);  // __align
+  D32(exception_code);
+  D32(exception_flags);
+  D64(0);  // exception_record
+  D64(exception_address);
+  D32(0);  // number_parameters
+  D32(0);  // __align
+  for (int i = 0; i < MD_EXCEPTION_MAXIMUM_PARAMETERS; ++i)
+    D64(0);  // exception_information
+  context.CiteLocationIn(this);
+  assert(Size() == sizeof(MDRawExceptionStream));
+}
+
+Dump::Dump(uint64_t flags,
            Endianness endianness,
-           u_int32_t version,
-           u_int32_t date_time_stamp)
+           uint32_t version,
+           uint32_t date_time_stamp)
     : test_assembler::Section(endianness),
       file_start_(0),
       stream_directory_(*this),

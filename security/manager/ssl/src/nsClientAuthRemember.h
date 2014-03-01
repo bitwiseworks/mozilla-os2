@@ -11,7 +11,6 @@
 #include "nsTHashtable.h"
 #include "nsIObserver.h"
 #include "nsIX509Cert.h"
-#include "nsAutoPtr.h"
 #include "nsNSSCertificate.h"
 #include "nsString.h"
 #include "nsWeakReference.h"
@@ -129,6 +128,7 @@ public:
                                  nsACString & aCertDBKey, bool *_retval);
 
   void ClearRememberedDecisions();
+  static void ClearAllRememberedDecisions();
 
 protected:
     mozilla::ReentrantMonitor monitor;

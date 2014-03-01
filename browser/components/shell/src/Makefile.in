@@ -10,28 +10,10 @@ VPATH   = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = shellservice
-
 FORCE_STATIC_LIB = 1
 USE_STATIC_LIBS = 1
 
-ifeq ($(OS_ARCH),WINNT)
-CPPSRCS = nsWindowsShellService.cpp
-else
-ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-CPPSRCS = nsMacShellService.cpp
-else
-ifeq ($(MOZ_WIDGET_TOOLKIT), gtk2)
-CPPSRCS = nsGNOMEShellService.cpp
-endif
-endif
-endif
-
-ifdef CPPSRCS
-LIBRARY_NAME = shellservice_s
-endif
-
-EXTRA_COMPONENTS = nsSetDefaultBrowser.js nsSetDefaultBrowser.manifest
+DISABLED_EXTRA_COMPONENTS = nsSetDefaultBrowser.js nsSetDefaultBrowser.manifest
 
 include $(topsrcdir)/config/rules.mk
 

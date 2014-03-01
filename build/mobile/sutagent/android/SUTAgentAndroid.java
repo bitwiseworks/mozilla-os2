@@ -38,6 +38,7 @@ import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiManager.WifiLock;
 import android.os.BatteryManager;
+import android.os.Build;
 import android.os.Build.VERSION;
 import android.os.Bundle;
 import android.os.Handler;
@@ -65,6 +66,7 @@ public class SUTAgentAndroid extends Activity
     public static String sPowerStatus = null;
     public static int    nChargeLevel = 0;
     public static int    nBatteryTemp = 0;
+    public static long   nCreateTimeMillis = System.currentTimeMillis();
 
     String lineSep = System.getProperty("line.separator");
     public PrintWriter dataOut = null;
@@ -74,6 +76,7 @@ public class SUTAgentAndroid extends Activity
     private static String RegSvrIPPort = "";
     private static String HardwareID = "";
     private static String Pool = "";
+    private static String Abi = "";
     private static String sRegString = "";
     private static boolean LogCommands = false;
 
@@ -109,6 +112,12 @@ public class SUTAgentAndroid extends Activity
 
         String today = "";
         String yesterday = "";
+
+        // test root can be null (if getTestRoot fails), handle that:
+        if (testroot == null) {
+            testroot = "";
+        }
+
         try {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss:SSS");
             Date dateObj = sdf.parse(datestamp);
@@ -153,6 +162,8 @@ public class SUTAgentAndroid extends Activity
 
         DoCommand dc = new DoCommand(getApplication());
 
+        dc.FixDataLocalPermissions();
+
         // Get configuration settings from "ini" file
         File dir = getFilesDir();
         File iniFile = new File(dir, "SUTAgent.ini");
@@ -166,7 +177,8 @@ public class SUTAgentAndroid extends Activity
         SUTAgentAndroid.RegSvrIPPort = dc.GetIniData("Registration Server", "PORT", sIniFile);
         SUTAgentAndroid.HardwareID = dc.GetIniData("Registration Server", "HARDWARE", sIniFile);
         SUTAgentAndroid.Pool = dc.GetIniData("Registration Server", "POOL", sIniFile);
-        logToFile(dc, "onCreate");
+        SUTAgentAndroid.Abi = android.os.Build.CPU_ABI;
+        log(dc, "onCreate");
 
         tv = (TextView) this.findViewById(R.id.Textview01);
 
@@ -264,10 +276,14 @@ public class SUTAgentAndroid extends Activity
                 }
             }
 
+        String hwid = getHWID(this);
+
         sLocalIPAddr = getLocalIpAddress();
         Toast.makeText(getApplication().getApplicationContext(), "SUTAgent [" + sLocalIPAddr + "] ...", Toast.LENGTH_LONG).show();
 
         String sConfig = "Unique ID: " + sUniqueID + lineSep;
+        sConfig += "HWID: " + hwid + lineSep;
+        sConfig += "ABI: " + Abi + lineSep;
         sConfig += "OS Info" + lineSep;
         sConfig += "\t" + dc.GetOSInfo() + lineSep;
         sConfig += "Screen Info" + lineSep;
@@ -293,6 +309,7 @@ public class SUTAgentAndroid extends Activity
         sRegString += "&MEMORY=" + dc.GetMemoryConfig();
         sRegString += "&HARDWARE=" + HardwareID;
         sRegString += "&POOL=" + Pool;
+        sRegString += "&ABI=" + Abi;
 
         String sTemp = Uri.encode(sRegString,"=&");
         sRegString = "register " + sTemp;
@@ -362,7 +379,7 @@ public class SUTAgentAndroid extends Activity
         super.onDestroy();
         if (isFinishing())
             {
-            logToFile(dc, "onDestroy - finishing");
+            log(dc, "onDestroy - finishing");
             Intent listenerSvc = new Intent(this, ASMozStub.class);
             listenerSvc.setAction("com.mozilla.SUTAgentAndroid.service.LISTENER_SERVICE");
             stopService(listenerSvc);
@@ -377,19 +394,17 @@ public class SUTAgentAndroid extends Activity
             }
         else
             {
-            logToFile(dc, "onDestroy - not finishing");
+            log(dc, "onDestroy - not finishing");
             }
         }
 
-    @Override
-    public void onLowMemory()
+    private void logMemory(String caller)
         {
-        System.gc();
         DoCommand dc = new DoCommand(getApplication());
         if (dc != null)
             {
-            logToFile(dc, "onLowMemory");
-            logToFile(dc, dc.GetMemoryInfo());
+            log(dc, caller);
+            log(dc, dc.GetMemoryInfo());
             String procInfo = dc.GetProcessInfo();
             if (procInfo != null)
                 {
@@ -398,11 +413,11 @@ public class SUTAgentAndroid extends Activity
                     {
                     if (line.contains("mozilla"))
                         {
-                        logToFile(dc, line);
+                        log(dc, line);
                         String words[] = line.split("\t");
                         if ((words != null) && (words.length > 1))
                             {
-                            logToFile(dc, dc.StatProcess(words[1]));
+                            log(dc, dc.StatProcess(words[1]));
                             }
                         }
                     }
@@ -410,8 +425,22 @@ public class SUTAgentAndroid extends Activity
             }
         else
             {
-            Log.e("SUTAgentAndroid", "onLowMemory: unable to log to file!");
+            Log.e("SUTAgentAndroid", "logMemory: unable to log to file!");
             }
+        }
+
+    @Override
+    public void onLowMemory()
+        {
+        System.gc();
+        logMemory("onLowMemory");
+        }
+
+    @Override
+    public void onTrimMemory(int level)
+        {
+        System.gc();
+        logMemory("onTrimMemory"+level);
         }
 
     private void monitorBatteryState()
@@ -738,22 +767,69 @@ public class SUTAgentAndroid extends Activity
             }
         };
 
-    public String getLocalIpAddress()
+    static String sHWID = null;
+    public static String getHWID(Context cx) {
+        if (sHWID != null)
+            return sHWID;
+
+        // If we're on SDK version > 8, use Build.SERIAL
+        if (android.os.Build.VERSION.SDK_INT > 8) {
+            sHWID = android.os.Build.SERIAL;
+        }
+
+        if (sHWID != null)
+            return sHWID;
+
+        // Otherwise, try from the telephony manager
+        TelephonyManager mTelephonyMgr = (TelephonyManager) cx.getSystemService(TELEPHONY_SERVICE);
+        if (mTelephonyMgr != null) {
+            sHWID = mTelephonyMgr.getDeviceId();
+        }
+
+        if (sHWID != null)
+            return sHWID;
+
+        // Otherwise, try WIFI_SERVICE and use the wifi manager
+        WifiManager wifiMan = (WifiManager) cx.getSystemService(Context.WIFI_SERVICE);
+        if (wifiMan != null) {
+            WifiInfo wifi = wifiMan.getConnectionInfo();
+            if (wifi != null) {
+                sHWID = "wifimac" + wifi.getMacAddress();
+            }
+        }
+
+        if (sHWID != null)
+            return sHWID;
+
+        sHWID = "0011223344556677";
+
+        return sHWID;
+    }
+
+    public static InetAddress getLocalInetAddress() throws SocketException
         {
-        try
+        for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements();)
             {
-            for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements();)
+            NetworkInterface intf = en.nextElement();
+            for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements();)
                 {
-                NetworkInterface intf = en.nextElement();
-                for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements();)
+                InetAddress inetAddress = enumIpAddr.nextElement();
+                if (!inetAddress.isLoopbackAddress() && InetAddressUtils.isIPv4Address(inetAddress.getHostAddress()))
                     {
-                    InetAddress inetAddress = enumIpAddr.nextElement();
-                    if (!inetAddress.isLoopbackAddress() && InetAddressUtils.isIPv4Address(inetAddress.getHostAddress()))
-                        {
-                        return inetAddress.getHostAddress().toString();
-                        }
+                        return inetAddress;
                     }
                 }
+            }
+
+        return null;
+        }
+
+    public String getLocalIpAddress()
+        {
+        try {
+            InetAddress inetAddress = getLocalInetAddress();
+            if (inetAddress != null)
+                return inetAddress.getHostAddress().toString();
             }
         catch (SocketException ex)
             {
@@ -762,8 +838,10 @@ public class SUTAgentAndroid extends Activity
         return null;
         }
 
-    public static void logToFile(DoCommand dc, String message)
+    public static void log(DoCommand dc, String message)
         {
+        Log.i("SUTAgentAndroid", message);
+
         if (SUTAgentAndroid.LogCommands == false)
             {
             return;
@@ -771,16 +849,15 @@ public class SUTAgentAndroid extends Activity
 
         if (message == null)
             {
-            Log.e("SUTAgentAndroid", "bad arguments in logToFile()!");
+            Log.e("SUTAgentAndroid", "bad arguments in log()!");
             return;
             }
-        Log.i("SUTAgentAndroid", message);
         String fileDateStr = "00";
         String testRoot = dc.GetTestRoot();
         String datestamp = dc.GetSystemTime();
         if (testRoot == null || datestamp == null)
             {
-            Log.e("SUTAgentAndroid", "Unable to get testRoot or datestamp in logToFile!");
+            Log.e("SUTAgentAndroid", "Unable to get testRoot or datestamp in log!");
             return;
             }
 

@@ -10,6 +10,7 @@
 #include "nsIDocumentLoaderFactory.h"
 #include "nsIPluginHost.h"
 #include "nsContentUtils.h"
+#include "imgLoader.h"
 
 NS_IMPL_ISUPPORTS1(nsWebNavigationInfo, nsIWebNavigationInfo)
 
@@ -24,9 +25,7 @@ nsWebNavigationInfo::Init()
   mCategoryManager = do_GetService(NS_CATEGORYMANAGER_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mImgLoader = do_GetService("@mozilla.org/image/loader;1", &rv);
-
-  return rv;
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -58,7 +57,7 @@ nsWebNavigationInfo::IsTypeSupported(const nsACString& aType,
   if (pluginHost) {
     // false will ensure that currently running plugins will not
     // be shut down
-    rv = pluginHost->ReloadPlugins(false);
+    rv = pluginHost->ReloadPlugins();
     if (NS_SUCCEEDED(rv)) {
       // OK, we reloaded plugins and there were new ones
       // (otherwise NS_ERROR_PLUGINS_PLUGINSNOTCHANGED would have
@@ -97,9 +96,10 @@ nsWebNavigationInfo::IsTypeSupportedInternal(const nsCString& aType,
     break;
 
   case nsContentUtils::TYPE_CONTENT:
-    bool isImage = false;
-    mImgLoader->SupportImageWithMimeType(aType.get(), &isImage);
-    if (isImage) {
+    // XXXbz we only need this because images register for the same
+    // contractid as documents, so we can't tell them apart based on
+    // contractid.
+    if (imgLoader::SupportImageWithMimeType(aType.get())) {
       *aIsSupported = nsIWebNavigationInfo::IMAGE;
     }
     else {

@@ -17,6 +17,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
+Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
 const ALARMSMANAGER_CONTRACTID = "@mozilla.org/alarmsManager;1";
 const ALARMSMANAGER_CID        = Components.ID("{fea1e884-9b05-11e1-9b64-87a7016c3860}");
@@ -115,7 +116,18 @@ AlarmsManager.prototype = {
         break;
 
       case "AlarmsManager:GetAll:Return:OK":
-        Services.DOMRequest.fireSuccess(request, json.alarms);
+        // We don't need to expose everything to the web content.
+        let alarms = [];
+        json.alarms.forEach(function trimAlarmInfo(aAlarm) {
+          let alarm = { "id":              aAlarm.id,
+                        "date":            aAlarm.date,
+                        "respectTimezone": aAlarm.ignoreTimezone ?
+                                             "ignoreTimezone" : "honorTimezone", 
+                        "data":            aAlarm.data };
+          alarms.push(alarm);
+        });
+        Services.DOMRequest.fireSuccess(request,
+                                        ObjectWrapper.wrap(alarms, this._window));
         break;
 
       case "AlarmsManager:Add:Return:KO":
@@ -141,15 +153,10 @@ AlarmsManager.prototype = {
     if (!Services.prefs.getBoolPref("dom.mozAlarms.enabled"))
       return null;
 
-    let principal = aWindow.document.nodePrincipal;
-    let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
-
-    let perm = Services.perms.testExactPermissionFromPrincipal(principal, "alarms");
-
     // Only pages with perm set can use the alarms.
-    this.hasPrivileges = perm == Ci.nsIPermissionManager.ALLOW_ACTION;
-
-    if (!this.hasPrivileges)
+    let principal = aWindow.document.nodePrincipal;
+    let perm = Services.perms.testExactPermissionFromPrincipal(principal, "alarms");
+    if (perm != Ci.nsIPermissionManager.ALLOW_ACTION)
       return null;
 
     this._cpmm = Cc["@mozilla.org/childprocessmessagemanager;1"].getService(Ci.nsISyncMessageSender);
@@ -163,6 +170,7 @@ AlarmsManager.prototype = {
                         .getService(Ci.nsIAppsService);
     this._pageURL = principal.URI.spec;
     this._manifestURL = appsService.getManifestURLByLocalId(principal.appId);
+    this._window = aWindow;
   },
 
   // Called from DOMRequestIpcHelper.
@@ -171,4 +179,4 @@ AlarmsManager.prototype = {
   },
 }
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([AlarmsManager])
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([AlarmsManager])

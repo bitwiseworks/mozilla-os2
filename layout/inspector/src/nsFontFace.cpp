@@ -2,19 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#define _IMPL_NS_LAYOUT
-
 #include "nsFontFace.h"
 #include "nsIDOMCSSFontFaceRule.h"
 #include "nsCSSRules.h"
 #include "gfxUserFontSet.h"
+#include "nsFontFaceLoader.h"
 #include "zlib.h"
 
 nsFontFace::nsFontFace(gfxFontEntry*      aFontEntry,
-                       uint8_t            aMatchType,
-                       nsCSSFontFaceRule* aRule)
+                       gfxFontGroup*      aFontGroup,
+                       uint8_t            aMatchType)
   : mFontEntry(aFontEntry),
-    mRule(aRule),
+    mFontGroup(aFontGroup),
     mMatchType(aMatchType)
 {
 }
@@ -83,7 +82,18 @@ nsFontFace::GetCSSFamilyName(nsAString & aCSSFamilyName)
 NS_IMETHODIMP
 nsFontFace::GetRule(nsIDOMCSSFontFaceRule **aRule)
 {
-  NS_IF_ADDREF(*aRule = mRule.get());
+  // check whether this font entry is associated with an @font-face rule
+  // in the relevant font group's user font set
+  nsCSSFontFaceRule* rule = nullptr;
+  if (mFontEntry->IsUserFont()) {
+    nsUserFontSet* fontSet =
+      static_cast<nsUserFontSet*>(mFontGroup->GetUserFontSet());
+    if (fontSet) {
+      rule = fontSet->FindRuleForEntry(mFontEntry);
+    }
+  }
+
+  NS_IF_ADDREF(*aRule = rule);
   return NS_OK;
 }
 
@@ -108,7 +118,7 @@ nsFontFace::GetURI(nsAString & aURI)
   if (mFontEntry->IsUserFont() && !mFontEntry->IsLocalUserFont()) {
     NS_ASSERTION(mFontEntry->mUserFontData, "missing userFontData");
     if (mFontEntry->mUserFontData->mURI) {
-      nsCAutoString spec;
+      nsAutoCString spec;
       mFontEntry->mUserFontData->mURI->GetSpec(spec);
       AppendUTF8toUTF16(spec, aURI);
     }
@@ -134,7 +144,7 @@ static void
 AppendToFormat(nsAString & aResult, const char* aFormat)
 {
   if (!aResult.IsEmpty()) {
-    aResult.AppendASCII(",");
+    aResult.Append(',');
   }
   aResult.AppendASCII(aFormat);
 }
@@ -177,7 +187,7 @@ nsFontFace::GetMetadata(nsAString & aMetadata)
     NS_ASSERTION(mFontEntry->mUserFontData, "missing userFontData");
     const gfxUserFontData* userFontData = mFontEntry->mUserFontData;
     if (userFontData->mMetadata.Length() && userFontData->mMetaOrigLen) {
-      nsCAutoString str;
+      nsAutoCString str;
       str.SetLength(userFontData->mMetaOrigLen);
       if (str.Length() == userFontData->mMetaOrigLen) {
         uLongf destLen = userFontData->mMetaOrigLen;

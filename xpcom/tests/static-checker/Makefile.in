@@ -7,26 +7,7 @@ topsrcdir = @top_srcdir@
 srcdir = @srcdir@
 VPATH = @srcdir@
 
-# We will do compilations that create dependency files.
-NEED_MDDEPDIR = 1
-
 include $(DEPTH)/config/autoconf.mk
-
-STACK_FAILURE_TESTCASES = \
-  TestStack.cpp \
-  TestStackTemplate.cpp \
-  StackNoConstructor.cpp \
-  StackVector.cpp \
-  StackConditional.cpp \
-  StackAggrInit.cpp \
-  StackCondBad.cpp \
-  StackFalsePositive.cpp \
-  $(NULL)
-
-STACK_PASS_TESTCASES = \
-  StackPlacementNewOK.cpp \
-  StackCond.cpp \
-  $(NULL)
 
 OUTPARAMS_WARNING_TESTCASES = \
   e1.cpp \
@@ -118,14 +99,12 @@ STATIC_FAILURE_TESTCASES = \
 
 STATIC_WARNING_TESTCASES = \
   $(OUTPARAMS_WARNING_TESTCASES) \
-  $(STACK_FAILURE_TESTCASES) \
   $(STATIC_INIT_WARNING_TESTCASES) \
   $(NULL)
 
 STATIC_PASS_TESTCASES = \
   $(OUTPARAMS_NS_FAILED_TESTCASES) \
   $(OUTPARAMS_PASS_TESTCASES) \
-  $(STACK_PASS_TESTCASES) \
   $(FLOW_PASS_TESTCASES) \
   $(MUST_OVERRIDE_PASS_TESTCASES) \
   $(OVERRIDE_PASS_TESTCASES) \
@@ -142,7 +121,7 @@ check:: \
   $(STATIC_WARNING_TESTCASES:.cpp=.s-warn) \
   $(STATIC_PASS_TESTCASES:.cpp=.s-pass)
 
-%.s-fail: %.cpp $(GLOBAL_DEPS) $(DEHYDRA_SCRIPTS)
+%.s-fail: %.cpp $(GLOBAL_DEPS) $(DEHYDRA_SCRIPTS) $(call mkdir_deps,$(MDDEPDIR))
 	@printf "Compiling $(<F) to check that the static-analysis script is checking properly..."
 	@if $(CCC) $(OUTOPTION)/dev/null -S $(COMPILE_CXXFLAGS) $(_VPATH_SRCS) >$(*F).errlog 2>&1; then \
 	  printf "fail:\nerror: compilation of $(<F) succeeded. It shouldn't have!\n"; \
@@ -151,7 +130,7 @@ check:: \
 	  printf "ok.\n"; \
 	fi
 
-%.s-warn: %.cpp $(GLOBAL_DEPS) $(DEHYDRA_SCRIPTS)
+%.s-warn: %.cpp $(GLOBAL_DEPS) $(DEHYDRA_SCRIPTS) $(call mkdir_deps,$(MDDEPDIR))
 	@printf "Compiling $(<F) to check that the static-analysis script is checking properly..."
 	@if $(CCC) -Werror $(OUTOPTION)/dev/null -S $(COMPILE_CXXFLAGS) $(_VPATH_SRCS) >$(*F).errlog 2>&1; then \
 	  printf "fail:\nerror: compilation of $(<F) succeeded with -Werror. It shouldn't have!\n"; \
@@ -164,7 +143,7 @@ check:: \
 	  exit 1; \
 	fi
 
-%.s-pass: %.cpp $(GLOBAL_DEPS) $(DEHYDRA_SCRIPTS)
+%.s-pass: %.cpp $(GLOBAL_DEPS) $(DEHYDRA_SCRIPTS) $(call mkdir_deps,$(MDDEPDIR))
 	@printf "Compiling $(<F) to check that the static-analysis script is checking properly..."
 	@if $(CCC) -Werror $(OUTOPTION)/dev/null -S $(COMPILE_CXXFLAGS) $(_VPATH_SRCS) >$(*F).errlog 2>&1; then \
 	  printf "ok.\n"; \

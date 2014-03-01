@@ -7,37 +7,12 @@ DEPTH		= @DEPTH@
 topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
-relativesrcdir  = accessible
-
-DIRS	= \
-  actions \
-  attributes \
-  bounds \
-  editabletext \
-  elm \
-  events \
-  focus \
-  hittest \
-  hyperlink \
-  hypertext \
-  name \
-  pivot \
-  relations \
-  role \
-  selectable \
-  states \
-  table \
-  text \
-  textcaret \
-  textselection \
-  tree \
-  treeupdate \
-  value \
-  $(null)
+relativesrcdir	= @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_A11Y_FILES =\
+		dumbfile.xpi \
 		formimage.png \
 		letters.gif \
 		moz.png \

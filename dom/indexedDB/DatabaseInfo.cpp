@@ -69,7 +69,7 @@ ObjectStoreInfo::ObjectStoreInfo(ObjectStoreInfo& aOther)
 #ifdef NS_BUILD_REFCNT_LOGGING
 
 IndexInfo::IndexInfo()
-: id(LL_MININT),
+: id(INT64_MIN),
   keyPath(0),
   unique(false),
   multiEntry(false)
@@ -178,31 +178,6 @@ DatabaseInfo::Remove(nsIAtom* aId)
       delete gDatabaseHash;
       gDatabaseHash = nullptr;
     }
-  }
-}
-
-PLDHashOperator
-EnumerateDatabasesRemoveOrigin(nsISupports* aId,
-                               DatabaseInfo*& aDatabaseInfo,
-                               void* aUserArg)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  const nsACString* origin = static_cast<const nsACString*>(aUserArg);
-  return aDatabaseInfo->origin.Equals(*origin) ?
-    PL_DHASH_REMOVE :
-    PL_DHASH_NEXT;
-}
-
-// static
-void
-DatabaseInfo::RemoveAllForOrigin(const nsACString& aOrigin)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  if (gDatabaseHash) {
-    gDatabaseHash->Enumerate(EnumerateDatabasesRemoveOrigin,
-                             const_cast<nsACString*>(&aOrigin));
   }
 }
 

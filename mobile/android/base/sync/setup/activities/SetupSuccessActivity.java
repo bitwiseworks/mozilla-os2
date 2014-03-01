@@ -5,24 +5,20 @@
 package org.mozilla.gecko.sync.setup.activities;
 
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.sync.GlobalConstants;
-import org.mozilla.gecko.sync.Logger;
+import org.mozilla.gecko.background.common.GlobalConstants;
 import org.mozilla.gecko.sync.setup.Constants;
 import org.mozilla.gecko.sync.setup.SyncAccounts;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 
-public class SetupSuccessActivity extends Activity {
-  private final static String LOG_TAG = "SetupSuccessActivity";
+public class SetupSuccessActivity extends SyncActivity {
   private TextView setupSubtitle;
 
   @Override
   public void onCreate(Bundle savedInstanceState) {
-    setTheme(R.style.SyncTheme);
     super.onCreate(savedInstanceState);
     Bundle extras = this.getIntent().getExtras();
     setContentView(R.layout.sync_setup_success);
@@ -37,7 +33,6 @@ public class SetupSuccessActivity extends Activity {
 
   @Override
   public void onDestroy() {
-    Logger.debug(LOG_TAG, "onDestroy() called.");
     super.onDestroy();
   }
 

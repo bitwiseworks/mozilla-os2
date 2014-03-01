@@ -107,16 +107,13 @@ VoidStats gVoidStats;
 #endif
 
 void
-nsVoidArray::SetArray(Impl *newImpl, int32_t aSize, int32_t aCount,
-                      bool aOwner, bool aHasAuto)
+nsVoidArray::SetArray(Impl *newImpl, int32_t aSize, int32_t aCount)
 {
   // old mImpl has been realloced and so we don't free/delete it
   NS_PRECONDITION(newImpl, "can't set size");
   mImpl = newImpl;
   mImpl->mCount = aCount;
-  mImpl->mBits = static_cast<uint32_t>(aSize & kArraySizeMask) |
-                 (aOwner ? kArrayOwnerMask : 0) |
-                 (aHasAuto ? kArrayHasAutoBufferMask : 0);
+  mImpl->mSize = aSize;
 }
 
 // This does all allocation/reallocation of the array.
@@ -125,8 +122,6 @@ nsVoidArray::SetArray(Impl *newImpl, int32_t aSize, int32_t aCount,
 bool nsVoidArray::SizeTo(int32_t aSize)
 {
   uint32_t oldsize = GetArraySize();
-  bool isOwner = IsArrayOwner();
-  bool hasAuto = HasAutoBuffer();
 
   if (aSize == (int32_t) oldsize)
     return true; // no change
@@ -136,25 +131,13 @@ bool nsVoidArray::SizeTo(int32_t aSize)
     // free the array if allocated
     if (mImpl)
     {
-      if (isOwner)
-      {
-        free(reinterpret_cast<char *>(mImpl));
-        if (hasAuto) {
-          static_cast<nsAutoVoidArray*>(this)->ResetToAutoBuffer();
-        }
-        else {
-          mImpl = nullptr;
-        }
-      }
-      else
-      {
-        mImpl->mCount = 0; // nsAutoVoidArray
-      }
+      free(reinterpret_cast<char *>(mImpl));
+      mImpl = nullptr;
     }
     return true;
   }
 
-  if (mImpl && isOwner)
+  if (mImpl)
   {
     // We currently own an array impl. Resize it appropriately.
     if (aSize < mImpl->mCount)
@@ -185,7 +168,7 @@ bool nsVoidArray::SizeTo(int32_t aSize)
       }
     }
 #endif
-    SetArray(newImpl, aSize, newImpl->mCount, true, hasAuto);
+    SetArray(newImpl, aSize, newImpl->mCount);
     return true;
   }
 
@@ -225,7 +208,7 @@ bool nsVoidArray::SizeTo(int32_t aSize)
                   mImpl->mCount * sizeof(mImpl->mArray[0]));
   }
 
-  SetArray(newImpl, aSize, mImpl ? mImpl->mCount : 0, true, hasAuto);
+  SetArray(newImpl, aSize, mImpl ? mImpl->mCount : 0);
   // no memset; handled later in ReplaceElementAt if needed
   return true;
 }
@@ -250,13 +233,13 @@ bool nsVoidArray::GrowArrayBy(int32_t aGrowBy)
     // Also, limit the increase in size to about a VM page or two.
     if (GetArraySize() >= kMaxGrowArrayBy)
     {
-      newCapacity = GetArraySize() + NS_MAX(kMaxGrowArrayBy,aGrowBy);
+      newCapacity = GetArraySize() + XPCOM_MAX(kMaxGrowArrayBy,aGrowBy);
       newSize = SIZEOF_IMPL(newCapacity);
     }
     else
     {
       PR_CEILING_LOG2(newSize, newSize);
-      newCapacity = CAPACITYOF_IMPL(PR_BIT(newSize));
+      newCapacity = CAPACITYOF_IMPL(1u << newSize);
     }
   }
   // frees old mImpl IF this succeeds
@@ -340,7 +323,7 @@ nsVoidArray& nsVoidArray::operator=(const nsVoidArray& other)
 nsVoidArray::~nsVoidArray()
 {
   MOZ_COUNT_DTOR(nsVoidArray);
-  if (mImpl && IsArrayOwner())
+  if (mImpl)
     free(reinterpret_cast<char*>(mImpl));
 }
 
@@ -584,14 +567,13 @@ bool nsVoidArray::MoveElement(int32_t aFrom, int32_t aTo)
   return true;
 }
 
-bool nsVoidArray::RemoveElementsAt(int32_t aIndex, int32_t aCount)
+void nsVoidArray::RemoveElementsAt(int32_t aIndex, int32_t aCount)
 {
   int32_t oldCount = Count();
   NS_ASSERTION(aIndex >= 0,"RemoveElementsAt(negative index)");
   if (uint32_t(aIndex) >= uint32_t(oldCount))
   {
-    // An invalid index causes the replace to fail
-    return false;
+    return;
   }
   // Limit to available entries starting at aIndex
   if (aCount + aIndex > oldCount)
@@ -606,14 +588,17 @@ bool nsVoidArray::RemoveElementsAt(int32_t aIndex, int32_t aCount)
   }
 
   mImpl->mCount -= aCount;
-  return true;
+  return;
 }
 
 bool nsVoidArray::RemoveElement(void* aElement)
 {
   int32_t theIndex = IndexOf(aElement);
   if (theIndex != -1)
-    return RemoveElementAt(theIndex);
+  {
+    RemoveElementAt(theIndex);
+    return true;
+  }
 
   return false;
 }
@@ -623,12 +608,6 @@ void nsVoidArray::Clear()
   if (mImpl)
   {
     mImpl->mCount = 0;
-    // We don't have to free on Clear, but if we have a built-in buffer,
-    // it's worth considering.
-    if (HasAutoBuffer() && IsArrayOwner() &&
-        GetArraySize() > kAutoClearCompactSizeFactor * kAutoBufSize) {
-      SizeTo(0);
-    }
   }
 }
 
@@ -639,15 +618,7 @@ void nsVoidArray::Compact()
     // XXX NOTE: this is quite inefficient in many cases if we're only
     // compacting by a little, but some callers care more about memory use.
     int32_t count = Count();
-    if (HasAutoBuffer() && count <= kAutoBufSize)
-    {
-      Impl* oldImpl = mImpl;
-      static_cast<nsAutoVoidArray*>(this)->ResetToAutoBuffer();
-      memcpy(mImpl->mArray, oldImpl->mArray,
-             count * sizeof(mImpl->mArray[0]));
-      free(reinterpret_cast<char *>(oldImpl));
-    }
-    else if (GetArraySize() > count)
+    if (GetArraySize() > count)
     {
       SizeTo(Count());
     }
@@ -756,21 +727,6 @@ nsVoidArray::SizeOfExcludingThis(
     n += data2.mSize;
   }
   return n;
-}
-
-//----------------------------------------------------------------
-// nsAutoVoidArray
-
-nsAutoVoidArray::nsAutoVoidArray()
-  : nsVoidArray()
-{
-  // Don't need to clear it.  Some users just call ReplaceElementAt(),
-  // but we'll clear it at that time if needed to save CPU cycles.
-#if DEBUG_VOIDARRAY
-  mIsAuto = true;
-  ADD_TO_STATS(MaxAuto,0);
-#endif
-  ResetToAutoBuffer();
 }
 
 //----------------------------------------------------------------------
@@ -943,23 +899,21 @@ nsSmallVoidArray::RemoveElement(void* aElement)
   return AsArray()->RemoveElement(aElement);
 }
 
-bool
+void
 nsSmallVoidArray::RemoveElementAt(int32_t aIndex)
 {
   if (HasSingle()) {
     if (aIndex == 0) {
       mImpl = nullptr;
-
-      return true;
     }
     
-    return false;
+    return;
   }
 
-  return AsArray()->RemoveElementAt(aIndex);
+  AsArray()->RemoveElementAt(aIndex);
 }
 
-bool
+void
 nsSmallVoidArray::RemoveElementsAt(int32_t aIndex, int32_t aCount)
 {
   if (HasSingle()) {
@@ -967,14 +921,12 @@ nsSmallVoidArray::RemoveElementsAt(int32_t aIndex, int32_t aCount)
       if (aCount > 0) {
         mImpl = nullptr;
       }
-
-      return true;
     }
 
-    return false;
+    return;
   }
 
-  return AsArray()->RemoveElementsAt(aIndex, aCount);
+  AsArray()->RemoveElementsAt(aIndex, aCount);
 }
 
 void

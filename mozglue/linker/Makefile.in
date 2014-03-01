@@ -9,30 +9,29 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= mozglue
-LIBRARY_NAME	= linker
 FORCE_STATIC_LIB= 1
 STL_FLAGS =
 
-CPPSRCS = \
-  Zip.cpp \
-  $(NULL)
-
-ifndef MOZ_OLD_LINKER
 HOST_PROGRAM = szip
 
 HOST_CPPSRCS = \
   szip.cpp \
+  SeekableZStream.cpp \
   $(NULL)
 
 HOST_LIBS = -lz
 
-CPPSRCS += \
-  ElfLoader.cpp \
-  CustomElf.cpp \
-  Mappable.cpp \
-  SeekableZStream.cpp \
-  $(NULL)
-endif
+DEFINES += -DIMPL_MFBT
 
 include $(topsrcdir)/config/rules.mk
+
+ifeq (arm,$(TARGET_CPU))
+ifdef MOZ_THUMB2
+HOST_CXXFLAGS += -DTARGET_THUMB
+else
+HOST_CXXFLAGS += -DTARGET_ARM
+endif
+endif
+ifeq (x86,$(CPU_ARCH))
+HOST_CXXFLAGS += -DTARGET_X86
+endif

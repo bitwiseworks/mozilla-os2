@@ -6,12 +6,14 @@
 #ifndef mozilla_dom_DOMJSProxyHandler_h
 #define mozilla_dom_DOMJSProxyHandler_h
 
+#include "mozilla/Attributes.h"
+#include "mozilla/Likely.h"
+
 #include "jsapi.h"
-#include "jsatom.h"
+#include "jsfriendapi.h"
 #include "jsproxy.h"
 #include "xpcpublic.h"
-#include "nsString.h"
-#include "mozilla/Likely.h"
+#include "nsStringGlue.h"
 
 #define DOM_PROXY_OBJECT_SLOT js::JSSLOT_PROXY_PRIVATE
 
@@ -19,50 +21,80 @@ namespace mozilla {
 namespace dom {
 
 enum {
-  JSPROXYSLOT_EXPANDO = 0
+  JSPROXYSLOT_EXPANDO = 0,
+  JSPROXYSLOT_XRAY_EXPANDO
 };
 
 template<typename T> struct Prefable;
 
-class DOMProxyHandler : public DOMBaseProxyHandler
+class DOMProxyHandler : public js::BaseProxyHandler
 {
 public:
   DOMProxyHandler(const DOMClass& aClass)
-    : DOMBaseProxyHandler(true),
+    : js::BaseProxyHandler(ProxyFamily()),
       mClass(aClass)
   {
   }
 
-  bool getPropertyDescriptor(JSContext* cx, JSObject* proxy, jsid id, bool set,
-                             JSPropertyDescriptor* desc);
-  bool defineProperty(JSContext* cx, JSObject* proxy, jsid id,
-                      JSPropertyDescriptor* desc);
-  bool delete_(JSContext* cx, JSObject* proxy, jsid id, bool* bp);
-  bool enumerate(JSContext* cx, JSObject* proxy, JS::AutoIdVector& props);
-  bool fix(JSContext* cx, JSObject* proxy, JS::Value* vp);
-  bool has(JSContext* cx, JSObject* proxy, jsid id, bool* bp);
-  using js::BaseProxyHandler::obj_toString;
+  bool preventExtensions(JSContext *cx, JS::Handle<JSObject*> proxy) MOZ_OVERRIDE;
+  bool getPropertyDescriptor(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                            JSPropertyDescriptor* desc, unsigned flags) MOZ_OVERRIDE;
+  bool defineProperty(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                      JSPropertyDescriptor* desc) MOZ_OVERRIDE
+  {
+    bool unused;
+    return defineProperty(cx, proxy, id, desc, &unused);
+  }
+  virtual bool defineProperty(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                              JSPropertyDescriptor* desc, bool* defined);
+  bool delete_(JSContext* cx, JS::Handle<JSObject*> proxy,
+               JS::Handle<jsid> id, bool* bp) MOZ_OVERRIDE;
+  bool enumerate(JSContext* cx, JS::Handle<JSObject*> proxy, JS::AutoIdVector& props) MOZ_OVERRIDE;
+  bool has(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id, bool* bp) MOZ_OVERRIDE;
+  bool isExtensible(JSObject *proxy) MOZ_OVERRIDE;
 
   static JSObject* GetExpandoObject(JSObject* obj)
   {
     MOZ_ASSERT(IsDOMProxy(obj), "expected a DOM proxy object");
     JS::Value v = js::GetProxyExtra(obj, JSPROXYSLOT_EXPANDO);
-    return v.isUndefined() ? NULL : v.toObjectOrNull();
+    if (v.isObject()) {
+      return &v.toObject();
+    }
+
+    if (v.isUndefined()) {
+      return nullptr;
+    }
+
+    js::ExpandoAndGeneration* expandoAndGeneration =
+      static_cast<js::ExpandoAndGeneration*>(v.toPrivate());
+    v = expandoAndGeneration->expando;
+    return v.isUndefined() ? nullptr : &v.toObject();
   }
-  static JSObject* EnsureExpandoObject(JSContext* cx, JSObject* obj);
+  /* GetAndClearExpandoObject does not DROP or clear the preserving wrapper flag. */
+  static JSObject* GetAndClearExpandoObject(JSObject* obj);
+  static JSObject* EnsureExpandoObject(JSContext* cx,
+                                       JS::Handle<JSObject*> obj);
 
   const DOMClass& mClass;
 
 protected:
-  static JSString* obj_toString(JSContext* cx, const char* className);
+  // Append the property names in "names" to "props". If
+  // shadowPrototypeProperties is false then skip properties that are also
+  // present on our proto chain.
+  bool AppendNamedPropertyIds(JSContext* cx, JS::Handle<JSObject*> proxy,
+                              nsTArray<nsString>& names,
+                              bool shadowPrototypeProperties,
+                              JS::AutoIdVector& props);
 };
 
 extern jsid s_length_id;
 
-int32_t IdToInt32(JSContext* cx, jsid id);
+int32_t IdToInt32(JSContext* cx, JS::Handle<jsid> id);
 
+// XXXbz this should really return uint32_t, with the maximum value
+// meaning "not an index"...
 inline int32_t
-GetArrayIndexFromId(JSContext* cx, jsid id)
+GetArrayIndexFromId(JSContext* cx, JS::Handle<jsid> id)
 {
   if (MOZ_LIKELY(JSID_IS_INT(id))) {
     return JSID_TO_INT(id);
@@ -83,6 +115,12 @@ GetArrayIndexFromId(JSContext* cx, jsid id)
   return IdToInt32(cx, id);
 }
 
+inline bool
+IsArrayIndex(int32_t index)
+{
+  return index >= 0;
+}
+
 inline void
 FillPropertyDescriptor(JSPropertyDescriptor* desc, JSObject* obj, bool readonly)
 {
@@ -94,14 +132,11 @@ FillPropertyDescriptor(JSPropertyDescriptor* desc, JSObject* obj, bool readonly)
 }
 
 inline void
-FillPropertyDescriptor(JSPropertyDescriptor* desc, JSObject* obj, jsval v, bool readonly)
+FillPropertyDescriptor(JSPropertyDescriptor* desc, JSObject* obj, JS::Value v, bool readonly)
 {
   desc->value = v;
   FillPropertyDescriptor(desc, obj, readonly);
 }
-
-JSObject* 
-EnsureExpandoObject(JSContext* cx, JSObject* obj);
 
 } // namespace dom
 } // namespace mozilla

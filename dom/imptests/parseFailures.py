@@ -2,16 +2,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import print_function, unicode_literals
+
+import collections
 import json
 import os
 import sys
 
-import writeMakefile
+import writeBuildFiles
 
 def extractLines(fp):
     lines = []
     watch = False
     for line in fp:
+        line = line.decode('utf-8')
         if line == '@@@ @@@ Failures\n':
             watch = True
         elif watch:
@@ -31,28 +35,39 @@ def dumpFailures(lines):
         if objstr == '{}\n':
             continue
 
+        # Avoid overly large diffs.
+        if 'editing/' in url:
+            sep = ':'
+        else:
+            sep = ': '
+
         jsonpath = 'failures/' + url + '.json'
         files.append(jsonpath)
         ensuredir(jsonpath)
-        obj = json.loads(objstr)
-        formattedobj = json.dumps(obj, sort_keys=True, indent=2, separators=(',', ': '))
-        fp = open(jsonpath, 'w')
-        fp.write(formattedobj + '\n')
+        obj = json.loads(objstr, object_pairs_hook=collections.OrderedDict)
+        formattedobjstr = json.dumps(obj, indent=2, separators=(',', sep)) + '\n'
+        formattedobj = formattedobjstr.encode('utf-8')
+        fp = open(jsonpath, 'wb')
+        fp.write(formattedobj)
         fp.close()
     return files
 
-def writeMakefiles(files):
+def writeFiles(files):
     pathmap = {}
     for path in files:
         dirp, leaf = path.rsplit('/', 1)
         pathmap.setdefault(dirp, []).append(leaf)
 
-    for k, v in pathmap.iteritems():
-        result = writeMakefile.substMakefile('parseFailures.py', 'dom/imptests/' + k, [], v)
+    for k, v in pathmap.items():
+        with open(k + '/Makefile.in', 'wb') as fh:
+            result = writeBuildFiles.substMakefile('parseFailures.py', v)
+            result = result.encode('utf-8')
+            fh.write(result)
 
-        fp = open(k + '/Makefile.in', 'wb')
-        fp.write(result)
-        fp.close()
+        with open(k + '/moz.build', 'wb') as fh:
+            result = writeBuildFiles.substMozbuild('parseFailures.py', [])
+            result = result.encode('utf-8')
+            fh.write(result)
 
 def main(logPath):
     fp = open(logPath, 'rb')
@@ -60,9 +75,10 @@ def main(logPath):
     fp.close()
 
     files = dumpFailures(lines)
-    writeMakefiles(files)
+    writeFiles(files)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print "Please pass the path to the logfile from which failures should be extracted."
+        print("Please pass the path to the logfile from which failures should be extracted.")
     main(sys.argv[1])
+

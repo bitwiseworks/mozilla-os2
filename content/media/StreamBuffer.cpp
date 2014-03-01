@@ -4,8 +4,34 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "StreamBuffer.h"
+#include "prlog.h"
+#include <algorithm>
 
 namespace mozilla {
+
+#ifdef PR_LOGGING
+extern PRLogModuleInfo* gMediaStreamGraphLog;
+#define LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
+#else
+#define LOG(type, msg)
+#endif
+
+#ifdef DEBUG
+void
+StreamBuffer::DumpTrackInfo() const
+{
+  LOG(PR_LOG_ALWAYS, ("DumpTracks: mTracksKnownTime %lld", mTracksKnownTime));
+  for (uint32_t i = 0; i < mTracks.Length(); ++i) {
+    Track* track = mTracks[i];
+    if (track->IsEnded()) {
+      LOG(PR_LOG_ALWAYS, ("Track[%d] %d: ended", i, track->GetID()));
+    } else {
+      LOG(PR_LOG_ALWAYS, ("Track[%d] %d: %lld", i, track->GetID(),
+                          track->GetEndTimeRoundDown()));
+    }
+  }
+}
+#endif
 
 StreamTime
 StreamBuffer::GetEnd() const
@@ -14,7 +40,7 @@ StreamBuffer::GetEnd() const
   for (uint32_t i = 0; i < mTracks.Length(); ++i) {
     Track* track = mTracks[i];
     if (!track->IsEnded()) {
-      t = NS_MIN(t, track->GetEndTimeRoundDown());
+      t = std::min(t, track->GetEndTimeRoundDown());
     }
   }
   return t;
@@ -52,7 +78,7 @@ StreamBuffer::ForgetUpTo(StreamTime aTime)
       --i;
       continue;
     }
-    TrackTicks forgetTo = NS_MIN(track->GetEnd() - 1, track->TimeToTicksRoundDown(forget));
+    TrackTicks forgetTo = std::min(track->GetEnd() - 1, track->TimeToTicksRoundDown(forget));
     track->ForgetUpTo(forgetTo);
   }
 }

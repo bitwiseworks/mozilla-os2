@@ -29,25 +29,23 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(FileIOObject)
   NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(FileIOObject)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(FileIOObject,
                                                   nsDOMEventTargetHelper)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mProgressNotifier)
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(abort)
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(error)
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(progress)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mError)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mProgressNotifier)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mError)
+  // Can't traverse mChannel because it's a multithreaded object.
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(FileIOObject,
                                                 nsDOMEventTargetHelper)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mProgressNotifier)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(abort)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(error)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(progress)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mError)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mProgressNotifier)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mError)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mChannel)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+NS_IMPL_EVENT_HANDLER(FileIOObject, abort)
+NS_IMPL_EVENT_HANDLER(FileIOObject, error)
+NS_IMPL_EVENT_HANDLER(FileIOObject, progress)
 
 FileIOObject::FileIOObject()
   : mProgressEventWasDelayed(false),
@@ -87,13 +85,13 @@ FileIOObject::DispatchError(nsresult rv, nsAString& finalEvent)
   // Set the status attribute, and dispatch the error event
   switch (rv) {
   case NS_ERROR_FILE_NOT_FOUND:
-    mError = DOMError::CreateWithName(NS_LITERAL_STRING("NotFoundError"));
+    mError = new DOMError(GetOwner(), NS_LITERAL_STRING("NotFoundError"));
     break;
   case NS_ERROR_FILE_ACCESS_DENIED:
-    mError = DOMError::CreateWithName(NS_LITERAL_STRING("SecurityError"));
+    mError = new DOMError(GetOwner(), NS_LITERAL_STRING("SecurityError"));
     break;
   default:
-    mError = DOMError::CreateWithName(NS_LITERAL_STRING("NotReadableError"));
+    mError = new DOMError(GetOwner(), NS_LITERAL_STRING("NotReadableError"));
     break;
   }
 
@@ -106,9 +104,8 @@ nsresult
 FileIOObject::DispatchProgressEvent(const nsAString& aType)
 {
   nsCOMPtr<nsIDOMEvent> event;
-  nsresult rv = nsEventDispatcher::CreateEvent(nullptr, nullptr,
-                                               NS_LITERAL_STRING("ProgressEvent"),
-                                               getter_AddRefs(event));
+  nsresult rv = NS_NewDOMProgressEvent(getter_AddRefs(event), this,
+                                       nullptr, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
   event->SetTrusted(true);
@@ -165,7 +162,7 @@ NS_IMETHODIMP
 FileIOObject::OnDataAvailable(nsIRequest *aRequest,
                               nsISupports *aContext,
                               nsIInputStream *aInputStream,
-                              uint32_t aOffset,
+                              uint64_t aOffset,
                               uint32_t aCount)
 {
   nsresult rv;
@@ -220,12 +217,13 @@ FileIOObject::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-FileIOObject::Abort()
+void
+FileIOObject::Abort(ErrorResult& aRv)
 {
   if (mReadyState != 1) {
     // XXX The spec doesn't say this
-    return NS_ERROR_DOM_FILE_ABORT_ERR;
+    aRv.Throw(NS_ERROR_DOM_FILE_ABORT_ERR);
+    return;
   }
 
   ClearProgressEventTimer();
@@ -233,30 +231,14 @@ FileIOObject::Abort()
   mReadyState = 2; // There are DONE constants on multiple interfaces,
                    // but they all have value 2.
   // XXX The spec doesn't say this
-  mError = DOMError::CreateWithName(NS_LITERAL_STRING("AbortError"));
+  mError = new DOMError(GetOwner(), NS_LITERAL_STRING("AbortError"));
 
   nsString finalEvent;
-  nsresult rv = DoAbort(finalEvent);
+  DoAbort(finalEvent);
 
   // Dispatch the events
   DispatchProgressEvent(NS_LITERAL_STRING(ABORT_STR));
   DispatchProgressEvent(finalEvent);
-
-  return rv;
-}
-
-NS_IMETHODIMP
-FileIOObject::GetReadyState(uint16_t *aReadyState)
-{
-  *aReadyState = mReadyState;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-FileIOObject::GetError(nsIDOMDOMError** aError)
-{
-  NS_IF_ADDREF(*aError = mError);
-  return NS_OK;
 }
 
 } // namespace dom

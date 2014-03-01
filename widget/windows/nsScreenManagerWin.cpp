@@ -5,6 +5,8 @@
 
 #include "nsScreenManagerWin.h"
 #include "nsScreenWin.h"
+#include "gfxWindowsPlatform.h"
+#include "nsIWidget.h"
 
 
 BOOL CALLBACK CountMonitors ( HMONITOR, HDC, LPRECT, LPARAM ioCount ) ;
@@ -64,7 +66,7 @@ nsScreenManagerWin :: CreateNewScreenObject ( HMONITOR inScreen )
 // Returns the screen that contains the rectangle. If the rect overlaps
 // multiple screens, it picks the screen with the greatest area of intersection.
 //
-// The coordinates are in pixels (not twips) and in screen coordinates.
+// The coordinates are in pixels (not twips) and in logical screen coordinates.
 //
 NS_IMETHODIMP
 nsScreenManagerWin :: ScreenForRect ( int32_t inLeft, int32_t inTop, int32_t inWidth, int32_t inHeight,
@@ -76,7 +78,17 @@ nsScreenManagerWin :: ScreenForRect ( int32_t inLeft, int32_t inTop, int32_t inW
     return NS_OK;
   }
 
-  RECT globalWindowBounds = { inLeft, inTop, inLeft + inWidth, inTop + inHeight };
+  // convert coordinates from logical to device pixels for MonitorFromRect
+  double dpiScale = nsIWidget::DefaultScaleOverride();
+  if (dpiScale <= 0.0) {
+    dpiScale = gfxWindowsPlatform::GetPlatform()->GetDPIScale(); 
+  }
+  RECT globalWindowBounds = {
+    NSToIntRound(dpiScale * inLeft),
+    NSToIntRound(dpiScale * inTop),
+    NSToIntRound(dpiScale * (inLeft + inWidth)),
+    NSToIntRound(dpiScale * (inTop + inHeight))
+  };
 
   HMONITOR genScreen = ::MonitorFromRect( &globalWindowBounds, MONITOR_DEFAULTTOPRIMARY );
 
@@ -141,6 +153,13 @@ nsScreenManagerWin :: GetNumberOfScreens(uint32_t *aNumberOfScreens)
   return NS_OK;
   
 } // GetNumberOfScreens
+
+NS_IMETHODIMP
+nsScreenManagerWin::GetSystemDefaultScale(float *aDefaultScale)
+{
+  *aDefaultScale = float(gfxWindowsPlatform::GetPlatform()->GetDPIScale());
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 nsScreenManagerWin :: ScreenForNativeWidget(void *aWidget, nsIScreen **outScreen)

@@ -17,6 +17,16 @@
 #ifdef MOZ_STATIC_JS
 @DLL_PREFIX@mozjs@DLL_SUFFIX@
 #endif
+#ifdef MOZ_FOLD_LIBS
+@DLL_PREFIX@nspr4@DLL_SUFFIX@
+@DLL_PREFIX@plds4@DLL_SUFFIX@
+@DLL_PREFIX@plc4@DLL_SUFFIX@
+@DLL_PREFIX@ssl3@DLL_SUFFIX@
+@DLL_PREFIX@smime3@DLL_SUFFIX@
+@DLL_PREFIX@nssutil3@DLL_SUFFIX@
+@DLL_PREFIX@mozsqlite3@DLL_SUFFIX@
+#endif
+@DLL_PREFIX@xpcom@DLL_SUFFIX@
 LICENSE
 browserconfig.properties
 chrome/US.jar
@@ -47,6 +57,7 @@ components/@DLL_PREFIX@myspell@DLL_SUFFIX@
 components/@DLL_PREFIX@spellchecker@DLL_SUFFIX@
 components/@DLL_PREFIX@spellchk@DLL_SUFFIX@
 #ifdef XP_MACOSX
+components/libalerts.dylib
 components/libalerts_s.dylib
 #endif
 components/aboutCertError.js
@@ -79,6 +90,8 @@ components/dom_telephony.xpt
 components/dom_wifi.xpt
 components/dom_system_b2g.xpt
 #endif
+components/dom_sms.xpt
+components/dom_webspeech.xpt
 components/uconvd.dll
 components/WeaveCrypto.js
 components/WeaveCrypto.manifest
@@ -87,15 +100,23 @@ components/xpcom.xpt
 components/xpti.dat
 components/xptitemp.dat
 components/nsMicrosummaryService.js
+components/nsProxyAutoConfig.manifest
+components/nsProxyAutoConfig.js
 D3DCompiler_42.dll
 d3dx9_42.dll
+d3dx9_43.dll
 defaults/pref/all.js
 defaults/pref/bug259708.js
 defaults/pref/bug307259.js
 defaults/pref/reporter.js
 defaults/pref/security-prefs.js
+defaults/pref/services-aitc.js
 defaults/pref/winpref.js
 defaults/pref/xpinstall.js
+defaults/preferences/services-aitc.js
+defaults/preferences/services-notifications.js
+defaults/preferences/services-sync.js
+defaults/preferences/healthreport-prefs.js
 defaults/profile/US/
 defaults/profile/extensions/
 defaults/profile/extensions/Extensions.rdf
@@ -289,6 +310,9 @@ res/ua.css
 res/unixcharset.properties
 res/viewsource.css
 res/wincharset.properties
+#ifdef XP_MACOSX
+run-mozilla.sh
+#endif
 searchplugins/DRAE.gif
 searchplugins/DRAE.png
 searchplugins/DRAE.src
@@ -699,7 +723,6 @@ uninstall/UninstallDeerPark.exe
 uninstall/UninstallFirefox.exe
 uninstall/uninst.exe
 uninstall/uninstall.exe
-update.locale
 #ifndef MOZ_UPDATER
   #ifdef XP_MACOSX
     updater.app/
@@ -710,6 +733,7 @@ update.locale
 #endif
 xpicleanup@BIN_SUFFIX@
 #ifdef MOZ_OMNIJAR
+  update.locale
   omni.jar
   chrome/af.jar
   chrome/af.manifest
@@ -873,13 +897,16 @@ xpicleanup@BIN_SUFFIX@
   chrome/pippki.jar
   chrome/toolkit.jar
   components/addonManager.js
+  components/Aitc.js
+  components/AitcComponents.manifest
   components/amContentHandler.js
   components/amWebInstallListener.js
+  components/binary.manifest
   components/browser.xpt
   components/BrowserElementParent.js
   components/BrowserElementParent.manifest
   components/BrowserElementPromptService.jsm
-  components/components.manifest
+  components/BrowserElementParent.jsm
   components/contentAreaDropListener.js
   components/contentSecurityPolicy.js
   components/crypto-SDR.js
@@ -890,7 +917,9 @@ xpicleanup@BIN_SUFFIX@
   components/GPSDGeolocationProvider.js
   components/interfaces.manifest
   components/jsconsole-clhandler.js
+  components/MetricsCollectionService.js
   components/NetworkGeolocationProvider.js
+  components/NotificationsComponents.manifest
   components/nsBadCertHandler.js
   components/nsBlocklistService.js
   components/nsBrowserContentHandler.js
@@ -918,6 +947,7 @@ xpicleanup@BIN_SUFFIX@
   components/nsPlacesExpiration.js
   components/nsPrivateBrowsingService.js
   components/nsPrompter.js
+  components/nsProxyAutoConfig.manifest
   components/nsProxyAutoConfig.js
   components/nsSafebrowsingApplication.js
   components/nsSearchService.js
@@ -1036,7 +1066,6 @@ xpicleanup@BIN_SUFFIX@
   modules/PluginProvider.jsm
   modules/PluralForm.jsm
   modules/PopupNotifications.jsm
-  modules/PropertyPanel.jsm
   modules/reflect.jsm
   modules/Services.jsm
   modules/services-common/async.js
@@ -1046,6 +1075,7 @@ xpicleanup@BIN_SUFFIX@
   modules/services-common/rest.js
   modules/services-common/stringbundle.js
   modules/services-common/utils.js
+  modules/services-notifications/service.js
   modules/services-sync/auth.js
   modules/services-sync/base_records/collection.js
   modules/services-sync/base_records/crypto.js
@@ -1192,6 +1222,7 @@ xpicleanup@BIN_SUFFIX@
   components/dom_json.xpt
   components/dom_loadsave.xpt
   components/dom_offline.xpt
+  components/dom_push.xpt
   components/dom_range.xpt
   components/dom_sidebar.xpt
   components/dom_smil.xpt
@@ -1340,6 +1371,25 @@ xpicleanup@BIN_SUFFIX@
   plugins/MRJPlugin.plugin/Contents/Resources/MRJPlugin.rsrc
   redo-prebinding.sh
   res/bloatcycle.html
+  res/cursors/arrowN.tiff
+  res/cursors/arrowS.tiff
+  res/cursors/colResize.tiff
+  res/cursors/help.tiff
+  res/cursors/rowResize.tiff
+  res/cursors/sizeNE.tiff
+  res/cursors/sizeNESW.tiff
+  res/cursors/sizeNS.tiff
+  res/cursors/sizeNW.tiff
+  res/cursors/sizeNWSE.tiff
+  res/cursors/sizeSE.tiff
+  res/cursors/sizeSW.tiff
+  res/cursors/spin1.tiff
+  res/cursors/spin2.tiff
+  res/cursors/spin3.tiff
+  res/cursors/spin4.tiff
+  res/cursors/vtIBeam.tiff
+  res/cursors/zoomIn.tiff
+  res/cursors/zoomOut.tiff
   res/cursors/CVS/Entries
   res/cursors/CVS/Repository
   res/cursors/CVS/Root

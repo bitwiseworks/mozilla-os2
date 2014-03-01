@@ -67,9 +67,9 @@
                   label="&cmd.cancel.label;"
                   accesskey="&cmd.cancel.accesskey;"/>
         <menuitem command="cmd_delete"
-                  class="downloadRemoveFromListMenuItem"
-                  label="&cmd.removeFromList.label;"
-                  accesskey="&cmd.removeFromList.accesskey;"/>
+                  class="downloadRemoveFromHistoryMenuItem"
+                  label="&cmd.removeFromHistory.label;"
+                  accesskey="&cmd.removeFromHistory.accesskey;"/>
         <menuitem command="downloadsCmd_show"
                   class="downloadShowMenuItem"
 #ifdef XP_MACOSX
@@ -98,17 +98,41 @@
       </menupopup>
 
       <richlistbox id="downloadsListBox"
-                   style="width: &downloads.width;"
                    class="plain"
                    flex="1"
                    context="downloadsContextMenu"
-                   onkeypress="DownloadsView.onDownloadKeyPress(event);"
+                   onmouseover="DownloadsView.onDownloadMouseOver(event);"
+                   onmouseout="DownloadsView.onDownloadMouseOut(event);"
                    oncontextmenu="DownloadsView.onDownloadContextMenu(event);"
                    ondragstart="DownloadsView.onDownloadDragStart(event);"/>
 
-      <button id="downloadsHistory"
-              class="plain"
-              oncommand="DownloadsPanel.showDownloadsHistory();"/>
+      <vbox id="downloadsFooter">
+        <hbox id="downloadsSummary"
+              align="center"
+              orient="horizontal"
+              onkeydown="DownloadsSummary.onKeyDown(event);"
+              onclick="DownloadsSummary.onClick(event);">
+          <image class="downloadTypeIcon" />
+          <vbox>
+            <description id="downloadsSummaryDescription"
+                         style="min-width: &downloadsSummary.minWidth2;"/>
+            <progressmeter id="downloadsSummaryProgress"
+                           class="downloadProgress"
+                           min="0"
+                           max="100"
+                           mode="normal" />
+            <description id="downloadsSummaryDetails"
+                         style="width: &downloadDetails.width;"
+                         crop="end"/>
+          </vbox>
+        </hbox>
+
+        <button id="downloadsHistory"
+                class="plain"
+                label="&downloadsHistory.label;"
+                accesskey="&downloadsHistory.accesskey;"
+                oncommand="DownloadsPanel.showDownloadsHistory();"/>
+      </vbox>
     </panel>
   </popupset>
 </overlay>

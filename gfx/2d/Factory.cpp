@@ -38,13 +38,23 @@
 #endif
 
 #include "DrawTargetDual.h"
+#include "DrawTargetRecording.h"
 
 #include "SourceSurfaceRawData.h"
+
+#include "DrawEventRecorder.h"
 
 #include "Logging.h"
 
 #ifdef PR_LOGGING
-PRLogModuleInfo *sGFX2DLog = PR_NewLogModule("gfx2d");
+PRLogModuleInfo *
+GetGFX2DLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("gfx2d");
+  return sLog;
+}
 #endif
 
 // The following code was largely taken from xpcom/glue/SSE.cpp and
@@ -56,7 +66,7 @@ enum CPUIDRegister { eax = 0, ebx = 1, ecx = 2, edx = 3 };
 // cpuid.h is available on gcc 4.3 and higher on i386 and x86_64
 #include <cpuid.h>
 
-static bool
+static inline bool
 HasCPUIDBit(unsigned int level, CPUIDRegister reg, unsigned int bit)
 {
   unsigned int regs[4];
@@ -118,7 +128,7 @@ __cpuid(int CPUInfo[4], int InfoType)
 #endif
 
 #ifdef HAVE_CPU_DETECTION
-static bool
+static inline bool
 HasCPUIDBit(unsigned int level, CPUIDRegister reg, unsigned int bit)
 {
   // Check that the level in question is supported.
@@ -142,6 +152,8 @@ int sGfxLogLevel = LOG_DEBUG;
 ID3D10Device1 *Factory::mD3D10Device;
 #endif
 
+DrawEventRecorder *Factory::mRecorder;
+
 bool
 Factory::HasSSE2()
 {
@@ -160,6 +172,7 @@ Factory::HasSSE2()
 TemporaryRef<DrawTarget>
 Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFormat aFormat)
 {
+  RefPtr<DrawTarget> retVal;
   switch (aBackend) {
 #ifdef WIN32
   case BACKEND_DIRECT2D:
@@ -167,7 +180,7 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
       RefPtr<DrawTargetD2D> newTarget;
       newTarget = new DrawTargetD2D();
       if (newTarget->Init(aSize, aFormat)) {
-        return newTarget;
+        retVal = newTarget;
       }
       break;
     }
@@ -178,7 +191,7 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
       RefPtr<DrawTargetCG> newTarget;
       newTarget = new DrawTargetCG();
       if (newTarget->Init(aBackend, aSize, aFormat)) {
-        return newTarget;
+        retVal = newTarget;
       }
       break;
     }
@@ -189,7 +202,7 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
       RefPtr<DrawTargetSkia> newTarget;
       newTarget = new DrawTargetSkia();
       if (newTarget->Init(aSize, aFormat)) {
-        return newTarget;
+        retVal = newTarget;
       }
       break;
     }
@@ -199,9 +212,24 @@ Factory::CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFor
     return nullptr;
   }
 
-  gfxDebug() << "Failed to create DrawTarget, Type: " << aBackend << " Size: " << aSize;
-  // Failed
-  return nullptr;
+  if (mRecorder && retVal) {
+    RefPtr<DrawTarget> recordDT;
+    recordDT = new DrawTargetRecording(mRecorder, retVal);
+    return recordDT;
+  }
+
+  if (!retVal) {
+    // Failed
+    gfxDebug() << "Failed to create DrawTarget, Type: " << aBackend << " Size: " << aSize;
+  }
+  
+  return retVal;
+}
+
+TemporaryRef<DrawTarget>
+Factory::CreateRecordingDrawTarget(DrawEventRecorder *aRecorder, DrawTarget *aDT)
+{
+  return new DrawTargetRecording(aRecorder, aDT);
 }
 
 TemporaryRef<DrawTarget>
@@ -211,6 +239,8 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
                                  int32_t aStride, 
                                  SurfaceFormat aFormat)
 {
+  RefPtr<DrawTarget> retVal;
+
   switch (aBackend) {
 #ifdef USE_SKIA
   case BACKEND_SKIA:
@@ -218,7 +248,7 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
       RefPtr<DrawTargetSkia> newTarget;
       newTarget = new DrawTargetSkia();
       newTarget->Init(aData, aSize, aStride, aFormat);
-      return newTarget;
+      retVal = newTarget;
     }
 #endif
 #ifdef XP_MACOSX
@@ -235,6 +265,11 @@ Factory::CreateDrawTargetForData(BackendType aBackend,
     return nullptr;
   }
 
+  if (mRecorder && retVal) {
+    RefPtr<DrawTarget> recordDT = new DrawTargetRecording(mRecorder, retVal);
+    return recordDT;
+  }
+
   gfxDebug() << "Failed to create DrawTarget, Type: " << aBackend << " Size: " << aSize;
   // Failed
   return nullptr;
@@ -249,10 +284,12 @@ Factory::CreateScaledFontForNativeFont(const NativeFont &aNativeFont, Float aSiz
     {
       return new ScaledFontDWrite(static_cast<IDWriteFontFace*>(aNativeFont.mFont), aSize);
     }
+#if defined(USE_CAIRO) || defined(USE_SKIA)
   case NATIVE_FONT_GDI_FONT_FACE:
     {
       return new ScaledFontWin(static_cast<LOGFONT*>(aNativeFont.mFont), aSize);
     }
+#endif
 #endif
 #ifdef XP_MACOSX
   case NATIVE_FONT_MAC_FONT_FACE:
@@ -283,6 +320,24 @@ Factory::CreateScaledFontForNativeFont(const NativeFont &aNativeFont, Float aSiz
 }
 
 TemporaryRef<ScaledFont>
+Factory::CreateScaledFontForTrueTypeData(uint8_t *aData, uint32_t aSize,
+                                         uint32_t aFaceIndex, Float aGlyphSize,
+                                         FontType aType)
+{
+  switch (aType) {
+#ifdef WIN32
+  case FONT_DWRITE:
+    {
+      return new ScaledFontDWrite(aData, aSize, aFaceIndex, aGlyphSize);
+    }
+#endif
+  default:
+    gfxWarning() << "Unable to create requested font type from truetype data";
+    return nullptr;
+  }
+}
+
+TemporaryRef<ScaledFont>
 Factory::CreateScaledFontWithCairo(const NativeFont& aNativeFont, Float aSize, cairo_scaled_font_t* aScaledFont)
 {
 #ifdef USE_CAIRO
@@ -306,7 +361,13 @@ Factory::CreateDrawTargetForD3D10Texture(ID3D10Texture2D *aTexture, SurfaceForma
 
   newTarget = new DrawTargetD2D();
   if (newTarget->Init(aTexture, aFormat)) {
-    return newTarget;
+    RefPtr<DrawTarget> retVal = newTarget;
+
+    if (mRecorder) {
+      retVal = new DrawTargetRecording(mRecorder, retVal);
+    }
+
+    return retVal;
   }
 
   gfxWarning() << "Failed to create draw target for D3D10 texture.";
@@ -338,7 +399,13 @@ Factory::CreateDualDrawTargetForD3D10Textures(ID3D10Texture2D *aTextureA,
   RefPtr<DrawTarget> newTarget =
     new DrawTargetDual(newTargetA, newTargetB);
 
-  return newTarget;
+  RefPtr<DrawTarget> retVal = newTarget;
+
+  if (mRecorder) {
+    retVal = new DrawTargetRecording(mRecorder, retVal);
+  }
+
+  return retVal;
 }
 
 void
@@ -374,19 +441,42 @@ Factory::GetD2DVRAMUsageSourceSurface()
   return DrawTargetD2D::mVRAMUsageSS;
 }
 
+void
+Factory::D2DCleanup()
+{
+  DrawTargetD2D::CleanupD2D();
+}
+
 #endif // XP_WIN
+
+#ifdef USE_SKIA_GPU
+TemporaryRef<DrawTarget>
+Factory::CreateSkiaDrawTargetForFBO(unsigned int aFBOID, GrContext *aGrContext, const IntSize &aSize, SurfaceFormat aFormat)
+{
+  RefPtr<DrawTargetSkia> newTarget = new DrawTargetSkia();
+  newTarget->InitWithFBO(aFBOID, aGrContext, aSize, aFormat);
+  return newTarget;
+}
+#endif // USE_SKIA_GPU
 
 TemporaryRef<DrawTarget>
 Factory::CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSize& aSize)
 {
+  RefPtr<DrawTarget> retVal;
+
 #ifdef USE_CAIRO
   RefPtr<DrawTargetCairo> newTarget = new DrawTargetCairo();
+
   if (newTarget->Init(aSurface, aSize)) {
-    return newTarget;
+    retVal = newTarget;
   }
 
+  if (mRecorder && retVal) {
+    RefPtr<DrawTarget> recordDT = new DrawTargetRecording(mRecorder, retVal);
+    return recordDT;
+  }
 #endif
-  return nullptr;
+  return retVal;
 }
 
 TemporaryRef<DataSourceSurface>
@@ -401,6 +491,18 @@ Factory::CreateWrappingDataSourceSurface(uint8_t *aData, int32_t aStride,
   }
 
   return nullptr;
+}
+
+TemporaryRef<DrawEventRecorder>
+Factory::CreateEventRecorderForFile(const char *aFilename)
+{
+  return new DrawEventRecorderFile(aFilename);
+}
+
+void
+Factory::SetGlobalEventRecorder(DrawEventRecorder *aRecorder)
+{
+  mRecorder = aRecorder;
 }
 
 }

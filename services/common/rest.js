@@ -2,20 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef MERGED_COMPARTMENT
+
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
-const EXPORTED_SYMBOLS = [
+this.EXPORTED_SYMBOLS = [
   "RESTRequest",
   "RESTResponse",
   "TokenAuthenticatedRESTRequest"
 ];
 
+#endif
+
+Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://services-crypto/utils.js");
 Cu.import("resource://services-common/log4moz.js");
-Cu.import("resource://services-common/preferences.js");
 Cu.import("resource://services-common/utils.js");
+
+XPCOMUtils.defineLazyModuleGetter(this, "CryptoUtils",
+                                  "resource://services-crypto/utils.js");
 
 const Prefs = new Preferences("services.common.rest.");
 
@@ -74,7 +80,7 @@ const Prefs = new Preferences("services.common.rest.");
  *   });
  *   request.get();
  */
-function RESTRequest(uri) {
+this.RESTRequest = function RESTRequest(uri) {
   this.status = this.NOT_SENT;
 
   // If we don't have an nsIURI object yet, make one. This will throw if
@@ -117,9 +123,10 @@ RESTRequest.prototype = {
   response: null,
 
   /**
-   * nsIRequest load flags. Don't do any caching by default.
+   * nsIRequest load flags. Don't do any caching by default. Don't send user
+   * cookies and such over the wire (Bug 644734).
    */
-  loadFlags: Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING,
+  loadFlags: Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING | Ci.nsIRequest.LOAD_ANONYMOUS,
 
   /**
    * nsIHttpChannel
@@ -323,7 +330,13 @@ RESTRequest.prototype = {
     channel.contentCharset = this.charset;
 
     // Blast off!
-    channel.asyncOpen(this, null);
+    try {
+      channel.asyncOpen(this, null);
+    } catch (ex) {
+      // asyncOpen can throw in a bunch of cases -- e.g., a forbidden port.
+      this._log.warn("Caught an error in asyncOpen: " + CommonUtils.exceptionStr(ex));
+      CommonUtils.nextTick(onComplete.bind(this, ex));
+    }
     this.status = this.SENT;
     this.delayTimeout();
     return this;
@@ -579,7 +592,7 @@ RESTRequest.prototype = {
  * Response object for a RESTRequest. This will be created automatically by
  * the RESTRequest.
  */
-function RESTResponse() {
+this.RESTResponse = function RESTResponse() {
   this._log = Log4Moz.repository.getLogger(this._logName);
   this._log.level =
     Log4Moz.Level[Prefs.get("log.logger.rest.response")];
@@ -670,7 +683,8 @@ RESTResponse.prototype = {
  *        nonce, and ext. See CrytoUtils.computeHTTPMACSHA1 for information on
  *        the purpose of these values.
  */
-function TokenAuthenticatedRESTRequest(uri, authToken, extra) {
+this.TokenAuthenticatedRESTRequest =
+ function TokenAuthenticatedRESTRequest(uri, authToken, extra) {
   RESTRequest.call(this, uri);
   this.authToken = authToken;
   this.extra = extra || {};

@@ -12,6 +12,7 @@
 
 #include "nsIPlatformCharset.h"
 #include "nsIFile.h"
+#include <algorithm>
 
 #ifdef MOZ_TOOLKIT_SEARCH
 #include "nsIBrowserSearchService.h"
@@ -20,6 +21,7 @@
 #include "nsIURIFixup.h"
 #include "nsDefaultURIFixup.h"
 #include "mozilla/Preferences.h"
+#include "nsIObserverService.h"
 
 using namespace mozilla;
 
@@ -37,7 +39,7 @@ nsDefaultURIFixup::~nsDefaultURIFixup()
   /* destructor code */
 }
 
-/* nsIURI createExposableURI (in nsIRUI aURI); */
+/* nsIURI createExposableURI (in nsIURI aURI); */
 NS_IMETHODIMP
 nsDefaultURIFixup::CreateExposableURI(nsIURI *aURI, nsIURI **aReturn)
 {
@@ -47,7 +49,7 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI *aURI, nsIURI **aReturn)
     bool isWyciwyg = false;
     aURI->SchemeIs("wyciwyg", &isWyciwyg);
 
-    nsCAutoString userPass;
+    nsAutoCString userPass;
     aURI->GetUserPass(userPass);
 
     // most of the time we can just AddRef and return
@@ -62,7 +64,7 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI *aURI, nsIURI **aReturn)
     nsCOMPtr<nsIURI> uri;
     if (isWyciwyg)
     {
-        nsCAutoString path;
+        nsAutoCString path;
         nsresult rv = aURI->GetPath(path);
         NS_ENSURE_SUCCESS(rv, rv);
 
@@ -82,7 +84,7 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI *aURI, nsIURI **aReturn)
         }
 
         // Get the charset of the original URI so we can pass it to our fixed up URI.
-        nsCAutoString charset;
+        nsAutoCString charset;
         aURI->GetOriginCharset(charset);
 
         rv = NS_NewURI(getter_AddRefs(uri),
@@ -111,7 +113,8 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI *aURI, nsIURI **aReturn)
 
 /* nsIURI createFixupURI (in nsAUTF8String aURIText, in unsigned long aFixupFlags); */
 NS_IMETHODIMP
-nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupFlags, nsIURI **aURI)
+nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupFlags,
+                                  nsIInputStream **aPostData, nsIURI **aURI)
 {
     NS_ENSURE_ARG(!aStringURI.IsEmpty());
     NS_ENSURE_ARG_POINTER(aURI);
@@ -119,7 +122,7 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
     nsresult rv;
     *aURI = nullptr;
 
-    nsCAutoString uriString(aStringURI);
+    nsAutoCString uriString(aStringURI);
     uriString.Trim(" ");  // Cleanup the empty spaces that might be on each end.
 
     // Eliminate embedded newlines, which single-line text fields now allow:
@@ -129,7 +132,7 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
 
     nsCOMPtr<nsIIOService> ioService = do_GetService(NS_IOSERVICE_CONTRACTID, &rv);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCAutoString scheme;
+    nsAutoCString scheme;
     ioService->ExtractScheme(aStringURI, scheme);
     
     // View-source is a pseudo scheme. We're interested in fixing up the stuff
@@ -145,10 +148,10 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
                                        sizeof("view-source:") - 1,
                                        uriString.Length() -
                                          (sizeof("view-source:") - 1)),
-                             newFixupFlags, getter_AddRefs(uri));
+                             newFixupFlags, aPostData, getter_AddRefs(uri));
         if (NS_FAILED(rv))
             return NS_ERROR_FAILURE;
-        nsCAutoString spec;
+        nsAutoCString spec;
         uri->GetSpec(spec);
         uriString.Assign(NS_LITERAL_CSTRING("view-source:") + spec);
     }
@@ -182,8 +185,8 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
             // slash. The forward slash test is to stop before trampling over
             // URIs which legitimately contain a mix of both forward and
             // backward slashes.
-            nsCAutoString::iterator start;
-            nsCAutoString::iterator end;
+            nsAutoCString::iterator start;
+            nsAutoCString::iterator end;
             uriString.BeginWriting(start);
             uriString.EndWriting(end);
             while (start != end) {
@@ -241,7 +244,7 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
         NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
         if (fixupKeywords)
         {
-            KeywordURIFixup(uriString, aURI);
+            KeywordURIFixup(uriString, aPostData, aURI);
             if(*aURI)
                 return NS_OK;
         }
@@ -280,7 +283,7 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
             hostPos = uriString.Length();
 
         // extract host name
-        nsCAutoString hostSpec;
+        nsAutoCString hostSpec;
         uriString.Left(hostSpec, hostPos);
 
         // insert url spec corresponding to host name
@@ -307,7 +310,7 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
     // keyword match.  This catches search strings with '.' or ':' in them.
     if (!*aURI && fixupKeywords)
     {
-        KeywordToURI(aStringURI, aURI);
+        KeywordToURI(aStringURI, aPostData, aURI);
         if(*aURI)
             return NS_OK;
     }
@@ -316,69 +319,68 @@ nsDefaultURIFixup::CreateFixupURI(const nsACString& aStringURI, uint32_t aFixupF
 }
 
 NS_IMETHODIMP nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
+                                              nsIInputStream **aPostData,
                                               nsIURI **aURI)
 {
     *aURI = nullptr;
+    if (aPostData) {
+        *aPostData = nullptr;
+    }
     NS_ENSURE_STATE(Preferences::GetRootBranch());
 
     // Strip leading "?" and leading/trailing spaces from aKeyword
-    nsCAutoString keyword(aKeyword);
+    nsAutoCString keyword(aKeyword);
     if (StringBeginsWith(keyword, NS_LITERAL_CSTRING("?"))) {
         keyword.Cut(0, 1);
     }
     keyword.Trim(" ");
-
-    nsAdoptingCString url = Preferences::GetLocalizedCString("keyword.URL");
-    if (!url) {
-        // Fall back to a non-localized pref, for backwards compat
-        url = Preferences::GetCString("keyword.URL");
-    }
-
-    // If the pref is set and non-empty, use it.
-    if (!url.IsEmpty()) {
-        // Escape keyword, then prepend URL
-        nsCAutoString spec;
-        if (!NS_Escape(keyword, spec, url_XPAlphas)) {
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
-
-        spec.Insert(url, 0);
-
-        return NS_NewURI(aURI, spec);
-    }
 
 #ifdef MOZ_TOOLKIT_SEARCH
     // Try falling back to the search service's default search engine
     nsCOMPtr<nsIBrowserSearchService> searchSvc = do_GetService("@mozilla.org/browser/search-service;1");
     if (searchSvc) {
         nsCOMPtr<nsISearchEngine> defaultEngine;
-        searchSvc->GetOriginalDefaultEngine(getter_AddRefs(defaultEngine));
+        searchSvc->GetDefaultEngine(getter_AddRefs(defaultEngine));
         if (defaultEngine) {
             nsCOMPtr<nsISearchSubmission> submission;
-            // We want to allow default search plugins to specify alternate
-            // parameters that are specific to keyword searches. For the moment,
-            // do this by first looking for a magic
-            // "application/x-moz-keywordsearch" submission type. In the future,
-            // we should instead use a solution that relies on bug 587780.
-            defaultEngine->GetSubmission(NS_ConvertUTF8toUTF16(keyword),
-                                         NS_LITERAL_STRING("application/x-moz-keywordsearch"),
-                                         getter_AddRefs(submission));
-            // If getting the special x-moz-keywordsearch submission type failed,
-            // fall back to the default response type.
-            if (!submission) {
-                defaultEngine->GetSubmission(NS_ConvertUTF8toUTF16(keyword),
-                                             EmptyString(),
-                                             getter_AddRefs(submission));
-            }
-
+            // We allow default search plugins to specify alternate
+            // parameters that are specific to keyword searches.
+            NS_NAMED_LITERAL_STRING(mozKeywordSearch, "application/x-moz-keywordsearch");
+            bool supportsResponseType = false;
+            defaultEngine->SupportsResponseType(mozKeywordSearch, &supportsResponseType);
+            if (supportsResponseType)
+              defaultEngine->GetSubmission(NS_ConvertUTF8toUTF16(keyword),
+                                           mozKeywordSearch,
+                                           NS_LITERAL_STRING("keyword"),
+                                           getter_AddRefs(submission));
+            else
+              defaultEngine->GetSubmission(NS_ConvertUTF8toUTF16(keyword),
+                                           EmptyString(),
+                                           NS_LITERAL_STRING("keyword"),
+                                           getter_AddRefs(submission));
             if (submission) {
-                // The submission depends on POST data (i.e. the search engine's
-                // "method" is POST), we can't use this engine for keyword
-                // searches
                 nsCOMPtr<nsIInputStream> postData;
                 submission->GetPostData(getter_AddRefs(postData));
-                if (postData) {
-                    return NS_ERROR_NOT_AVAILABLE;
+                if (aPostData) {
+                  postData.forget(aPostData);
+                } else if (postData) {
+                  // The submission specifies POST data (i.e. the search
+                  // engine's "method" is POST), but our caller didn't allow
+                  // passing post data back. No point passing back a URL that
+                  // won't load properly.
+                  return NS_ERROR_FAILURE;
+                }
+
+                // This notification is meant for Firefox Health Report so it
+                // can increment counts from the search engine. The assumption
+                // here is that this keyword/submission will eventually result
+                // in a search. Since we only generate a URI here, there is the
+                // possibility we'll increment the counter without actually
+                // incurring a search. A robust solution would involve currying
+                // the search engine's name through various function calls.
+                nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
+                if (obsSvc) {
+                    obsSvc->NotifyObservers(defaultEngine, "keyword-search", NS_ConvertUTF8toUTF16(keyword).get());
                 }
 
                 return submission->GetUri(aURI);
@@ -410,14 +412,14 @@ bool nsDefaultURIFixup::MakeAlternateURI(nsIURI *aURI)
     }
 
     // Security - URLs with user / password info should NOT be fixed up
-    nsCAutoString userpass;
+    nsAutoCString userpass;
     aURI->GetUserPass(userpass);
     if (!userpass.IsEmpty()) {
         return false;
     }
 
-    nsCAutoString oldHost;
-    nsCAutoString newHost;
+    nsAutoCString oldHost;
+    nsAutoCString newHost;
     aURI->GetHost(oldHost);
 
     // Count the dots
@@ -436,7 +438,7 @@ bool nsDefaultURIFixup::MakeAlternateURI(nsIURI *aURI)
     // Get the prefix and suffix to stick onto the new hostname. By default these
     // are www. & .com but they could be any other value, e.g. www. & .org
 
-    nsCAutoString prefix("www.");
+    nsAutoCString prefix("www.");
     nsAdoptingCString prefPrefix =
         Preferences::GetCString("browser.fixup.alternate.prefix");
     if (prefPrefix)
@@ -444,7 +446,7 @@ bool nsDefaultURIFixup::MakeAlternateURI(nsIURI *aURI)
         prefix.Assign(prefPrefix);
     }
 
-    nsCAutoString suffix(".com");
+    nsAutoCString suffix(".com");
     nsAdoptingCString prefSuffix =
         Preferences::GetCString("browser.fixup.alternate.suffix");
     if (prefSuffix)
@@ -531,7 +533,7 @@ bool nsDefaultURIFixup::IsLikelyFTP(const nsCString &aHostSpec)
 nsresult nsDefaultURIFixup::FileURIFixup(const nsACString& aStringURI, 
                                          nsIURI** aURI)
 {
-    nsCAutoString uriSpecOut;
+    nsAutoCString uriSpecOut;
 
     nsresult rv = ConvertFileToStringURI(aStringURI, uriSpecOut);
     if (NS_SUCCEEDED(rv))
@@ -748,7 +750,7 @@ const char * nsDefaultURIFixup::GetFileSystemCharset()
   if (mFsCharset.IsEmpty())
   {
     nsresult rv;
-    nsCAutoString charset;
+    nsAutoCString charset;
     nsCOMPtr<nsIPlatformCharset> plat(do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv));
     if (NS_SUCCEEDED(rv))
       rv = plat->GetCharset(kPlatformCharsetSel_FileName, charset);
@@ -768,8 +770,9 @@ const char * nsDefaultURIFixup::GetCharsetForUrlBar()
   return charset;
 }
 
-nsresult nsDefaultURIFixup::KeywordURIFixup(const nsACString & aURIString, 
-                                            nsIURI** aURI)
+void nsDefaultURIFixup::KeywordURIFixup(const nsACString & aURIString,
+                                        nsIInputStream **aPostData,
+                                        nsIURI** aURI)
 {
     // These are keyword formatted strings
     // "what is mozilla"
@@ -800,7 +803,7 @@ nsresult nsDefaultURIFixup::KeywordURIFixup(const nsACString & aURIString,
         spaceLoc = uint32_t(kNotFound);
     }
     uint32_t qMarkLoc = uint32_t(aURIString.FindChar('?'));
-    uint32_t quoteLoc = NS_MIN(uint32_t(aURIString.FindChar('"')),
+    uint32_t quoteLoc = std::min(uint32_t(aURIString.FindChar('"')),
                                uint32_t(aURIString.FindChar('\'')));
 
     if (((spaceLoc < dotLoc || quoteLoc < dotLoc) &&
@@ -808,13 +811,8 @@ nsresult nsDefaultURIFixup::KeywordURIFixup(const nsACString & aURIString,
          (spaceLoc < qMarkLoc || quoteLoc < qMarkLoc)) ||
         qMarkLoc == 0)
     {
-        KeywordToURI(aURIString, aURI);
+        KeywordToURI(aURIString, aPostData, aURI);
     }
-
-    if(*aURI)
-        return NS_OK;
-
-    return NS_ERROR_FAILURE;
 }
 
 

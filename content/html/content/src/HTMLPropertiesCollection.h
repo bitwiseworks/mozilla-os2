@@ -7,11 +7,10 @@
 #ifndef HTMLPropertiesCollection_h_
 #define HTMLPropertiesCollection_h_
 
+#include "mozilla/Attributes.h"
 #include "nsDOMLists.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsAutoPtr.h"
-#include "nsIDOMHTMLPropertiesCollection.h"
-#include "nsIDOMPropertyNodeList.h"
 #include "nsCOMArray.h"
 #include "nsIMutationObserver.h"
 #include "nsStubMutationObserver.h"
@@ -19,9 +18,10 @@
 #include "nsINodeList.h"
 #include "nsIHTMLCollection.h"
 #include "nsHashKeys.h"
-#include "nsGenericHTMLElement.h"
+#include "nsRefPtrHashtable.h"
+#include "jsapi.h"
 
-class nsXPCClassInfo;
+class nsGenericHTMLElement;
 class nsIDocument;
 class nsINode;
 
@@ -30,6 +30,7 @@ namespace dom {
 
 class HTMLPropertiesCollection;
 class PropertyNodeList;
+class Element;
 
 class PropertyStringList : public nsDOMStringList
 {
@@ -45,10 +46,9 @@ protected:
   nsRefPtr<HTMLPropertiesCollection> mCollection;
 };
 
-class HTMLPropertiesCollection : public nsIDOMHTMLPropertiesCollection,
+class HTMLPropertiesCollection : public nsIHTMLCollection,
                                  public nsStubMutationObserver,
-                                 public nsWrapperCache,
-                                 public nsIHTMLCollection
+                                 public nsWrapperCache
 {
   friend class PropertyNodeList;
   friend class PropertyStringList;
@@ -56,15 +56,32 @@ public:
   HTMLPropertiesCollection(nsGenericHTMLElement* aRoot);
   virtual ~HTMLPropertiesCollection();
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  using nsWrapperCache::GetWrapperPreserveColor;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
-  NS_IMETHOD NamedItem(const nsAString& aName, nsIDOMNode** aResult);
+  virtual Element* GetElementAt(uint32_t aIndex);
+
   void SetDocument(nsIDocument* aDocument);
-  nsINode* GetParentObject();
+  nsINode* GetParentObject() MOZ_OVERRIDE;
+  virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
+                              mozilla::ErrorResult& error) MOZ_OVERRIDE;
+  PropertyNodeList* NamedItem(const nsAString& aName);
+  PropertyNodeList* NamedGetter(const nsAString& aName, bool& aFound)
+  {
+    aFound = IsSupportedNamedProperty(aName);
+    return aFound ? NamedItem(aName) : nullptr;
+  }
+  nsDOMStringList* Names()
+  {
+    EnsureFresh();
+    return mNames;
+  }
+  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+
+  NS_DECL_NSIDOMHTMLCOLLECTION
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_NSIDOMHTMLPROPERTIESCOLLECTION
 
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
@@ -74,39 +91,42 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(HTMLPropertiesCollection,
                                                          nsIHTMLCollection)
 
-  nsXPCClassInfo* GetClassInfo();
-
 protected:
   // Make sure this collection is up to date, in case the DOM has been mutated.
   void EnsureFresh();
-  
+
   // Crawl the properties of mRoot, following any itemRefs it may have
   void CrawlProperties();
 
   // Crawl startNode and its descendants, looking for items
   void CrawlSubtree(Element* startNode);
 
+  bool IsSupportedNamedProperty(const nsAString& aName)
+  {
+    EnsureFresh();
+    return mNames->ContainsInternal(aName);
+  }
+
   // the items that make up this collection
-  nsTArray<nsRefPtr<nsGenericHTMLElement> > mProperties; 
-  
+  nsTArray<nsRefPtr<nsGenericHTMLElement> > mProperties;
+
   // the itemprop attribute of the properties
-  nsRefPtr<PropertyStringList> mNames; 
- 
-  // The cached PropertyNodeLists that are NamedItems of this collection 
+  nsRefPtr<PropertyStringList> mNames;
+
+  // The cached PropertyNodeLists that are NamedItems of this collection
   nsRefPtrHashtable<nsStringHashKey, PropertyNodeList> mNamedItemEntries;
-  
+
   // The element this collection is rooted at
   nsCOMPtr<nsGenericHTMLElement> mRoot;
-  
+
   // The document mRoot is in, if any
   nsCOMPtr<nsIDocument> mDoc;
-  
+
   // True if there have been DOM modifications since the last EnsureFresh call.
   bool mIsDirty;
 };
 
 class PropertyNodeList : public nsINodeList,
-                         public nsIDOMPropertyNodeList,
                          public nsStubMutationObserver
 {
 public:
@@ -114,17 +134,21 @@ public:
                    nsIContent* aRoot, const nsAString& aName);
   virtual ~PropertyNodeList();
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   void SetDocument(nsIDocument* aDocument);
 
-  NS_DECL_NSIDOMPROPERTYNODELIST
+  void GetValues(JSContext* aCx, nsTArray<JS::Value >& aResult,
+                 ErrorResult& aError);
+
+  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(PropertyNodeList,
                                                          nsINodeList)
+  NS_DECL_NSIDOMNODELIST
 
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
@@ -132,26 +156,26 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
 
   // nsINodeList interface
-  virtual int32_t IndexOf(nsIContent* aContent);
-  virtual nsINode* GetParentObject();
-  
+  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
+  virtual nsINode* GetParentObject() MOZ_OVERRIDE;
+
   void AppendElement(nsGenericHTMLElement* aElement)
   {
     mElements.AppendElement(aElement);
   }
-  
+
   void Clear()
   {
     mElements.Clear();
   }
-  
+
   void SetDirty() { mIsDirty = true; }
- 
+
 protected:
   // Make sure this list is up to date, in case the DOM has been mutated.
   void EnsureFresh();
 
-  // the the name that this list corresponds to 
+  // the the name that this list corresponds to
   nsString mName;
 
   // the document mParent is in, if any
@@ -172,4 +196,4 @@ protected:
 
 } // namespace dom
 } // namespace mozilla
-#endif // HTMLPropertiesCollection_h_ 
+#endif // HTMLPropertiesCollection_h_

@@ -9,14 +9,14 @@ typedef InfallibleTArray<nsIntRegion> RegionArray;
 namespace mozilla {
 namespace _ipdltest {
 
-static const uint32 nactors = 10;
+static const uint32_t nactors = 10;
 
 #define test_assert(_cond, _msg) \
     if (!(_cond)) fail(_msg)
 
 template<typename T>
 static void
-assert_arrays_equal(InfallibleTArray<T> a, InfallibleTArray<T> b)
+assert_arrays_equal(const InfallibleTArray<T>& a, const InfallibleTArray<T>& b)
 {
     test_assert(a == b, "arrays equal");
 }
@@ -49,7 +49,7 @@ TestDataStructuresParent::~TestDataStructuresParent()
 void
 TestDataStructuresParent::Main()
 {
-    for (uint32 i = 0; i < nactors; ++i)
+    for (uint32_t i = 0; i < nactors; ++i)
         if (!SendPTestDataStructuresSubConstructor(i))
             fail("can't alloc actor");
 
@@ -88,7 +88,7 @@ bool TestDataStructuresParent::RecvTest2(
         InfallibleTArray<PTestDataStructuresSubParent*>* o1)
 {
     test_assert(nactors == i1.Length(), "wrong #actors");
-    for (uint32 i = 0; i < i1.Length(); ++i)
+    for (uint32_t i = 0; i < i1.Length(); ++i)
         test_assert(i == Cast(i1[i]).mI, "wrong mI value");
     *o1 = i1;
     return true;
@@ -179,13 +179,13 @@ bool TestDataStructuresParent::RecvTest6(
     IntDoubleArrays id1(i1[0]);
     test_assert(42 == id1.get_int(), "wrong value");
 
-    InfallibleTArray<int> i2a = i1[1].get_ArrayOfint();
+    InfallibleTArray<int> i2a(i1[1].get_ArrayOfint());
     test_assert(3 == i2a.Length(), "wrong length");
     test_assert(1 == i2a[0], "wrong value");
     test_assert(2 == i2a[1], "wrong value");
     test_assert(3 == i2a[2], "wrong value");
 
-    InfallibleTArray<double> i3a = i1[2].get_ArrayOfdouble();
+    InfallibleTArray<double> i3a(i1[2].get_ArrayOfdouble());
     test_assert(3 == i3a.Length(), "wrong length");
     test_assert(1.0 == i3a[0], "wrong value");
     test_assert(2.0 == i3a[1], "wrong value");
@@ -500,7 +500,7 @@ TestDataStructuresChild::RecvStart()
         Test18();
     }
 
-    for (uint32 i = 0; i < nactors; ++i)
+    for (uint32_t i = 0; i < nactors; ++i)
         if (!PTestDataStructuresSubChild::Send__delete__(mKids[i]))
             fail("can't send dtor");
 
@@ -618,8 +618,8 @@ TestDataStructuresChild::Test6()
 
     test_assert(3 == o1.Length(), "wrong length");
     IntDoubleArrays od1(o1[0]);
-    InfallibleTArray<int> od2 = o1[1].get_ArrayOfint();
-    InfallibleTArray<double> od3 = o1[2].get_ArrayOfdouble();
+    InfallibleTArray<int> od2(o1[1].get_ArrayOfint());
+    InfallibleTArray<double> od3(o1[2].get_ArrayOfdouble());
 
     test_assert(42 == od1.get_int(), "wrong value");
     assert_arrays_equal(id2, od2);

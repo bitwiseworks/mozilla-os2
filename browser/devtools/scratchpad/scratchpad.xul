@@ -8,21 +8,24 @@
 <!ENTITY % scratchpadDTD SYSTEM "chrome://browser/locale/devtools/scratchpad.dtd" >
  %scratchpadDTD;
 ]>
-<?xml-stylesheet href="chrome://global/skin/global.css" type="text/css"?>
+<?xml-stylesheet href="chrome://global/skin/global.css"?>
+<?xml-stylesheet href="chrome://browser/skin/devtools/common.css"?>
+<?xml-stylesheet href="chrome://browser/skin/devtools/scratchpad.css"?>
 <?xul-overlay href="chrome://global/content/editMenuOverlay.xul"?>
-<?xul-overlay href="chrome://browser/content/source-editor-overlay.xul"?>
+<?xul-overlay href="chrome://browser/content/devtools/source-editor-overlay.xul"?>
 
 <window id="main-window"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         title="&window.title;"
         windowtype="devtools:scratchpad"
         macanimationtype="document"
+        fullscreenbutton="true"
         screenX="4" screenY="4"
         width="640" height="480"
         persist="screenX screenY width height sizemode">
 
 <script type="application/javascript" src="chrome://global/content/globalOverlay.js"/>
-<script type="application/javascript" src="chrome://browser/content/scratchpad.js"/>
+<script type="application/javascript" src="chrome://browser/content/devtools/scratchpad.js"/>
 
 <commandset id="editMenuCommands"/>
 <commandset id="sourceEditorCommands"/>
@@ -33,6 +36,7 @@
   <command id="sp-cmd-clearRecentFiles" oncommand="Scratchpad.clearRecentFiles();"/>
   <command id="sp-cmd-save" oncommand="Scratchpad.saveFile();"/>
   <command id="sp-cmd-saveas" oncommand="Scratchpad.saveFileAs();"/>
+  <command id="sp-cmd-revert" oncommand="Scratchpad.promptRevert();" disabled="true"/>
 
   <!-- TODO: bug 650340 - implement printFile()
   <command id="sp-cmd-printFile" oncommand="Scratchpad.printFile();" disabled="true"/>
@@ -44,10 +48,12 @@
   <command id="sp-cmd-display" oncommand="Scratchpad.display();"/>
   <command id="sp-cmd-contentContext" oncommand="Scratchpad.setContentContext();"/>
   <command id="sp-cmd-browserContext" oncommand="Scratchpad.setBrowserContext();" disabled="true"/>
+  <command id="sp-cmd-reloadAndRun" oncommand="Scratchpad.reloadAndRun();"/>
   <command id="sp-cmd-resetContext" oncommand="Scratchpad.resetContext();"/>
   <command id="sp-cmd-errorConsole" oncommand="Scratchpad.openErrorConsole();" disabled="true"/>
   <command id="sp-cmd-webConsole" oncommand="Scratchpad.openWebConsole();"/>
   <command id="sp-cmd-documentationLink" oncommand="Scratchpad.openDocumentationPage();"/>
+  <command id="sp-cmd-hideSidebar" oncommand="Scratchpad.sidebar.hide();"/>
 </commandset>
 
 <keyset id="sourceEditorKeys"/>
@@ -89,14 +95,17 @@
        key="&display.key;"
        command="sp-cmd-display"
        modifiers="accel"/>
+  <key id="sp-key-reloadAndRun"
+       key="&reloadAndRun.key;"
+       command="sp-cmd-reloadAndRun"
+       modifiers="accel,shift"/>
   <key id="sp-key-errorConsole"
        key="&errorConsoleCmd.commandkey;"
        command="sp-cmd-errorConsole"
        modifiers="accel,shift"/>
-  <key id="sp-key-webConsole"
-       key="&webConsoleCmd.commandkey;"
-       command="sp-cmd-webConsole"
-       modifiers="accel,shift"/>
+  <key id="sp-key-hideSidebar"
+       keycode="VK_ESCAPE"
+       command="sp-cmd-hideSidebar"/>
   <key id="key_openHelp"
        keycode="VK_F1"
        command="sp-cmd-documentationLink"/>
@@ -132,6 +141,10 @@
                 label="&saveFileAsCmd.label;"
                 accesskey="&saveFileAsCmd.accesskey;"
                 command="sp-cmd-saveas"/>
+      <menuitem id="sp-menu-revert"
+                label="&revertCmd.label;"
+                accesskey="&revertCmd.accesskey;"
+                command="sp-cmd-revert"/>
       <menuseparator/>
 
       <!-- TODO: bug 650340 - implement printFile
@@ -189,6 +202,11 @@
                 key="sp-key-display"
                 command="sp-cmd-display"/>
       <menuseparator/>
+      <menuitem id="sp-text-reloadAndRun"
+                label="&reloadAndRun.label;"
+                key="sp-key-reloadAndRun"
+                accesskey="&reloadAndRun.accesskey;"
+                command="sp-cmd-reloadAndRun"/>
       <menuitem id="sp-text-resetContext"
                 label="&resetContext2.label;"
                 accesskey="&resetContext2.accesskey;"
@@ -268,7 +286,16 @@
 </popupset>
 
 <notificationbox id="scratchpad-notificationbox" flex="1">
-  <hbox id="scratchpad-editor" flex="1"/>
+  <hbox flex="1">
+    <vbox id="scratchpad-editor" flex="1"/>
+    <splitter class="devtools-side-splitter"/>
+    <tabbox id="scratchpad-sidebar" class="devtools-sidebar-tabs"
+                                    width="300"
+                                    hidden="true">
+      <tabs/>
+      <tabpanels flex="1"/>
+    </tabbox>
+  </hbox>
 </notificationbox>
 
 </window>

@@ -9,21 +9,17 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = android
-LIBRARY_NAME     = android
 FORCE_STATIC_LIB = 1
 STL_FLAGS=
+FAIL_ON_WARNINGS := 1
 
 DEFINES += \
   -DANDROID_PACKAGE_NAME='"$(ANDROID_PACKAGE_NAME)"' \
   $(NULL)
 
-CPPSRCS = \
-  nsGeckoUtils.cpp \
-  APKOpen.cpp \
-  SQLiteBridge.cpp \
-	NSSBridge.cpp \
-  $(NULL)
+ifdef MOZ_FOLD_LIBS
+DEFINES += -DMOZ_FOLD_LIBS
+endif
 
 LOCAL_INCLUDES += -I$(DEPTH)/build
 LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/build
@@ -40,7 +36,6 @@ LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/nss
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/util
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/softoken
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/pk11wrap
-LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/cmd/ecperf
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/pkcs7
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/certdb
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/cryptohi
@@ -50,17 +45,6 @@ LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/pki
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/smime
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/freebl/
 LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/lib/ssl
-LOCAL_INCLUDES += -I$(topsrcdir)/security/nss/cmd/lib/
-
-ifdef MOZ_OLD_LINKER
-DEFINES += -DMOZ_OLD_LINKER
-LOCAL_INCLUDES += -I$(topsrcdir)/other-licenses/android
-ifeq ($(CPU_ARCH),arm)
-DEFINES += -DANDROID_ARM_LINKER
-endif
-endif
-
-EXPORTS = APKOpen.h
 
 include $(topsrcdir)/config/rules.mk
 

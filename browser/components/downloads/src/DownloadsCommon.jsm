@@ -6,7 +6,7 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = [
+this.EXPORTED_SYMBOLS = [
   "DownloadsCommon",
 ];
 
@@ -47,18 +47,28 @@ const Cr = Components.results;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "gBrowserGlue",
-                                   "@mozilla.org/browser/browserglue;1",
-                                   "nsIBrowserGlue");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadUtils",
+                                  "resource://gre/modules/DownloadUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow",
+                                  "resource:///modules/RecentWindow.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+                                  "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadsLogger",
+                                  "resource:///modules/DownloadsLogger.jsm");
 
 const nsIDM = Ci.nsIDownloadManager;
 
 const kDownloadsStringBundleUrl =
   "chrome://browser/locale/downloads/downloads.properties";
+
+const kPrefBdmScanWhenDone =   "browser.download.manager.scanWhenDone";
+const kPrefBdmAlertOnExeOpen = "browser.download.manager.alertOnEXEOpen";
 
 const kDownloadsStringsRequiringFormatting = {
   sizeWithUnits: true,
@@ -72,13 +82,53 @@ const kDownloadsStringsRequiringFormatting = {
 };
 
 const kDownloadsStringsRequiringPluralForm = {
-  showMoreDownloads: true
+  otherDownloads2: true
 };
 
 XPCOMUtils.defineLazyGetter(this, "DownloadsLocalFileCtor", function () {
   return Components.Constructor("@mozilla.org/file/local;1",
                                 "nsILocalFile", "initWithPath");
 });
+
+const kPartialDownloadSuffix = ".part";
+
+const kPrefBranch = Services.prefs.getBranch("browser.download.");
+
+let PrefObserver = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
+                                         Ci.nsISupportsWeakReference]),
+  getPref: function PO_getPref(name) {
+    try {
+      switch (typeof this.prefs[name]) {
+        case "boolean":
+          return kPrefBranch.getBoolPref(name);
+      }
+    } catch (ex) { }
+    return this.prefs[name];
+  },
+  observe: function PO_observe(aSubject, aTopic, aData) {
+    if (this.prefs.hasOwnProperty(aData)) {
+      return this[aData] = this.getPref(aData);
+    }
+  },
+  register: function PO_register(prefs) {
+    this.prefs = prefs;
+    kPrefBranch.addObserver("", this, true);
+    for (let key in prefs) {
+      let name = key;
+      XPCOMUtils.defineLazyGetter(this, name, function () {
+        return PrefObserver.getPref(name);
+      });
+    }
+  },
+};
+
+PrefObserver.register({
+  // prefName: defaultValue
+  debug: false,
+  animateNotifications: true
+});
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsCommon
@@ -87,7 +137,28 @@ XPCOMUtils.defineLazyGetter(this, "DownloadsLocalFileCtor", function () {
  * This object is exposed directly to the consumers of this JavaScript module,
  * and provides shared methods for all the instances of the user interface.
  */
-const DownloadsCommon = {
+this.DownloadsCommon = {
+  log: function DC_log(...aMessageArgs) {
+    delete this.log;
+    this.log = function DC_log(...aMessageArgs) {
+      if (!PrefObserver.debug) {
+        return;
+      }
+      DownloadsLogger.log.apply(DownloadsLogger, aMessageArgs);
+    }
+    this.log.apply(this, aMessageArgs);
+  },
+
+  error: function DC_error(...aMessageArgs) {
+    delete this.error;
+    this.error = function DC_error(...aMessageArgs) {
+      if (!PrefObserver.debug) {
+        return;
+      }
+      DownloadsLogger.reportError.apply(DownloadsLogger, aMessageArgs);
+    }
+    this.error.apply(this, aMessageArgs);
+  },
   /**
    * Returns an object whose keys are the string names from the downloads string
    * bundle, and whose values are either the translated strings or functions
@@ -169,20 +240,334 @@ const DownloadsCommon = {
   },
 
   /**
-   * Returns a reference to the DownloadsData singleton.
-   *
-   * This does not need to be a lazy getter, since no initialization is required
-   * at present.
+   * Indicates whether we should show visual notification on the indicator
+   * when a download event is triggered.
    */
-  get data() DownloadsData,
+  get animateNotifications()
+  {
+    return PrefObserver.animateNotifications;
+  },
 
   /**
-   * Returns a reference to the DownloadsData singleton.
+   * Get access to one of the DownloadsData or PrivateDownloadsData objects,
+   * depending on the privacy status of the window in question.
    *
-   * This does not need to be a lazy getter, since no initialization is required
-   * at present.
+   * @param aWindow
+   *        The browser window which owns the download button.
    */
-  get indicatorData() DownloadsIndicatorData
+  getData: function DC_getData(aWindow) {
+    if (PrivateBrowsingUtils.isWindowPrivate(aWindow)) {
+      return PrivateDownloadsData;
+    } else {
+      return DownloadsData;
+    }
+  },
+
+  /**
+   * Initializes the data link for both the private and non-private downloads
+   * data objects.
+   *
+   * @param aDownloadManagerService
+   *        Reference to the service implementing nsIDownloadManager.  We need
+   *        this because getService isn't available for us when this method is
+   *        called, and we must ensure to register our listeners before the
+   *        getService call for the Download Manager returns.
+   */
+  initializeAllDataLinks: function DC_initializeAllDataLinks(aDownloadManagerService) {
+    DownloadsData.initializeDataLink(aDownloadManagerService);
+    PrivateDownloadsData.initializeDataLink(aDownloadManagerService);
+  },
+
+  /**
+   * Terminates the data link for both the private and non-private downloads
+   * data objects.
+   */
+  terminateAllDataLinks: function DC_terminateAllDataLinks() {
+    DownloadsData.terminateDataLink();
+    PrivateDownloadsData.terminateDataLink();
+  },
+
+  /**
+   * Reloads the specified kind of downloads from the non-private store.
+   * This method must only be called when Private Browsing Mode is disabled.
+   *
+   * @param aActiveOnly
+   *        True to load only active downloads from the database.
+   */
+  ensureAllPersistentDataLoaded:
+  function DC_ensureAllPersistentDataLoaded(aActiveOnly) {
+    DownloadsData.ensurePersistentDataLoaded(aActiveOnly);
+  },
+
+  /**
+   * Get access to one of the DownloadsIndicatorData or
+   * PrivateDownloadsIndicatorData objects, depending on the privacy status of
+   * the window in question.
+   */
+  getIndicatorData: function DC_getIndicatorData(aWindow) {
+    if (PrivateBrowsingUtils.isWindowPrivate(aWindow)) {
+      return PrivateDownloadsIndicatorData;
+    } else {
+      return DownloadsIndicatorData;
+    }
+  },
+
+  /**
+   * Returns a reference to the DownloadsSummaryData singleton - creating one
+   * in the process if one hasn't been instantiated yet.
+   *
+   * @param aWindow
+   *        The browser window which owns the download button.
+   * @param aNumToExclude
+   *        The number of items on the top of the downloads list to exclude
+   *        from the summary.
+   */
+  getSummary: function DC_getSummary(aWindow, aNumToExclude)
+  {
+    if (PrivateBrowsingUtils.isWindowPrivate(aWindow)) {
+      if (this._privateSummary) {
+        return this._privateSummary;
+      }
+      return this._privateSummary = new DownloadsSummaryData(true, aNumToExclude);
+    } else {
+      if (this._summary) {
+        return this._summary;
+      }
+      return this._summary = new DownloadsSummaryData(false, aNumToExclude);
+    }
+  },
+  _summary: null,
+  _privateSummary: null,
+
+  /**
+   * Given an iterable collection of DownloadDataItems, generates and returns
+   * statistics about that collection.
+   *
+   * @param aDataItems An iterable collection of DownloadDataItems.
+   *
+   * @return Object whose properties are the generated statistics. Currently,
+   *         we return the following properties:
+   *
+   *         numActive       : The total number of downloads.
+   *         numPaused       : The total number of paused downloads.
+   *         numScanning     : The total number of downloads being scanned.
+   *         numDownloading  : The total number of downloads being downloaded.
+   *         totalSize       : The total size of all downloads once completed.
+   *         totalTransferred: The total amount of transferred data for these
+   *                           downloads.
+   *         slowestSpeed    : The slowest download rate.
+   *         rawTimeLeft     : The estimated time left for the downloads to
+   *                           complete.
+   *         percentComplete : The percentage of bytes successfully downloaded.
+   */
+  summarizeDownloads: function DC_summarizeDownloads(aDataItems)
+  {
+    let summary = {
+      numActive: 0,
+      numPaused: 0,
+      numScanning: 0,
+      numDownloading: 0,
+      totalSize: 0,
+      totalTransferred: 0,
+      // slowestSpeed is Infinity so that we can use Math.min to
+      // find the slowest speed. We'll set this to 0 afterwards if
+      // it's still at Infinity by the time we're done iterating all
+      // dataItems.
+      slowestSpeed: Infinity,
+      rawTimeLeft: -1,
+      percentComplete: -1
+    }
+
+    for (let dataItem of aDataItems) {
+      summary.numActive++;
+      switch (dataItem.state) {
+        case nsIDM.DOWNLOAD_PAUSED:
+          summary.numPaused++;
+          break;
+        case nsIDM.DOWNLOAD_SCANNING:
+          summary.numScanning++;
+          break;
+        case nsIDM.DOWNLOAD_DOWNLOADING:
+          summary.numDownloading++;
+          if (dataItem.maxBytes > 0 && dataItem.speed > 0) {
+            let sizeLeft = dataItem.maxBytes - dataItem.currBytes;
+            summary.rawTimeLeft = Math.max(summary.rawTimeLeft,
+                                           sizeLeft / dataItem.speed);
+            summary.slowestSpeed = Math.min(summary.slowestSpeed,
+                                            dataItem.speed);
+          }
+          break;
+      }
+      // Only add to total values if we actually know the download size.
+      if (dataItem.maxBytes > 0 &&
+          dataItem.state != nsIDM.DOWNLOAD_CANCELED &&
+          dataItem.state != nsIDM.DOWNLOAD_FAILED) {
+        summary.totalSize += dataItem.maxBytes;
+        summary.totalTransferred += dataItem.currBytes;
+      }
+    }
+
+    if (summary.numActive != 0 && summary.totalSize != 0 &&
+        summary.numActive != summary.numScanning) {
+      summary.percentComplete = (summary.totalTransferred /
+                                 summary.totalSize) * 100;
+    }
+
+    if (summary.slowestSpeed == Infinity) {
+      summary.slowestSpeed = 0;
+    }
+
+    return summary;
+  },
+
+  /**
+   * If necessary, smooths the estimated number of seconds remaining for one
+   * or more downloads to complete.
+   *
+   * @param aSeconds
+   *        Current raw estimate on number of seconds left for one or more
+   *        downloads. This is a floating point value to help get sub-second
+   *        accuracy for current and future estimates.
+   */
+  smoothSeconds: function DC_smoothSeconds(aSeconds, aLastSeconds)
+  {
+    // We apply an algorithm similar to the DownloadUtils.getTimeLeft function,
+    // though tailored to a single time estimation for all downloads.  We never
+    // apply sommothing if the new value is less than half the previous value.
+    let shouldApplySmoothing = aLastSeconds >= 0 &&
+                               aSeconds > aLastSeconds / 2;
+    if (shouldApplySmoothing) {
+      // Apply hysteresis to favor downward over upward swings.  Trust only 30%
+      // of the new value if lower, and 10% if higher (exponential smoothing).
+      let (diff = aSeconds - aLastSeconds) {
+        aSeconds = aLastSeconds + (diff < 0 ? .3 : .1) * diff;
+      }
+
+      // If the new time is similar, reuse something close to the last time
+      // left, but subtract a little to provide forward progress.
+      let diff = aSeconds - aLastSeconds;
+      let diffPercent = diff / aLastSeconds * 100;
+      if (Math.abs(diff) < 5 || Math.abs(diffPercent) < 5) {
+        aSeconds = aLastSeconds - (diff < 0 ? .4 : .2);
+      }
+    }
+
+    // In the last few seconds of downloading, we are always subtracting and
+    // never adding to the time left.  Ensure that we never fall below one
+    // second left until all downloads are actually finished.
+    return aLastSeconds = Math.max(aSeconds, 1);
+  },
+
+  /**
+   * Opens a downloaded file.
+   * If you've a dataItem, you should call dataItem.openLocalFile.
+   * @param aFile
+   *        the downloaded file to be opened.
+   * @param aMimeInfo
+   *        the mime type info object.  May be null.
+   * @param aOwnerWindow
+   *        the window with which this action is associated.
+   */
+  openDownloadedFile: function DC_openDownloadedFile(aFile, aMimeInfo, aOwnerWindow) {
+    if (!(aFile instanceof Ci.nsIFile))
+      throw new Error("aFile must be a nsIFile object");
+    if (aMimeInfo && !(aMimeInfo instanceof Ci.nsIMIMEInfo))
+      throw new Error("Invalid value passed for aMimeInfo");
+    if (!(aOwnerWindow instanceof Ci.nsIDOMWindow))
+      throw new Error("aOwnerWindow must be a dom-window object");
+
+    // Confirm opening executable files if required.
+    if (aFile.isExecutable()) {
+      let showAlert = true;
+      try {
+        showAlert = Services.prefs.getBoolPref(kPrefBdmAlertOnExeOpen);
+      } catch (ex) { }
+
+      // On Vista and above, we rely on native security prompting for
+      // downloaded content unless it's disabled.
+      if (DownloadsCommon.isWinVistaOrHigher) {
+        try {
+          if (Services.prefs.getBoolPref(kPrefBdmScanWhenDone)) {
+            showAlert = false;
+          }
+        } catch (ex) { }
+      }
+
+      if (showAlert) {
+        let name = aFile.leafName;
+        let message =
+          DownloadsCommon.strings.fileExecutableSecurityWarning(name, name);
+        let title =
+          DownloadsCommon.strings.fileExecutableSecurityWarningTitle;
+        let dontAsk =
+          DownloadsCommon.strings.fileExecutableSecurityWarningDontAsk;
+
+        let checkbox = { value: false };
+        let open = Services.prompt.confirmCheck(aOwnerWindow, title, message,
+                                                dontAsk, checkbox);
+        if (!open) {
+          return;
+        }
+
+        Services.prefs.setBoolPref(kPrefBdmAlertOnExeOpen,
+                                   !checkbox.value);
+      }
+    }
+
+    // Actually open the file.
+    try {
+      if (aMimeInfo && aMimeInfo.preferredAction == aMimeInfo.useHelperApp) {
+        aMimeInfo.launchWithFile(aFile);
+        return;
+      }
+    }
+    catch(ex) { }
+
+    // If either we don't have the mime info, or the preferred action failed,
+    // attempt to launch the file directly.
+    try {
+      aFile.launch();
+    }
+    catch(ex) {
+      // If launch fails, try sending it through the system's external "file:"
+      // URL handler.
+      Cc["@mozilla.org/uriloader/external-protocol-service;1"]
+        .getService(Ci.nsIExternalProtocolService)
+        .loadUrl(NetUtil.newURI(aFile));
+    }
+  },
+
+  /**
+   * Show a donwloaded file in the system file manager.
+   * If you have a dataItem, use dataItem.showLocalFile.
+   *
+   * @param aFile
+   *        a downloaded file.
+   */
+  showDownloadedFile: function DC_showDownloadedFile(aFile) {
+    if (!(aFile instanceof Ci.nsIFile))
+      throw new Error("aFile must be a nsIFile object");
+    try {
+      // Show the directory containing the file and select the file.
+      aFile.reveal();
+    } catch (ex) {
+      // If reveal fails for some reason (e.g., it's not implemented on unix
+      // or the file doesn't exist), try using the parent if we have it.
+      let parent = aFile.parent;
+      if (parent) {
+        try {
+          // Open the parent directory to show where the file should be.
+          parent.launch();
+        } catch (ex) {
+          // If launch also fails (probably because it's not implemented), let
+          // the OS handler try to open the parent.
+          Cc["@mozilla.org/uriloader/external-protocol-service;1"]
+            .getService(Ci.nsIExternalProtocolService)
+            .loadUrl(NetUtil.newURI(parent));
+        }
+      }
+    }
+  }
 };
 
 /**
@@ -214,8 +599,27 @@ XPCOMUtils.defineLazyGetter(DownloadsCommon, "isWinVistaOrHigher", function () {
  * service.  Consumers will see an empty list of downloads until the service is
  * actually started.  This is useful to display a neutral progress indicator in
  * the main browser window until the autostart timeout elapses.
+ *
+ * Note that DownloadsData and PrivateDownloadsData are two equivalent singleton
+ * objects, one accessing non-private downloads, and the other accessing private
+ * ones.
  */
-const DownloadsData = {
+function DownloadsDataCtor(aPrivate) {
+  this._isPrivate = aPrivate;
+
+  // This Object contains all the available DownloadsDataItem objects, indexed by
+  // their globally unique identifier.  The identifiers of downloads that have
+  // been removed from the Download Manager data are still present, however the
+  // associated objects are replaced with the value "null".  This is required to
+  // prevent race conditions when populating the list asynchronously.
+  this.dataItems = {};
+
+  // Array of view objects that should be notified when the available download
+  // data changes.
+  this._views = [];
+}
+
+DownloadsDataCtor.prototype = {
   /**
    * Starts receiving events for current downloads.
    *
@@ -228,10 +632,8 @@ const DownloadsData = {
   initializeDataLink: function DD_initializeDataLink(aDownloadManagerService)
   {
     // Start receiving real-time events.
-    aDownloadManagerService.addListener(this);
-    Services.obs.addObserver(this, "download-manager-remove-download", false);
-    Services.obs.addObserver(this, "download-manager-database-type-changed",
-                             false);
+    aDownloadManagerService.addPrivacyAwareListener(this);
+    Services.obs.addObserver(this, "download-manager-remove-download-guid", false);
   },
 
   /**
@@ -242,19 +644,12 @@ const DownloadsData = {
     this._terminateDataAccess();
 
     // Stop receiving real-time events.
-    Services.obs.removeObserver(this, "download-manager-database-type-changed");
-    Services.obs.removeObserver(this, "download-manager-remove-download");
+    Services.obs.removeObserver(this, "download-manager-remove-download-guid");
     Services.downloads.removeListener(this);
   },
 
   //////////////////////////////////////////////////////////////////////////////
   //// Registration of views
-
-  /**
-   * Array of view objects that should be notified when the available download
-   * data changes.
-   */
-  _views: [],
 
   /**
    * Adds an object to be notified when the available download data changes.
@@ -295,12 +690,12 @@ const DownloadsData = {
     // Indicate to the view that a batch loading operation is in progress.
     aView.onDataLoadStarting();
 
-    // Sort backwards by download identifier, ensuring that the most recent
+    // Sort backwards by start time, ensuring that the most recent
     // downloads are added first regardless of their state.
     let loadedItemsArray = [dataItem
                             for each (dataItem in this.dataItems)
                             if (dataItem)];
-    loadedItemsArray.sort(function(a, b) b.downloadId - a.downloadId);
+    loadedItemsArray.sort(function(a, b) b.startTime - a.startTime);
     loadedItemsArray.forEach(
       function (dataItem) aView.onDataItemAdded(dataItem, false)
     );
@@ -313,21 +708,6 @@ const DownloadsData = {
 
   //////////////////////////////////////////////////////////////////////////////
   //// In-memory downloads data store
-
-  /**
-   * Object containing all the available DownloadsDataItem objects, indexed by
-   * their numeric download identifier.  The identifiers of downloads that have
-   * been removed from the Download Manager data are still present, however the
-   * associated objects are replaced with the value "null".  This is required to
-   * prevent race conditions when populating the list asynchronously.
-   */
-  dataItems: {},
-
-  /**
-   * While operating in Private Browsing Mode, persistent data items are parked
-   * here until we return to the normal mode.
-   */
-  _persistentDataItems: {},
 
   /**
    * Clears the loaded data.
@@ -356,7 +736,7 @@ const DownloadsData = {
    *        if it doesn't already exist in the list.  This should implement
    *        either nsIDownload or mozIStorageRow.  If the item exists, this
    *        argument is only used to retrieve the download identifier.
-   * @param aMayReuseId
+   * @param aMayReuseGUID
    *        If false, indicates that the download should not be added if a
    *        download with the same identifier was removed in the meantime.  This
    *        ensures that, while loading the list asynchronously, downloads that
@@ -365,21 +745,22 @@ const DownloadsData = {
    * @return New or existing data item, or null if the item was deleted from the
    *         list of available downloads.
    */
-  _getOrAddDataItem: function DD_getOrAddDataItem(aSource, aMayReuseId)
+  _getOrAddDataItem: function DD_getOrAddDataItem(aSource, aMayReuseGUID)
   {
-    let downloadId = (aSource instanceof Ci.nsIDownload)
-                     ? aSource.id
-                     : aSource.getResultByName("id");
-    if (downloadId in this.dataItems) {
-      let existingItem = this.dataItems[downloadId];
-      if (existingItem || !aMayReuseId) {
+    let downloadGuid = (aSource instanceof Ci.nsIDownload)
+                       ? aSource.guid
+                       : aSource.getResultByName("guid");
+    if (downloadGuid in this.dataItems) {
+      let existingItem = this.dataItems[downloadGuid];
+      if (existingItem || !aMayReuseGUID) {
         // Returns null if the download was removed and we can't reuse the item.
         return existingItem;
       }
     }
-
+    DownloadsCommon.log("Creating a new DownloadsDataItem with downloadGuid =",
+                        downloadGuid);
     let dataItem = new DownloadsDataItem(aSource);
-    this.dataItems[downloadId] = dataItem;
+    this.dataItems[downloadGuid] = dataItem;
 
     // Create the view items before returning.
     let addToStartOfList = aSource instanceof Ci.nsIDownload;
@@ -398,11 +779,11 @@ const DownloadsData = {
   {
     if (aDownloadId in this.dataItems) {
       let dataItem = this.dataItems[aDownloadId];
+      this.dataItems[aDownloadId] = null;
       this._views.forEach(
         function (view) view.onDataItemRemoved(dataItem)
       );
     }
-    this.dataItems[aDownloadId] = null;
   },
 
   //////////////////////////////////////////////////////////////////////////////
@@ -437,6 +818,11 @@ const DownloadsData = {
   ensurePersistentDataLoaded:
   function DD_ensurePersistentDataLoaded(aActiveOnly)
   {
+    if (this == PrivateDownloadsData) {
+      Cu.reportError("ensurePersistentDataLoaded should not be called on PrivateDownloadsData");
+      return;
+    }
+
     if (this._pendingStatement) {
       // We are already in the process of reloading all downloads.
       return;
@@ -444,6 +830,7 @@ const DownloadsData = {
 
     if (aActiveOnly) {
       if (this._loadState == this.kLoadNone) {
+        DownloadsCommon.log("Loading only active downloads from the persistence database");
         // Indicate to the views that a batch loading operation is in progress.
         this._views.forEach(
           function (view) view.onDataLoadStarting()
@@ -462,6 +849,7 @@ const DownloadsData = {
         this._views.forEach(
           function (view) view.onDataLoadCompleted()
         );
+        DownloadsCommon.log("Active downloads done loading.");
       }
     } else {
       if (this._loadState != this.kLoadAll) {
@@ -469,11 +857,13 @@ const DownloadsData = {
         // columns are read in the _initFromDataRow method of DownloadsDataItem.
         // Order by descending download identifier so that the most recent
         // downloads are notified first to the listening views.
-        let statement = Services.downloads.DBConnection.createAsyncStatement(
-          "SELECT id, target, name, source, referrer, state, "
+        DownloadsCommon.log("Loading all downloads from the persistence database.");
+        let dbConnection = Services.downloads.DBConnection;
+        let statement = dbConnection.createAsyncStatement(
+          "SELECT guid, target, name, source, referrer, state, "
         +        "startTime, endTime, currBytes, maxBytes "
         + "FROM moz_downloads "
-        + "ORDER BY id DESC"
+        + "ORDER BY startTime DESC"
         );
         try {
           this._pendingStatement = statement.executeAsync(this);
@@ -518,12 +908,14 @@ const DownloadsData = {
 
   handleError: function DD_handleError(aError)
   {
-    Cu.reportError("Database statement execution error (" + aError.result +
-                   "): " + aError.message);
+    DownloadsCommon.error("Database statement execution error (",
+                          aError.result, "): ", aError.message);
   },
 
   handleCompletion: function DD_handleCompletion(aReason)
   {
+    DownloadsCommon.log("Loading all downloads from database completed with reason:",
+                        aReason);
     this._pendingStatement = null;
 
     // To ensure that we don't inadvertently delete more downloads from the
@@ -549,42 +941,34 @@ const DownloadsData = {
   observe: function DD_observe(aSubject, aTopic, aData)
   {
     switch (aTopic) {
-      case "download-manager-remove-download":
+      case "download-manager-remove-download-guid":
         // If a single download was removed, remove the corresponding data item.
         if (aSubject) {
-          this._removeDataItem(aSubject.QueryInterface(Ci.nsISupportsPRUint32));
+            let downloadGuid = aSubject.QueryInterface(Ci.nsISupportsCString).data;
+            DownloadsCommon.log("A single download with id",
+                                downloadGuid, "was removed.");
+          this._removeDataItem(downloadGuid);
           break;
         }
 
         // Multiple downloads have been removed.  Iterate over known downloads
         // and remove those that don't exist anymore.
+        DownloadsCommon.log("Multiple downloads were removed.");
         for each (let dataItem in this.dataItems) {
           if (dataItem) {
-            try {
-              Services.downloads.getDownload(dataItem.downloadId);
-            } catch (ex) {
-              this._removeDataItem(dataItem.downloadId);
-            }
+            // Bug 449811 - We have to bind to the dataItem because Javascript
+            // doesn't do fresh let-bindings per loop iteration.
+            let dataItemBinding = dataItem;
+            Services.downloads.getDownloadByGUID(dataItemBinding.downloadGuid,
+                                                 function(aStatus, aResult) {
+              if (aStatus == Components.results.NS_ERROR_NOT_AVAILABLE) {
+                DownloadsCommon.log("Removing download with id",
+                                    dataItemBinding.downloadGuid);
+                this._removeDataItem(dataItemBinding.downloadGuid);
+              }
+            }.bind(this));
           }
         }
-        break;
-
-      case "download-manager-database-type-changed":
-        let pbs = Cc["@mozilla.org/privatebrowsing;1"]
-                  .getService(Ci.nsIPrivateBrowsingService);
-        if (pbs.privateBrowsingEnabled) {
-          // Save a reference to the persistent store before terminating access.
-          this._persistentDataItems = this.dataItems;
-          this.clear();
-        } else {
-          // Terminate data access, then restore the persistent store.
-          this.clear();
-          this.dataItems = this._persistentDataItems;
-          this._persistentDataItems = null;
-        }
-        // Reinitialize the views with the current items.  View data has been
-        // already invalidated by the previous calls.
-        this._views.forEach(this._updateView, this);
         break;
     }
   },
@@ -592,19 +976,28 @@ const DownloadsData = {
   //////////////////////////////////////////////////////////////////////////////
   //// nsIDownloadProgressListener
 
-  onDownloadStateChange: function DD_onDownloadStateChange(aState, aDownload)
+  onDownloadStateChange: function DD_onDownloadStateChange(aOldState, aDownload)
   {
+    if (aDownload.isPrivate != this._isPrivate) {
+      // Ignore the downloads with a privacy status other than what we are
+      // tracking.
+      return;
+    }
+
     // When a new download is added, it may have the same identifier of a
     // download that we previously deleted during this session, and we also
     // want to provide a visible indication that the download started.
-    let isNew = aState == nsIDM.DOWNLOAD_NOTSTARTED ||
-                aState == nsIDM.DOWNLOAD_QUEUED;
+    let isNew = aOldState == nsIDM.DOWNLOAD_NOTSTARTED ||
+                aOldState == nsIDM.DOWNLOAD_QUEUED;
 
     let dataItem = this._getOrAddDataItem(aDownload, isNew);
     if (!dataItem) {
       return;
     }
 
+    let wasInProgress = dataItem.inProgress;
+
+    DownloadsCommon.log("A download changed its state to:", aDownload.state);
     dataItem.state = aDownload.state;
     dataItem.referrer = aDownload.referrer && aDownload.referrer.spec;
     dataItem.resumable = aDownload.resumable;
@@ -612,13 +1005,55 @@ const DownloadsData = {
     dataItem.currBytes = aDownload.amountTransferred;
     dataItem.maxBytes = aDownload.size;
 
-    this._views.forEach(
-      function (view) view.getViewItem(dataItem).onStateChange()
-    );
+    if (wasInProgress && !dataItem.inProgress) {
+      dataItem.endTime = Date.now();
+    }
+
+    // When a download is retried, we create a different download object from
+    // the database with the same ID as before. This means that the nsIDownload
+    // that the dataItem holds might now need updating.
+    //
+    // We only overwrite this in the event that _download exists, because if it
+    // doesn't, that means that no caller ever tried to get the nsIDownload,
+    // which means it was never retrieved and doesn't need to be overwritten.
+    if (dataItem._download) {
+      dataItem._download = aDownload;
+    }
+
+    for (let view of this._views) {
+      try {
+        view.getViewItem(dataItem).onStateChange(aOldState);
+      } catch (ex) {
+        Cu.reportError(ex);
+      }
+    }
 
     if (isNew && !dataItem.newDownloadNotified) {
       dataItem.newDownloadNotified = true;
-      this._notifyNewDownload();
+      this._notifyDownloadEvent("start");
+    }
+
+    // This is a final state of which we are only notified once.
+    if (dataItem.done) {
+      this._notifyDownloadEvent("finish");
+    }
+
+    // TODO Bug 830415: this isn't the right place to set these annotation.
+    // It should be set it in places' nsIDownloadHistory implementation.
+    if (!this._isPrivate && !dataItem.inProgress) {
+      let downloadMetaData = { state: dataItem.state,
+                               endTime: dataItem.endTime };
+      if (dataItem.done)
+        downloadMetaData.fileSize = dataItem.maxBytes;
+
+      try {
+        PlacesUtils.annotations.setPageAnnotation(
+          NetUtil.newURI(dataItem.uri), "downloads/metaData", JSON.stringify(downloadMetaData), 0,
+          PlacesUtils.annotations.EXPIRE_WITH_HISTORY);
+      }
+      catch(ex) {
+        Cu.reportError(ex);
+      }
     }
   },
 
@@ -628,6 +1063,12 @@ const DownloadsData = {
                                                   aCurTotalProgress,
                                                   aMaxTotalProgress, aDownload)
   {
+    if (aDownload.isPrivate != this._isPrivate) {
+      // Ignore the downloads with a privacy status other than what we are
+      // tracking.
+      return;
+    }
+
     let dataItem = this._getOrAddDataItem(aDownload, false);
     if (!dataItem) {
       return;
@@ -651,39 +1092,62 @@ const DownloadsData = {
   //// Notifications sent to the most recent browser window only
 
   /**
-   * Set to true after the first download in the session caused the downloads
-   * panel to be displayed.
+   * Set to true after the first download causes the downloads panel to be
+   * displayed.
    */
-  firstDownloadShown: false,
+  get panelHasShownBefore() {
+    try {
+      return Services.prefs.getBoolPref("browser.download.panel.shown");
+    } catch (ex) { }
+    return false;
+  },
+
+  set panelHasShownBefore(aValue) {
+    Services.prefs.setBoolPref("browser.download.panel.shown", aValue);
+    return aValue;
+  },
 
   /**
-   * Displays a new download notification in the most recent browser window, if
-   * one is currently available.
+   * Displays a new or finished download notification in the most recent browser
+   * window, if one is currently available with the required privacy type.
+   *
+   * @param aType
+   *        Set to "start" for new downloads, "finish" for completed downloads.
    */
-  _notifyNewDownload: function DD_notifyNewDownload()
+  _notifyDownloadEvent: function DD_notifyDownloadEvent(aType)
   {
+    DownloadsCommon.log("Attempting to notify that a new download has started or finished.");
     if (DownloadsCommon.useToolkitUI) {
+      DownloadsCommon.log("Cancelling notification - we're using the toolkit downloads manager.");
       return;
     }
 
     // Show the panel in the most recent browser window, if present.
-    let browserWin = gBrowserGlue.getMostRecentBrowserWindow();
+    let browserWin = RecentWindow.getMostRecentBrowserWindow({ private: this._isPrivate });
     if (!browserWin) {
       return;
     }
 
-    browserWin.focus();
-    if (this.firstDownloadShown) {
-      // For new downloads after the first one in the session, don't show the
-      // panel automatically, but provide a visible notification in the topmost
+    if (this.panelHasShownBefore) {
+      // For new downloads after the first one, don't show the panel
+      // automatically, but provide a visible notification in the topmost
       // browser window, if the status indicator is already visible.
-      browserWin.DownloadsIndicatorView.showEventNotification();
+      DownloadsCommon.log("Showing new download notification.");
+      browserWin.DownloadsIndicatorView.showEventNotification(aType);
       return;
     }
-    this.firstDownloadShown = true;
+    this.panelHasShownBefore = true;
     browserWin.DownloadsPanel.showPanel();
   }
 };
+
+XPCOMUtils.defineLazyGetter(this, "PrivateDownloadsData", function() {
+  return new DownloadsDataCtor(true);
+});
+
+XPCOMUtils.defineLazyGetter(this, "DownloadsData", function() {
+  return new DownloadsDataCtor(false);
+});
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DownloadsDataItem
@@ -718,10 +1182,10 @@ DownloadsDataItem.prototype = {
    */
   _initFromDownload: function DDI_initFromDownload(aDownload)
   {
-    this.download = aDownload;
+    this._download = aDownload;
 
     // Fetch all the download properties eagerly.
-    this.downloadId = aDownload.id;
+    this.downloadGuid = aDownload.guid;
     this.file = aDownload.target.spec;
     this.target = aDownload.displayName;
     this.uri = aDownload.source.spec;
@@ -751,7 +1215,8 @@ DownloadsDataItem.prototype = {
   _initFromDataRow: function DDI_initFromDataRow(aStorageRow)
   {
     // Get the download properties from the data row.
-    this.downloadId = aStorageRow.getResultByName("id");
+    this._download = null;
+    this.downloadGuid = aStorageRow.getResultByName("guid");
     this.file = aStorageRow.getResultByName("target");
     this.target = aStorageRow.getResultByName("name");
     this.uri = aStorageRow.getResultByName("source");
@@ -762,10 +1227,6 @@ DownloadsDataItem.prototype = {
     this.currBytes = aStorageRow.getResultByName("currBytes");
     this.maxBytes = aStorageRow.getResultByName("maxBytes");
 
-    // Allows accessing the underlying download object lazily.
-    XPCOMUtils.defineLazyGetter(this, "download", function ()
-                                Services.downloads.getDownload(this.downloadId));
-
     // Now we have to determine if the download is resumable, but don't want to
     // access the underlying download object unnecessarily.  The only case where
     // the property is relevant is when we are currently downloading data, and
@@ -773,10 +1234,15 @@ DownloadsDataItem.prototype = {
     // loaded very soon in any case.  In all the other cases, including a paused
     // download, we assume that the download is resumable.  The property will be
     // updated as soon as the underlying download state changes.
+
+    // We'll start by assuming we're resumable, and then if we're downloading,
+    // update resumable property in case we were wrong.
+    this.resumable = true;
+
     if (this.state == nsIDM.DOWNLOAD_DOWNLOADING) {
-      this.resumable = this.download.resumable;
-    } else {
-      this.resumable = true;
+      this.getDownload(function(aDownload) {
+        this.resumable = aDownload.resumable;
+      }.bind(this));
     }
 
     // Compute the other properties without accessing the download object.
@@ -784,6 +1250,35 @@ DownloadsDataItem.prototype = {
     this.percentComplete = this.maxBytes <= 0
                            ? -1
                            : Math.round(this.currBytes / this.maxBytes * 100);
+  },
+
+  /**
+   * Asynchronous getter for the download object corresponding to this data item.
+   *
+   * @param aCallback
+   *        A callback function which will be called when the download object is
+   *        available.  It should accept one argument which will be the download
+   *        object.
+   */
+  getDownload: function DDI_getDownload(aCallback) {
+    if (this._download) {
+      // Return the download object asynchronously to the caller
+      let download = this._download;
+      Services.tm.mainThread.dispatch(function () aCallback(download),
+                                      Ci.nsIThread.DISPATCH_NORMAL);
+    } else {
+      Services.downloads.getDownloadByGUID(this.downloadGuid,
+                                           function(aStatus, aResult) {
+        if (!Components.isSuccessCode(aStatus)) {
+          Cu.reportError(
+            new Components.Exception("Cannot retrieve download for GUID: " +
+                                     this.downloadGuid));
+        } else {
+          this._download = aResult;
+          aCallback(aResult);
+        }
+      }.bind(this));
+    }
   },
 
   /**
@@ -861,19 +1356,337 @@ DownloadsDataItem.prototype = {
    */
   get localFile()
   {
+    return this._getFile(this.file);
+  },
+
+  /**
+   * Returns the nsILocalFile for the partially downloaded target.
+   *
+   * @throws if the native path is not valid.  This can happen if the same
+   *         profile is used on different platforms, for example if a native
+   *         Windows path is stored and then the item is accessed on a Mac.
+   */
+  get partFile()
+  {
+    return this._getFile(this.file + kPartialDownloadSuffix);
+  },
+
+  /**
+   * Returns an nsILocalFile for aFilename. aFilename might be a file URL or
+   * a native path.
+   *
+   * @param aFilename the filename of the file to retrieve.
+   * @return an nsILocalFile for the file.
+   * @throws if the native path is not valid.  This can happen if the same
+   *         profile is used on different platforms, for example if a native
+   *         Windows path is stored and then the item is accessed on a Mac.
+   * @note This function makes no guarantees about the file's existence -
+   *       callers should check that the returned file exists.
+   */
+  _getFile: function DDI__getFile(aFilename)
+  {
     // The download database may contain targets stored as file URLs or native
     // paths.  This can still be true for previously stored items, even if new
     // items are stored using their file URL.  See also bug 239948 comment 12.
-    if (/^file:/.test(this.file)) {
+    if (aFilename.startsWith("file:")) {
       // Assume the file URL we obtained from the downloads database or from the
       // "spec" property of the target has the UTF-8 charset.
-      let fileUrl = NetUtil.newURI(this.file).QueryInterface(Ci.nsIFileURL);
+      let fileUrl = NetUtil.newURI(aFilename).QueryInterface(Ci.nsIFileURL);
       return fileUrl.file.clone().QueryInterface(Ci.nsILocalFile);
     } else {
       // The downloads database contains a native path.  Try to create a local
       // file, though this may throw an exception if the path is invalid.
-      return new DownloadsLocalFileCtor(this.file);
+      return new DownloadsLocalFileCtor(aFilename);
     }
+  },
+
+  /**
+   * Open the target file for this download.
+   *
+   * @param aOwnerWindow
+   *        The window with which the required action is associated.
+   * @throws if the file cannot be opened.
+   */
+  openLocalFile: function DDI_openLocalFile(aOwnerWindow) {
+    this.getDownload(function(aDownload) {
+      DownloadsCommon.openDownloadedFile(this.localFile,
+                                         aDownload.MIMEInfo,
+                                         aOwnerWindow);
+    }.bind(this));
+  },
+
+  /**
+   * Show the downloaded file in the system file manager.
+   */
+  showLocalFile: function DDI_showLocalFile() {
+    DownloadsCommon.showDownloadedFile(this.localFile);
+  },
+
+  /**
+   * Resumes the download if paused, pauses it if active.
+   * @throws if the download is not resumable or if has already done.
+   */
+  togglePauseResume: function DDI_togglePauseResume() {
+    if (!this.inProgress || !this.resumable)
+      throw new Error("The given download cannot be paused or resumed");
+
+    this.getDownload(function(aDownload) {
+      if (this.inProgress) {
+        if (this.paused)
+          aDownload.resume();
+        else
+          aDownload.pause();
+      }
+    }.bind(this));
+  },
+
+  /**
+   * Attempts to retry the download.
+   * @throws if we cannot.
+   */
+  retry: function DDI_retry() {
+    if (!this.canRetry)
+      throw new Error("Cannot rerty this download");
+
+    this.getDownload(function(aDownload) {
+      aDownload.retry();
+    });
+  },
+
+  /**
+   * Support function that deletes the local file for a download. This is
+   * used in cases where the Download Manager service doesn't delete the file
+   * from disk when cancelling. See bug 732924.
+   */
+  _ensureLocalFileRemoved: function DDI__ensureLocalFileRemoved()
+  {
+    try {
+      let localFile = this.localFile;
+      if (localFile.exists()) {
+        localFile.remove(false);
+      }
+    } catch (ex) { }
+  },
+
+  /**
+   * Cancels the download.
+   * @throws if the download is already done.
+   */
+  cancel: function() {
+    if (!this.inProgress)
+      throw new Error("Cannot cancel this download");
+
+    this.getDownload(function (aDownload) {
+      aDownload.cancel();
+      this._ensureLocalFileRemoved();
+    }.bind(this));
+  },
+
+  /**
+   * Remove the download.
+   */
+  remove: function DDI_remove() {
+    this.getDownload(function (aDownload) {
+      if (this.inProgress) {
+        aDownload.cancel();
+        this._ensureLocalFileRemoved();
+      }
+      aDownload.remove();
+    }.bind(this));
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+//// DownloadsViewPrototype
+
+/**
+ * A prototype for an object that registers itself with DownloadsData as soon
+ * as a view is registered with it.
+ */
+const DownloadsViewPrototype = {
+  //////////////////////////////////////////////////////////////////////////////
+  //// Registration of views
+
+  /**
+   * Array of view objects that should be notified when the available status
+   * data changes.
+   *
+   * SUBCLASSES MUST OVERRIDE THIS PROPERTY.
+   */
+  _views: null,
+
+  /**
+   * Determines whether this view object is over the private or non-private
+   * downloads.
+   *
+   * SUBCLASSES MUST OVERRIDE THIS PROPERTY.
+   */
+  _isPrivate: false,
+
+  /**
+   * Adds an object to be notified when the available status data changes.
+   * The specified object is initialized with the currently available status.
+   *
+   * @param aView
+   *        View object to be added.  This reference must be
+   *        passed to removeView before termination.
+   */
+  addView: function DVP_addView(aView)
+  {
+    // Start receiving events when the first of our views is registered.
+    if (this._views.length == 0) {
+      if (this._isPrivate) {
+        PrivateDownloadsData.addView(this);
+      } else {
+        DownloadsData.addView(this);
+      }
+    }
+
+    this._views.push(aView);
+    this.refreshView(aView);
+  },
+
+  /**
+   * Updates the properties of an object previously added using addView.
+   *
+   * @param aView
+   *        View object to be updated.
+   */
+  refreshView: function DVP_refreshView(aView)
+  {
+    // Update immediately even if we are still loading data asynchronously.
+    // Subclasses must provide these two functions!
+    this._refreshProperties();
+    this._updateView(aView);
+  },
+
+  /**
+   * Removes an object previously added using addView.
+   *
+   * @param aView
+   *        View object to be removed.
+   */
+  removeView: function DVP_removeView(aView)
+  {
+    let index = this._views.indexOf(aView);
+    if (index != -1) {
+      this._views.splice(index, 1);
+    }
+
+    // Stop receiving events when the last of our views is unregistered.
+    if (this._views.length == 0) {
+      if (this._isPrivate) {
+        PrivateDownloadsData.removeView(this);
+      } else {
+        DownloadsData.removeView(this);
+      }
+    }
+  },
+
+  //////////////////////////////////////////////////////////////////////////////
+  //// Callback functions from DownloadsData
+
+  /**
+   * Indicates whether we are still loading downloads data asynchronously.
+   */
+  _loading: false,
+
+  /**
+   * Called before multiple downloads are about to be loaded.
+   */
+  onDataLoadStarting: function DVP_onDataLoadStarting()
+  {
+    this._loading = true;
+  },
+
+  /**
+   * Called after data loading finished.
+   */
+  onDataLoadCompleted: function DVP_onDataLoadCompleted()
+  {
+    this._loading = false;
+  },
+
+  /**
+   * Called when the downloads database becomes unavailable (for example, we
+   * entered Private Browsing Mode and the database backend changed).
+   * References to existing data should be discarded.
+   *
+   * @note Subclasses should override this.
+   */
+  onDataInvalidated: function DVP_onDataInvalidated()
+  {
+    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+  },
+
+  /**
+   * Called when a new download data item is available, either during the
+   * asynchronous data load or when a new download is started.
+   *
+   * @param aDataItem
+   *        DownloadsDataItem object that was just added.
+   * @param aNewest
+   *        When true, indicates that this item is the most recent and should be
+   *        added in the topmost position.  This happens when a new download is
+   *        started.  When false, indicates that the item is the least recent
+   *        with regard to the items that have been already added. The latter
+   *        generally happens during the asynchronous data load.
+   *
+   * @note Subclasses should override this.
+   */
+  onDataItemAdded: function DVP_onDataItemAdded(aDataItem, aNewest)
+  {
+    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+  },
+
+  /**
+   * Called when a data item is removed, ensures that the widget associated with
+   * the view item is removed from the user interface.
+   *
+   * @param aDataItem
+   *        DownloadsDataItem object that is being removed.
+   *
+   * @note Subclasses should override this.
+   */
+  onDataItemRemoved: function DVP_onDataItemRemoved(aDataItem)
+  {
+    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+  },
+
+  /**
+   * Returns the view item associated with the provided data item for this view.
+   *
+   * @param aDataItem
+   *        DownloadsDataItem object for which the view item is requested.
+   *
+   * @return Object that can be used to notify item status events.
+   *
+   * @note Subclasses should override this.
+   */
+  getViewItem: function DID_getViewItem(aDataItem)
+  {
+    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+  },
+
+  /**
+   * Private function used to refresh the internal properties being sent to
+   * each registered view.
+   *
+   * @note Subclasses should override this.
+   */
+  _refreshProperties: function DID_refreshProperties()
+  {
+    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+  },
+
+  /**
+   * Private function used to refresh an individual view.
+   *
+   * @note Subclasses should override this.
+   */
+  _updateView: function DID_updateView()
+  {
+    throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
   }
 };
 
@@ -890,47 +1703,12 @@ DownloadsDataItem.prototype = {
  * actually started.  This is useful to display a neutral progress indicator in
  * the main browser window until the autostart timeout elapses.
  */
-const DownloadsIndicatorData = {
-  //////////////////////////////////////////////////////////////////////////////
-  //// Registration of views
-
-  /**
-   * Array of view objects that should be notified when the available status
-   * data changes.
-   */
-  _views: [],
-
-  /**
-   * Adds an object to be notified when the available status data changes.
-   * The specified object is initialized with the currently available status.
-   *
-   * @param aView
-   *        DownloadsIndicatorView object to be added.  This reference must be
-   *        passed to removeView before termination.
-   */
-  addView: function DID_addView(aView)
-  {
-    // Start receiving events when the first of our views is registered.
-    if (this._views.length == 0) {
-      DownloadsCommon.data.addView(this);
-    }
-
-    this._views.push(aView);
-    this.refreshView(aView);
-  },
-
-  /**
-   * Updates the properties of an object previously added using addView.
-   *
-   * @param aView
-   *        DownloadsIndicatorView object to be updated.
-   */
-  refreshView: function DID_refreshView(aView)
-  {
-    // Update immediately even if we are still loading data asynchronously.
-    this._refreshProperties();
-    this._updateView(aView);
-  },
+function DownloadsIndicatorDataCtor(aPrivate) {
+  this._isPrivate = aPrivate;
+  this._views = [];
+}
+DownloadsIndicatorDataCtor.prototype = {
+  __proto__: DownloadsViewPrototype,
 
   /**
    * Removes an object previously added using addView.
@@ -940,14 +1718,9 @@ const DownloadsIndicatorData = {
    */
   removeView: function DID_removeView(aView)
   {
-    let index = this._views.indexOf(aView);
-    if (index != -1) {
-      this._views.splice(index, 1);
-    }
+    DownloadsViewPrototype.removeView.call(this, aView);
 
-    // Stop receiving events when the last of our views is unregistered.
     if (this._views.length == 0) {
-      DownloadsCommon.data.removeView(this);
       this._itemCount = 0;
     }
   },
@@ -956,24 +1729,11 @@ const DownloadsIndicatorData = {
   //// Callback functions from DownloadsData
 
   /**
-   * Indicates whether we are still loading downloads data asynchronously.
-   */
-  _loading: false,
-
-  /**
-   * Called before multiple downloads are about to be loaded.
-   */
-  onDataLoadStarting: function DID_onDataLoadStarting()
-  {
-    this._loading = true;
-  },
-
-  /**
    * Called after data loading finished.
    */
   onDataLoadCompleted: function DID_onDataLoadCompleted()
   {
-    this._loading = false;
+    DownloadsViewPrototype.onDataLoadCompleted.call(this);
     this._updateViews();
   },
 
@@ -1029,23 +1789,25 @@ const DownloadsIndicatorData = {
    */
   getViewItem: function DID_getViewItem(aDataItem)
   {
+    let data = this._isPrivate ? PrivateDownloadsIndicatorData
+                               : DownloadsIndicatorData;
     return Object.freeze({
-      onStateChange: function DIVI_onStateChange()
+      onStateChange: function DIVI_onStateChange(aOldState)
       {
         if (aDataItem.state == nsIDM.DOWNLOAD_FINISHED ||
             aDataItem.state == nsIDM.DOWNLOAD_FAILED) {
-          DownloadsIndicatorData.attention = true;
+          data.attention = true;
         }
 
         // Since the state of a download changed, reset the estimated time left.
-        DownloadsIndicatorData._lastRawTimeLeft = -1;
-        DownloadsIndicatorData._lastTimeLeft = -1;
+        data._lastRawTimeLeft = -1;
+        data._lastTimeLeft = -1;
 
-        DownloadsIndicatorData._updateViews();
+        data._updateViews();
       },
       onProgressChange: function DIVI_onProgressChange()
       {
-        DownloadsIndicatorData._updateViews();
+        data._updateViews();
       }
     });
   },
@@ -1138,40 +1900,20 @@ const DownloadsIndicatorData = {
   _lastTimeLeft: -1,
 
   /**
-   * Update the estimated time until all in-progress downloads will finish.
-   *
-   * @param aSeconds
-   *        Current raw estimate on number of seconds left for all downloads.
-   *        This is a floating point value to help get sub-second accuracy for
-   *        current and future estimates.
+   * A generator function for the dataItems that this summary is currently
+   * interested in. This generator is passed off to summarizeDownloads in order
+   * to generate statistics about the dataItems we care about - in this case,
+   * it's all dataItems for active downloads.
    */
-  _updateTimeLeft: function DID_updateTimeLeft(aSeconds)
+  _activeDataItems: function DID_activeDataItems()
   {
-    // We apply an algorithm similar to the DownloadUtils.getTimeLeft function,
-    // though tailored to a single time estimation for all downloads.  We never
-    // apply sommothing if the new value is less than half the previous value.
-    let shouldApplySmoothing = this._lastTimeLeft >= 0 &&
-                               aSeconds > this._lastTimeLeft / 2;
-    if (shouldApplySmoothing) {
-      // Apply hysteresis to favor downward over upward swings.  Trust only 30%
-      // of the new value if lower, and 10% if higher (exponential smoothing).
-      let (diff = aSeconds - this._lastTimeLeft) {
-        aSeconds = this._lastTimeLeft + (diff < 0 ? .3 : .1) * diff;
-      }
-
-      // If the new time is similar, reuse something close to the last time
-      // left, but subtract a little to provide forward progress.
-      let diff = aSeconds - this._lastTimeLeft;
-      let diffPercent = diff / this._lastTimeLeft * 100;
-      if (Math.abs(diff) < 5 || Math.abs(diffPercent) < 5) {
-        aSeconds = this._lastTimeLeft - (diff < 0 ? .4 : .2);
+    let dataItems = this._isPrivate ? PrivateDownloadsData.dataItems
+                                    : DownloadsData.dataItems;
+    for each (let dataItem in dataItems) {
+      if (dataItem && dataItem.inProgress) {
+        yield dataItem;
       }
     }
-
-    // In the last few seconds of downloading, we are always subtracting and
-    // never adding to the time left.  Ensure that we never fall below one
-    // second left until all downloads are actually finished.
-    this._lastTimeLeft = Math.max(aSeconds, 1);
   },
 
   /**
@@ -1179,69 +1921,249 @@ const DownloadsIndicatorData = {
    */
   _refreshProperties: function DID_refreshProperties()
   {
-    let numActive = 0;
-    let numPaused = 0;
-    let numScanning = 0;
-    let totalSize = 0;
-    let totalTransferred = 0;
-    let rawTimeLeft = -1;
-
-    // If no download has been loaded, don't use the methods of the Download
-    // Manager service, so that it is not initialized unnecessarily.
-    if (this._itemCount > 0) {
-      let downloads = Services.downloads.activeDownloads;
-      while (downloads.hasMoreElements()) {
-        let download = downloads.getNext().QueryInterface(Ci.nsIDownload);
-        numActive++;
-        switch (download.state) {
-          case nsIDM.DOWNLOAD_PAUSED:
-            numPaused++;
-            break;
-          case nsIDM.DOWNLOAD_SCANNING:
-            numScanning++;
-            break;
-          case nsIDM.DOWNLOAD_DOWNLOADING:
-            if (download.size > 0 && download.speed > 0) {
-              let sizeLeft = download.size - download.amountTransferred;
-              rawTimeLeft = Math.max(rawTimeLeft, sizeLeft / download.speed);
-            }
-            break;
-        }
-        // Only add to total values if we actually know the download size.
-        if (download.size > 0) {
-          totalSize += download.size;
-          totalTransferred += download.amountTransferred;
-        }
-      }
-    }
+    let summary =
+      DownloadsCommon.summarizeDownloads(this._activeDataItems());
 
     // Determine if the indicator should be shown or get attention.
     this._hasDownloads = (this._itemCount > 0);
 
-    if (numActive == 0 || totalSize == 0 || numActive == numScanning) {
-      // Don't display the current progress.
-      this._percentComplete = -1;
-    } else {
-      // Display the current progress.
-      this._percentComplete = (totalTransferred / totalSize) * 100;
-    }
-
     // If all downloads are paused, show the progress indicator as paused.
-    this._paused = numActive > 0 && numActive == numPaused;
+    this._paused = summary.numActive > 0 &&
+                   summary.numActive == summary.numPaused;
+
+    this._percentComplete = summary.percentComplete;
 
     // Display the estimated time left, if present.
-    if (rawTimeLeft == -1) {
+    if (summary.rawTimeLeft == -1) {
       // There are no downloads with a known time left.
       this._lastRawTimeLeft = -1;
       this._lastTimeLeft = -1;
       this._counter = "";
     } else {
       // Compute the new time left only if state actually changed.
-      if (this._lastRawTimeLeft != rawTimeLeft) {
-        this._lastRawTimeLeft = rawTimeLeft;
-        this._updateTimeLeft(rawTimeLeft);
+      if (this._lastRawTimeLeft != summary.rawTimeLeft) {
+        this._lastRawTimeLeft = summary.rawTimeLeft;
+        this._lastTimeLeft = DownloadsCommon.smoothSeconds(summary.rawTimeLeft,
+                                                           this._lastTimeLeft);
       }
       this._counter = DownloadsCommon.formatTimeLeft(this._lastTimeLeft);
+    }
+  }
+};
+
+XPCOMUtils.defineLazyGetter(this, "PrivateDownloadsIndicatorData", function() {
+  return new DownloadsIndicatorDataCtor(true);
+});
+
+XPCOMUtils.defineLazyGetter(this, "DownloadsIndicatorData", function() {
+  return new DownloadsIndicatorDataCtor(false);
+});
+
+////////////////////////////////////////////////////////////////////////////////
+//// DownloadsSummaryData
+
+/**
+ * DownloadsSummaryData is a view for DownloadsData that produces a summary
+ * of all downloads after a certain exclusion point aNumToExclude. For example,
+ * if there were 5 downloads in progress, and a DownloadsSummaryData was
+ * constructed with aNumToExclude equal to 3, then that DownloadsSummaryData
+ * would produce a summary of the last 2 downloads.
+ *
+ * @param aIsPrivate
+ *        True if the browser window which owns the download button is a private
+ *        window.
+ * @param aNumToExclude
+ *        The number of items to exclude from the summary, starting from the
+ *        top of the list.
+ */
+function DownloadsSummaryData(aIsPrivate, aNumToExclude) {
+  this._numToExclude = aNumToExclude;
+  // Since we can have multiple instances of DownloadsSummaryData, we
+  // override these values from the prototype so that each instance can be
+  // completely separated from one another.
+  this._loading = false;
+
+  this._dataItems = [];
+
+  // Floating point value indicating the last number of seconds estimated until
+  // the longest download will finish.  We need to store this value so that we
+  // don't continuously apply smoothing if the actual download state has not
+  // changed.  This is set to -1 if the previous value is unknown.
+  this._lastRawTimeLeft = -1;
+
+  // Last number of seconds estimated until all in-progress downloads with a
+  // known size and speed will finish.  This value is stored to allow smoothing
+  // in case of small variations.  This is set to -1 if the previous value is
+  // unknown.
+  this._lastTimeLeft = -1;
+
+  // The following properties are updated by _refreshProperties and are then
+  // propagated to the views.
+  this._showingProgress = false;
+  this._details = "";
+  this._description = "";
+  this._numActive = 0;
+  this._percentComplete = -1;
+
+  this._isPrivate = aIsPrivate;
+  this._views = [];
+}
+
+DownloadsSummaryData.prototype = {
+  __proto__: DownloadsViewPrototype,
+
+  /**
+   * Removes an object previously added using addView.
+   *
+   * @param aView
+   *        DownloadsSummary view to be removed.
+   */
+  removeView: function DSD_removeView(aView)
+  {
+    DownloadsViewPrototype.removeView.call(this, aView);
+
+    if (this._views.length == 0) {
+      // Clear out our collection of DownloadDataItems. If we ever have
+      // another view registered with us, this will get re-populated.
+      this._dataItems = [];
+    }
+  },
+
+  //////////////////////////////////////////////////////////////////////////////
+  //// Callback functions from DownloadsData - see the documentation in
+  //// DownloadsViewPrototype for more information on what these functions
+  //// are used for.
+
+  onDataLoadCompleted: function DSD_onDataLoadCompleted()
+  {
+    DownloadsViewPrototype.onDataLoadCompleted.call(this);
+    this._updateViews();
+  },
+
+  onDataInvalidated: function DSD_onDataInvalidated()
+  {
+    this._dataItems = [];
+  },
+
+  onDataItemAdded: function DSD_onDataItemAdded(aDataItem, aNewest)
+  {
+    if (aNewest) {
+      this._dataItems.unshift(aDataItem);
+    } else {
+      this._dataItems.push(aDataItem);
+    }
+
+    this._updateViews();
+  },
+
+  onDataItemRemoved: function DSD_onDataItemRemoved(aDataItem)
+  {
+    let itemIndex = this._dataItems.indexOf(aDataItem);
+    this._dataItems.splice(itemIndex, 1);
+    this._updateViews();
+  },
+
+  getViewItem: function DSD_getViewItem(aDataItem)
+  {
+    let self = this;
+    return Object.freeze({
+      onStateChange: function DIVI_onStateChange(aOldState)
+      {
+        // Since the state of a download changed, reset the estimated time left.
+        self._lastRawTimeLeft = -1;
+        self._lastTimeLeft = -1;
+        self._updateViews();
+      },
+      onProgressChange: function DIVI_onProgressChange()
+      {
+        self._updateViews();
+      }
+    });
+  },
+
+  //////////////////////////////////////////////////////////////////////////////
+  //// Propagation of properties to our views
+
+  /**
+   * Computes aggregate values and propagates the changes to our views.
+   */
+  _updateViews: function DSD_updateViews()
+  {
+    // Do not update the status indicators during batch loads of download items.
+    if (this._loading) {
+      return;
+    }
+
+    this._refreshProperties();
+    this._views.forEach(this._updateView, this);
+  },
+
+  /**
+   * Updates the specified view with the current aggregate values.
+   *
+   * @param aView
+   *        DownloadsIndicatorView object to be updated.
+   */
+  _updateView: function DSD_updateView(aView)
+  {
+    aView.showingProgress = this._showingProgress;
+    aView.percentComplete = this._percentComplete;
+    aView.description = this._description;
+    aView.details = this._details;
+  },
+
+  //////////////////////////////////////////////////////////////////////////////
+  //// Property updating based on current download status
+
+  /**
+   * A generator function for the dataItems that this summary is currently
+   * interested in. This generator is passed off to summarizeDownloads in order
+   * to generate statistics about the dataItems we care about - in this case,
+   * it's the dataItems in this._dataItems after the first few to exclude,
+   * which was set when constructing this DownloadsSummaryData instance.
+   */
+  _dataItemsForSummary: function DSD_dataItemsForSummary()
+  {
+    if (this._dataItems.length > 0) {
+      for (let i = this._numToExclude; i < this._dataItems.length; ++i) {
+        yield this._dataItems[i];
+      }
+    }
+  },
+
+  /**
+   * Computes aggregate values based on the current state of downloads.
+   */
+  _refreshProperties: function DSD_refreshProperties()
+  {
+    // Pre-load summary with default values.
+    let summary =
+      DownloadsCommon.summarizeDownloads(this._dataItemsForSummary());
+
+    this._description = DownloadsCommon.strings
+                                       .otherDownloads2(summary.numActive);
+    this._percentComplete = summary.percentComplete;
+
+    // If all downloads are paused, show the progress indicator as paused.
+    this._showingProgress = summary.numDownloading > 0 ||
+                            summary.numPaused > 0;
+
+    // Display the estimated time left, if present.
+    if (summary.rawTimeLeft == -1) {
+      // There are no downloads with a known time left.
+      this._lastRawTimeLeft = -1;
+      this._lastTimeLeft = -1;
+      this._details = "";
+    } else {
+      // Compute the new time left only if state actually changed.
+      if (this._lastRawTimeLeft != summary.rawTimeLeft) {
+        this._lastRawTimeLeft = summary.rawTimeLeft;
+        this._lastTimeLeft = DownloadsCommon.smoothSeconds(summary.rawTimeLeft,
+                                                           this._lastTimeLeft);
+      }
+      [this._details] = DownloadUtils.getDownloadStatusNoRate(
+        summary.totalTransferred, summary.totalSize, summary.slowestSpeed,
+        this._lastTimeLeft);
     }
   }
 }

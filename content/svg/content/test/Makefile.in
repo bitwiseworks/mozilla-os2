@@ -42,19 +42,23 @@ MOCHITEST_FILES = \
 		test_getElementById.xhtml \
 		test_getSubStringLength.xhtml \
 		getSubStringLength-helper.svg \
-		test_isSupported.xhtml \
-		test_lang.xhtml \
+		test_hasFeature.xhtml \
+		$(filter disabled-for-intermittent-failures--bug-701060, test_lang.xhtml) \
 		test_nonAnimStrings.xhtml \
 		test_pathAnimInterpolation.xhtml \
 		test_pathSeg.xhtml \
 		test_pointAtLength.xhtml \
-		test_pointer-events.xhtml \
+		test_pointer-events-1a.xhtml \
+		test_pointer-events-1b.xhtml \
+		pointer-events.js \
 		test_pointer-events-2.xhtml \
 		test_pointer-events-3.xhtml \
 		test_pointer-events-4.xhtml \
 		test_scientific.html \
 		scientific-helper.svg \
-		test_SVGAnimatedImageSMILDisabled.html \
+		test_selectSubString.xhtml \
+		test_selectSubString2.xhtml \
+		selectSubString-helper.svg \
 		animated-svg-image-helper.html \
 		animated-svg-image-helper.svg \
 		test_stroke-linecap-hit-testing.xhtml \
@@ -69,12 +73,19 @@ MOCHITEST_FILES = \
 		test_SVGStringList.xhtml \
 		test_SVGTransformList.xhtml \
 		test_SVGTransformListAddition.xhtml \
+		test_SVGUnitTypes.html \
 		test_SVGxxxList.xhtml \
 		test_SVGxxxListIndexing.xhtml \
 		test_switch.xhtml \
 		switch-helper.svg \
 		test_text.html \
+		test_text_2.html \
+		test_text_scaled.html \
+		test_text_selection.html \
+		test_text_update.html \
 		text-helper.svg \
+		text-helper-scaled.svg \
+		text-helper-selection.svg \
 		test_transform.xhtml \
 		test_valueAsString.xhtml \
 		test_valueLeaks.xhtml \
@@ -82,6 +93,13 @@ MOCHITEST_FILES = \
 		test_viewport.html \
 		zoom-helper.svg \
 		test_zoom.xhtml \
+                test_bug872812.html \
 		$(NULL)
+
+ifneq (android,$(MOZ_WIDGET_TOOLKIT))
+MOCHITEST_FILES += \
+		test_text.html \
+		$(NULL)
+endif
 
 include $(topsrcdir)/config/rules.mk

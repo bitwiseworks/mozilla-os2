@@ -10,8 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= layout
-LIBRARY_NAME	= gkmedias
 EXPORT_LIBRARY	= $(DIST)/lib
 ifeq (WINNT,$(OS_TARGET))
 FORCE_SHARED_LIB = 1
@@ -20,6 +18,7 @@ endif
 SHARED_LIBRARY_LIBS = \
     $(MOZ_OTS_LIBS) \
     $(QCMS_LIBS) \
+    $(MOZ_GRAPHITE_LIBS) \
     $(MOZ_HARFBUZZ_LIBS) \
     $(NULL)
 
@@ -29,10 +28,6 @@ endif
 
 ifdef MOZ_TREE_PIXMAN
 SHARED_LIBRARY_LIBS += $(MOZ_PIXMAN_LIBS)
-endif
-
-ifdef MOZ_GRAPHITE
-SHARED_LIBRARY_LIBS += $(MOZ_GRAPHITE_LIBS)
 endif
 
 ifdef MOZ_VORBIS
@@ -75,15 +70,15 @@ SHARED_LIBRARY_LIBS 	+= \
 endif
 endif
 
-ifdef MOZ_SYDNEYAUDIO
-SHARED_LIBRARY_LIBS 	+= \
-	$(DEPTH)/media/libsydneyaudio/src/$(LIB_PREFIX)sydneyaudio.$(LIB_SUFFIX) \
-	$(NULL)
-endif
-
 ifdef MOZ_SPEEX_RESAMPLER
 SHARED_LIBRARY_LIBS 	+= \
 	$(DEPTH)/media/libspeex_resampler/src/$(LIB_PREFIX)speex_resampler.$(LIB_SUFFIX) \
+	$(NULL)
+endif
+
+ifdef MOZ_SOUNDTOUCH
+SHARED_LIBRARY_LIBS 	+= \
+	$(DEPTH)/media/libsoundtouch/src/$(LIB_PREFIX)soundtouch.$(LIB_SUFFIX) \
 	$(NULL)
 endif
 
@@ -114,12 +109,20 @@ SHARED_LIBRARY_LIBS 	+= \
 	$(DEPTH)/gfx/2d/$(LIB_PREFIX)gfx2d.$(LIB_SUFFIX) \
 	$(NULL)
 
-ifdef MOZ_WEBRTC
-include $(topsrcdir)/media/webrtc/shared_libs.mk
-endif
-
 ifdef MOZ_ENABLE_SKIA
 SHARED_LIBRARY_LIBS += $(MOZ_SKIA_LIBS)
+endif
+
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/media/webvtt/$(LIB_PREFIX)webvtt.$(LIB_SUFFIX) \
+  $(NULL)
+
+ifdef MOZ_WEBRTC
+ifndef MOZ_WEBRTC_IN_LIBXUL
+DEFINES += -DMOZ_WEBRTC_GKMEDIA=1
+include $(topsrcdir)/media/webrtc/shared_libs.mk
+SHARED_LIBRARY_LIBS += $(WEBRTC_LIBS)
+endif
 endif
 
 ifeq (WINNT,$(OS_TARGET))
@@ -138,14 +141,13 @@ EXTRA_DSO_LDOPTS += \
   $(NULL)
 endif
 endif
-
 DEFFILE = symbols.def
 endif
 
 include $(topsrcdir)/config/rules.mk
 
 ifeq (WINNT,$(OS_TARGET))
-symbols.def: symbols.def.in
+symbols.def: symbols.def.in $(GLOBAL_DEPS)
 	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(ACDEFINES) $< > $@
 
 OS_LIBS += $(call EXPAND_LIBNAME, msimg32)

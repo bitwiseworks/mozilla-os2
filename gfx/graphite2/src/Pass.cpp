@@ -41,14 +41,23 @@ typedef Machine::Code  Code;
 
 
 Pass::Pass()
-        :
-        m_silf(0),
-        m_cols(0),
-        m_rules(0),
-        m_ruleMap(0),
-        m_startStates(0),
-        m_sTable(0),
-        m_states(0)
+: m_silf(0),
+  m_cols(0),
+  m_rules(0),
+  m_ruleMap(0),
+  m_startStates(0),
+  m_transitions(0),
+  m_states(0),
+  m_flags(0),
+  m_iMaxLoop(0),
+  m_numGlyphs(0),
+  m_numRules(0),
+  m_numStates(0),
+  m_numTransition(0),
+  m_numSuccess(0),
+  m_numColumns(0),
+  m_minPreCtxt(0),
+  m_maxPreCtxt(0)
 {
 }
 
@@ -56,14 +65,14 @@ Pass::~Pass()
 {
     free(m_cols);
     free(m_startStates);
-    free(m_sTable);
+    free(m_transitions);
     free(m_states);
     free(m_ruleMap);
 
     delete [] m_rules;
 }
 
-bool Pass::readPass(const byte * const pass_start, size_t pass_length, size_t subtable_base, const Face & face)
+bool Pass::readPass(const byte * const pass_start, size_t pass_length, size_t subtable_base, GR_MAYBE_UNUSED const Face & face)
 {
     const byte *                p = pass_start,
                * const pass_end   = p + pass_length;
@@ -71,7 +80,7 @@ bool Pass::readPass(const byte * const pass_start, size_t pass_length, size_t su
 
     if (pass_length < 40) return false; 
     // Read in basic values
-    m_immutable = be::read<byte>(p) & 0x1U;
+    m_flags = be::read<byte>(p);
     m_iMaxLoop = be::read<byte>(p);
     be::skip<byte>(p,2); // skip maxContext & maxBackup
     m_numRules = be::read<uint16>(p);
@@ -80,33 +89,34 @@ bool Pass::readPass(const byte * const pass_start, size_t pass_length, size_t su
                * const rcCode = pass_start + be::read<uint32>(p) - subtable_base,
                * const aCode  = pass_start + be::read<uint32>(p) - subtable_base;
     be::skip<uint32>(p);
-    m_sRows = be::read<uint16>(p);
-    m_sTransition = be::read<uint16>(p);
-    m_sSuccess = be::read<uint16>(p);
-    m_sColumns = be::read<uint16>(p);
+    m_numStates = be::read<uint16>(p);
+    m_numTransition = be::read<uint16>(p);
+    m_numSuccess = be::read<uint16>(p);
+    m_numColumns = be::read<uint16>(p);
     numRanges = be::read<uint16>(p);
     be::skip<uint16>(p, 3); // skip searchRange, entrySelector & rangeShift.
     assert(p - pass_start == 40);
     // Perform some sanity checks.
-    if (   m_sTransition > m_sRows
-            || m_sSuccess > m_sRows
-            || m_sSuccess + m_sTransition < m_sRows
+    if (   m_numTransition > m_numStates
+            || m_numSuccess > m_numStates
+            || m_numSuccess + m_numTransition < m_numStates
             || numRanges == 0)
         return false;
 
+    m_successStart = m_numStates - m_numSuccess;
     if (p + numRanges * 6 - 4 > pass_end) return false;
     m_numGlyphs = be::peek<uint16>(p + numRanges * 6 - 4) + 1;
     // Calculate the start of various arrays.
     const byte * const ranges = p;
     be::skip<uint16>(p, numRanges*3);
     const byte * const o_rule_map = p;
-    be::skip<uint16>(p, m_sSuccess + 1);
+    be::skip<uint16>(p, m_numSuccess + 1);
 
     // More sanity checks
-    if (reinterpret_cast<const byte *>(o_rule_map + m_sSuccess*sizeof(uint16)) > pass_end
+    if (reinterpret_cast<const byte *>(o_rule_map + m_numSuccess*sizeof(uint16)) > pass_end
             || p > pass_end)
         return false;
-    const size_t numEntries = be::peek<uint16>(o_rule_map + m_sSuccess*sizeof(uint16));
+    const size_t numEntries = be::peek<uint16>(o_rule_map + m_numSuccess*sizeof(uint16));
     const byte * const   rule_map = p;
     be::skip<uint16>(p, numEntries);
 
@@ -129,7 +139,7 @@ bool Pass::readPass(const byte * const pass_start, size_t pass_length, size_t su
     const uint16 * const o_actions = reinterpret_cast<const uint16 *>(p);
     be::skip<uint16>(p, m_numRules + 1);
     const byte * const states = p;
-    be::skip<int16>(p, m_sTransition*m_sColumns);
+    be::skip<int16>(p, m_numTransition*m_numColumns);
     be::skip<byte>(p);          // skip reserved byte
     if (p != pcCode || p >= pass_end) return false;
     be::skip<byte>(p, pass_constraint_len);
@@ -152,7 +162,10 @@ bool Pass::readPass(const byte * const pass_start, size_t pass_length, size_t su
     if (!readRanges(ranges, numRanges)) return false;
     if (!readRules(rule_map, numEntries,  precontext, sort_keys,
                    o_constraint, rcCode, o_actions, aCode, face)) return false;
-    return readStates(start_states, states, o_rule_map);
+#ifdef GRAPHITE2_TELEMETRY
+    telemetry::category _states_cat(face.tele.states);
+#endif
+    return readStates(start_states, states, o_rule_map, face);
 }
 
 
@@ -186,7 +199,8 @@ bool Pass::readRules(const byte * rule_map, const size_t num_entries,
         if (r->sort > 63 || r->preContext >= r->sort || r->preContext > m_maxPreCtxt || r->preContext < m_minPreCtxt)
             return false;
         ac_begin      = ac_data + be::peek<uint16>(--o_action);
-        rc_begin      = *--o_constraint ? rc_data + be::peek<uint16>(o_constraint) : rc_end;
+        --o_constraint;
+        rc_begin      = be::peek<uint16>(o_constraint) ? rc_data + be::peek<uint16>(o_constraint) : rc_end;
 
         if (ac_begin > ac_end || ac_begin > ac_data_end || ac_end > ac_data_end
                 || rc_begin > rc_end || rc_begin > rc_data_end || rc_end > rc_data_end)
@@ -216,44 +230,48 @@ bool Pass::readRules(const byte * rule_map, const size_t num_entries,
 static int cmpRuleEntry(const void *a, const void *b) { return (*(RuleEntry *)a < *(RuleEntry *)b ? -1 :
                                                                 (*(RuleEntry *)b < *(RuleEntry *)a ? 1 : 0)); }
 
-bool Pass::readStates(const byte * starts, const byte *states, const byte * o_rule_map)
+bool Pass::readStates(const byte * starts, const byte *states, const byte * o_rule_map, GR_MAYBE_UNUSED const Face & face)
 {
-    m_startStates = gralloc<State *>(m_maxPreCtxt - m_minPreCtxt + 1);
-    m_states      = gralloc<State>(m_sRows);
-    m_sTable      = gralloc<State *>(m_sTransition * m_sColumns);
+#ifdef GRAPHITE2_TELEMETRY
+    telemetry::category _states_cat(face.tele.starts);
+#endif
+    m_startStates = gralloc<uint16>(m_maxPreCtxt - m_minPreCtxt + 1);
+#ifdef GRAPHITE2_TELEMETRY
+    telemetry::set_category(face.tele.states);
+#endif
+    m_states      = gralloc<State>(m_numStates);
+#ifdef GRAPHITE2_TELEMETRY
+    telemetry::set_category(face.tele.transitions);
+#endif
+    m_transitions      = gralloc<uint16>(m_numTransition * m_numColumns);
 
-    if (!m_startStates || !m_states || !m_sTable) return false;
+    if (!m_startStates || !m_states || !m_transitions) return false;
     // load start states
-    for (State * * s = m_startStates,
-            * * const s_end = s + m_maxPreCtxt - m_minPreCtxt + 1; s != s_end; ++s)
+    for (uint16 * s = m_startStates,
+                * const s_end = s + m_maxPreCtxt - m_minPreCtxt + 1; s != s_end; ++s)
     {
-        *s = m_states + be::read<uint16>(starts);
-        if (*s < m_states || *s >= m_states + m_sRows) return false; // true;
+        *s = be::read<uint16>(starts);
+        if (*s >= m_numStates) return false; // true;
     }
 
     // load state transition table.
-    for (State * * t = m_sTable,
-               * * const t_end = t + m_sTransition*m_sColumns; t != t_end; ++t)
+    for (uint16 * t = m_transitions,
+                * const t_end = t + m_numTransition*m_numColumns; t != t_end; ++t)
     {
-        *t = m_states + be::read<uint16>(states);
-        if (*t < m_states || *t >= m_states + m_sRows) return false;
+        *t = be::read<uint16>(states);
+        if (*t >= m_numStates) return false;
     }
 
     State * s = m_states,
-          * const transitions_end = m_states + m_sTransition,
-          * const success_begin = m_states + m_sRows - m_sSuccess;
-    const RuleEntry * rule_map_end = m_ruleMap + be::peek<uint16>(o_rule_map + m_sSuccess*sizeof(uint16));
-    for (size_t n = m_sRows; n; --n, ++s)
+          * const success_begin = m_states + m_numStates - m_numSuccess;
+    const RuleEntry * rule_map_end = m_ruleMap + be::peek<uint16>(o_rule_map + m_numSuccess*sizeof(uint16));
+    for (size_t n = m_numStates; n; --n, ++s)
     {
-        s->transitions = s < transitions_end ? m_sTable + (s-m_states)*m_sColumns : 0;
         RuleEntry * const begin = s < success_begin ? 0 : m_ruleMap + be::read<uint16>(o_rule_map),
                   * const end   = s < success_begin ? 0 : m_ruleMap + be::peek<uint16>(o_rule_map);
 
         if (begin >= rule_map_end || end > rule_map_end || begin > end)
             return false;
-#ifndef NDEBUG
-        s->index = (s - m_states);
-#endif
         s->rules = begin;
         s->rules_end = (end - begin <= FiniteStateMachine::MAX_RULES)? end :
             begin + FiniteStateMachine::MAX_RULES;
@@ -269,16 +287,19 @@ bool Pass::readRanges(const byte * ranges, size_t num_ranges)
     memset(m_cols, 0xFF, m_numGlyphs * sizeof(uint16));
     for (size_t n = num_ranges; n; --n)
     {
-        const uint16 first = be::read<uint16>(ranges),
-                     last  = be::read<uint16>(ranges),
-                     col   = be::read<uint16>(ranges);
-        uint16 *p;
+        uint16     * ci     = m_cols + be::read<uint16>(ranges),
+                   * ci_end = m_cols + be::read<uint16>(ranges) + 1,
+                     col    = be::read<uint16>(ranges);
 
-        if (first > last || last >= m_numGlyphs || col >= m_sColumns)
+        if (ci >= ci_end || ci_end > m_cols+m_numGlyphs || col >= m_numColumns)
             return false;
 
-        for (p = m_cols + first; p <= m_cols + last; )
-            *p++ = col;
+        // A glyph must only belong to one column at a time
+        while (ci != ci_end && *ci == 0xffff)
+            *ci++ = col;
+
+        if (ci != ci_end)
+            return false;
     }
     return true;
 }
@@ -291,8 +312,8 @@ void Pass::runGraphite(Machine & m, FiniteStateMachine & fsm) const
     Slot *currHigh = s->next();
 
 #if !defined GRAPHITE2_NTRACING
-    if (dbgout)  *dbgout << "rules"	<< json::array;
-	json::closer rules_array_closer = dbgout;
+    if (fsm.dbgout)  *fsm.dbgout << "rules"	<< json::array;
+	json::closer rules_array_closer(fsm.dbgout);
 #endif
 
     m.slotMap().highwater(currHigh);
@@ -313,31 +334,30 @@ void Pass::runGraphite(Machine & m, FiniteStateMachine & fsm) const
     } while (s);
 }
 
-inline uint16 Pass::glyphToCol(const uint16 gid) const
-{
-    return gid < m_numGlyphs ? m_cols[gid] : 0xffffU;
-}
-
 bool Pass::runFSM(FiniteStateMachine& fsm, Slot * slot) const
 {
 	fsm.reset(slot, m_maxPreCtxt);
     if (fsm.slots.context() < m_minPreCtxt)
         return false;
 
-    const State * state = m_startStates[m_maxPreCtxt - fsm.slots.context()];
+    uint16 state = m_startStates[m_maxPreCtxt - fsm.slots.context()];
+    uint8  free_slots = SlotMap::MAX_SLOTS;
     do
     {
         fsm.slots.pushSlot(slot);
-        if (fsm.slots.size() >= SlotMap::MAX_SLOTS) return false;
-        const uint16 col = glyphToCol(slot->gid());
-        if (col == 0xffffU || !state->is_transition()) return true;
+        if (--free_slots == 0
+         || slot->gid() >= m_numGlyphs
+         || m_cols[slot->gid()] == 0xffffU
+         || state >= m_numTransition)
+            return free_slots != 0;
 
-        state = state->transitions[col];
-        if (state->is_success())
-            fsm.rules.accumulate_rules(*state);
+        const uint16 * transitions = m_transitions + state*m_numColumns;
+        state = transitions[m_cols[slot->gid()]];
+        if (state >= m_successStart)
+            fsm.rules.accumulate_rules(m_states[state]);
 
         slot = slot->next();
-    } while (state != m_states && slot);
+    } while (state != 0 && slot);
 
     fsm.slots.pushSlot(slot);
     return true;
@@ -372,14 +392,14 @@ void Pass::findNDoRule(Slot * & slot, Machine &m, FiniteStateMachine & fsm) cons
         // Search for the first rule which passes the constraint
         const RuleEntry *        r = fsm.rules.begin(),
                         * const re = fsm.rules.end();
-        for (; r != re && !testConstraint(*r->rule, m); ++r);
+        while (r != re && !testConstraint(*r->rule, m)) ++r;
 
 #if !defined GRAPHITE2_NTRACING
-        if (dbgout)
+        if (fsm.dbgout)
         {
         	if (fsm.rules.size() != 0)
         	{
-				*dbgout << json::item << json::object;
+				*fsm.dbgout << json::item << json::object;
 				dumpRuleEventConsidered(fsm, *r);
 				if (r != re)
 				{
@@ -387,16 +407,16 @@ void Pass::findNDoRule(Slot * & slot, Machine &m, FiniteStateMachine & fsm) cons
 					dumpRuleEventOutput(fsm, *r->rule, slot);
 					if (r->rule->action->deletes()) fsm.slots.collectGarbage();
 					adjustSlot(adv, slot, fsm.slots);
-					*dbgout		<< "cursor" << slotid(slot)
+					*fsm.dbgout	<< "cursor" << objectid(dslot(&fsm.slots.segment, slot))
 							<< json::close; // Close RuelEvent object
 
 					return;
 				}
 				else
 				{
-					*dbgout 	<< json::close	// close "considered" array
+					*fsm.dbgout << json::close	// close "considered" array
 							<< "output" << json::null
-							<< "cursor"	<< slotid(slot->next())
+							<< "cursor"	<< objectid(dslot(&fsm.slots.segment, slot->next()))
 							<< json::close;
 				}
         	}
@@ -421,15 +441,15 @@ void Pass::findNDoRule(Slot * & slot, Machine &m, FiniteStateMachine & fsm) cons
 
 void Pass::dumpRuleEventConsidered(const FiniteStateMachine & fsm, const RuleEntry & re) const
 {
-	*dbgout << "considered" << json::array;
+	*fsm.dbgout << "considered" << json::array;
 	for (const RuleEntry *r = fsm.rules.begin(); r != &re; ++r)
 	{
 		if (r->rule->preContext > fsm.slots.context())	continue;
-	*dbgout 	<< json::flat << json::object
+	*fsm.dbgout << json::flat << json::object
 					<< "id" 	<< r->rule - m_rules
 					<< "failed"	<< true
 					<< "input" << json::flat << json::object
-						<< "start" << slotid(input_slot(fsm.slots, -r->rule->preContext))
+						<< "start" << objectid(dslot(&fsm.slots.segment, input_slot(fsm.slots, -r->rule->preContext)))
 						<< "length" << r->rule->sort
 						<< json::close	// close "input"
 					<< json::close;	// close Rule object
@@ -439,26 +459,28 @@ void Pass::dumpRuleEventConsidered(const FiniteStateMachine & fsm, const RuleEnt
 
 void Pass::dumpRuleEventOutput(const FiniteStateMachine & fsm, const Rule & r, Slot * const last_slot) const
 {
-	*dbgout 		<< json::item << json::flat << json::object
+	*fsm.dbgout		<< json::item << json::flat << json::object
 						<< "id" 	<< &r - m_rules
 						<< "failed" << false
 						<< "input" << json::flat << json::object
-							<< "start" << slotid(input_slot(fsm.slots, 0))
+							<< "start" << objectid(dslot(&fsm.slots.segment, input_slot(fsm.slots, 0)))
 							<< "length" << r.sort - r.preContext
 							<< json::close // close "input"
 						<< json::close	// close Rule object
 				<< json::close // close considered array
 				<< "output" << json::object
 					<< "range" << json::flat << json::object
-						<< "start"	<< slotid(input_slot(fsm.slots, 0))
-						<< "end"	<< slotid(last_slot)
+						<< "start"	<< objectid(dslot(&fsm.slots.segment, input_slot(fsm.slots, 0)))
+						<< "end"	<< objectid(dslot(&fsm.slots.segment, last_slot))
 					<< json::close // close "input"
 					<< "slots"	<< json::array;
+	const Position rsb_prepos = last_slot ? last_slot->origin() : fsm.slots.segment.advance();
 	fsm.slots.segment.positionSlots(0);
 
 	for(Slot * slot = output_slot(fsm.slots, 0); slot != last_slot; slot = slot->next())
-		*dbgout 		<< dslot(&fsm.slots.segment, slot);
-	*dbgout 			<< json::close 	// close "slots"
+		*fsm.dbgout		<< dslot(&fsm.slots.segment, slot);
+	*fsm.dbgout			<< json::close 	// close "slots"
+					<< "postshift"	<< (last_slot ? last_slot->origin() : fsm.slots.segment.advance()) - rsb_prepos
 				<< json::close;			// close "output" object
 
 }
@@ -473,16 +495,18 @@ bool Pass::testPassConstraint(Machine & m) const
 
     assert(m_cPConstraint.constraint());
 
+    m.slotMap().reset(*m.slotMap().segment.first(), 0);
+    m.slotMap().pushSlot(m.slotMap().segment.first());
     vm::slotref * map = m.slotMap().begin();
-    *map = m.slotMap().segment.first();
     const uint32 ret = m_cPConstraint.run(m, map);
 
 #if !defined GRAPHITE2_NTRACING
+    json * const dbgout = m.slotMap().segment.getFace()->logger();
     if (dbgout)
-    	*dbgout << "constraint" << (ret || m.status() != Machine::finished);
+    	*dbgout << "constraint" << (ret && m.status() == Machine::finished);
 #endif
 
-    return ret || m.status() != Machine::finished;
+    return ret && m.status() == Machine::finished;
 }
 
 

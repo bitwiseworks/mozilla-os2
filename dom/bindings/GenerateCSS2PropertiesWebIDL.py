@@ -8,9 +8,9 @@ import string
 propList = eval(sys.stdin.read())
 props = ""
 for [prop, pref] in propList:
-    extendedAttrs = ["TreatNullAs=EmptyString"]
+    extendedAttrs = ["Throws", "TreatNullAs=EmptyString"]
     if pref is not "":
-        extendedAttrs.append("Pref=%s" % pref)
+        extendedAttrs.append('Pref="%s"' % pref)
     if not prop.startswith("Moz"):
         prop = prop[0].lower() + prop[1:]
     # Unfortunately, even some of the getters here are fallible

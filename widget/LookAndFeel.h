@@ -186,6 +186,10 @@ public:
     eIntID_SubmenuDelay,
     // can popups overlap menu/task bar?
     eIntID_MenusCanOverlapOSBar,
+    // should overlay scrollbars be used?
+    eIntID_UseOverlayScrollbars,
+    // allow H and V overlay scrollbars to overlap?
+    eIntID_AllowOverlayScrollbarsOverlap,
     // show/hide scrollbars based on activity
     eIntID_ShowHideScrollbars,
     // skip navigating to disabled menu item?
@@ -249,6 +253,15 @@ public:
      * (will return the default of NS_ERROR_FAILURE).
      */
     eIntID_WindowsClassic,
+
+    /*
+     * A Boolean value to determine whether the current Windows desktop theme
+     * supports Aero Glass.
+     *
+     * This is Windows-specific and is not implemented on other platforms
+     * (will return the default of NS_ERROR_FAILURE).
+     */
+    eIntID_WindowsGlass,
 
     /*
      * A Boolean value to determine whether the device is a touch enabled
@@ -346,7 +359,20 @@ public:
     /**
      * Dealy before showing a tooltip.
      */
-    eIntID_TooltipDelay
+    eIntID_TooltipDelay,
+
+    /*
+     * A Boolean value to determine whether Mac OS X Lion style swipe animations
+     * should be used.
+     */
+    eIntID_SwipeAnimationEnabled,
+
+    /*
+     * A boolean value indicating whether or not the device has a hardware
+     * home button. Used on gaia to determine whether a home button
+     * is shown.
+     */
+    eIntID_PhysicalHomeButton
   };
 
   /**
@@ -360,7 +386,8 @@ public:
     eWindowsTheme_LunaOlive,
     eWindowsTheme_LunaSilver,
     eWindowsTheme_Royale,
-    eWindowsTheme_Zune
+    eWindowsTheme_Zune,
+    eWindowsTheme_AeroLite
   };
 
   enum {
@@ -491,8 +518,10 @@ public:
    * @param aID    Which system-theme font is wanted.
    * @param aName  The name of the font to use.
    * @param aStyle Styling to apply to the font.
+   * @param aDevPixPerCSSPixel  Ratio of device pixels to CSS pixels
    */
-  static bool GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle);
+  static bool GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle,
+                      float aDevPixPerCSSPixel);
 
   /**
    * GetPasswordCharacter() returns a unicode character which should be used

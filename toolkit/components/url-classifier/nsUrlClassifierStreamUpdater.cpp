@@ -42,14 +42,12 @@ nsUrlClassifierStreamUpdater::nsUrlClassifierStreamUpdater()
 
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS9(nsUrlClassifierStreamUpdater,
+NS_IMPL_THREADSAFE_ISUPPORTS7(nsUrlClassifierStreamUpdater,
                               nsIUrlClassifierStreamUpdater,
                               nsIUrlClassifierUpdateObserver,
                               nsIRequestObserver,
                               nsIStreamListener,
                               nsIObserver,
-                              nsIBadCertListener2,
-                              nsISSLErrorListener,
                               nsIInterfaceRequestor,
                               nsITimerCallback)
 
@@ -144,7 +142,7 @@ nsUrlClassifierStreamUpdater::FetchUpdate(const nsACString & aUpdateUrl,
   nsresult rv = NS_NewURI(getter_AddRefs(uri), aUpdateUrl);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString urlSpec;
+  nsAutoCString urlSpec;
   uri->GetAsciiSpec(urlSpec);
 
   LOG(("(post) Fetching update from %s\n", urlSpec.get()));
@@ -212,7 +210,7 @@ nsUrlClassifierStreamUpdater::DownloadUpdates(
   mIsUpdating = true;
   *_retval = true;
 
-  nsCAutoString urlSpec;
+  nsAutoCString urlSpec;
   mUpdateUrl->GetAsciiSpec(urlSpec);
 
   LOG(("FetchUpdate: %s", urlSpec.get()));
@@ -327,7 +325,7 @@ nsUrlClassifierStreamUpdater::UpdateSuccess(uint32_t requestedTimeout)
   nsCOMPtr<nsIUrlClassifierCallback> successCallback = mDownloadError ? nullptr : mSuccessCallback.get();
   DownloadDone();
 
-  nsCAutoString strTimeout;
+  nsAutoCString strTimeout;
   strTimeout.AppendInt(requestedTimeout);
   if (successCallback) {
     successCallback->HandleEvent(strTimeout);
@@ -346,7 +344,7 @@ nsUrlClassifierStreamUpdater::UpdateError(nsresult result)
 
   DownloadDone();
 
-  nsCAutoString strResult;
+  nsAutoCString strResult;
   strResult.AppendInt(static_cast<uint32_t>(result));
   if (errorCallback) {
     errorCallback->HandleEvent(strResult);
@@ -394,7 +392,7 @@ nsUrlClassifierStreamUpdater::OnStartRequest(nsIRequest *request,
 {
   nsresult rv;
   bool downloadError = false;
-  nsCAutoString strStatus;
+  nsAutoCString strStatus;
   nsresult status = NS_OK;
 
   // Only update if we got http success header
@@ -448,7 +446,7 @@ NS_IMETHODIMP
 nsUrlClassifierStreamUpdater::OnDataAvailable(nsIRequest *request,
                                               nsISupports* context,
                                               nsIInputStream *aIStream,
-                                              uint32_t aSourceOffset,
+                                              uint64_t aSourceOffset,
                                               uint32_t aLength)
 {
   if (!mDBService)
@@ -522,32 +520,6 @@ nsUrlClassifierStreamUpdater::Observe(nsISupports *aSubject, const char *aTopic,
       mTimer = nullptr;
     }
   }
-  return NS_OK;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// nsIBadCertListener2 implementation
-
-NS_IMETHODIMP
-nsUrlClassifierStreamUpdater::NotifyCertProblem(nsIInterfaceRequestor *socketInfo, 
-                                                nsISSLStatus *status, 
-                                                const nsACString &targetSite, 
-                                                bool *_retval)
-{
-  *_retval = true;
-  return NS_OK;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// nsISSLErrorListener implementation
-
-NS_IMETHODIMP
-nsUrlClassifierStreamUpdater::NotifySSLError(nsIInterfaceRequestor *socketInfo, 
-                                             int32_t error, 
-                                             const nsACString &targetSite, 
-                                             bool *_retval)
-{
-  *_retval = true;
   return NS_OK;
 }
 

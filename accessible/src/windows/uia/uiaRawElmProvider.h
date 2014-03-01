@@ -9,12 +9,13 @@
 
 #include "objbase.h"
 #include "AccessibleWrap.h"
-#include "UIAutomation.h"
-
-class AccessibleWrap;
+#include "IUnknownImpl.h"
+#include "uiautomation.h"
 
 namespace mozilla {
 namespace a11y {
+
+class AccessibleWrap;
 
 /**
  * IRawElementProviderSimple implementation (maintains IAccessibleEx approach).
@@ -23,7 +24,7 @@ class uiaRawElmProvider MOZ_FINAL : public IAccessibleEx,
                                     public IRawElementProviderSimple
 {
 public:
-  uiaRawElmProvider(AccessibleWrap* aAcc) : mAcc(aAcc), mRefCnt(0) { }
+  uiaRawElmProvider(AccessibleWrap* aAcc) : mAcc(aAcc) { }
 
   // IUnknown
   DECL_IUNKNOWN

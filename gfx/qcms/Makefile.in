@@ -9,12 +9,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE       = qcms
-LIBRARY_NAME = mozqcms
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
-GRE_MODULE      = 1
-
-EXPORTS      = qcms.h qcmstypes.h
 
 CSRCS = \
   chain.c \
@@ -52,11 +48,14 @@ else
 endif
 endif
 endif
+else
+ifeq (ppc,$(findstring ppc,$(CPU_ARCH)))
+ifdef GNU_CC
+	CSRCS += transform-altivec.c
+	ALTIVEC_FLAGS=-maltivec
 endif
-
-# -pedantic causes warnings that we don't care about
-# so turn it off
-CFLAGS := $(filter-out -pedantic,$(CFLAGS))
+endif
+endif
 
 FORCE_STATIC_LIB = 1
 
@@ -73,3 +72,5 @@ endif # GNU_CC
 transform-sse1.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(SSE1_FLAGS)
 
 transform-sse2.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(SSE2_FLAGS)
+
+transform-altivec.$(OBJ_SUFFIX): COMPILE_CFLAGS += $(ALTIVEC_FLAGS)

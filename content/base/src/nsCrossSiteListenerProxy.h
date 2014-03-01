@@ -40,22 +40,12 @@ class nsCORSListenerProxy MOZ_FINAL : public nsIStreamListener,
 public:
   nsCORSListenerProxy(nsIStreamListener* aOuter,
                       nsIPrincipal* aRequestingPrincipal,
-                      nsIChannel* aChannel,
-                      bool aWithCredentials,
-                      nsresult* aResult);
+                      bool aWithCredentials);
   nsCORSListenerProxy(nsIStreamListener* aOuter,
                       nsIPrincipal* aRequestingPrincipal,
-                      nsIChannel* aChannel,
-                      bool aWithCredentials,
-                      bool aAllowDataURI,
-                      nsresult* aResult);
-  nsCORSListenerProxy(nsIStreamListener* aOuter,
-                      nsIPrincipal* aRequestingPrincipal,
-                      nsIChannel* aChannel,
                       bool aWithCredentials,
                       const nsCString& aPreflightMethod,
-                      const nsTArray<nsCString>& aPreflightHeaders,
-                      nsresult* aResult);
+                      const nsTArray<nsCString>& aPreflightHeaders);
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
@@ -69,12 +59,18 @@ public:
 
   static void Shutdown();
 
+  nsresult Init(nsIChannel* aChannel, bool aAllowDataURI = false);
+
 private:
   nsresult UpdateChannel(nsIChannel* aChannel, bool aAllowDataURI = false);
   nsresult CheckRequestApproved(nsIRequest* aRequest);
 
   nsCOMPtr<nsIStreamListener> mOuterListener;
+  // The principal that originally kicked off the request
   nsCOMPtr<nsIPrincipal> mRequestingPrincipal;
+  // The principal to use for our Origin header ("source origin" in spec terms).
+  // This can get changed during redirects, unlike mRequestingPrincipal.
+  nsCOMPtr<nsIPrincipal> mOriginHeaderPrincipal;
   nsCOMPtr<nsIInterfaceRequestor> mOuterNotificationCallbacks;
   bool mWithCredentials;
   bool mRequestApproved;

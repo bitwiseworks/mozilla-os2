@@ -1,0 +1,41 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+EXPORTS.mozilla.dom.network += [
+    'Constants.h',
+    'TCPSocketChild.h',
+    'TCPSocketParent.h',
+    'Types.h',
+    'Utils.h',
+]
+
+CPP_SOURCES += [
+    'Connection.cpp',
+    'TCPSocketChild.cpp',
+    'TCPSocketParent.cpp',
+    'Utils.cpp',
+]
+
+if CONFIG['MOZ_B2G_RIL']:
+    CPP_SOURCES += [
+        'MobileConnection.cpp',
+    ]
+    EXTRA_JS_MODULES = [
+        'NetworkStatsDB.jsm',
+        'NetworkStatsService.jsm',
+    ]
+
+EXTRA_COMPONENTS += [
+    'TCPSocket.js',
+    'TCPSocket.manifest',
+    'TCPSocketParentIntermediary.js',
+]
+
+if CONFIG['MOZ_B2G_RIL']:
+    EXTRA_COMPONENTS += [
+        'NetworkStatsManager.js',
+        'NetworkStatsManager.manifest',
+    ]

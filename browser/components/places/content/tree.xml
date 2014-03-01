@@ -56,9 +56,14 @@
         ]]></setter>
       </property>
 
+      <property name="associatedElement"
+                readonly="true"
+                onget="return this"/>
+
       <method name="applyFilter">
         <parameter name="filterString"/>
         <parameter name="folderRestrict"/>
+        <parameter name="includeHidden"/>
         <body><![CDATA[
           // preserve grouping
           var queryNode = PlacesUtils.asQuery(this.result.root);
@@ -70,7 +75,7 @@
           if (PlacesUtils.nodeIsHistoryContainer(queryNode) ||
               options.resultType == options.RESULTS_AS_TAG_QUERY ||
               options.resultType == options.RESULTS_AS_TAG_CONTENTS)
-            options.resultType = options.RESULT_TYPE_URI;
+            options.resultType = options.RESULTS_AS_URI;
 
           var query = PlacesUtils.history.getNewQuery();
           query.searchTerms = filterString;
@@ -79,6 +84,8 @@
             query.setFolders(folderRestrict, folderRestrict.length);
             options.queryType = options.QUERY_TYPE_BOOKMARKS;
           }
+
+          options.includeHidden = !!includeHidden;
 
           this.load([query], options);
         ]]></body>
@@ -110,6 +117,11 @@
           // calls removeObserver.
           result.addObserver(treeView, false);
           this.view = treeView;
+
+          if (this.getAttribute("selectfirstnode") == "true" && treeView.rowCount > 0) {
+            treeView.selection.select(0);
+          }
+
           this._cachedInsertionPoint = undefined;
         ]]></body>
       </method>
@@ -667,6 +679,12 @@
       <property name="ownerWindow"
                 readonly="true"
                 onget="return window;"/>
+
+      <field name="_active">true</field>
+      <property name="active"
+                onget="return this._active"
+                onset="return this._active = val"/>
+
     </implementation>
     <handlers>
       <handler event="focus"><![CDATA[

@@ -11,20 +11,15 @@
 
 #include <ctype.h> // for toupper()
 #include <stdio.h>
-#include "nsIEnumerator.h"
+#include "nsArrayEnumerator.h"
+#include "nsCOMArray.h"
+#include "nsISupportsArray.h"
 #include "nsIRDFDataSource.h"
 #include "nsIRDFObserver.h"
 #include "nsIServiceManager.h"
 #include "nsXPIDLString.h"
 #include "nsRDFCID.h"
 #include "rdfutil.h"
-#include "plhash.h"
-#include "plstr.h"
-#include "prlong.h"
-#include "prlog.h"
-#include "prmem.h"
-#include "prprf.h"
-#include "prio.h"
 #include "rdf.h"
 #include "nsEnumeratorUtils.h"
 #include "nsIURL.h"
@@ -218,13 +213,7 @@ FileSystemDataSource::Create(nsISupports* aOuter, const nsIID& aIID, void **aRes
     return self->QueryInterface(aIID, aResult);
 }
 
-NS_IMPL_CYCLE_COLLECTION_0(FileSystemDataSource) 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(FileSystemDataSource)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(FileSystemDataSource)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(FileSystemDataSource)
-    NS_INTERFACE_MAP_ENTRY(nsIRDFDataSource)
-    NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS1(FileSystemDataSource, nsIRDFDataSource)
 
 NS_IMETHODIMP
 FileSystemDataSource::GetURI(char **uri)
@@ -744,39 +733,35 @@ FileSystemDataSource::ArcLabelsOut(nsIRDFResource *source,
     if (! labels)
     return NS_ERROR_NULL_POINTER;
 
-    nsresult rv;
-
     if (source == mNC_FileSystemRoot)
     {
-        nsCOMPtr<nsISupportsArray> array;
-        rv = NS_NewISupportsArray(getter_AddRefs(array));
-        if (NS_FAILED(rv)) return rv;
+        nsCOMArray<nsIRDFResource> resources;
+        resources.SetCapacity(2);
 
-        array->AppendElement(mNC_Child);
-        array->AppendElement(mNC_pulse);
+        resources.AppendObject(mNC_Child);
+        resources.AppendObject(mNC_pulse);
 
-        return NS_NewArrayEnumerator(labels, array);
+        return NS_NewArrayEnumerator(labels, resources);
     }
     else if (isFileURI(source))
     {
-        nsCOMPtr<nsISupportsArray> array;
-        rv = NS_NewISupportsArray(getter_AddRefs(array));
-        if (NS_FAILED(rv)) return rv;
+        nsCOMArray<nsIRDFResource> resources;
+        resources.SetCapacity(2);
 
         if (isDirURI(source))
         {
 #ifdef  XP_WIN
             if (isValidFolder(source))
             {
-                array->AppendElement(mNC_Child);
+                resources.AppendObject(mNC_Child);
             }
 #else
-            array->AppendElement(mNC_Child);
+            resources.AppendObject(mNC_Child);
 #endif
-            array->AppendElement(mNC_pulse);
+            resources.AppendObject(mNC_pulse);
         }
 
-        return NS_NewArrayEnumerator(labels, array);
+        return NS_NewArrayEnumerator(labels, resources);
     }
 
     return NS_NewEmptyEnumerator(labels);
@@ -859,11 +844,7 @@ nsresult
 FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
 {
     nsresult rv;
-    nsCOMPtr<nsISupportsArray> volumes;
-
-    rv = NS_NewISupportsArray(getter_AddRefs(volumes));
-    if (NS_FAILED(rv)) return rv;
-
+    nsCOMArray<nsIRDFResource> volumes;
     nsCOMPtr<nsIRDFResource> vol;
 
 #ifdef XP_WIN
@@ -871,7 +852,6 @@ FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
     int32_t         driveType;
     PRUnichar       drive[32];
     int32_t         volNum;
-    char            *url;
 
     for (volNum = 0; volNum < 26; volNum++)
     {
@@ -880,28 +860,25 @@ FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
         driveType = GetDriveTypeW(drive);
         if (driveType != DRIVE_UNKNOWN && driveType != DRIVE_NO_ROOT_DIR)
         {
-            if (nullptr != (url = PR_smprintf("file:///%c|/", volNum + 'A')))
-            {
-                rv = mRDFService->GetResource(nsDependentCString(url),
-                                              getter_AddRefs(vol));
-                PR_Free(url);
+          nsAutoCString url;
+          url.AppendPrintf("file:///%c|/", volNum + 'A');
+          rv = mRDFService->GetResource(url, getter_AddRefs(vol));
+          if (NS_FAILED(rv))
+            return rv;
 
-                if (NS_FAILED(rv)) return rv;
-                volumes->AppendElement(vol);
-            }
+                volumes.AppendObject(vol);
         }
     }
 #endif
 
 #ifdef XP_UNIX
     mRDFService->GetResource(NS_LITERAL_CSTRING("file:///"), getter_AddRefs(vol));
-    volumes->AppendElement(vol);
+    volumes.AppendObject(vol);
 #endif
 
 #ifdef XP_OS2
     ULONG ulDriveNo = 0;
     ULONG ulDriveMap = 0;
-    char *url;
 
     rv = DosQueryCurrentDisk(&ulDriveNo, &ulDriveMap);
     if (NS_FAILED(rv))
@@ -911,14 +888,12 @@ FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
     {
         if (((ulDriveMap << (31 - volNum)) >> 31))
         {
-            if (nullptr != (url = PR_smprintf("file:///%c|/", volNum + 'A')))
-            {
-                rv = mRDFService->GetResource(nsDependentCString(url), getter_AddRefs(vol));
-                PR_Free(url);
+          nsAutoCString url;
+          url.AppendPrintf("file:///%c|/", volNum + 'A');
+          rv = mRDFService->GetResource(nsDependentCString(url), getter_AddRefs(vol));
 
-                if (NS_FAILED(rv)) return rv;
-                volumes->AppendElement(vol);
-            }
+          if (NS_FAILED(rv)) return rv;
+                volumes.AppendObject(vol);
         }
 
     }
@@ -995,11 +970,6 @@ FileSystemDataSource::GetFolderList(nsIRDFResource *source, bool allowHidden,
         return(NS_RDF_NO_VALUE);
 
     nsresult                    rv;
-    nsCOMPtr<nsISupportsArray>  nameArray;
-
-    rv = NS_NewISupportsArray(getter_AddRefs(nameArray));
-    if (NS_FAILED(rv))
-        return(rv);
 
     const char      *parentURI = nullptr;
     rv = source->GetValueConst(&parentURI);
@@ -1029,6 +999,7 @@ FileSystemDataSource::GetFolderList(nsIRDFResource *source, bool allowHidden,
     if (!dirContents)
         return(NS_ERROR_UNEXPECTED);
 
+    nsCOMArray<nsIRDFResource> resources;
     bool            hasMore;
     while(NS_SUCCEEDED(rv = dirContents->HasMoreElements(&hasMore)) &&
           hasMore)
@@ -1056,7 +1027,7 @@ FileSystemDataSource::GetFolderList(nsIRDFResource *source, bool allowHidden,
         if (leafStr.IsEmpty())
             continue;
   
-        nsCAutoString           fullURI;
+        nsAutoCString           fullURI;
         fullURI.Assign(parentURI);
         if (fullURI.Last() != '/')
         {
@@ -1069,7 +1040,7 @@ FileSystemDataSource::GetFolderList(nsIRDFResource *source, bool allowHidden,
         if (!escLeafStr)
             continue;
   
-        nsCAutoString           leaf(escLeafStr);
+        nsAutoCString           leaf(escLeafStr);
         NS_Free(escLeafStr);
         escLeafStr = nullptr;
 
@@ -1094,13 +1065,13 @@ FileSystemDataSource::GetFolderList(nsIRDFResource *source, bool allowHidden,
         nsCOMPtr<nsIRDFResource>    fileRes;
         mRDFService->GetResource(fullURI, getter_AddRefs(fileRes));
 
-        nameArray->AppendElement(fileRes);
+        resources.AppendObject(fileRes);
 
         if (onlyFirst)
             break;
     }
 
-    return NS_NewArrayEnumerator(aResult, nameArray);
+    return NS_NewArrayEnumerator(aResult, resources);
 }
 
 nsresult
@@ -1140,7 +1111,7 @@ FileSystemDataSource::GetLastMod(nsIRDFResource *source, nsIRDFDate **aResult)
     // convert from milliseconds to seconds
     PRTime      temp64, thousand;
     LL_I2L(thousand, PR_MSEC_PER_SEC);
-    LL_MUL(temp64, lastModDate, thousand);
+    temp64 = lastModDate * thousand;
 
     mRDFService->GetDateLiteral(temp64, aResult);
 
@@ -1192,9 +1163,7 @@ FileSystemDataSource::GetFileSize(nsIRDFResource *source, nsIRDFInt **aResult)
         return(rv);
 
     // convert 64bits to 32bits
-    int32_t     aFileSize32 = 0;
-    LL_L2I(aFileSize32, aFileSize64);
-
+    int32_t aFileSize32 = int32_t(aFileSize64);
     mRDFService->GetIntLiteral(aFileSize32, aResult);
 
     return(NS_OK);
@@ -1326,7 +1295,7 @@ FileSystemDataSource::getIEFavoriteURL(nsIRDFResource *source, nsString aFileURL
     nsCOMPtr<nsILineInputStream> linereader = do_QueryInterface(strm, &rv);
 
     nsAutoString    line;
-    nsCAutoString   cLine;
+    nsAutoCString   cLine;
     while(NS_SUCCEEDED(rv))
     {
         bool    isEOF;

@@ -17,8 +17,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsIURI.h"
 #include "nsIDocShell.h"
-#include "nsIEnumerator.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIDocument.h"
@@ -206,6 +204,9 @@ NS_IMETHODIMP nsWebBrowserFind::FindNext(bool *outDidFind)
         curItem = do_QueryInterface(curSupports, &rv);
         if (NS_FAILED(rv)) break;
 
+        searchFrame = do_GetInterface(curItem, &rv);
+        if (NS_FAILED(rv)) break;
+
         if (curItem.get() == startingItem.get())
         {
             // Beware! This may flush notifications via synchronous
@@ -216,9 +217,6 @@ NS_IMETHODIMP nsWebBrowserFind::FindNext(bool *outDidFind)
                 return OnFind(searchFrame);        // we are done
             break;
         }
-
-        searchFrame = do_GetInterface(curItem, &rv);
-        if (NS_FAILED(rv)) break;
 
         OnStartSearchFrame(searchFrame);
 
@@ -499,12 +497,15 @@ nsWebBrowserFind::GetSearchLimits(nsIDOMRange* aSearchRange,
     // There is a selection.
     int32_t count = -1;
     nsresult rv = aSel->GetRangeCount(&count);
+    NS_ENSURE_SUCCESS(rv, rv);
     if (count < 1)
         return SetRangeAroundDocument(aSearchRange, aStartPt, aEndPt, aDoc);
 
     // Need bodyNode, for the start/end of the document
     nsCOMPtr<nsIDOMNode> bodyNode;
     rv = GetRootNode(aDoc, getter_AddRefs(bodyNode));
+    NS_ENSURE_SUCCESS(rv, rv);
+
     nsCOMPtr<nsIContent> bodyContent (do_QueryInterface(bodyNode));
     NS_ENSURE_ARG_POINTER(bodyContent);
 
@@ -704,11 +705,7 @@ nsresult nsWebBrowserFind::SearchInFrame(nsIDOMWindow* aWindow,
         rv = subject->Subsumes(theDoc->NodePrincipal(), &subsumes);
         NS_ENSURE_SUCCESS(rv, rv);
         if (!subsumes) {
-            bool hasCap = false;
-            secMan->IsCapabilityEnabled("UniversalXPConnect", &hasCap);
-            if (!hasCap) {
-                return NS_ERROR_DOM_PROP_ACCESS_DENIED;
-            }
+            return NS_ERROR_DOM_PROP_ACCESS_DENIED;
         }
     }
 
@@ -729,11 +726,11 @@ nsresult nsWebBrowserFind::SearchInFrame(nsIDOMWindow* aWindow,
     GetFrameSelection(aWindow, getter_AddRefs(sel));
     NS_ENSURE_ARG_POINTER(sel);
 
-    nsCOMPtr<nsIDOMRange> searchRange = nsFind::CreateRange();
+    nsCOMPtr<nsIDOMRange> searchRange = nsFind::CreateRange(theDoc);
     NS_ENSURE_ARG_POINTER(searchRange);
-    nsCOMPtr<nsIDOMRange> startPt  = nsFind::CreateRange();
+    nsCOMPtr<nsIDOMRange> startPt  = nsFind::CreateRange(theDoc);
     NS_ENSURE_ARG_POINTER(startPt);
-    nsCOMPtr<nsIDOMRange> endPt  = nsFind::CreateRange();
+    nsCOMPtr<nsIDOMRange> endPt  = nsFind::CreateRange(theDoc);
     NS_ENSURE_ARG_POINTER(endPt);
 
     nsCOMPtr<nsIDOMRange> foundRange;
@@ -801,18 +798,13 @@ nsWebBrowserFind::GetFrameSelection(nsIDOMWindow* aWindow,
     // that we must use when they have focus.
     nsPresContext *presContext = presShell->GetPresContext();
 
-    nsIFrame *frame = nullptr;
-    nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
-    if (fm) {
-      nsCOMPtr<nsIDOMElement> focusedElement;
-      fm->GetFocusedElement(getter_AddRefs(focusedElement));
-      nsCOMPtr<nsIContent> focusedContent(do_QueryInterface(focusedElement));
-      if (focusedContent) {
-        frame = focusedContent->GetPrimaryFrame();
-        if (frame && frame->PresContext() != presContext)
-          frame = nullptr;
-      }
-    }
+    nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aWindow));
+
+    nsCOMPtr<nsPIDOMWindow> focusedWindow;
+    nsCOMPtr<nsIContent> focusedContent =
+      nsFocusManager::GetFocusedDescendant(window, false, getter_AddRefs(focusedWindow));
+
+    nsIFrame *frame = focusedContent ? focusedContent->GetPrimaryFrame() : nullptr;
 
     nsCOMPtr<nsISelectionController> selCon;
     if (frame) {

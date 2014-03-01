@@ -16,8 +16,6 @@
 #include "nsContainerFrame.h"
 #include "nsBlockFrame.h"
 #include "nsLineBox.h"
-#include "nsIDOMHTMLTableCellElement.h"
-#include "nsIDOMHTMLBodyElement.h"
 #include "nsGkAtoms.h"
 #include "nsCOMPtr.h"
 #include "nsLayoutUtils.h"
@@ -94,7 +92,7 @@ nsBlockReflowContext::ComputeCollapsedTopMargin(const nsHTMLReflowState& aRS,
   // B->nextinflow, we'll traverse B->nextinflow twice. But this is
   // OK because our traversal is idempotent.
   for ( ;block; block = static_cast<nsBlockFrame*>(block->GetNextInFlow())) {
-    for (int overflowLines = false; overflowLines <= true; ++overflowLines) {
+    for (int overflowLines = 0; overflowLines <= 1; ++overflowLines) {
       nsBlockFrame::line_iterator line;
       nsBlockFrame::line_iterator line_end;
       bool anyLines = true;
@@ -158,7 +156,7 @@ nsBlockReflowContext::ComputeCollapsedTopMargin(const nsHTMLReflowState& aRS,
                                                availSpace);
             // Record that we're being optimistic by assuming the kid
             // has no clearance
-            if (kid->GetStyleDisplay()->mBreakType != NS_STYLE_CLEAR_NONE) {
+            if (kid->StyleDisplay()->mBreakType != NS_STYLE_CLEAR_NONE) {
               *aMayNeedRetry = true;
             }
             if (ComputeCollapsedTopMargin(innerReflowState, aMargin, aClearanceFrame, aMayNeedRetry, &isEmpty)) {
@@ -302,8 +300,7 @@ nsBlockReflowContext::ReflowBlock(const nsRect&       aSpace,
         // parent is not this because we are executing pullup code).
         // Floats will eventually be removed via nsBlockFrame::RemoveFloat
         // which detaches the placeholder from the float.
-/* XXX promote DeleteChildsNextInFlow to nsIFrame to elminate this cast */
-        aState.mOverflowTracker->Finish(mFrame);
+        nsOverflowContinuationTracker::AutoFinish fini(aState.mOverflowTracker, mFrame);
         static_cast<nsContainerFrame*>(kidNextInFlow->GetParent())
           ->DeleteNextInFlowChild(mPresContext, kidNextInFlow, true);
       }
@@ -391,7 +388,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
     nscoord yMost = y - backupContainingBlockAdvance + mMetrics.height;
     if (yMost > mSpace.YMost()) {
       // didn't fit, we must acquit.
-      mFrame->DidReflow(mPresContext, &aReflowState, NS_FRAME_REFLOW_FINISHED);
+      mFrame->DidReflow(mPresContext, &aReflowState, nsDidReflowStatus::FINISHED);
       return false;
     }
   }
@@ -400,7 +397,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
                          mMetrics.width, mMetrics.height);
   
   // Apply CSS relative positioning
-  const nsStyleDisplay* styleDisp = mFrame->GetStyleDisplay();
+  const nsStyleDisplay* styleDisp = mFrame->StyleDisplay();
   if (NS_STYLE_POSITION_RELATIVE == styleDisp->mPosition) {
     x += aReflowState.mComputedOffsets.left;
     y += aReflowState.mComputedOffsets.top;

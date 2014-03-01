@@ -22,6 +22,7 @@
 #include "nsRange.h"
 #include "nsContentUtils.h"
 #include "nsIFrame.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -316,10 +317,11 @@ nsresult
 mozInlineSpellWordUtil::MakeRange(NodeOffset aBegin, NodeOffset aEnd,
                                   nsRange** aRange)
 {
+  NS_ENSURE_ARG_POINTER(aBegin.mNode);
   if (!mDOMDocument)
     return NS_ERROR_NOT_INITIALIZED;
 
-  nsRefPtr<nsRange> range = new nsRange();
+  nsRefPtr<nsRange> range = new nsRange(aBegin.mNode);
   nsresult rv = range->Set(aBegin.mNode, aBegin.mOffset,
                            aEnd.mNode, aEnd.mOffset);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -388,7 +390,7 @@ TextNodeContainsDOMWordSeparator(nsINode* aNode,
   nsIContent* content = static_cast<nsIContent*>(aNode);
   const nsTextFragment* textFragment = content->GetText();
   NS_ASSERTION(textFragment, "Where is our text?");
-  for (int32_t i = NS_MIN(aBeforeOffset, int32_t(textFragment->GetLength())) - 1; i >= 0; --i) {
+  for (int32_t i = std::min(aBeforeOffset, int32_t(textFragment->GetLength())) - 1; i >= 0; --i) {
     if (IsDOMWordSeparator(textFragment->CharAt(i))) {
       // Be greedy, find as many separators as we can
       for (int32_t j = i - 1; j >= 0; --j) {
@@ -448,7 +450,7 @@ IsBreakElement(nsINode* aNode)
 
   // Anything that's not an inline element is a break element.
   // XXXbz should replaced inlines be break elements, though?
-  return element->GetPrimaryFrame()->GetStyleDisplay()->mDisplay !=
+  return element->GetPrimaryFrame()->StyleDisplay()->mDisplay !=
     NS_STYLE_DISPLAY_INLINE;
 }
 
@@ -518,7 +520,7 @@ mozInlineSpellWordUtil::BuildSoftText()
       }
       break;
     }
-    checkBeforeOffset = PR_INT32_MAX;
+    checkBeforeOffset = INT32_MAX;
     if (IsBreakElement(node)) {
       // Since GetPreviousContent follows tree *preorder*, we're about to traverse
       // up out of 'node'. Since node induces breaks (e.g., it's a block),
@@ -761,7 +763,7 @@ enum CharClass {
   CHAR_CLASS_END_OF_INPUT };
 
 // Encapsulates DOM-word to real-word splitting
-struct NS_STACK_CLASS WordSplitState
+struct MOZ_STACK_CLASS WordSplitState
 {
   mozInlineSpellWordUtil*    mWordUtil;
   const nsDependentSubstring mDOMWordText;

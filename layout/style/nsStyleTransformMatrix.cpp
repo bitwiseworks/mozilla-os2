@@ -8,14 +8,10 @@
  */
 
 #include "nsStyleTransformMatrix.h"
-#include "nsAutoPtr.h"
 #include "nsCSSValue.h"
-#include "nsStyleContext.h"
 #include "nsPresContext.h"
 #include "nsRuleNode.h"
 #include "nsCSSKeywords.h"
-#include "nsMathUtils.h"
-#include "CSSCalc.h"
 #include "nsStyleAnimation.h"
 
 namespace css = mozilla::css;
@@ -160,7 +156,7 @@ ProcessMatrix3D(gfx3DMatrix& aMatrix,
 }
 
 /* Helper function to process two matrices that we need to interpolate between */
-static void
+void
 ProcessInterpolateMatrix(gfx3DMatrix& aMatrix,
                          const nsCSSValue::Array* aData,
                          nsStyleContext* aContext,
@@ -601,9 +597,8 @@ MatrixForTransformFunction(gfx3DMatrix& aMatrix,
 nsCSSKeyword
 TransformFunctionOf(const nsCSSValue::Array* aData)
 {
-  nsAutoString keyword;
-  aData->Item(0).GetStringValue(keyword);
-  return nsCSSKeywords::LookupKeyword(keyword);
+  MOZ_ASSERT(aData->Item(0).GetUnit() == eCSSUnit_Enumerated);
+  return aData->Item(0).GetKeywordValue();
 }
 
 gfx3DMatrix

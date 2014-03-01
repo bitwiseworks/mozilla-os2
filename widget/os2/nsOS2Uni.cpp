@@ -38,7 +38,7 @@ ConverterInfo gConverterInfo[eCONVERTER_COUNT] =
   { 943,  "Shift_JIS",     nullptr,  nullptr },
   { 1381, "GB2312",        nullptr,  nullptr },
   { 1386, "GB2312",        nullptr,  nullptr },
-  { 949,  "x-windows-949", nullptr,  nullptr },
+  { 949,  "EUC-KR",        nullptr,  nullptr },
   { 950,  "Big5",          nullptr,  nullptr },
   { 1361, "x-johab",       nullptr,  nullptr }
 };
@@ -56,7 +56,7 @@ OS2Uni::GetUconvObject(int aCodePage, ConverterRequest aReq)
     if (aCodePage == gConverterInfo[i].mCodePage) {
       if (gConverterInfo[i].mEncoder == nullptr) {
         const char* convname;
-        nsCAutoString charset;
+        nsAutoCString charset;
         if (aCodePage == 0) {
           nsCOMPtr<nsIPlatformCharset>
                       plat(do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv));

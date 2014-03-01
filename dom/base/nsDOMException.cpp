@@ -3,16 +3,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsDOMException.h"
+
+#include "mozilla/Util.h"
 #include "nsCOMPtr.h"
 #include "nsCRTGlue.h"
 #include "nsContentUtils.h"
 #include "nsDOMClassInfoID.h"
 #include "nsError.h"
-#include "nsDOMException.h"
 #include "nsIDOMDOMException.h"
 #include "nsIDocument.h"
 #include "nsString.h"
 #include "prprf.h"
+
+using namespace mozilla;
 
 enum DOM4ErrorTypeCodeMap {
   /* DOM4 errors from http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#domexception */
@@ -39,6 +43,7 @@ enum DOM4ErrorTypeCodeMap {
   TimeoutError               = nsIDOMDOMException::TIMEOUT_ERR,
   InvalidNodeTypeError       = nsIDOMDOMException::INVALID_NODE_TYPE_ERR,
   DataCloneError             = nsIDOMDOMException::DATA_CLONE_ERR,
+  EncodingError              = 0,
 
   /* XXX Should be JavaScript native errors */
   TypeError                  = 0,
@@ -62,15 +67,14 @@ enum DOM4ErrorTypeCodeMap {
 #define DOM4_MSG_DEF(name, message, nsresult) {(nsresult), name, #name, message},
 #define DOM_MSG_DEF(val, message) {(val), NS_ERROR_GET_CODE(val), #val, message},
 
-static struct ResultStruct
+static const struct ResultStruct
 {
   nsresult mNSResult;
   uint16_t mCode;
   const char* mName;
   const char* mMessage;
-} gDOMErrorMsgMap[] = {
+} sDOMErrorMsgMap[] = {
 #include "domerr.msg"
-  {NS_OK, 0, nullptr, nullptr}   // sentinel to mark end of array
 };
 
 #undef DOM4_MSG_DEF
@@ -85,17 +89,13 @@ NSResultToNameAndMessage(nsresult aNSResult,
   *aName = nullptr;
   *aMessage = nullptr;
   *aCode = 0;
-  ResultStruct* result_struct = gDOMErrorMsgMap;
-
-  while (result_struct->mName) {
-    if (aNSResult == result_struct->mNSResult) {
-      *aName = result_struct->mName;
-      *aMessage = result_struct->mMessage;
-      *aCode = result_struct->mCode;
+  for (uint32_t idx = 0; idx < ArrayLength(sDOMErrorMsgMap); idx++) {
+    if (aNSResult == sDOMErrorMsgMap[idx].mNSResult) {
+      *aName = sDOMErrorMsgMap[idx].mName;
+      *aMessage = sDOMErrorMsgMap[idx].mMessage;
+      *aCode = sDOMErrorMsgMap[idx].mCode;
       return;
     }
-
-    ++result_struct;
   }
 
   NS_WARNING("Huh, someone is throwing non-DOM errors using the DOM module!");
@@ -182,8 +182,7 @@ nsDOMException::GetCode(uint16_t* aCode)
   // Warn only when the code was changed (other than DOM Core)
   // or the code is useless (zero)
   if (NS_ERROR_GET_MODULE(mResult) != NS_ERROR_MODULE_DOM || !mCode) {
-    nsCOMPtr<nsIDocument> doc =
-      do_QueryInterface(nsContentUtils::GetDocumentFromCaller());
+    nsCOMPtr<nsIDocument> doc = nsContentUtils::GetDocumentFromCaller();
     if (doc) {
       doc->WarnOnceAbout(nsIDocument::eDOMExceptionCode);
     }
@@ -319,7 +318,7 @@ nsDOMException::ToString(char **aReturn)
   static const char format[] =
     "[Exception... \"%s\"  code: \"%d\" nsresult: \"0x%x (%s)\"  location: \"%s\"]";
 
-  nsCAutoString location;
+  nsAutoCString location;
 
   if (mInner) {
     nsXPIDLCString filename;

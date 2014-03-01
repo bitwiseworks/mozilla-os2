@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.nio.IntBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ public class FennecNativeDriver implements Driver {
     private HashMap mLocators = null;
     private Activity mActivity;
     private Solo mSolo;
+    private String mRootPath;
 
     private static String mLogFile = null;
     private static LogLevel mLogLevel = LogLevel.INFO;
@@ -76,12 +78,13 @@ public class FennecNativeDriver implements Driver {
         }
     }
 
-    public FennecNativeDriver(Activity activity, Solo robocop) {
+    public FennecNativeDriver(Activity activity, Solo robocop, String rootPath) {
         mActivity = activity;
         mSolo = robocop;
+        mRootPath = rootPath;
 
         // Set up table of fennec_ids.
-        mLocators = convertTextToTable(getFile("/mnt/sdcard/fennec_ids.txt"));
+        mLocators = convertTextToTable(getFile(mRootPath + "/fennec_ids.txt"));
 
         // Set up reflexive access of java classes and methods.
         try {
@@ -235,15 +238,20 @@ public class FennecNativeDriver implements Driver {
     }
 
     private View getSurfaceView() {
+        ArrayList<View> views = mSolo.getCurrentViews();
         try {
             Class c = Class.forName("org.mozilla.gecko.gfx.LayerView");
-            for (View v : mSolo.getCurrentViews()) {
+            for (View v : views) {
                 if (c.isInstance(v)) {
                     return v;
                 }
             }
         } catch (ClassNotFoundException e) {
             log(LogLevel.ERROR, e);
+        }
+        log(LogLevel.WARN, "getSurfaceView could not find LayerView");
+        for (View v : views) {
+            log(LogLevel.WARN, v.toString());
         }
         return null;
     }
@@ -266,7 +274,7 @@ public class FennecNativeDriver implements Driver {
         int w = view.getWidth();
         int h = view.getHeight();
         pixelBuffer.position(0);
-        String mapFile = "/mnt/sdcard/pixels.map";
+        String mapFile = mRootPath + "/pixels.map";
 
         FileOutputStream fos = null;
         BufferedOutputStream bos = null;
@@ -391,7 +399,7 @@ public class FennecNativeDriver implements Driver {
 
         String[] lines = data.split("\n");
         for (int i = 0; i < lines.length; i++) {
-            String[] parts = lines[i].split("=");
+            String[] parts = lines[i].split("=", 2);
             retVal.put(parts[0].trim(), parts[1].trim());
         }
         return retVal;

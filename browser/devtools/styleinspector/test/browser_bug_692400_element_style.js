@@ -5,29 +5,39 @@
 // Tests for selector text errors.
 
 let doc;
-let stylePanel;
+let computedView;
 
 function createDocument()
 {
   doc.body.innerHTML = "<div style='color:blue;'></div>";
 
   doc.title = "Style Inspector Selector Text Test";
-  stylePanel = new ComputedViewPanel(window);
 
-  Services.obs.addObserver(SI_checkText, "StyleInspector-populated", false);
+  openInspector(openComputedView);
+}
 
-  let span = doc.querySelector("div");
-  ok(span, "captain, we have the test div");
 
-  stylePanel.createPanel(span);
+function openComputedView(aInspector)
+{
+  let div = doc.querySelector("div");
+  ok(div, "captain, we have the test div");
+
+  aInspector.selection.setNode(div);
+
+  aInspector.sidebar.once("computedview-ready", function() {
+    aInspector.sidebar.select("computedview");
+    computedView = getComputedView(aInspector);
+
+    Services.obs.addObserver(SI_checkText, "StyleInspector-populated", false);
+  });
 }
 
 function SI_checkText()
 {
-  Services.obs.removeObserver(SI_checkText, "StyleInspector-populated", false);
+  Services.obs.removeObserver(SI_checkText, "StyleInspector-populated");
 
   let propertyView = null;
-  stylePanel.cssHtmlTree.propertyViews.some(function(aView) {
+  computedView.propertyViews.some(function(aView) {
     if (aView.name == "color") {
       propertyView = aView;
       return true;
@@ -42,27 +52,18 @@ function SI_checkText()
   propertyView.matchedExpanded = true;
   propertyView.refreshMatchedSelectors();
 
-  let td = propertyView.matchedSelectorsContainer.querySelector("td.rule-text");
-  ok(td, "found the first table row");
+  let span = propertyView.matchedSelectorsContainer.querySelector("span.rule-text");
+  ok(span, "found the first table row");
 
   let selector = propertyView.matchedSelectorViews[0];
   ok(selector, "found the first matched selector view");
 
-  try {
-    is(td.textContent.trim(), selector.humanReadableText(td).trim(),
-      "selector text is correct");
-  } catch (ex) {
-    info("EXCEPTION: " + ex);
-    ok(false, "getting the selector text should not raise an exception");
-  }
-
-  stylePanel.destroy();
   finishUp();
 }
 
 function finishUp()
 {
-  doc = stylePanel = null;
+  doc = computedView = null;
   gBrowser.removeCurrentTab();
   finish();
 }

@@ -64,15 +64,6 @@ let UI = {
   // the operation interactive.
   _maxInteractiveWait: 250,
 
-  // Variable: _privateBrowsing
-  // Keeps track of info related to private browsing, including: 
-  //   transitionMode - whether we're entering or exiting PB
-  //   wasInTabView - whether TabView was visible before we went into PB
-  _privateBrowsing: {
-    transitionMode: "",
-    wasInTabView: false 
-  },
-  
   // Variable: _storageBusy
   // Tells whether the storage is currently busy or not.
   _storageBusy: false,
@@ -595,8 +586,8 @@ let UI = {
 
   // ----------
   // Function: storageBusy
-  // Pauses the storage activity that conflicts with sessionstore updates and 
-  // private browsing mode switches. Calls can be nested. 
+  // Pauses the storage activity that conflicts with sessionstore updates.
+  // Calls can be nested.
   storageBusy: function UI_storageBusy() {
     if (this._storageBusy)
       return;
@@ -649,47 +640,6 @@ let UI = {
       gWindow.removeEventListener("SSWindowStateReady", handleSSWindowStateReady, false);
     });
 
-    // Private Browsing:
-    // When transitioning to PB, we exit Panorama if necessary (making note of the
-    // fact that we were there so we can return after PB) and make sure we
-    // don't reenter Panorama due to all of the session restore tab
-    // manipulation (which otherwise we might). When transitioning away from
-    // PB, we reenter Panorama if we had been there directly before PB.
-    function pbObserver(subject, topic, data) {
-      if (topic == "private-browsing") {
-        // We could probably do this in private-browsing-change-granted, but
-        // this seems like a nicer spot, right in the middle of the process.
-        if (data == "enter") {
-          // If we are in Tab View, exit. 
-          self._privateBrowsing.wasInTabView = self.isTabViewVisible();
-          if (self.isTabViewVisible())
-            self.goToTab(gBrowser.selectedTab);
-        }
-      } else if (topic == "private-browsing-change-granted") {
-        if (data == "enter" || data == "exit") {
-          Search.hide();
-          self._privateBrowsing.transitionMode = data;
-        }
-      } else if (topic == "private-browsing-transition-complete") {
-        // We use .transitionMode here, as aData is empty.
-        if (self._privateBrowsing.transitionMode == "exit" &&
-            self._privateBrowsing.wasInTabView)
-          self.showTabView(false);
-
-        self._privateBrowsing.transitionMode = "";
-      }
-    }
-
-    Services.obs.addObserver(pbObserver, "private-browsing", false);
-    Services.obs.addObserver(pbObserver, "private-browsing-change-granted", false);
-    Services.obs.addObserver(pbObserver, "private-browsing-transition-complete", false);
-
-    this._cleanupFunctions.push(function() {
-      Services.obs.removeObserver(pbObserver, "private-browsing");
-      Services.obs.removeObserver(pbObserver, "private-browsing-change-granted");
-      Services.obs.removeObserver(pbObserver, "private-browsing-transition-complete");
-    });
-
     // TabOpen
     this._eventListeners.open = function (event) {
       let tab = event.target;
@@ -714,7 +664,7 @@ let UI = {
         if (self._currentTab == tab)
           self._closedSelectedTabInTabView = true;
       } else {
-        // If we're currently in the process of entering private browsing,
+        // If we're currently in the process of session store update,
         // we don't want to go to the Tab View UI. 
         if (self._storageBusy)
           return;
@@ -810,7 +760,7 @@ let UI = {
   // Selects the given xul:tab in the browser.
   goToTab: function UI_goToTab(xulTab) {
     // If it's not focused, the onFocus listener would handle it.
-    if (gBrowser.selectedTab == xulTab)
+    if (xulTab.selected)
       this.onTabSelect(xulTab);
     else
       gBrowser.selectedTab = xulTab;
@@ -825,9 +775,8 @@ let UI = {
     if (this.isTabViewVisible()) {
       // We want to zoom in if:
       // 1) we didn't just restore a tab via Ctrl+Shift+T
-      // 2) we're not in the middle of switching from/to private browsing
-      // 3) the currently selected tab is the last created tab and has a tabItem
-      if (!this.restoredClosedTab && !this._privateBrowsing.transitionMode &&
+      // 2) the currently selected tab is the last created tab and has a tabItem
+      if (!this.restoredClosedTab &&
           this._lastOpenedTab == tab && tab._tabViewTabItem) {
         tab._tabViewTabItem.zoomIn(true);
         this._lastOpenedTab = null;
@@ -918,7 +867,7 @@ let UI = {
     // TabView is hidden and that the correct group is activated. When a modal
     // dialog is shown for currently selected tab the onTabSelect event handler
     // is not called, so we need to do it.
-    if (gBrowser.selectedTab == tab && this._currentTab == tab)
+    if (tab.selected && this._currentTab == tab)
       this.onTabSelect(tab);
   },
 
@@ -1012,8 +961,7 @@ let UI = {
 #ifdef XP_MACOSX
       "fullScreen",
 #endif
-      "closeWindow", "tabview", "undoCloseTab", "undoCloseWindow",
-      "privatebrowsing"
+      "closeWindow", "tabview", "undoCloseTab", "undoCloseWindow"
     ].forEach(function(key) {
       let element = gWindow.document.getElementById("key_" + key);
       let code = element.getAttribute("key").toLocaleLowerCase().charCodeAt(0);

@@ -30,11 +30,24 @@ function runTest()
 
   var sel2 = frames[1].getSelection();
   sel2.collapse(frames[1].document.body, 0);
-
   window.frames[0].focus();
   document.commandDispatcher.getControllerForCommand("cmd_moveBottom").doCommand("cmd_moveBottom");
 
-  ok(frames[0].scrollY > 0, "scrollY for non-showcaret");
+  var listener = function() {
+    if (!(frames[0].scrollY > 0)) {
+      window.content.removeEventListener("scroll", listener, false);
+    }
+  }
+  window.frames[0].addEventListener("scroll", listener, false);
+
+  var sel1 = frames[0].getSelection();
+  sel1.collapse(frames[0].document.body, 0);
+
+  var sel2 = frames[1].getSelection();
+  sel2.collapse(frames[1].document.body, 0);
+
+  window.frames[0].focus();
+  document.commandDispatcher.getControllerForCommand("cmd_moveBottom").doCommand("cmd_moveBottom");
   is(sel1.focusNode, frames[0].document.body, "focusNode for non-showcaret");
   is(sel1.focusOffset, 0, "focusOffset for non-showcaret");
 

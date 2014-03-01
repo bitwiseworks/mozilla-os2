@@ -67,7 +67,17 @@ let modules = {
   feedback: {
     uri: "chrome://browser/content/aboutFeedback.xhtml",
     privileged: true
-  }
+  },
+  privatebrowsing: {
+    uri: "chrome://browser/content/aboutPrivateBrowsing.xhtml",
+    privileged: true
+  },
+#ifdef MOZ_SERVICES_HEALTHREPORT
+  healthreport: {
+    uri: "chrome://browser/content/aboutHealthReport.xhtml",
+    privileged: true
+  },
+#endif
 }
 
 function AboutRedirector() {}
@@ -112,4 +122,4 @@ AboutRedirector.prototype = {
 };
 
 const components = [AboutRedirector];
-const NSGetFactory = XPCOMUtils.generateNSGetFactory(components);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);

@@ -59,13 +59,15 @@ var signonsTreeView = {
   isSorted : function() { return false; },
   isContainer : function(index) { return false; },
   cycleHeader : function(column) {},
-  getRowProperties : function(row,prop) {},
-  getColumnProperties : function(column,prop) {},
-  getCellProperties : function(row,column,prop) {
+  getRowProperties : function(row) { return ""; },
+  getColumnProperties : function(column) { return ""; },
+  getCellProperties : function(row,column) {
     if (column.element.getAttribute("id") == "siteCol")
-      prop.AppendElement(kLTRAtom);
+      return "ltr";
+
+    return "";
   }
- };
+};
 
 
 function LoadSignons() {
@@ -88,7 +90,7 @@ function LoadSignons() {
   // disable "remove all signons" button if there are no signons
   var element = document.getElementById("removeAllSignons");
   var toggle = document.getElementById("togglePasswords");
-  if (signons.length == 0 || gSelectUserInUse) {
+  if (signons.length == 0) {
     element.setAttribute("disabled","true");
     toggle.setAttribute("disabled","true");
   } else {
@@ -101,7 +103,7 @@ function LoadSignons() {
 
 function SignonSelected() {
   var selections = GetTreeSelections(signonsTree);
-  if (selections.length && !gSelectUserInUse) {
+  if (selections.length) {
     document.getElementById("removeSignon").removeAttribute("disabled");
   }
 }

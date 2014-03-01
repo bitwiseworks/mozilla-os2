@@ -6,15 +6,19 @@
 #ifndef MOZILLA_SVGANIMATEDLENGTHLIST_H__
 #define MOZILLA_SVGANIMATEDLENGTHLIST_H__
 
+#include "mozilla/Attributes.h"
 #include "nsAutoPtr.h"
 #include "nsISMILAttr.h"
 #include "SVGLengthList.h"
 
-class nsISMILAnimationElement;
 class nsSMILValue;
 class nsSVGElement;
 
 namespace mozilla {
+
+namespace dom {
+class SVGAnimationElement;
+}
 
 /**
  * Class SVGAnimatedLengthList
@@ -109,12 +113,12 @@ private:
 
     // nsISMILAttr methods
     virtual nsresult ValueFromString(const nsAString& aStr,
-                                     const nsISMILAnimationElement* aSrcElement,
+                                     const dom::SVGAnimationElement* aSrcElement,
                                      nsSMILValue& aValue,
-                                     bool& aPreventCachingOfSandwich) const;
-    virtual nsSMILValue GetBaseValue() const;
-    virtual void ClearAnimValue();
-    virtual nsresult SetAnimValue(const nsSMILValue& aValue);
+                                     bool& aPreventCachingOfSandwich) const MOZ_OVERRIDE;
+    virtual nsSMILValue GetBaseValue() const MOZ_OVERRIDE;
+    virtual void ClearAnimValue() MOZ_OVERRIDE;
+    virtual nsresult SetAnimValue(const nsSMILValue& aValue) MOZ_OVERRIDE;
   };
 };
 

@@ -23,6 +23,7 @@
 #include "nsITheme.h"
 #include "nsUnicharUtils.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsDisplayList.h"
 #include "nsCSSRendering.h"
 #include "nsIReflowCallback.h"
@@ -30,6 +31,10 @@
 #include "mozilla/Preferences.h"
 #include "nsLayoutUtils.h"
 #include "mozilla/Attributes.h"
+
+#ifdef ACCESSIBILITY
+#include "nsAccessibilityService.h"
+#endif
 
 #ifdef IBMBIDI
 #include "nsBidiUtils.h"
@@ -59,6 +64,9 @@ NS_NewTextBoxFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTextBoxFrame)
 
+NS_QUERYFRAME_HEAD(nsTextBoxFrame)
+  NS_QUERYFRAME_ENTRY(nsTextBoxFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsTextBoxFrameSuper)
 
 NS_IMETHODIMP
 nsTextBoxFrame::AttributeChanged(int32_t         aNameSpaceID,
@@ -100,7 +108,7 @@ nsTextBoxFrame::~nsTextBoxFrame()
 }
 
 
-NS_IMETHODIMP
+void
 nsTextBoxFrame::Init(nsIContent*      aContent,
                      nsIFrame*        aParent,
                      nsIFrame*        aPrevInFlow)
@@ -113,8 +121,6 @@ nsTextBoxFrame::Init(nsIContent*      aContent,
 
     // register access key
     RegUnregAccessKey(true);
-
-    return NS_OK;
 }
 
 void
@@ -324,7 +330,7 @@ nsDisplayXULTextBox::Paint(nsDisplayListBuilder* aBuilder,
                     ToReferenceFrame();
   nsLayoutUtils::PaintTextShadow(mFrame, aCtx,
                                  drawRect, mVisibleRect,
-                                 mFrame->GetStyleColor()->mColor,
+                                 mFrame->StyleColor()->mColor,
                                  PaintTextShadowCallback,
                                  (void*)this);
 
@@ -353,18 +359,17 @@ nsDisplayXULTextBox::GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder)
       ToReferenceFrame();
 }
 
-NS_IMETHODIMP
+void
 nsTextBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                  const nsRect&           aDirtyRect,
                                  const nsDisplayListSet& aLists)
 {
     if (!IsVisibleForPainting(aBuilder))
-      return NS_OK;
+        return;
 
-    nsresult rv = nsLeafBoxFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsLeafBoxFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
     
-    return aLists.Content()->AppendNewToTop(new (aBuilder)
+    aLists.Content()->AppendNewToTop(new (aBuilder)
         nsDisplayXULTextBox(aBuilder, this));
 }
 
@@ -403,11 +408,11 @@ nsTextBoxFrame::DrawText(nsRenderingContext& aRenderingContext,
 
     nsIFrame* f = this;
     do {  // find decoration colors
-      nsStyleContext* context = f->GetStyleContext();
+      nsStyleContext* context = f->StyleContext();
       if (!context->HasTextDecorationLines()) {
         break;
       }
-      const nsStyleTextReset* styleText = context->GetStyleTextReset();
+      const nsStyleTextReset* styleText = context->StyleTextReset();
       
       if (decorMask & styleText->mTextDecorationLine) {  // a decoration defined here
         nscolor color;
@@ -498,14 +503,14 @@ nsTextBoxFrame::DrawText(nsRenderingContext& aRenderingContext,
 
     CalculateUnderline(*refContext);
 
-    aRenderingContext.SetColor(aOverrideColor ? *aOverrideColor : GetStyleColor()->mColor);
+    aRenderingContext.SetColor(aOverrideColor ? *aOverrideColor : StyleColor()->mColor);
 
 #ifdef IBMBIDI
     nsresult rv = NS_ERROR_FAILURE;
 
     if (mState & NS_FRAME_IS_BIDI) {
       presContext->SetBidiEnabled();
-      const nsStyleVisibility* vis = GetStyleVisibility();
+      const nsStyleVisibility* vis = StyleVisibility();
       nsBidiDirection direction = (NS_STYLE_DIRECTION_RTL == vis->mDirection) ? NSBIDI_RTL : NSBIDI_LTR;
       if (mAccessKeyInfo && mAccessKeyInfo->mAccesskeyIndex != kNotFound) {
           // We let the RenderText function calculate the mnemonic's
@@ -597,8 +602,10 @@ nsTextBoxFrame::CalculateTitleForWidth(nsPresContext*      aPresContext,
                                        nsRenderingContext& aRenderingContext,
                                        nscoord              aWidth)
 {
-    if (mTitle.IsEmpty())
+    if (mTitle.IsEmpty()) {
+        mCroppedTitle.Truncate();
         return 0;
+    }
 
     nsRefPtr<nsFontMetrics> fm;
     nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm));
@@ -892,7 +899,7 @@ nsTextBoxFrame::DoLayout(nsBoxLayoutState& aBoxLayoutState)
 
     CalcDrawRect(*aBoxLayoutState.GetRenderingContext());
 
-    const nsStyleText* textStyle = GetStyleText();
+    const nsStyleText* textStyle = StyleText();
     
     nsRect scrollBounds(nsPoint(0, 0), GetSize());
     nsRect textRect = mTextDrawRect;
@@ -929,7 +936,7 @@ nsTextBoxFrame::DoLayout(nsBoxLayoutState& aBoxLayoutState)
 nsRect
 nsTextBoxFrame::GetComponentAlphaBounds()
 {
-  if (GetStyleText()->mTextShadow) {
+  if (StyleText()->mTextShadow) {
     return GetVisualOverflowRectRelativeToSelf();
   }
   return mTextDrawRect;
@@ -994,6 +1001,17 @@ nsTextBoxFrame::CalcDrawRect(nsRenderingContext &aRenderingContext)
     // determine (cropped) title which fits in aRect.width and its width
     nscoord titleWidth =
         CalculateTitleForWidth(presContext, aRenderingContext, textRect.width);
+
+#ifdef ACCESSIBILITY
+    // Make sure to update the accessible tree in case when cropped title is
+    // changed.
+    nsAccessibilityService* accService = GetAccService();
+    if (accService) {
+        accService->UpdateLabelValue(PresContext()->PresShell(), mContent,
+                                     mCroppedTitle);
+    }
+#endif
+
     // determine if and at which position to put the underline
     UpdateAccessIndex();
 
@@ -1002,8 +1020,8 @@ nsTextBoxFrame::CalcDrawRect(nsRenderingContext &aRenderingContext)
     textRect.width = titleWidth;
 
     // Align our text within the overall rect by checking our text-align property.
-    const nsStyleVisibility* vis = GetStyleVisibility();
-    const nsStyleText* textStyle = GetStyleText();
+    const nsStyleVisibility* vis = StyleVisibility();
+    const nsStyleText* textStyle = StyleText();
 
     if (textStyle->mTextAlign == NS_STYLE_TEXT_ALIGN_CENTER)
       textRect.x += (outerWidth - textRect.width)/2;

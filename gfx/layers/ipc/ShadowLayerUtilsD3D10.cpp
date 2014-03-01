@@ -8,8 +8,11 @@
 #include <d3d10_1.h>
 #include <dxgi.h>
 
-#include "mozilla/layers/PLayers.h"
+#include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/layers/PLayerTransaction.h"
 #include "ShadowLayers.h"
+
+using namespace mozilla::gl;
 
 namespace mozilla {
 namespace layers {
@@ -17,10 +20,10 @@ namespace layers {
 // Platform-specific shadow-layers interfaces.  See ShadowLayers.h.
 // D3D10 doesn't need all these yet.
 bool
-ShadowLayerForwarder::PlatformAllocBuffer(const gfxIntSize&,
-                                          gfxASurface::gfxContentType,
-                                          uint32_t,
-                                          SurfaceDescriptor*)
+ISurfaceAllocator::PlatformAllocSurfaceDescriptor(const gfxIntSize&,
+                                                  gfxASurface::gfxContentType,
+                                                  uint32_t,
+                                                  SurfaceDescriptor*)
 {
   return false;
 }
@@ -70,21 +73,27 @@ ShadowLayerForwarder::PlatformSyncBeforeUpdate()
 }
 
 bool
-ShadowLayerManager::PlatformDestroySharedSurface(SurfaceDescriptor*)
+ISurfaceAllocator::PlatformDestroySharedSurface(SurfaceDescriptor*)
 {
   return false;
 }
 
 /*static*/ already_AddRefed<TextureImage>
-ShadowLayerManager::OpenDescriptorForDirectTexturing(GLContext*,
-                                                     const SurfaceDescriptor&,
-                                                     GLenum)
+LayerManagerComposite::OpenDescriptorForDirectTexturing(GLContext*,
+                                                        const SurfaceDescriptor&,
+                                                        GLenum)
 {
   return nullptr;
 }
 
+/*static*/ bool
+LayerManagerComposite::SupportsDirectTexturing()
+{
+  return true;
+}
+
 /*static*/ void
-ShadowLayerManager::PlatformSyncBeforeReplyUpdate()
+LayerManagerComposite::PlatformSyncBeforeReplyUpdate()
 {
 }
 
@@ -114,7 +123,6 @@ OpenForeign(ID3D10Device* aDevice, const SurfaceDescriptorD3D10& aDescr)
   if (!SUCCEEDED(hr) || !tex)
     return nullptr;
 
-  // XXX FIXME TODO do we need this???
   return nsRefPtr<ID3D10Texture2D>(tex).forget();
 }
 

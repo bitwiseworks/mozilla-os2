@@ -6,6 +6,7 @@
 
 // Local Includes 
 #include "nsSHistory.h"
+#include <algorithm>
 
 // Helper Classes
 #include "nsXPIDLString.h"
@@ -34,7 +35,7 @@
 
 // For calculating max history entries and max cachable contentviewers
 #include "nspr.h"
-#include <math.h>  // for log()
+#include "mozilla/MathAlgorithms.h"
 
 using namespace mozilla;
 
@@ -60,8 +61,17 @@ int32_t nsSHistory::sHistoryMaxTotalViewers = -1;
 // entries were touched, so that we can evict older entries first.
 static uint32_t gTouchCounter = 0;
 
-static PRLogModuleInfo* gLogModule = PR_LOG_DEFINE("nsSHistory");
-#define LOG(format) PR_LOG(gLogModule, PR_LOG_DEBUG, format)
+#ifdef PR_LOGGING
+
+static PRLogModuleInfo*
+GetSHistoryLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("nsSHistory");
+  return sLog;
+}
+#define LOG(format) PR_LOG(GetSHistoryLog(), PR_LOG_DEBUG, format)
 
 // This macro makes it easier to print a log message which includes a URI's
 // spec.  Example use:
@@ -71,8 +81,8 @@ static PRLogModuleInfo* gLogModule = PR_LOG_DEFINE("nsSHistory");
 //
 #define LOG_SPEC(format, uri)                              \
   PR_BEGIN_MACRO                                           \
-    if (PR_LOG_TEST(gLogModule, PR_LOG_DEBUG)) {           \
-      nsCAutoString _specStr(NS_LITERAL_CSTRING("(null)"));\
+    if (PR_LOG_TEST(GetSHistoryLog(), PR_LOG_DEBUG)) {     \
+      nsAutoCString _specStr(NS_LITERAL_CSTRING("(null)"));\
       if (uri) {                                           \
         uri->GetSpec(_specStr);                            \
       }                                                    \
@@ -89,11 +99,61 @@ static PRLogModuleInfo* gLogModule = PR_LOG_DEFINE("nsSHistory");
 //
 #define LOG_SHENTRY_SPEC(format, shentry)                  \
   PR_BEGIN_MACRO                                           \
-    if (PR_LOG_TEST(gLogModule, PR_LOG_DEBUG)) {           \
+    if (PR_LOG_TEST(GetSHistoryLog(), PR_LOG_DEBUG)) {     \
       nsCOMPtr<nsIURI> uri;                                \
       shentry->GetURI(getter_AddRefs(uri));                \
       LOG_SPEC(format, uri);                               \
     }                                                      \
+  PR_END_MACRO
+
+#else // !PR_LOGGING
+
+#define LOG(format)
+#define LOG_SPEC(format, uri)
+#define LOG_SHENTRY_SPEC(format, shentry)
+
+#endif // PR_LOGGING
+
+// Iterates over all registered session history listeners.
+#define ITERATE_LISTENERS(body)                            \
+  PR_BEGIN_MACRO                                           \
+  {                                                        \
+    nsAutoTObserverArray<nsWeakPtr, 2>::EndLimitedIterator \
+      iter(mListeners);                                    \
+    while (iter.HasMore()) {                               \
+      nsCOMPtr<nsISHistoryListener> listener =             \
+        do_QueryReferent(iter.GetNext());                  \
+      if (listener) {                                      \
+        body                                               \
+      }                                                    \
+    }                                                      \
+  }                                                        \
+  PR_END_MACRO
+
+// Calls a given method on all registered session history listeners.
+#define NOTIFY_LISTENERS(method, args)                     \
+  ITERATE_LISTENERS(                                       \
+    listener->method args;                                 \
+  );
+
+// Calls a given method on all registered session history listeners.
+// Listeners may return 'false' to cancel an action so make sure that we
+// set the return value to 'false' if one of the listeners wants to cancel.
+#define NOTIFY_LISTENERS_CANCELABLE(method, retval, args)  \
+  PR_BEGIN_MACRO                                           \
+  {                                                        \
+    bool canceled = false;                                 \
+    retval = true;                                         \
+    ITERATE_LISTENERS(                                     \
+      listener->method args;                               \
+      if (!retval) {                                       \
+        canceled = true;                                   \
+      }                                                    \
+    );                                                     \
+    if (canceled) {                                        \
+      retval = false;                                      \
+    }                                                      \
+  }                                                        \
   PR_END_MACRO
 
 enum HistCmd{
@@ -242,14 +302,14 @@ nsSHistory::CalcMaxTotalViewers()
   // 4096 Mb       8
   uint64_t bytes = PR_GetPhysicalMemorySize();
 
-  if (LL_IS_ZERO(bytes))
+  if (bytes == 0)
     return 0;
 
-  // Conversion from unsigned int64 to double doesn't work on all platforms.
-  // We need to truncate the value at LL_MAXINT to make sure we don't
+  // Conversion from unsigned int64_t to double doesn't work on all platforms.
+  // We need to truncate the value at INT64_MAX to make sure we don't
   // overflow.
-  if (LL_CMP(bytes, >, LL_MAXINT))
-    bytes = LL_MAXINT;
+  if (bytes > INT64_MAX)
+    bytes = INT64_MAX;
 
   uint64_t kbytes;
   LL_SHR(kbytes, bytes, 10);
@@ -261,7 +321,7 @@ nsSHistory::CalcMaxTotalViewers()
   // except that we divide the final memory calculation by 4, since
   // we assume each ContentViewer takes on average 4MB
   uint32_t viewers = 0;
-  double x = log(kBytesD)/log(2.0) - 14;
+  double x = std::log(kBytesD)/std::log(2.0) - 14;
   if (x > 0) {
     viewers    = (uint32_t)(x * x - x + 2.001); // add .001 for rounding
     viewers   /= 4;
@@ -370,22 +430,17 @@ nsSHistory::AddEntry(nsISHEntry * aSHEntry, bool aPersist)
   nsCOMPtr<nsISHTransaction> txn(do_CreateInstance(NS_SHTRANSACTION_CONTRACTID));
   NS_ENSURE_TRUE(txn, NS_ERROR_FAILURE);
 
-  // Notify any listener about the new addition
-  if (mListener) {
-    nsCOMPtr<nsISHistoryListener> listener(do_QueryReferent(mListener));
-    if (listener) {
-      nsCOMPtr<nsIURI> uri;
-      nsCOMPtr<nsIHistoryEntry> hEntry(do_QueryInterface(aSHEntry));
-      if (hEntry) {
-        int32_t currentIndex = mIndex;
-        hEntry->GetURI(getter_AddRefs(uri));
-        listener->OnHistoryNewEntry(uri);
+  nsCOMPtr<nsIURI> uri;
+  nsCOMPtr<nsIHistoryEntry> hEntry(do_QueryInterface(aSHEntry));
+  if (hEntry) {
+    int32_t currentIndex = mIndex;
+    hEntry->GetURI(getter_AddRefs(uri));
+    NOTIFY_LISTENERS(OnHistoryNewEntry, (uri));
 
-        // If a listener has changed mIndex, we need to get currentTxn again,
-        // otherwise we'll be left at an inconsistent state (see bug 320742)
-        if (currentIndex != mIndex)
-          GetTransactionAtIndex(mIndex, getter_AddRefs(currentTxn));
-      }
+    // If a listener has changed mIndex, we need to get currentTxn again,
+    // otherwise we'll be left at an inconsistent state (see bug 320742)
+    if (currentIndex != mIndex) {
+      GetTransactionAtIndex(mIndex, getter_AddRefs(currentTxn));
     }
   }
 
@@ -555,7 +610,7 @@ nsSHistory::PrintHistory()
     }
 
 #if 0
-    nsCAutoString url;
+    nsAutoCString url;
     if (uri)
      uri->GetSpec(url);
 
@@ -619,16 +674,11 @@ nsSHistory::PurgeHistory(int32_t aEntries)
   if (mLength <= 0 || aEntries <= 0)
     return NS_ERROR_FAILURE;
 
-  aEntries = NS_MIN(aEntries, mLength);
+  aEntries = std::min(aEntries, mLength);
   
   bool purgeHistory = true;
-  // Notify the listener about the history purge
-  if (mListener) {
-    nsCOMPtr<nsISHistoryListener> listener(do_QueryReferent(mListener));
-    if (listener) {
-      listener->OnHistoryPurge(aEntries, &purgeHistory);
-    } 
-  }
+  NOTIFY_LISTENERS_CANCELABLE(OnHistoryPurge, purgeHistory,
+                              (aEntries, &purgeHistory));
 
   if (!purgeHistory) {
     // Listener asked us not to purge
@@ -674,8 +724,9 @@ nsSHistory::AddSHistoryListener(nsISHistoryListener * aListener)
   // have the right ownership with who ever listens to SHistory
   nsWeakPtr listener = do_GetWeakReference(aListener);
   if (!listener) return NS_ERROR_FAILURE;
-  mListener = listener;
-  return NS_OK;
+
+  return mListeners.AppendElementUnlessExists(listener) ?
+    NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
 
@@ -684,12 +735,9 @@ nsSHistory::RemoveSHistoryListener(nsISHistoryListener * aListener)
 {
   // Make sure the listener that wants to be removed is the
   // one we have in store. 
-  nsWeakPtr listener = do_GetWeakReference(aListener);  
-  if (listener == mListener) {
-    mListener = nullptr;
-    return NS_OK;
-  }
-  return NS_ERROR_FAILURE;
+  nsWeakPtr listener = do_GetWeakReference(aListener);
+  mListeners.RemoveElement(listener);
+  return NS_OK;
 }
 
 
@@ -717,14 +765,12 @@ nsSHistory::ReplaceEntry(int32_t aIndex, nsISHEntry * aReplaceEntry)
   return rv;
 }
 
-/* Get a handle to the Session history listener */
 NS_IMETHODIMP
-nsSHistory::GetListener(nsISHistoryListener ** aListener)
+nsSHistory::NotifyOnHistoryReload(nsIURI* aReloadURI, uint32_t aReloadFlags,
+                                  bool* aCanReload)
 {
-  NS_ENSURE_ARG_POINTER(aListener);
-  if (mListener) 
-    CallQueryReferent(mListener.get(),  aListener);
-  // Don't addref aListener. It is a weak pointer.
+  NOTIFY_LISTENERS_CANCELABLE(OnHistoryReload, *aCanReload,
+                              (aReloadURI, aReloadFlags, aCanReload));
   return NS_OK;
 }
 
@@ -818,7 +864,6 @@ nsSHistory::GoForward()
 NS_IMETHODIMP
 nsSHistory::Reload(uint32_t aReloadFlags)
 {
-  nsresult rv;
   nsDocShellInfoLoadType loadType;
   if (aReloadFlags & nsIWebNavigation::LOAD_FLAGS_BYPASS_PROXY && 
       aReloadFlags & nsIWebNavigation::LOAD_FLAGS_BYPASS_CACHE)
@@ -837,25 +882,24 @@ nsSHistory::Reload(uint32_t aReloadFlags)
   {
     loadType = nsIDocShellLoadInfo::loadReloadCharsetChange;
   }
+  else if (aReloadFlags & nsIWebNavigation::LOAD_FLAGS_ALLOW_MIXED_CONTENT)
+  {
+    loadType = nsIDocShellLoadInfo::loadMixedContent;
+  }
   else
   {
     loadType = nsIDocShellLoadInfo::loadReloadNormal;
   }
-  
-  // Notify listeners
+
+  // We are reloading. Send Reload notifications.
+  // nsDocShellLoadFlagType is not public, where as nsIWebNavigation
+  // is public. So send the reload notifications with the
+  // nsIWebNavigation flags.
   bool canNavigate = true;
-  if (mListener) {
-    nsCOMPtr<nsISHistoryListener> listener(do_QueryReferent(mListener));
-    // We are reloading. Send Reload notifications. 
-    // nsDocShellLoadFlagType is not public, where as nsIWebNavigation
-    // is public. So send the reload notifications with the
-    // nsIWebNavigation flags. 
-    if (listener) {
-      nsCOMPtr<nsIURI> currentURI;
-      rv = GetCurrentURI(getter_AddRefs(currentURI));
-      listener->OnHistoryReload(currentURI, aReloadFlags, &canNavigate);
-    }
-  }
+  nsCOMPtr<nsIURI> currentURI;
+  GetCurrentURI(getter_AddRefs(currentURI));
+  NOTIFY_LISTENERS_CANCELABLE(OnHistoryReload, canNavigate,
+                              (currentURI, aReloadFlags, &canNavigate));
   if (!canNavigate)
     return NS_OK;
 
@@ -867,14 +911,10 @@ nsSHistory::ReloadCurrentEntry()
 {
   // Notify listeners
   bool canNavigate = true;
-  if (mListener) {
-    nsCOMPtr<nsISHistoryListener> listener(do_QueryReferent(mListener));
-    if (listener) {
-      nsCOMPtr<nsIURI> currentURI;
-      GetCurrentURI(getter_AddRefs(currentURI));
-      listener->OnHistoryGotoIndex(mIndex, currentURI, &canNavigate);
-    }
-  }
+  nsCOMPtr<nsIURI> currentURI;
+  GetCurrentURI(getter_AddRefs(currentURI));
+  NOTIFY_LISTENERS_CANCELABLE(OnHistoryGotoIndex, canNavigate,
+                              (mIndex, currentURI, &canNavigate));
   if (!canNavigate)
     return NS_OK;
 
@@ -928,8 +968,8 @@ nsSHistory::EvictOutOfRangeWindowContentViewers(int32_t aIndex)
   }
 
   // Calculate the range that's safe from eviction.
-  int32_t startSafeIndex = NS_MAX(0, aIndex - gHistoryMaxViewers);
-  int32_t endSafeIndex = NS_MIN(mLength, aIndex + gHistoryMaxViewers);
+  int32_t startSafeIndex = std::max(0, aIndex - gHistoryMaxViewers);
+  int32_t endSafeIndex = std::min(mLength, aIndex + gHistoryMaxViewers);
 
   LOG(("EvictOutOfRangeWindowContentViewers(index=%d), "
        "mLength=%d. Safe range [%d, %d]",
@@ -941,7 +981,7 @@ nsSHistory::EvictOutOfRangeWindowContentViewers(int32_t aIndex)
   nsCOMArray<nsIContentViewer> safeViewers;
   nsCOMPtr<nsISHTransaction> trans;
   GetTransactionAtIndex(startSafeIndex, getter_AddRefs(trans));
-  for (uint32_t i = startSafeIndex; trans && i <= endSafeIndex; i++) {
+  for (int32_t i = startSafeIndex; trans && i <= endSafeIndex; i++) {
     nsCOMPtr<nsIContentViewer> viewer = GetContentViewerForTransaction(trans);
     safeViewers.AppendObject(viewer);
     nsISHTransaction *temp = trans;
@@ -1043,8 +1083,8 @@ nsSHistory::GloballyEvictContentViewers()
     //     SHistory object in question, we'll do a full search of its history
     //     and evict the out-of-range content viewers, so we don't bother here.
     //
-    int32_t startIndex = NS_MAX(0, shist->mIndex - gHistoryMaxViewers);
-    int32_t endIndex = NS_MIN(shist->mLength - 1,
+    int32_t startIndex = std::max(0, shist->mIndex - gHistoryMaxViewers);
+    int32_t endIndex = std::min(shist->mLength - 1,
                               shist->mIndex + gHistoryMaxViewers);
     nsCOMPtr<nsISHTransaction> trans;
     shist->GetTransactionAtIndex(startIndex, getter_AddRefs(trans));
@@ -1061,8 +1101,7 @@ nsSHistory::GloballyEvictContentViewers()
         for (uint32_t j = 0; j < shTransactions.Length(); j++) {
           TransactionAndDistance &container = shTransactions[j];
           if (container.mViewer == contentViewer) {
-            container.mDistance = NS_MIN(container.mDistance,
-                                         NS_ABS(i - shist->mIndex));
+            container.mDistance = std::min(container.mDistance, DeprecatedAbs(i - shist->mIndex));
             found = true;
             break;
           }
@@ -1071,7 +1110,7 @@ nsSHistory::GloballyEvictContentViewers()
         // If we didn't find a TransactionAndDistance for this content viewer, make a new
         // one.
         if (!found) {
-          TransactionAndDistance container(trans, NS_ABS(i - shist->mIndex));
+          TransactionAndDistance container(trans, DeprecatedAbs(i - shist->mIndex));
           shTransactions.AppendElement(container);
         }
       }
@@ -1109,8 +1148,8 @@ nsSHistory::GloballyEvictContentViewers()
 nsresult
 nsSHistory::EvictExpiredContentViewerForEntry(nsIBFCacheEntry *aEntry)
 {
-  int32_t startIndex = NS_MAX(0, mIndex - gHistoryMaxViewers);
-  int32_t endIndex = NS_MIN(mLength - 1,
+  int32_t startIndex = std::max(0, mIndex - gHistoryMaxViewers);
+  int32_t endIndex = std::min(mLength - 1,
                             mIndex + gHistoryMaxViewers);
   nsCOMPtr<nsISHTransaction> trans;
   GetTransactionAtIndex(startIndex, getter_AddRefs(trans));
@@ -1248,7 +1287,7 @@ bool IsSameTree(nsISHEntry* aEntry1, nsISHEntry* aEntry2)
   container1->GetChildCount(&count1);
   container2->GetChildCount(&count2);
   // We allow null entries in the end of the child list.
-  int32_t count = NS_MAX(count1, count2);
+  int32_t count = std::max(count1, count2);
   for (int32_t i = 0; i < count; ++i) {
     nsCOMPtr<nsISHEntry> child1, child2;
     container1->GetChildAt(i, getter_AddRefs(child1));
@@ -1515,22 +1554,18 @@ nsSHistory::LoadEntry(int32_t aIndex, long aLoadType, uint32_t aHistCmd)
   nsCOMPtr<nsIURI> nextURI;
   nHEntry->GetURI(getter_AddRefs(nextURI));
 
-  if(mListener) {
-    nsCOMPtr<nsISHistoryListener> listener(do_QueryReferent(mListener));
-    if (listener) {
-      if (aHistCmd == HIST_CMD_BACK) {
-        // We are going back one entry. Send GoBack notifications
-        listener->OnHistoryGoBack(nextURI, &canNavigate);
-      }
-      else if (aHistCmd == HIST_CMD_FORWARD) {
-        // We are going forward. Send GoForward notification
-        listener->OnHistoryGoForward(nextURI, &canNavigate);
-      }
-      else if (aHistCmd == HIST_CMD_GOTOINDEX) {
-        // We are going somewhere else. This is not reload either
-        listener->OnHistoryGotoIndex(aIndex, nextURI, &canNavigate);
-      }
-    }
+  if (aHistCmd == HIST_CMD_BACK) {
+    // We are going back one entry. Send GoBack notifications
+    NOTIFY_LISTENERS_CANCELABLE(OnHistoryGoBack, canNavigate,
+                                (nextURI, &canNavigate));
+  } else if (aHistCmd == HIST_CMD_FORWARD) {
+    // We are going forward. Send GoForward notification
+    NOTIFY_LISTENERS_CANCELABLE(OnHistoryGoForward, canNavigate,
+                                (nextURI, &canNavigate));
+  } else if (aHistCmd == HIST_CMD_GOTOINDEX) {
+    // We are going somewhere else. This is not reload either
+    NOTIFY_LISTENERS_CANCELABLE(OnHistoryGotoIndex, canNavigate,
+                                (aIndex, nextURI, &canNavigate));
   }
 
   if (!canNavigate) {

@@ -14,8 +14,7 @@ PARALLEL_DIRS_export = $(addsuffix _export,$(PARALLEL_DIRS))
 ###############
 export_tier_%:
 	@$(ECHO) "$@"
-	@$(MAKE_TIER_SUBMAKEFILES)
-	$(foreach dir,$(tier_$*_dirs),$(call SUBMAKE,export,$(dir)))
+	$(foreach dir,$(tier_$*_dirs),$(call TIER_DIR_SUBMAKE,export,$(dir)))
 
 #################
 ## Common targets
@@ -27,7 +26,7 @@ $(PARALLEL_DIRS_export): %_export: %/Makefile
 	+@$(call SUBMAKE,export,$*)
 endif
 
-export:: $(SUBMAKEFILES) $(MAKE_DIRS) $(if $(XPIDLSRCS),$(IDL_DIR))
+export:: $(SUBMAKEFILES) $(MAKE_DIRS)
 	$(LOOP_OVER_DIRS)
 	$(LOOP_OVER_TOOL_DIRS)
 

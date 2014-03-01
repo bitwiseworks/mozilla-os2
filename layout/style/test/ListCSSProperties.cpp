@@ -12,19 +12,20 @@
 struct PropertyInfo {
     const char *propName;
     const char *domName;
+    const char *pref;
 };
 
 const PropertyInfo gLonghandProperties[] = {
 
-#define CSS_PROP_DOMPROP_PREFIXED(prop_) Moz ## prop_
+#define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) publicname_
 #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, kwtable_, \
                  stylestruct_, stylestructoffset_, animtype_)                 \
-    { #name_, #method_ },
+    { #name_, #method_, pref_ },
 
 #include "nsCSSPropList.h"
 
 #undef CSS_PROP
-#undef CSS_PROP_DOMPROP_PREFIXED
+#undef CSS_PROP_PUBLIC_OR_PRIVATE
 
 };
 
@@ -49,21 +50,21 @@ const char* gLonghandPropertiesWithDOMProp[] = {
 
 const PropertyInfo gShorthandProperties[] = {
 
-#define CSS_PROP_DOMPROP_PREFIXED(prop_) Moz ## prop_
+#define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) publicname_
 // Need an extra level of macro nesting to force expansion of method_
 // params before they get pasted.
-#define LISTCSSPROPERTIES_INNER_MACRO(method_) #method_,
+#define LISTCSSPROPERTIES_INNER_MACRO(method_) #method_
 #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_)	\
-    { #name_, LISTCSSPROPERTIES_INNER_MACRO(method_) },
+    { #name_, LISTCSSPROPERTIES_INNER_MACRO(method_), pref_ },
 
 #include "nsCSSPropList.h"
 
 #undef CSS_PROP_SHORTHAND
 #undef LISTCSSPROPERTIES_INNER_MACRO
-#undef CSS_PROP_DOMPROP_PREFIXED
+#undef CSS_PROP_PUBLIC_OR_PRIVATE
 
 #define CSS_PROP_ALIAS(name_, id_, method_, pref_) \
-    { #name_, #method_ },
+    { #name_, #method_, pref_ },
 
 #include "nsCSSPropAliasList.h"
 
@@ -191,7 +192,10 @@ print_array(const char *aName,
                 // lowercase the first letter
                 printf("\"%c%s\"", p->domName[0] + 32, p->domName + 1);
         }
-        printf("}");
+        if (p->pref[0]) {
+            printf(", pref: \"%s\"", p->pref);
+        }
+        printf(" }");
     }
 
     if (j != aDOMPropsLength) {

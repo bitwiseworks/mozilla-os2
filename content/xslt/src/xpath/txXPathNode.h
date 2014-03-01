@@ -11,7 +11,7 @@
 #include "nsIDocument.h"
 #include "nsIDOMNode.h"
 #include "nsINameSpaceManager.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // For NameSpaceManager().
 
 typedef nsIDOMNode txXPathNodeType;
 
@@ -53,7 +53,7 @@ private:
     static nsINode *RootOf(nsINode *aNode)
     {
         nsINode *ancestor, *root = aNode;
-        while ((ancestor = root->GetNodeParent())) {
+        while ((ancestor = root->GetParentNode())) {
             root = ancestor;
         }
         return root;

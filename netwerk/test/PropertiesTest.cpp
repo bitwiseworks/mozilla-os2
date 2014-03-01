@@ -14,7 +14,6 @@
 #include "nsNetCID.h"
 #include "nsIChannel.h"
 #include "nsIComponentManager.h"
-#include "nsIEnumerator.h"
 #include <stdio.h>
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
@@ -40,14 +39,14 @@ main(int argc, char* argv[])
   nsIInputStream* in = nullptr;
 
   nsCOMPtr<nsIIOService> service(do_GetService(kIOServiceCID, &ret));
-  if (NS_FAILED(ret)) return ret;
+  if (NS_FAILED(ret)) return 1;
 
   nsIChannel *channel = nullptr;
   ret = service->NewChannel(NS_LITERAL_CSTRING(TEST_URL), nullptr, nullptr, &channel);
-  if (NS_FAILED(ret)) return ret;
+  if (NS_FAILED(ret)) return 1;
 
   ret = channel->Open(&in);
-  if (NS_FAILED(ret)) return ret;
+  if (NS_FAILED(ret)) return 1;
 
   nsIPersistentProperties* props;
   ret = CallCreateInstance(kPersistentPropertiesCID, &props);
@@ -98,7 +97,7 @@ main(int argc, char* argv[])
       return 1;
 	  }
 
-    nsCAutoString key;
+    nsAutoCString key;
     nsAutoString value;
 
     ret = propElem->GetKey(key);

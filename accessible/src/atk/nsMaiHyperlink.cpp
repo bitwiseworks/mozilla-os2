@@ -7,6 +7,8 @@
 #include "nsIURI.h"
 #include "nsMaiHyperlink.h"
 
+using namespace mozilla::a11y;
+
 /* MaiAtkHyperlink */
 
 #define MAI_TYPE_ATK_HYPERLINK      (mai_atk_hyperlink_get_type ())
@@ -58,7 +60,7 @@ static gboolean isValidCB(AtkHyperlink *aLink);
 static gint getAnchorCountCB(AtkHyperlink *aLink);
 G_END_DECLS
 
-static gpointer parent_class = NULL;
+static gpointer parent_class = nullptr;
 static Accessible*
 get_accessible_hyperlink(AtkHyperlink *aHyperlink);
 
@@ -70,15 +72,15 @@ mai_atk_hyperlink_get_type(void)
     if (!type) {
         static const GTypeInfo tinfo = {
             sizeof(MaiAtkHyperlinkClass),
-            (GBaseInitFunc)NULL,
-            (GBaseFinalizeFunc)NULL,
+            (GBaseInitFunc)nullptr,
+            (GBaseFinalizeFunc)nullptr,
             (GClassInitFunc)classInitCB,
-            (GClassFinalizeFunc)NULL,
-            NULL, /* class data */
+            (GClassFinalizeFunc)nullptr,
+            nullptr, /* class data */
             sizeof(MaiAtkHyperlink), /* instance size */
             0, /* nb preallocs */
-            (GInstanceInitFunc)NULL,
-            NULL /* value table */
+            (GInstanceInitFunc)nullptr,
+            nullptr /* value table */
         };
 
         type = g_type_register_static(ATK_TYPE_HYPERLINK,
@@ -115,7 +117,7 @@ MaiHyperlink::GetAtkHyperlink(void)
 
     mMaiAtkHyperlink =
         reinterpret_cast<AtkHyperlink *>
-                        (g_object_new(mai_atk_hyperlink_get_type(), NULL));
+                        (g_object_new(mai_atk_hyperlink_get_type(), nullptr));
     NS_ASSERTION(mMaiAtkHyperlink, "OUT OF MEMORY");
     NS_ENSURE_TRUE(mMaiAtkHyperlink, nullptr);
 
@@ -186,7 +188,7 @@ getUriCB(AtkHyperlink *aLink, gint aLinkIndex)
     if (!uri)
         return nullptr;
 
-    nsCAutoString cautoStr;
+    nsAutoCString cautoStr;
     nsresult rv = uri->GetSpec(cautoStr);
     NS_ENSURE_SUCCESS(rv, nullptr);
 

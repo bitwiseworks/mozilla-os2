@@ -27,9 +27,10 @@
 #include "imgIRequest.h"
 #include "imgIContainer.h"
 #include "prprf.h"
-#ifdef MOZ_WIDGET_GTK2
+#if defined(MOZ_WIDGET_GTK)
 #include "nsIImageToPixbuf.h"
 #endif
+#include "nsXULAppAPI.h"
 
 #include <glib.h>
 #include <glib-object.h>
@@ -108,11 +109,8 @@ nsGNOMEShellService::Init()
   NS_ENSURE_TRUE(dirSvc, NS_ERROR_NOT_AVAILABLE);
 
   nsCOMPtr<nsIFile> appPath;
-  rv = dirSvc->Get(NS_XPCOM_CURRENT_PROCESS_DIR, NS_GET_IID(nsIFile),
+  rv = dirSvc->Get(XRE_EXECUTABLE_FILE, NS_GET_IID(nsIFile),
                    getter_AddRefs(appPath));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = appPath->AppendNative(NS_LITERAL_CSTRING(MOZ_APP_NAME));
   NS_ENSURE_SUCCESS(rv, rv);
 
   return appPath->GetNativePath(mAppPath);
@@ -179,7 +177,7 @@ nsGNOMEShellService::CheckHandlerMatchesAppName(const nsACString &handler) const
 {
   gint argc;
   gchar **argv;
-  nsCAutoString command(handler);
+  nsAutoCString command(handler);
 
   // The string will be something of the form: [/path/to/]browser "%s"
   // We want to remove all of the parameters and get just the binary name.
@@ -208,7 +206,7 @@ nsGNOMEShellService::IsDefaultBrowser(bool aStartupCheck,
   nsCOMPtr<nsIGIOService> giovfs = do_GetService(NS_GIOSERVICE_CONTRACTID);
 
   bool enabled;
-  nsCAutoString handler;
+  nsAutoCString handler;
   nsCOMPtr<nsIGIOMimeApp> gioApp;
 
   for (unsigned int i = 0; i < ArrayLength(appProtocols); ++i) {
@@ -255,7 +253,7 @@ nsGNOMEShellService::SetDefaultBrowser(bool aClaimAllTypes,
   nsCOMPtr<nsIGConfService> gconf = do_GetService(NS_GCONFSERVICE_CONTRACTID);
   nsCOMPtr<nsIGIOService> giovfs = do_GetService(NS_GIOSERVICE_CONTRACTID);
   if (gconf) {
-    nsCAutoString appKeyValue;
+    nsAutoCString appKeyValue;
     if (mAppIsInPath) {
       // mAppPath is in the users path, so use only the basename as the launcher
       gchar *tmp = g_path_get_basename(mAppPath.get());
@@ -370,7 +368,7 @@ nsGNOMEShellService::GetCanSetDesktopBackground(bool* aResult)
 static nsresult
 WriteImage(const nsCString& aPath, imgIContainer* aImage)
 {
-#ifndef MOZ_WIDGET_GTK2
+#if !defined(MOZ_WIDGET_GTK)
   return NS_ERROR_NOT_AVAILABLE;
 #else
   nsCOMPtr<nsIImageToPixbuf> imgToPixbuf =
@@ -407,7 +405,7 @@ nsGNOMEShellService::SetDesktopBackground(nsIDOMElement* aElement,
   if (!container) return rv;
 
   // Set desktop wallpaper filling style
-  nsCAutoString options;
+  nsAutoCString options;
   if (aPosition == BACKGROUND_TILE)
     options.Assign("wallpaper");
   else if (aPosition == BACKGROUND_STRETCH)
@@ -420,7 +418,7 @@ nsGNOMEShellService::SetDesktopBackground(nsIDOMElement* aElement,
     options.Assign("centered");
 
   // Write the background file to the home directory.
-  nsCAutoString filePath(PR_GetEnv("HOME"));
+  nsAutoCString filePath(PR_GetEnv("HOME"));
 
   // get the product brand name from localized strings
   nsString brandName;
@@ -500,7 +498,7 @@ nsGNOMEShellService::GetDesktopBackgroundColor(uint32_t *aColor)
   nsCOMPtr<nsIGSettingsService> gsettings = 
     do_GetService(NS_GSETTINGSSERVICE_CONTRACTID);
   nsCOMPtr<nsIGSettingsCollection> background_settings;
-  nsCAutoString background;
+  nsAutoCString background;
 
   if (gsettings) {
     gsettings->GetCollectionForSchema(
@@ -552,7 +550,7 @@ NS_IMETHODIMP
 nsGNOMEShellService::SetDesktopBackgroundColor(uint32_t aColor)
 {
   NS_ASSERTION(aColor <= 0xffffff, "aColor has extra bits");
-  nsCAutoString colorString;
+  nsAutoCString colorString;
   ColorToCString(aColor, colorString);
 
   nsCOMPtr<nsIGSettingsService> gsettings =
@@ -580,7 +578,7 @@ nsGNOMEShellService::SetDesktopBackgroundColor(uint32_t aColor)
 NS_IMETHODIMP
 nsGNOMEShellService::OpenApplication(int32_t aApplication)
 {
-  nsCAutoString scheme;
+  nsAutoCString scheme;
   if (aApplication == APPLICATION_MAIL)
     scheme.Assign("mailto");
   else if (aApplication == APPLICATION_NEWS)
@@ -601,7 +599,7 @@ nsGNOMEShellService::OpenApplication(int32_t aApplication)
     return NS_ERROR_FAILURE;
 
   bool enabled;
-  nsCAutoString appCommand;
+  nsAutoCString appCommand;
   gconf->GetAppForProtocol(scheme, &enabled, appCommand);
 
   if (!enabled)

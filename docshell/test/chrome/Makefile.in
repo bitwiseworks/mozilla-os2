@@ -79,8 +79,8 @@ MOCHITEST_CHROME_FILES =	\
 		bug449778_window.xul \
 		test_bug449780.xul \
 		bug449780_window.xul \
-		test_bug454235.xul \
 		bug454235-subframe.xul \
+		test_bug453650.xul \
 		test_bug456980.xul \
 		test_bug662200.xul \
 		bug662200_window.xul \
@@ -95,11 +95,19 @@ MOCHITEST_CHROME_FILES =	\
 		test_mozFrameType.xul \
 		mozFrameType_window.xul \
 		test_bug789773.xul \
-		$(NULL)
-
-MOCHITEST_CHROME_FILES += \
+		test_private_hidden_window.html \
     docshell_helpers.js \
     generic.html \
+    test_bug846906.xul \
+    bug846906.html \
     $(NULL)
+
+ifneq ($(MOZ_WIDGET_TOOLKIT),gtk2)
+MOCHITEST_CHROME_FILES += \
+		test_bug454235.xul \
+		$(NULL)
+else
+$(filter disabled-temporarily--bug-684176, test_bug454235.xul)
+endif
 
 include $(topsrcdir)/config/rules.mk

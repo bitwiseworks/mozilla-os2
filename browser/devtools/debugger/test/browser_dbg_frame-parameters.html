@@ -11,6 +11,11 @@
           var a = 1;
           var b = { a: a };
           var c = { a: 1, b: "beta", c: true, d: b };
+          var myVar = {
+            _prop: 42,
+            get prop() { return this._prop; },
+            set prop(val) { this._prop = val; }
+          };
 
           debugger;
         }
@@ -20,6 +25,7 @@
         }
         var button = document.querySelector("button");
         button.addEventListener("click", load, false);
+        var buttonAsProto = Object.create(button);
       });
     </script>
 

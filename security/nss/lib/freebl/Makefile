@@ -187,7 +187,9 @@ ifeq ($(CPU_ARCH),x86_64)
 #   DEFINES += -DMPI_AMD64_ADD
     # comment the next two lines to turn off intel HW accelleration
     DEFINES += -DUSE_HW_AES
-    ASFILES += intel-aes.s
+    ASFILES += intel-aes.s intel-gcm.s
+    EXTRA_SRCS += intel-gcm-wrap.c
+    INTEL_GCM = 1
     MPI_SRCS += mpi_amd64.c mp_comba.c
 endif
 ifeq ($(CPU_ARCH),x86)
@@ -282,7 +284,6 @@ ifeq ($(CPU_ARCH),sparc)
         HAVE_ABI64_INT = 1
         HAVE_ABI64_FPU = 1
     else
-        HAVE_ABI32_INT32 = 1
         HAVE_ABI32_FPU = 1
         HAVE_ABI32_INT64 = 1
     endif
@@ -290,9 +291,6 @@ ifeq ($(CPU_ARCH),sparc)
     SOLARIS_AS = /usr/ccs/bin/as
     #### set arch, asm, c flags
     ifdef NS_USE_GCC
-	ifdef USE_ABI32_INT32
-	    # default ARCHFLAG=-mcpu=v8 set by coreconf/sunOS5.mk
-	endif
 	ifdef USE_ABI32_INT64
 	    ARCHFLAG=-mcpu=v9 -Wa,-xarch=v8plus
 	    SOLARIS_AS_FLAGS = -xarch=v8plus -K PIC
@@ -324,9 +322,6 @@ ifeq ($(CPU_ARCH),sparc)
 	    # if -xchip=ultra3 is used (Bugzilla bug 333925).  So we revert
 	    # to what we used in NSS 3.10.
 	    FPU_TARGET_OPTIMIZER = -xchip=ultra2
-	endif
-	ifdef USE_ABI32_INT32
-	    #ARCHFLAG=-xarch=v8 set in coreconf/sunOS5.mk
 	endif
 	ifdef USE_ABI32_INT64
 	    # this builds for Sparc v8+a ABI32_FPU architecture, 64-bit registers, 
@@ -383,12 +378,6 @@ ifeq ($(CPU_ARCH),sparc)
     endif # NS_USE_GCC
 
     ### set flags for both GCC and Sun cc
-    ifdef USE_ABI32_INT32
-	# this builds for Sparc v8 pure 32-bit architecture
-	DEFINES += -DMP_USE_UINT_DIGIT -DMP_ASSEMBLY_MULTIPLY
-	ASFILES  = mpv_sparcv8x.s
-	DEFINES += -DSHA_NO_LONG_LONG # avoid 64-bit arithmetic in SHA512
-    endif
     ifdef USE_ABI32_INT64
 	# this builds for Sparc v8+a ABI32_FPU architecture, 64-bit registers, 
 	# 32-bit ABI, it uses 64-bit words, integer arithmetic, no FPU
@@ -442,7 +431,9 @@ else
 	DEFINES += -DNSS_USE_COMBA -DMP_CHAR_STORE_SLOW -DMP_IS_LITTLE_ENDIAN
 	# comment the next two lines to turn off intel HW accelleration
 	DEFINES += -DUSE_HW_AES
-	ASFILES += intel-aes.s
+	ASFILES += intel-aes.s intel-gcm.s
+        EXTRA_SRCS += intel-gcm-wrap.c
+        INTEL_GCM = 1
 	MPI_SRCS += mpi_amd64.c
     else
 	# Solaris x86
@@ -641,5 +632,21 @@ ifdef NEED_ABSOLUTE_PATH
 else
 	$(CC) -o $@ -c $(CFLAGS) -fno-strict-aliasing $<
 endif
+endif
+endif
+
+ifdef INTEL_GCM
+#
+# GCM binary needs -mssse3
+#
+$(OBJDIR)/$(PROG_PREFIX)intel-gcm-wrap$(OBJ_SUFFIX): CFLAGS += -mssse3
+
+# The integrated assembler in Clang 3.2 does not support % in the
+# expression of a .set directive. intel-gcm.s uses .set to give
+# symbolic names to registers, for example,
+#     .set  Htbl, %rdi
+# So we can't use Clang's integrated assembler with intel-gcm.s.
+ifneq (,$(findstring clang,$(AS)))
+$(OBJDIR)/$(PROG_PREFIX)intel-gcm$(OBJ_SUFFIX): ASFLAGS += -no-integrated-as
 endif
 endif

@@ -3,6 +3,7 @@
 
 function test() {
   let instance, widthBeforeClose, heightBeforeClose;
+  let mgr = ResponsiveUI.ResponsiveUIManager;
 
   waitForExplicitFinish();
 
@@ -16,8 +17,8 @@ function test() {
 
   function startTest() {
     document.getElementById("Tools:ResponsiveUI").removeAttribute("disabled");
+    mgr.once("on", function() {executeSoon(onUIOpen)});
     synthesizeKeyFromKeyTag("key_responsiveUI");
-    executeSoon(onUIOpen);
   }
 
   function onUIOpen() {
@@ -31,9 +32,27 @@ function test() {
     instance = gBrowser.selectedTab.__responsiveUI;
     ok(instance, "instance of the module is attached to the tab.");
 
+    if (instance._floatingScrollbars) {
+      ensureScrollbarsAreFloating();
+    }
+
     instance.transitionsEnabled = false;
 
     testPresets();
+  }
+
+  function ensureScrollbarsAreFloating() {
+    let body = gBrowser.contentDocument.body;
+    let html = gBrowser.contentDocument.documentElement;
+
+    let originalWidth = body.getBoundingClientRect().width;
+
+    html.style.overflowY = "scroll"; // Force scrollbars
+    // Flush. Should not be needed as getBoundingClientRect() should flush,
+    // but just in case.
+    gBrowser.contentWindow.getComputedStyle(html).overflowY;
+    let newWidth = body.getBoundingClientRect().width;
+    is(originalWidth, newWidth, "Floating scrollbars are presents");
   }
 
   function testPresets() {
@@ -50,7 +69,8 @@ function test() {
 
       testOnePreset(c - 1);
     }
-    testOnePreset(instance.menulist.firstChild.childNodes.length - 1);
+    // Starting from length - 4 because last 3 items are not presets : separator, addbutton and removebutton
+    testOnePreset(instance.menulist.firstChild.childNodes.length - 4);
   }
 
   function extractSizeFromString(str) {
@@ -101,17 +121,29 @@ function test() {
     widthBeforeClose = content.innerWidth;
     heightBeforeClose = content.innerHeight;
 
-    EventUtils.synthesizeKey("VK_ESCAPE", {});
+    info("XXX BUG 851296: instance.closing: " + !!instance.closing);
 
-    executeSoon(restart);
+    mgr.once("off", function() {
+      info("XXX BUG 851296: 'off' received.");
+      executeSoon(restart);
+    });
+    EventUtils.synthesizeKey("VK_ESCAPE", {});
   }
 
   function restart() {
-    synthesizeKeyFromKeyTag("key_responsiveUI");
-    executeSoon(onUIOpen2);
+    info("XXX BUG 851296: restarting.");
+    info("XXX BUG 851296: __responsiveUI: " + gBrowser.selectedTab.__responsiveUI);
+    mgr.once("on", function() {
+      info("XXX BUG 851296: 'on' received.");
+      executeSoon(onUIOpen2);
+    });
+    //XXX BUG 851296: synthesizeKeyFromKeyTag("key_responsiveUI");
+    mgr.toggle(window, gBrowser.selectedTab);
+    info("XXX BUG 851296: restart() finished.");
   }
 
   function onUIOpen2() {
+    info("XXX BUG 851296: onUIOpen2.");
     let container = gBrowser.getBrowserContainer();
     is(container.getAttribute("responsivemode"), "true", "In responsive mode.");
 
@@ -121,8 +153,8 @@ function test() {
     is(content.innerWidth, widthBeforeClose, "width restored.");
     is(content.innerHeight, heightBeforeClose, "height restored.");
 
+    mgr.once("off", function() {executeSoon(finishUp)});
     EventUtils.synthesizeKey("VK_ESCAPE", {});
-    executeSoon(finishUp);
   }
 
   function finishUp() {
@@ -158,6 +190,8 @@ function test() {
       accelKey: modifiersAttr.match("accel")
     }
 
+    info("XXX BUG 851296: key name: " + name);
+    info("XXX BUG 851296: key modifiers: " + JSON.stringify(modifiers));
     EventUtils.synthesizeKey(name, modifiers);
   }
 }

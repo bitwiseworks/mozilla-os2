@@ -10,6 +10,7 @@
 #include "nsBulletFrame.h" // legacy location for list style type to text code
 #include "nsContentUtils.h"
 #include "nsTArray.h"
+#include "mozilla/Likely.h"
 
 bool
 nsCounterUseNode::InitTextFrame(nsGenConList* aList,
@@ -57,7 +58,8 @@ void nsCounterChangeNode::Calc(nsCounterList *aList)
         mValueAfter = mChangeValue;
     } else {
         NS_ASSERTION(mType == INCREMENT, "invalid type");
-        mValueAfter = aList->ValueBefore(this) + mChangeValue;
+        mValueAfter = nsCounterManager::IncrementCounter(aList->ValueBefore(this),
+                                                         mChangeValue);
     }
 }
 
@@ -185,7 +187,7 @@ nsCounterManager::nsCounterManager()
 bool
 nsCounterManager::AddCounterResetsAndIncrements(nsIFrame *aFrame)
 {
-    const nsStyleContent *styleContent = aFrame->GetStyleContent();
+    const nsStyleContent *styleContent = aFrame->StyleContent();
     if (!styleContent->CounterIncrementCount() &&
         !styleContent->CounterResetCount())
         return false;
@@ -229,7 +231,7 @@ nsCounterManager::AddResetOrIncrement(nsIFrame *aFrame, int32_t aIndex,
 
     // Don't call Calc() if the list is already dirty -- it'll be recalculated
     // anyway, and trying to calculate with a dirty list doesn't work.
-    if (NS_LIKELY(!counterList->IsDirty())) {
+    if (MOZ_LIKELY(!counterList->IsDirty())) {
         node->Calc(counterList);
     }
     return false;

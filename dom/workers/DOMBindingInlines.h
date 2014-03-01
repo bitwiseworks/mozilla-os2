@@ -6,11 +6,17 @@
 #ifndef mozilla_dom_workers_dombindinginlines_h__
 #define mozilla_dom_workers_dombindinginlines_h__
 
+#include "mozilla/dom/FileReaderSyncBinding.h"
+#include "mozilla/dom/TextDecoderBinding.h"
+#include "mozilla/dom/TextEncoderBinding.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
 
 BEGIN_WORKERS_NAMESPACE
 
+class FileReaderSync;
+class TextDecoder;
+class TextEncoder;
 class XMLHttpRequest;
 class XMLHttpRequestUpload;
 
@@ -34,13 +40,16 @@ struct WrapPrototypeTraits
     }                                                                          \
                                                                                \
     static inline JSObject*                                                    \
-    GetProtoObject(JSContext* aCx, JSObject* aGlobal)                          \
+    GetProtoObject(JSContext* aCx, JS::Handle<JSObject*> aGlobal)              \
     {                                                                          \
       using namespace mozilla::dom;                                            \
-      return _class##Binding_workers::GetProtoObject(aCx, aGlobal, aGlobal);   \
+      return _class##Binding_workers::GetProtoObject(aCx, aGlobal);            \
     }                                                                          \
   };
 
+SPECIALIZE_PROTO_TRAITS(FileReaderSync)
+SPECIALIZE_PROTO_TRAITS(TextDecoder)
+SPECIALIZE_PROTO_TRAITS(TextEncoder)
 SPECIALIZE_PROTO_TRAITS(XMLHttpRequest)
 SPECIALIZE_PROTO_TRAITS(XMLHttpRequestUpload)
 
@@ -61,13 +70,14 @@ Wrap(JSContext* aCx, JSObject* aGlobal, nsRefPtr<T>& aConcreteObject)
     }
   }
 
-  JSObject* proto = WrapPrototypeTraits<T>::GetProtoObject(aCx, aGlobal);
+  JS::Rooted<JSObject*> global(aCx, aGlobal);
+  JSObject* proto = WrapPrototypeTraits<T>::GetProtoObject(aCx, global);
   if (!proto) {
     return NULL;
   }
 
   JSObject* wrapper =
-    JS_NewObject(aCx, WrapPrototypeTraits<T>::GetJSClass(), proto, aGlobal);
+    JS_NewObject(aCx, WrapPrototypeTraits<T>::GetJSClass(), proto, global);
   if (!wrapper) {
     return NULL;
   }

@@ -104,16 +104,12 @@ public:
   /**
    * Obtains the service's object.
    */
-  static nsNavBookmarks* GetSingleton();
+  static already_AddRefed<nsNavBookmarks> GetSingleton();
 
   /**
    * Initializes the service's object.  This should only be called once.
    */
   nsresult Init();
-
-  static nsNavBookmarks* GetBookmarksServiceIfAvailable() {
-    return gBookmarksService;
-  }
 
   static nsNavBookmarks* GetBookmarksService() {
     if (!gBookmarksService) {

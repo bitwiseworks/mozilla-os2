@@ -8,7 +8,6 @@
 
 interface nsIDOMEventListener;
 interface nsIDOMFileHandle;
-interface nsIDOMFileRequest;
 
 dictionary DOMFileMetadataParameters
 {
@@ -16,7 +15,7 @@ dictionary DOMFileMetadataParameters
   boolean lastModified;
 };
 
-[scriptable, builtinclass, uuid(696a4cbf-603d-40e1-840a-e468ee363871)]
+[scriptable, builtinclass, uuid(a09cdc35-6b1e-42ce-95bb-f8f10a354202)]
 interface nsIDOMLockedFile : nsISupports
 {
   readonly attribute nsIDOMFileHandle fileHandle;
@@ -30,39 +29,39 @@ interface nsIDOMLockedFile : nsISupports
   attribute jsval location;
 
   [implicit_jscontext]
-  nsIDOMFileRequest
+  nsISupports /* FileRequest */
   getMetadata(/* DOMFileMetadataParameters */
               [optional /* all */] in jsval parameters);
 
   [implicit_jscontext]
-  nsIDOMFileRequest
+  nsISupports /* FileRequest */
   readAsArrayBuffer(in unsigned long long size);
 
-  nsIDOMFileRequest
+  nsISupports /* FileRequest */
   readAsText(in unsigned long long size,
              [optional] in DOMString encoding);
 
   [implicit_jscontext]
-  nsIDOMFileRequest
+  nsISupports /* FileRequest */
   write(in jsval value);
 
   [implicit_jscontext]
-  nsIDOMFileRequest
+  nsISupports /* FileRequest */
   append(in jsval value);
 
   [optional_argc]
-  nsIDOMFileRequest
+  nsISupports /* FileRequest */
   truncate([optional] in unsigned long long size);
 
-  nsIDOMFileRequest
+  nsISupports /* FileRequest */
   flush();
 
   void
   abort();
 
-  attribute nsIDOMEventListener oncomplete;
+  [implicit_jscontext] attribute jsval oncomplete;
 
-  attribute nsIDOMEventListener onabort;
+  [implicit_jscontext] attribute jsval onabort;
 
-  attribute nsIDOMEventListener onerror;
+  [implicit_jscontext] attribute jsval onerror;
 };

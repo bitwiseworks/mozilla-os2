@@ -15,6 +15,7 @@
 #include "nsIObserver.h"
 #include "nsIContentViewer.h"
 #include "nsWeakReference.h"
+#include "nsMimeTypes.h"
 
 class nsIAtom;
 class nsIPresShell;
@@ -22,13 +23,15 @@ class nsIRequest;
 class nsILoadGroup;
 class nsIFrame;
 struct nsIntSize;
-class nsSVGSVGElement;
 
-#define SVG_MIMETYPE     "image/svg+xml"
 #define OBSERVER_SVC_CID "@mozilla.org/observer-service;1"
 
 
 namespace mozilla {
+namespace dom {
+class SVGSVGElement;
+}
+
 namespace image {
 
 class SVGDocumentWrapper MOZ_FINAL : public nsIStreamListener,
@@ -65,10 +68,15 @@ public:
   bool      GetWidthOrHeight(Dimension aDimension, int32_t& aResult);
 
   /**
+   * Returns the wrapped document, or nullptr on failure. (No AddRef.)
+   */
+  nsIDocument* GetDocument();
+
+  /**
    * Returns the root <svg> element for the wrapped document, or nullptr on
    * failure.
    */
-  nsSVGSVGElement* GetRootSVGElem();
+  mozilla::dom::SVGSVGElement* GetRootSVGElem();
 
   /**
    * Returns the root nsIFrame* for the wrapped document, or nullptr on failure.
@@ -87,15 +95,6 @@ public:
    */
   inline nsresult  GetPresShell(nsIPresShell** aPresShell)
     { return mViewer->GetPresShell(aPresShell); }
-
-  /**
-   * Returns a bool indicating whether the wrapped document has been parsed
-   * successfully.
-   *
-   * @return true if the document has been parsed successfully,
-   *         false otherwise (e.g. if there's a syntax error in the SVG).
-   */
-  inline bool      ParsedSuccessfully()  { return !!GetRootSVGElem(); }
 
   /**
    * Modifier to update the viewport dimensions of the wrapped document. This
@@ -136,6 +135,13 @@ public:
   void StartAnimation();
   void StopAnimation();
   void ResetAnimation();
+  float GetCurrentTime();
+  void SetCurrentTime(float aTime);
+
+  /**
+   * Force a layout flush of the underlying SVG document.
+   */
+  void FlushLayout();
 
 private:
   nsresult SetupViewer(nsIRequest *aRequest,
@@ -144,8 +150,6 @@ private:
   void     DestroyViewer();
   void     RegisterForXPCOMShutdown();
   void     UnregisterForXPCOMShutdown();
-
-  void     FlushLayout();
 
   nsCOMPtr<nsIContentViewer>  mViewer;
   nsCOMPtr<nsILoadGroup>      mLoadGroup;

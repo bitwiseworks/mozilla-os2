@@ -173,10 +173,6 @@ protected:
     void          StartBlinking();
     void          StopBlinking();
 
-    // If the nearest block has a potential 'text-overflow' marker then
-    // invalidate it.
-    void          InvalidateTextOverflowBlock();
-    
     bool          DrawAtPositionWithHint(nsIDOMNode* aNode,
                                          int32_t aOffset,
                                          nsFrameSelection::HINT aFrameHint,
@@ -203,8 +199,6 @@ protected:
     void          DrawCaret(bool aInvalidate);
     void          DrawCaretAfterBriefDelay();
     bool          UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset);
-    static void   InvalidateRects(const nsRect &aRect, const nsRect &aHook,
-                                  nsIFrame *aFrame);
     nsRect        GetHookRect()
     {
 #ifdef IBMBIDI
@@ -215,7 +209,7 @@ protected:
     }
     void          ToggleDrawnStatus() { mDrawn = !mDrawn; }
 
-    already_AddRefed<nsFrameSelection> GetFrameSelection();
+    nsFrameSelection* GetFrameSelection();
 
     // Returns true if we should not draw the caret because of XUL menu popups.
     // The caret should be hidden if:
@@ -267,35 +261,6 @@ protected:
     nsFrameSelection::HINT mLastHint;        // the hint associated with the last request, see also
                                               // mLastBidiLevel below
 
-};
-
-// handy stack-based class for temporarily disabling the caret
-
-class StCaretHider
-{
-public:
-               StCaretHider(nsCaret* aSelCon)
-               : mWasVisible(false), mCaret(aSelCon)
-               {
-                 if (mCaret)
-                 {
-                   mCaret->GetCaretVisible(&mWasVisible);
-                   if (mWasVisible)
-                     mCaret->SetCaretVisible(false);
-                 }
-               }
-
-               ~StCaretHider()
-               {
-                 if (mCaret && mWasVisible)
-                   mCaret->SetCaretVisible(true);
-                 // nsCOMPtr releases mPresShell
-               }
-
-protected:
-
-    bool                    mWasVisible;
-    nsCOMPtr<nsCaret>  mCaret;
 };
 
 #endif //nsCaret_h__

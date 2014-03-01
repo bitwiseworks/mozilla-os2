@@ -9,11 +9,8 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = speex_resampler
-LIBRARY_NAME = speex_resampler
+MSVC_ENABLE_PGO := 1
 FORCE_STATIC_LIB = 1
-
-EXPORTS_NAMESPACES = speex
 
 # We don't compile the full speex codec, only the resampler.
 DEFINES += -DOUTSIDE_SPEEX
@@ -31,10 +28,6 @@ endif
 
 CSRCS = \
     resample.c \
-    $(NULL)
-
-EXPORTS_speex = \
-    speex_resampler.h \
     $(NULL)
 
 include $(topsrcdir)/config/rules.mk

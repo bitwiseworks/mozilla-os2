@@ -10,7 +10,7 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
   BrowserPlaces.manifest \
   PlacesProtocolHandler.js \
   $(NULL)
@@ -21,4 +21,3 @@ EXTRA_JS_MODULES = \
 
 include $(topsrcdir)/config/rules.mk
 
-XPIDL_FLAGS += -I$(topsrcdir)/browser/components

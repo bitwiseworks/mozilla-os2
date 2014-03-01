@@ -327,7 +327,7 @@ nsOSHelperAppService::GetTypeAndDescriptionFromMimetypesFile(const nsAString& aF
   nsCOMPtr<nsILineInputStream> mimeTypes;
   bool netscapeFormat;
   nsAutoString buf;
-  nsCAutoString cBuf;
+  nsAutoCString cBuf;
   bool more = false;
   rv = CreateInputStream(aFilename, getter_AddRefs(mimeFile), getter_AddRefs(mimeTypes),
                          cBuf, &netscapeFormat, &more);
@@ -497,7 +497,7 @@ nsOSHelperAppService::GetExtensionsAndDescriptionFromMimetypesFile(const nsAStri
   nsCOMPtr<nsILineInputStream> mimeTypes;
   bool netscapeFormat;
   nsAutoString buf;
-  nsCAutoString cBuf;
+  nsAutoCString cBuf;
   bool more = false;
   rv = CreateInputStream(aFilename, getter_AddRefs(mimeFile), getter_AddRefs(mimeTypes),
                          cBuf, &netscapeFormat, &more);
@@ -923,7 +923,7 @@ nsOSHelperAppService::GetHandlerAndDescriptionFromMailcapFile(const nsAString& a
   }
 
   nsString entry, buffer;
-  nsCAutoString cBuffer;
+  nsAutoCString cBuffer;
   entry.SetCapacity(128);
   cBuffer.SetCapacity(80);
   rv = mailcap->ReadLine(cBuffer, &more);
@@ -1031,7 +1031,7 @@ nsOSHelperAppService::GetHandlerAndDescriptionFromMailcapFile(const nsAString& a
                 } else if (optionName.EqualsLiteral("x-mozilla-flags")) {
                   aMozillaFlags = Substring(++equal_sign_iter, semicolon_iter);
                 } else if (optionName.EqualsLiteral("test")) {
-                  nsCAutoString testCommand;
+                  nsAutoCString testCommand;
                   rv = UnescapeCommand(Substring(++equal_sign_iter, semicolon_iter),
                                        aMajorType,
                                        aMinorType,
@@ -1082,9 +1082,9 @@ nsresult nsOSHelperAppService::OSProtocolHandlerExists(const char * aProtocolSch
 
   /* if applications.protocol is in prefs, then we have an external protocol handler */
   nsresult rv;
-  nsCAutoString branchName =
+  nsAutoCString branchName =
     NS_LITERAL_CSTRING("applications.") + nsDependentCString(aProtocolScheme);
-  nsCAutoString prefName = branchName + branchName;
+  nsAutoCString prefName = branchName + branchName;
 
   nsAdoptingCString prefString = Preferences::GetCString(prefName.get());
   *aHandlerExists = !prefString.IsEmpty();
@@ -1139,7 +1139,7 @@ nsOSHelperAppService::GetFromExtension(const nsCString& aFileExt) {
     return nullptr;
   }
 
-  nsCAutoString mimeType(asciiMajorType + NS_LITERAL_CSTRING("/") + asciiMinorType);
+  nsAutoCString mimeType(asciiMajorType + NS_LITERAL_CSTRING("/") + asciiMinorType);
   nsMIMEInfoOS2* mimeInfo = new nsMIMEInfoOS2(mimeType);
   if (!mimeInfo)
     return nullptr;
@@ -1368,8 +1368,8 @@ WpsMimeInfoFromExtension(const char *aFileExt, nsMIMEInfoOS2 *aMI)
 
   // if the mimeinfo is bogus, change the mimetype & extensions list
   if (!exists) {
-    nsCAutoString extLower;
-    nsCAutoString cstr;
+    nsAutoCString extLower;
+    nsAutoCString cstr;
     ToLowerCase(nsDependentCString(aFileExt), extLower);
     cstr.Assign(NS_LITERAL_CSTRING("application/x-") + extLower);
     aMI->SetMIMEType(cstr);
@@ -1384,7 +1384,7 @@ WpsMimeInfoFromExtension(const char *aFileExt, nsMIMEInfoOS2 *aMI)
     ustr.Truncate();
 
   if (ustr.IsEmpty()) {
-    nsCAutoString extUpper;
+    nsAutoCString extUpper;
     ToUpperCase(nsDependentCString(aFileExt), extUpper);
     CopyUTF8toUTF16(extUpper, ustr);
 
@@ -1420,7 +1420,7 @@ nsOSHelperAppService::GetFromTypeAndExtension(const nsACString& aMIMEType,
 
   // do lookups using the original extension if present;
   // otherwise use the extension derived from the mimetype
-  nsCAutoString ext;
+  nsAutoCString ext;
   if (!aFileExt.IsEmpty())
     ext.Assign(aFileExt);
   else {
@@ -1573,10 +1573,10 @@ NS_IMETHODIMP
 nsOSHelperAppService::GetApplicationDescription(const nsACString& aScheme, nsAString& _retval)
 {
   nsresult rv;
-  nsCAutoString branchName = NS_LITERAL_CSTRING("applications.") + aScheme;
-  nsCAutoString applicationName;
+  nsAutoCString branchName = NS_LITERAL_CSTRING("applications.") + aScheme;
+  nsAutoCString applicationName;
 
-  nsCAutoString prefName = branchName + branchName;
+  nsAutoCString prefName = branchName + branchName;
   nsAdoptingCString prefString = Preferences::GetCString(prefName.get());
   if (!prefString) { // failed
     char szAppFromINI[CCHMAXPATH];

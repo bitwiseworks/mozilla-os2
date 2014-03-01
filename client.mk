@@ -60,6 +60,11 @@ endif
 # MacOS X 10.4 sends "no autoconf*" errors to stdout, discard those via grep
 AUTOCONF ?= $(shell which autoconf-2.13 autoconf2.13 autoconf213 2>/dev/null | grep -v '^no autoconf' | head -1)
 
+# See if the autoconf package was installed through fink
+ifeq (,$(strip $(AUTOCONF)))
+AUTOCONF = $(shell which fink >/dev/null 2>&1 && echo `which fink`/../../lib/autoconf2.13/bin/autoconf)
+endif
+
 ifeq (,$(strip $(AUTOCONF)))
 AUTOCONF=$(error Could not find autoconf 2.13)
 endif
@@ -77,7 +82,16 @@ endif
 ####################################
 # Sanity checks
 
+# Windows checks.
 ifneq (,$(findstring mingw,$(CONFIG_GUESS)))
+
+# Require pymake (as opposed to GNU make).
+ifndef .PYMAKE
+$(error Pymake is required to build on Windows. Run |./mach build| to \
+automatically use pymake. Or, invoke pymake directly via \
+|python build/pymake/make.py|.)
+endif
+
 # check for CRLF line endings
 ifneq (0,$(shell $(PERL) -e 'binmode(STDIN); while (<STDIN>) { if (/\r/) { print "1"; exit } } print "0"' < $(TOPSRCDIR)/client.mk))
 $(error This source tree appears to have Windows-style line endings. To \
@@ -102,6 +116,17 @@ endef
 # unlikely sequence (||), which is then replaced back to newlines by make
 # before evaluation.
 $(eval $(subst ||,$(CR),$(shell _PYMAKE=$(.PYMAKE) $(TOPSRCDIR)/$(MOZCONFIG_LOADER) $(TOPSRCDIR) 2> $(TOPSRCDIR)/.mozconfig.out | sed 's/$$/||/')))
+
+ifdef AUTOCLOBBER
+export AUTOCLOBBER=1
+endif
+
+# Automatically add -jN to make flags if not defined. N defaults to number of cores.
+ifeq (,$(findstring -j,$(MOZ_MAKE_FLAGS)))
+  cores=$(shell $(PYTHON) -c 'import multiprocessing; print(multiprocessing.cpu_count())')
+  MOZ_MAKE_FLAGS += -j$(cores)
+endif
+
 
 ifndef MOZ_OBJDIR
   MOZ_OBJDIR = obj-$(CONFIG_GUESS)
@@ -172,12 +197,6 @@ everything: clean build
 
 ####################################
 # Profile-Guided Optimization
-#  To use this, you should set the following variables in your mozconfig
-#    mk_add_options PROFILE_GEN_SCRIPT=/path/to/profile-script
-#
-#  The profile script should exercise the functionality to be included
-#  in the profile feedback.
-#
 #  This is up here, outside of the MOZ_CURRENT_PROJECT logic so that this
 #  is usable in multi-pass builds, where you might not have a runnable
 #  application until all the build passes and postflight scripts have run.
@@ -190,7 +209,8 @@ endif
 profiledbuild::
 	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_GENERATE=1 MOZ_PGO_INSTRUMENTED=1
 	$(MAKE) -C $(PGO_OBJDIR) package MOZ_PGO_INSTRUMENTED=1 MOZ_INTERNAL_SIGNING_FORMAT= MOZ_EXTERNAL_SIGNING_FORMAT=
-	MOZ_PGO_INSTRUMENTED=1 OBJDIR=${PGO_OBJDIR} JARLOG_DIR=${PGO_OBJDIR}/jarlog/en-US $(PROFILE_GEN_SCRIPT)
+	rm -f ${PGO_OBJDIR}/jarlog/en-US.log
+	MOZ_PGO_INSTRUMENTED=1 JARLOG_FILE=jarlog/en-US.log EXTRA_TEST_ARGS=10 $(MAKE) -C $(PGO_OBJDIR) pgo-profile-run
 	$(MAKE) -f $(TOPSRCDIR)/client.mk maybe_clobber_profiledbuild
 	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_USE=1
 
@@ -265,13 +285,14 @@ $(CONFIGURES): %: %.in $(EXTRA_CONFIG_DEPS)
 CONFIG_STATUS_DEPS := \
   $(wildcard $(TOPSRCDIR)/*/confvars.sh) \
   $(CONFIGURES) \
-  $(TOPSRCDIR)/allmakefiles.sh \
+  $(TOPSRCDIR)/CLOBBER \
   $(TOPSRCDIR)/nsprpub/configure \
   $(TOPSRCDIR)/config/milestone.txt \
   $(TOPSRCDIR)/js/src/config/milestone.txt \
   $(TOPSRCDIR)/browser/config/version.txt \
   $(TOPSRCDIR)/build/virtualenv/packages.txt \
   $(TOPSRCDIR)/build/virtualenv/populate_virtualenv.py \
+  $(TOPSRCDIR)/testing/mozbase/packages.txt \
   $(NULL)
 
 CONFIGURE_ENV_ARGS += \
@@ -287,9 +308,14 @@ else
   CONFIGURE = $(TOPSRCDIR)/configure
 endif
 
+check-clobber:
+	$(PYTHON) $(TOPSRCDIR)/config/pythonpath.py -I $(TOPSRCDIR)/testing/mozbase/mozfile \
+	    $(TOPSRCDIR)/python/mozbuild/mozbuild/controller/clobber.py $(TOPSRCDIR) $(OBJDIR)
+
 configure-files: $(CONFIGURES)
 
 configure-preqs = \
+  check-clobber \
   configure-files \
   $(call mkdir_deps,$(OBJDIR)) \
   $(if $(MOZ_BUILD_PROJECTS),$(call mkdir_deps,$(MOZ_OBJDIR))) \
@@ -427,4 +453,23 @@ echo-variable-%:
 # in parallel.
 .NOTPARALLEL:
 
-.PHONY: checkout real_checkout depend realbuild build profiledbuild cleansrcdir pull_all build_all clobber clobber_all pull_and_build_all everything configure preflight_all preflight postflight postflight_all $(OBJDIR_TARGETS)
+.PHONY: checkout \
+    real_checkout \
+    depend \
+    realbuild \
+    build \
+    profiledbuild \
+    cleansrcdir \
+    pull_all \
+    build_all \
+    check-clobber \
+    clobber \
+    clobber_all \
+    pull_and_build_all \
+    everything \
+    configure \
+    preflight_all \
+    preflight \
+    postflight \
+    postflight_all \
+    $(OBJDIR_TARGETS)

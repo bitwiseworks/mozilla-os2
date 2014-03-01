@@ -8,6 +8,7 @@
 #ifndef NS_SMILMAPPEDATTRIBUTE_H_
 #define NS_SMILMAPPEDATTRIBUTE_H_
 
+#include "mozilla/Attributes.h"
 #include "nsSMILCSSProperty.h"
 
 /* We'll use the empty-string atom |nsGkAtoms::_empty| as the key for storing
@@ -39,12 +40,12 @@ public:
 
   // nsISMILAttr methods
   virtual nsresult ValueFromString(const nsAString& aStr,
-                                   const nsISMILAnimationElement* aSrcElement,
+                                   const mozilla::dom::SVGAnimationElement* aSrcElement,
                                    nsSMILValue& aValue,
-                                   bool& aPreventCachingOfSandwich) const;
-  virtual nsSMILValue GetBaseValue() const;
-  virtual nsresult    SetAnimValue(const nsSMILValue& aValue);
-  virtual void        ClearAnimValue();
+                                   bool& aPreventCachingOfSandwich) const MOZ_OVERRIDE;
+  virtual nsSMILValue GetBaseValue() const MOZ_OVERRIDE;
+  virtual nsresult    SetAnimValue(const nsSMILValue& aValue) MOZ_OVERRIDE;
+  virtual void        ClearAnimValue() MOZ_OVERRIDE;
 
 protected:
   // Helper Methods

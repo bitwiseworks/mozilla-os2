@@ -9,10 +9,10 @@
 #define _nsTextEquivUtils_H_
 
 #include "Accessible.h"
+#include "nsIStringBundle.h"
 #include "Role.h"
 
-#include "nsIContent.h"
-#include "nsIStringBundle.h"
+class nsIContent;
 
 /**
  * Text equivalent computation rules (see nsTextEquivUtils::gRoleToNameRulesMap)
@@ -20,19 +20,19 @@
 enum ETextEquivRule
 {
   // No rule.
-  eNoRule = 0x00,
+  eNoNameRule = 0x00,
 
   // Walk into subtree only if the currently navigated accessible is not root
   // accessible (i.e. if the accessible is part of text equivalent computation).
-  eFromSubtreeIfRec = 0x01,
+  eNameFromSubtreeIfReqRule = 0x01,
 
   // Text equivalent computation from subtree is allowed.
-  eFromSubtree = 0x03,
+  eNameFromSubtreeRule = 0x03,
 
   // The accessible allows to append its value to text equivalent.
   // XXX: This is temporary solution. Once we move accessible value of links
   // and linkable accessibles to MSAA part we can remove this.
-  eFromValue = 0x04
+  eNameFromValueRule = 0x04
 };
 
 /**
@@ -42,6 +42,7 @@ enum ETextEquivRule
 class nsTextEquivUtils
 {
 public:
+  typedef mozilla::a11y::Accessible Accessible;
 
   /**
    * Calculates the name from accessible subtree if allowed.
@@ -51,6 +52,14 @@ public:
    */
   static nsresult GetNameFromSubtree(Accessible* aAccessible,
                                      nsAString& aName);
+
+  /**
+   * Calculates text equivalent from the subtree. Similar to GetNameFromSubtree.
+   * The difference it returns not empty result for things like HTML p, i.e.
+   * if the role has eNameFromSubtreeIfReq rule.
+   */
+  static void GetTextEquivFromSubtree(Accessible* aAccessible,
+                                      nsString& aTextEquiv);
 
   /**
    * Calculates text equivalent for the given accessible from its IDRefs
@@ -144,13 +153,6 @@ private:
    * Returns the rule (constant of ETextEquivRule) for a given role.
    */
   static uint32_t GetRoleRule(mozilla::a11y::roles::Role aRole);
-
-  /**
-   * The accessible for which we are computing a text equivalent. It is useful
-   * for bailing out during recursive text computation, or for special cases
-   * like step f. of the ARIA implementation guide.
-   */
-  static nsRefPtr<Accessible> gInitiatorAcc;
 };
 
 #endif

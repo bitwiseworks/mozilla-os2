@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 
+#include "mozilla/WeakPtr.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/ipc/Transport.h"
 
@@ -62,7 +63,9 @@ public:
     typedef IPC::Message Message;
     typedef mozilla::ipc::Transport Transport;
 
-    class /*NS_INTERFACE_CLASS*/ AsyncListener: protected HasResultCodes
+    class /*NS_INTERFACE_CLASS*/ AsyncListener
+        : protected HasResultCodes
+        , public mozilla::SupportsWeakPtr<AsyncListener>
     {
     public:
         virtual ~AsyncListener() { }
@@ -71,7 +74,10 @@ public:
         virtual void OnChannelError() = 0;
         virtual Result OnMessageReceived(const Message& aMessage) = 0;
         virtual void OnProcessingError(Result aError) = 0;
-        virtual void OnChannelConnected(int32 peer_pid) {};
+        // FIXME/bug 792652: this doesn't really belong here, but a
+        // large refactoring is needed to put it where it belongs.
+        virtual int32_t GetProtocolTypeId() = 0;
+        virtual void OnChannelConnected(int32_t peer_pid) {}
     };
 
     enum Side { Parent, Child, Unknown };
@@ -115,7 +121,7 @@ public:
     virtual bool Echo(Message* msg);
 
     // Send OnChannelConnected notification to listeners.
-    void DispatchOnChannelConnected(int32 peer_pid);
+    void DispatchOnChannelConnected(int32_t peer_pid);
 
     //
     // Each AsyncChannel is associated with either a ProcessLink or a
@@ -169,7 +175,7 @@ public:
         // similarly named methods in AsyncChannel below
         // (OnMessageReceivedFromLink(), etc)
         virtual void OnMessageReceived(const Message& msg) MOZ_OVERRIDE;
-        virtual void OnChannelConnected(int32 peer_pid) MOZ_OVERRIDE;
+        virtual void OnChannelConnected(int32_t peer_pid) MOZ_OVERRIDE;
         virtual void OnChannelError() MOZ_OVERRIDE;
 
         virtual void EchoMessage(Message *msg) MOZ_OVERRIDE;
@@ -196,14 +202,14 @@ protected:
     // NOT our worker thread.
     void AssertLinkThread() const
     {
-        NS_ABORT_IF_FALSE(mWorkerLoop != MessageLoop::current(),
+        NS_ABORT_IF_FALSE(mWorkerLoopID != MessageLoop::current()->id(),
                           "on worker thread but should not be!");
     }
 
     // Can be run on either thread
     void AssertWorkerThread() const
     {
-        NS_ABORT_IF_FALSE(mWorkerLoop == MessageLoop::current(),
+        NS_ABORT_IF_FALSE(mWorkerLoopID == MessageLoop::current()->id(),
                           "not on worker thread!");
     }
 
@@ -233,7 +239,7 @@ protected:
 
     // Run on the worker thread
     void OnDispatchMessage(const Message& aMsg);
-    virtual bool OnSpecialMessage(uint16 id, const Message& msg);
+    virtual bool OnSpecialMessage(uint16_t id, const Message& msg);
     void SendSpecialMessage(Message* msg) const;
 
     // Tell the IO thread to close the channel and wait for it to ACK.
@@ -255,13 +261,17 @@ protected:
 
     virtual void Clear();
 
-    AsyncListener* mListener;
+    mozilla::WeakPtr<AsyncListener> mListener;
     ChannelState mChannelState;
     nsRefPtr<RefCountedMonitor> mMonitor;
     MessageLoop* mWorkerLoop;   // thread where work is done
     bool mChild;                // am I the child or parent?
     CancelableTask* mChannelErrorTask; // NotifyMaybeChannelError runnable
     Link *mLink;                // link to other thread/process
+
+    // id() of mWorkerLoop.  This persists even after mWorkerLoop is cleared
+    // during channel shutdown.
+    int mWorkerLoopID;
 };
 
 } // namespace ipc

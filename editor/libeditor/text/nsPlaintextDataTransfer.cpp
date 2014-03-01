@@ -44,7 +44,6 @@
 #include "nsString.h"
 #include "nsXPCOM.h"
 #include "nscore.h"
-#include "prtypes.h"
 
 class nsILoadContext;
 class nsISupports;
@@ -105,8 +104,6 @@ NS_IMETHODIMP nsPlaintextEditor::InsertTextFromTransferable(nsITransferable *aTr
                                                             int32_t aDestOffset,
                                                             bool aDoDeleteSelection)
 {
-  HandlingTrustedAction trusted(this);
-
   nsresult rv = NS_OK;
   char* bestFlavor = nullptr;
   nsCOMPtr<nsISupports> genericDataObj;

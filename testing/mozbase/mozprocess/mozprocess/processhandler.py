@@ -198,7 +198,7 @@ class ProcessHandlerMixin(object):
                 self.pid = pid
                 self.tid = tid
 
-                if canCreateJob:
+                if not self._ignore_children and canCreateJob:
                     try:
                         # We create a new job for this process, so that we can kill
                         # the process and any sub-processes
@@ -237,7 +237,7 @@ class ProcessHandlerMixin(object):
                                                 0,    # job mem limit (ignored)
                                                 0,    # peak process limit (ignored)
                                                 0)    # peak job limit (ignored)
-                                                
+
                         winprocess.SetInformationJobObject(self._job,
                                                            JobObjectExtendedLimitInformation,
                                                            addressof(jeli),
@@ -290,7 +290,7 @@ falling back to not using job objects for managing child processes"""
 
                 if MOZPROCESS_DEBUG:
                     print "DBG::MOZPROC Self.pid value is: %s" % self.pid
-                
+
                 while True:
                     msgid = c_ulong(0)
                     compkey = c_ulong(0)
@@ -311,8 +311,9 @@ falling back to not using job objects for managing child processes"""
                         # don't want to mistake that situation for the situation of an unexpected
                         # parent abort (which is what we're looking for here).
                         if diff.seconds > self.MAX_IOCOMPLETION_PORT_NOTIFICATION_DELAY:
-                            print >> sys.stderr, "Parent process exited without \
-                                                  killing children, attempting to kill children"
+                            print >> sys.stderr, "Parent process %s exited with children alive:" % self.pid
+                            print >> sys.stderr, "PIDS: %s" %  ', '.join([str(i) for i in self._spawned_procs])
+                            print >> sys.stderr, "Attempting to kill them..."
                             self.kill()
                             self._process_events.put({self.pid: 'FINISHED'})
 
@@ -391,10 +392,11 @@ falling back to not using job objects for managing child processes"""
 
                 # Python 2.5 uses isAlive versus is_alive use the proper one
                 threadalive = False
-                if hasattr(self._procmgrthread, 'is_alive'):
-                    threadalive = self._procmgrthread.is_alive()
-                else:
-                    threadalive = self._procmgrthread.isAlive()
+                if hasattr(self, "_procmgrthread"):
+                    if hasattr(self._procmgrthread, 'is_alive'):
+                        threadalive = self._procmgrthread.is_alive()
+                    else:
+                        threadalive = self._procmgrthread.isAlive()
                 if self._job and threadalive: 
                     # Then we are managing with IO Completion Ports
                     # wait on a signal so we know when we have seen the last
@@ -425,7 +427,7 @@ falling back to not using job objects for managing child processes"""
                     # Not managing with job objects, so all we can reasonably do
                     # is call waitforsingleobject and hope for the best
 
-                    if MOZPROCESS_DEBUG:
+                    if MOZPROCESS_DEBUG and not self._ignore_children:
                         print "DBG::MOZPROC NOT USING JOB OBJECTS!!!"
                     # First, make sure we have not already ended
                     if self.returncode != winprocess.STILL_ACTIVE:
@@ -591,19 +593,34 @@ falling back to not using job objects for managing child processes"""
         """the string value of the command line"""
         return subprocess.list2cmdline([self.cmd] + self.args)
 
-    def run(self):
-        """Starts the process.  waitForFinish must be called to allow the
-           process to complete.
+    def run(self, timeout=None, outputTimeout=None):
+        """
+        Starts the process.
+
+        If timeout is not None, the process will be allowed to continue for
+        that number of seconds before being killed.
+
+        If outputTimeout is not None, the process will be allowed to continue
+        for that number of seconds without producing any output before
+        being killed.
         """
         self.didTimeout = False
         self.startTime = datetime.now()
-        self.proc = self.Process(self.cmd,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT,
-                                 cwd=self.cwd,
-                                 env=self.env,
-                                 ignore_children = self._ignore_children,
-                                 **self.keywordargs)
+
+        # default arguments
+        args = dict(stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    cwd=self.cwd,
+                    env=self.env,
+                    ignore_children=self._ignore_children)
+
+        # build process arguments
+        args.update(self.keywordargs)
+
+        # launch the process
+        self.proc = self.Process(self.cmd, **args)
+
+        self.processOutput(timeout=timeout, outputTimeout=outputTimeout)
 
     def kill(self):
         """
@@ -616,7 +633,14 @@ falling back to not using job objects for managing child processes"""
           Note that this does not manage any state, save any output etc,
           it immediately kills the process.
         """
-        return self.proc.kill()
+        try:
+            return self.proc.kill()
+        except AttributeError:
+            # Try to print a relevant error message.
+            if not self.proc:
+                print >> sys.stderr, "Unable to kill Process because call to ProcessHandler constructor failed."
+            else:
+                raise
 
     def readWithTimeout(self, f, timeout):
         """
@@ -660,9 +684,6 @@ falling back to not using job objects for managing child processes"""
         being killed.
         """
         def _processOutput():
-            if not hasattr(self, 'proc'):
-                self.run()
-
             self.didTimeout = False
             logsource = self.proc.stdout
 
@@ -684,21 +705,24 @@ falling back to not using job objects for managing child processes"""
                 self.onTimeout()
             else:
                 self.onFinish()
-        
+
+        if not hasattr(self, 'proc'):
+            self.run()
+
         if not self.outThread:
             self.outThread = threading.Thread(target=_processOutput)
             self.outThread.daemon = True
             self.outThread.start()
 
 
-    def waitForFinish(self, timeout=None):
+    def wait(self, timeout=None):
         """
         Waits until all output has been read and the process is 
         terminated.
 
         If timeout is not None, will return after timeout seconds.
-        This timeout is only for waitForFinish and doesn't affect
-        the didTimeout or onTimeout properties.
+        This timeout only causes the wait function to return and
+        does not kill the process.
         """
         if self.outThread:
             # Thread.join() blocks the main thread until outThread is finished
@@ -711,6 +735,12 @@ falling back to not using job objects for managing child processes"""
                     return
 
         return self.proc.wait()
+
+    # TODO Remove this method when consumers have been fixed
+    def waitForFinish(self, timeout=None):
+        print >> sys.stderr, "MOZPROCESS WARNING: ProcessHandler.waitForFinish() is deprecated, " \
+                             "use ProcessHandler.wait() instead"
+        return self.wait(timeout=timeout)
 
 
     ### Private methods from here on down. Thar be dragons.
@@ -753,6 +783,10 @@ falling back to not using job objects for managing child processes"""
             if len(r) == 0:
                 return ('', True)
             return (f.readline(), False)
+
+    @property
+    def pid(self):
+        return self.proc.pid
 
 
 ### default output handlers

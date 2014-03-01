@@ -17,6 +17,8 @@
 #include "nsUnicharUtils.h"
 #include "nsUTF8Utils.h"
 #include "mozilla/SSE.h"
+#include "nsTextFragmentImpl.h"
+#include <algorithm>
 
 #define TEXTFRAG_WHITE_AFTER_NEWLINE 50
 #define TEXTFRAG_MAX_NEWLINES 7
@@ -117,24 +119,16 @@ nsTextFragment::operator=(const nsTextFragment& aOther)
 static inline int32_t
 FirstNon8BitUnvectorized(const PRUnichar *str, const PRUnichar *end)
 {
-#if PR_BYTES_PER_WORD == 4
-  const size_t mask = 0xff00ff00;
-  const uint32_t alignMask = 0x3;
-  const uint32_t numUnicharsPerWord = 2;
-#elif PR_BYTES_PER_WORD == 8
-  const size_t mask = 0xff00ff00ff00ff00;
-  const uint32_t alignMask = 0x7;
-  const uint32_t numUnicharsPerWord = 4;
-#else
-#error Unknown platform!
-#endif
-
+  typedef Non8BitParameters<sizeof(size_t)> p;
+  const size_t mask = p::mask();
+  const uint32_t alignMask = p::alignMask();
+  const uint32_t numUnicharsPerWord = p::numUnicharsPerWord();
   const int32_t len = end - str;
   int32_t i = 0;
 
   // Align ourselves to a word boundary.
   int32_t alignLen =
-    NS_MIN(len, int32_t(((-NS_PTR_TO_INT32(str)) & alignMask) / sizeof(PRUnichar)));
+    std::min(len, int32_t(((-NS_PTR_TO_INT32(str)) & alignMask) / sizeof(PRUnichar)));
   for (; i < alignLen; i++) {
     if (str[i] > 255)
       return i;

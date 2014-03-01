@@ -10,38 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= locale
-LIBRARY_NAME	= nslocale_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY  = 1
-
-
-ifneq (,$(filter os2 windows, $(MOZ_WIDGET_TOOLKIT)))
-DIRS		= $(MOZ_WIDGET_TOOLKIT)
-else
-ifeq ($(MOZ_WIDGET_TOOLKIT), cocoa)
-DIRS		= mac
-else
-DIRS		= unix
-endif
-endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT), qt)
 OS_INCLUDES	+= $(MOZ_QT_CFLAGS)
 endif
-
-CPPSRCS		= \
-		nsCollation.cpp \
-		nsScriptableDateFormat.cpp \
-		nsLanguageAtomService.cpp \
-		nsLocale.cpp \
-		nsLocaleService.cpp \
-		nsCharsetAlias.cpp \
-		nsUConvPropertySearch.cpp \
-		$(NULL)
-
-EXPORTS		= \
-		nsCollation.h \
-		$(NULL)
 
 EXPORT_RESOURCE = \
 		$(srcdir)/langGroups.properties \

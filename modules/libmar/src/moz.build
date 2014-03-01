@@ -1,0 +1,22 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'libmar'
+
+EXPORTS += [
+    'mar.h',
+    'mar_cmdline.h',
+]
+
+HOST_CSRCS += [
+    'mar_create.c',
+    'mar_extract.c',
+    'mar_read.c',
+]
+HOST_LIBRARY_NAME = 'hostmar'
+
+LIBRARY_NAME = 'mar'
+

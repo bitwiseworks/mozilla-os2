@@ -1,0 +1,45 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+MODULE = 'mozalloc'
+
+EXPORTS.mozilla += [
+    'fallible.h',
+    'mozalloc.h',
+    'mozalloc_abort.h',
+    'mozalloc_macro_wrappers.h',
+    'mozalloc_oom.h',
+    'mozalloc_undef_macro_wrappers.h',
+]
+
+if CONFIG['MOZ_MSVC_STL_WRAP__RAISE'] or CONFIG['MOZ_MSVC_STL_WRAP__Throw']:
+    build_msvc_wrappers = 1
+else:
+    build_msvc_wrappers = 0
+
+if CONFIG['WRAP_STL_INCLUDES']:
+    if CONFIG['GNU_CXX']:
+        EXPORTS.mozilla += ['throw_gcc.h']
+    elif CONFIG['_MSC_VER']:
+        if build_msvc_wrappers:
+            EXPORTS.mozilla += [
+                'msvc_raise_wrappers.h',
+                'msvc_throw_wrapper.h',
+                'throw_msvc.h',
+            ]
+            CPP_SOURCES += [
+                'msvc_raise_wrappers.cpp',
+                'msvc_throw_wrapper.cpp',
+            ]
+
+CPP_SOURCES += [
+    'mozalloc.cpp',
+    'mozalloc_abort.cpp',
+    'mozalloc_oom.cpp',
+]
+
+LIBRARY_NAME = 'mozalloc'
+

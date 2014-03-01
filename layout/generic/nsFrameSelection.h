@@ -7,14 +7,16 @@
 
 #include "mozilla/Attributes.h"
 
+#include "mozilla/Selection.h"
 #include "nsIFrame.h"
 #include "nsIContent.h"
 #include "nsISelectionController.h"
-#include "nsITableLayout.h"
 #include "nsITableCellLayout.h"
 #include "nsIDOMElement.h"
 #include "nsGUIEvent.h"
 #include "nsRange.h"
+
+class nsTableOuterFrame;
 
 // IID for the nsFrameSelection interface
 // 3c6ae2d0-4cf1-44a1-9e9d-2411867f19c6
@@ -56,7 +58,7 @@ enum EWordMovementType { eStartWord, eEndWord, eDefaultBehavior };
  *  that are passed to nsFrame::PeekOffset(). See below for the description of
  *  individual arguments.
  */
-struct NS_STACK_CLASS nsPeekOffsetStruct
+struct MOZ_STACK_CLASS nsPeekOffsetStruct
 {
   nsPeekOffsetStruct(nsSelectionAmount aAmount,
                      nsDirection aDirection,
@@ -184,13 +186,13 @@ class nsIScrollableFrame;
  * or they may cause other objects to be deleted.
  */
 
-class nsFrameSelection MOZ_FINAL : public nsISupports {
+class nsFrameSelection MOZ_FINAL {
 public:
   enum HINT { HINTLEFT = 0, HINTRIGHT = 1};  //end of this line or beginning of next
   /*interfaces for addref and release and queryinterface*/
   
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS(nsFrameSelection)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsFrameSelection)
+  NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(nsFrameSelection)
 
   /** Init will initialize the frame selector with the necessary pres shell to 
    *  be used by most of the methods
@@ -650,8 +652,6 @@ private:
   nsRefPtr<mozilla::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
 
   // Table selection support.
-  // Interfaces that let us get info based on cellmap locations
-  nsITableLayout* GetTableLayout(nsIContent *aTableContent) const;
   nsITableCellLayout* GetCellLayout(nsIContent *aCellContent) const;
 
   nsresult SelectBlockOfCells(nsIContent *aStartNode, nsIContent *aEndNode);

@@ -40,6 +40,7 @@ function newWorker(custom_ns) {
     onmessage: undefined,
     onerror: undefined,
 
+    CLIENT_ID: 0,
     DEBUG: true
   };
   // The 'self' variable in a worker points to the worker's own namespace.
@@ -139,13 +140,13 @@ function newRadioInterfaceLayer() {
  *
  * @param func
  *        Function to be tested.
- * @param result
- *        Expected result. <code>null</code> for no throws.
+ * @param message
+ *        Message of expected exception. <code>null</code> for no throws.
  * @param stack
  *        Optional stack object to be printed. <code>null</code> for
  *        Components#stack#caller.
  */
-function do_check_throws(func, result, stack)
+function do_check_throws(func, message, stack)
 {
   if (!stack)
     stack = Components.stack.caller;
@@ -153,13 +154,15 @@ function do_check_throws(func, result, stack)
   try {
     func();
   } catch (exc) {
-    if (exc.result == result)
+    if (exc.message === message) {
       return;
-    do_throw("expected result " + result + ", caught " + exc, stack);
+    }
+    do_throw("expecting exception '" + message
+             + "', caught '" + exc.message + "'", stack);
   }
 
-  if (result) {
-    do_throw("expected result " + result + ", none thrown", stack);
+  if (message) {
+    do_throw("expecting exception '" + message + "', none thrown", stack);
   }
 }
 

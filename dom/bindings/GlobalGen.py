@@ -6,13 +6,10 @@
 # and generate information for subsequent phases.
 
 import os
-import cStringIO
 import WebIDL
 import cPickle
-from Configuration import *
+from Configuration import Configuration
 from Codegen import GlobalGenRoots, replaceFileIfChanged
-# import Codegen in general, so we can set a variable on it
-import Codegen
 
 def generate_file(config, name, action):
 
@@ -58,13 +55,13 @@ def main():
         parser.parse(''.join(lines), fullPath)
     parserResults = parser.finish()
 
-    # Write the parser results out to a pickle.
-    resultsFile = open('ParserResults.pkl', 'wb')
-    cPickle.dump(parserResults, resultsFile, -1)
-    resultsFile.close()
-
     # Load the configuration.
     config = Configuration(configFile, parserResults)
+
+    # Write the configuration out to a pickle.
+    resultsFile = open('ParserResults.pkl', 'wb')
+    cPickle.dump(config, resultsFile, -1)
+    resultsFile.close()
 
     # Generate the prototype list.
     generate_file(config, 'PrototypeList', 'declare')
@@ -74,6 +71,7 @@ def main():
     generate_file(config, 'RegisterBindings', 'define')
 
     generate_file(config, 'UnionTypes', 'declare')
+    generate_file(config, 'UnionTypes', 'define')
     generate_file(config, 'UnionConversions', 'declare')
 
 if __name__ == '__main__':

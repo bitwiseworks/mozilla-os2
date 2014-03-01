@@ -310,7 +310,7 @@ nsresult nsIconChannel::GetHIconFromFile(HICON *hIcon)
     nsCOMPtr<nsIMIMEService> mimeService (do_GetService(NS_MIMESERVICE_CONTRACTID, &rv));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCAutoString defFileExt;
+    nsAutoCString defFileExt;
     mimeService->GetPrimaryExtension(contentType, fileExt, defFileExt);
     // If the mime service does not know about this mime type, we show
     // the generic icon.
@@ -356,7 +356,7 @@ nsresult nsIconChannel::GetStockHIcon(nsIMozIconURI *aIconURI, HICON *hIcon)
   {
     uint32_t desiredImageSize;
     aIconURI->GetImageSize(&desiredImageSize);
-    nsCAutoString stockIcon;
+    nsAutoCString stockIcon;
     aIconURI->GetStockIcon(stockIcon);
 
     SHSTOCKICONID stockIconID = GetStockIconIDForName(stockIcon);
@@ -461,7 +461,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
   nsCOMPtr<nsIMozIconURI> iconURI(do_QueryInterface(mUrl, &rv));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString stockIcon;
+  nsAutoCString stockIcon;
   iconURI->GetStockIcon(stockIcon);
   if (!stockIcon.IsEmpty())
     rv = GetStockHIcon(iconURI, &hIcon);
@@ -487,6 +487,8 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
           maskHeader.biWidth  == colorHeader.biWidth  &&
           colorHeader.biBitCount > 8 &&
           colorHeader.biSizeImage > 0 &&
+          colorHeader.biWidth >= 0 && colorHeader.biWidth <= 255 &&
+          colorHeader.biHeight >= 0 && colorHeader.biHeight <= 255 &&
           maskHeader.biSizeImage > 0  &&
           (colorTableSize = GetColorTableSize(&colorHeader)) >= 0 &&
           (maskTableSize  = GetColorTableSize(&maskHeader))  >= 0) {
@@ -514,8 +516,8 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
 
           // followed by the single icon entry
           ICONENTRY iconEntry;
-          iconEntry.ieWidth = colorHeader.biWidth;
-          iconEntry.ieHeight = colorHeader.biHeight;
+          iconEntry.ieWidth = static_cast<int8_t>(colorHeader.biWidth);
+          iconEntry.ieHeight = static_cast<int8_t>(colorHeader.biHeight);
           iconEntry.ieColors = 0;
           iconEntry.ieReserved = 0;
           iconEntry.iePlanes = 1;
@@ -587,7 +589,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
 
 NS_IMETHODIMP nsIconChannel::GetContentType(nsACString &aContentType) 
 {
-  aContentType.AssignLiteral("image/x-icon");
+  aContentType.AssignLiteral(IMAGE_ICO);
   return NS_OK;
 }
 
@@ -620,7 +622,19 @@ nsIconChannel::GetContentDisposition(uint32_t *aContentDisposition)
 }
 
 NS_IMETHODIMP
+nsIconChannel::SetContentDisposition(uint32_t aContentDisposition)
+{
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 nsIconChannel::GetContentDispositionFilename(nsAString &aContentDispositionFilename)
+{
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+nsIconChannel::SetContentDispositionFilename(const nsAString &aContentDispositionFilename)
 {
   return NS_ERROR_NOT_AVAILABLE;
 }
@@ -631,13 +645,13 @@ nsIconChannel::GetContentDispositionHeader(nsACString &aContentDispositionHeader
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-NS_IMETHODIMP nsIconChannel::GetContentLength(int32_t *aContentLength)
+NS_IMETHODIMP nsIconChannel::GetContentLength(int64_t *aContentLength)
 {
   *aContentLength = mContentLength;
   return NS_OK;
 }
 
-NS_IMETHODIMP nsIconChannel::SetContentLength(int32_t aContentLength)
+NS_IMETHODIMP nsIconChannel::SetContentLength(int64_t aContentLength)
 {
   NS_NOTREACHED("nsIconChannel::SetContentLength");
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -704,7 +718,7 @@ NS_IMETHODIMP nsIconChannel::OnStopRequest(nsIRequest* aRequest, nsISupports* aC
 NS_IMETHODIMP nsIconChannel::OnDataAvailable(nsIRequest* aRequest,
                                              nsISupports* aContext,
                                              nsIInputStream* aStream,
-                                             uint32_t aOffset,
+                                             uint64_t aOffset,
                                              uint32_t aCount)
 {
   if (mListener)

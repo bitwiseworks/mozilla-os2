@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -30,7 +30,7 @@ static const char STRICT_TWO[] =
 static const char STRICT_THREE[] =
     "function f() { 'use strict'; return arguments; }";
 
-static const char *CALL_CODES[] =
+static const char * const CALL_CODES[] =
     { "f()", "f(0)", "f(0, 1)", "f(0, 1, 2)", "f(0, 1, 2, 3)", "f(0, 1, 2, 3, 4)" };
 
 static const size_t MAX_ELEMS = 6;
@@ -86,18 +86,18 @@ BEGIN_TEST(testArgumentsObject)
 template<size_t ArgCount> bool
 ExhaustiveTest(const char funcode[])
 {
-    jsval v;
-    EVAL(funcode, &v);
+    RootedValue v(cx);
+    EVAL(funcode, v.address());
 
-    EVAL(CALL_CODES[ArgCount], &v);
-    ArgumentsObject &argsobj = JSVAL_TO_OBJECT(v)->asArguments();
+    EVAL(CALL_CODES[ArgCount], v.address());
+    Rooted<ArgumentsObject*> argsobj(cx, &JSVAL_TO_OBJECT(v)->as<ArgumentsObject>());
 
     Value elems[MAX_ELEMS];
 
     for (size_t i = 0; i <= ArgCount; i++) {
         for (size_t j = 0; j <= ArgCount - i; j++) {
             ClearElements(elems);
-            CHECK(argsobj.maybeGetElements(i, j, elems));
+            CHECK(argsobj->maybeGetElements(i, j, elems));
             for (size_t k = 0; k < j; k++)
                 CHECK_SAME(elems[k], INT_TO_JSVAL(i + k));
             for (size_t k = j; k < MAX_ELEMS - 1; k++)

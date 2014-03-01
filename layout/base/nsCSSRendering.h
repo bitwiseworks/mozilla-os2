@@ -29,10 +29,12 @@ class nsRenderingContext;
  */
 class nsImageRenderer {
 public:
+  typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::layers::ImageContainer ImageContainer;
 
   enum {
-    FLAG_SYNC_DECODE_IMAGES = 0x01
+    FLAG_SYNC_DECODE_IMAGES = 0x01,
+    FLAG_PAINTING_TO_WINDOW = 0x02
   };
   nsImageRenderer(nsIFrame* aForFrame, const nsStyleImage* aImage, uint32_t aFlags);
   ~nsImageRenderer();
@@ -60,9 +62,10 @@ public:
             const nsPoint&       aAnchor,
             const nsRect&        aDirty);
 
-
   bool IsRasterImage();
-  already_AddRefed<ImageContainer> GetContainer();
+  bool IsAnimatedImage();
+  already_AddRefed<ImageContainer> GetContainer(LayerManager* aManager);
+
 private:
   /*
    * Compute the "unscaled" dimensions of the image in aUnscaled{Width,Height}
@@ -242,9 +245,8 @@ struct nsCSSRendering {
    * backgrounds between BODY, the root element, and the canvas.
    * @return true if there is some meaningful background.
    */
-  static bool FindBackground(nsPresContext* aPresContext,
-                               nsIFrame* aForFrame,
-                               nsStyleContext** aBackgroundSC);
+  static bool FindBackground(nsIFrame* aForFrame,
+                             nsStyleContext** aBackgroundSC);
 
   /**
    * As FindBackground, but the passed-in frame is known to be a root frame
@@ -274,7 +276,7 @@ struct nsCSSRendering {
     // This should always give transparent, so we'll fill it in with the
     // default color if needed.  This seems to happen a bit while a page is
     // being loaded.
-    return aForFrame->GetStyleContext();
+    return aForFrame->StyleContext();
   }
 
   /**
@@ -299,6 +301,14 @@ struct nsCSSRendering {
                            nsIFrame* aFrame,
                            bool& aDrawBackgroundImage,
                            bool& aDrawBackgroundColor);
+
+  static nsRect
+  ComputeBackgroundPositioningArea(nsPresContext* aPresContext,
+                                   nsIFrame* aForFrame,
+                                   const nsRect& aBorderArea,
+                                   const nsStyleBackground& aBackground,
+                                   const nsStyleBackground::Layer& aLayer,
+                                   nsIFrame** aAttachedToFrame);
 
   static nsBackgroundLayerState
   PrepareBackgroundLayer(nsPresContext* aPresContext,
@@ -335,12 +345,24 @@ struct nsCSSRendering {
                               const nsRect& aDirtyRect,
                               const nsRect& aBorderArea,
                               uint32_t aFlags,
-                              nsRect* aBGClipRect = nullptr);
+                              nsRect* aBGClipRect = nullptr,
+                              int32_t aLayer = -1);
+ 
+  static void PaintBackgroundColor(nsPresContext* aPresContext,
+                                   nsRenderingContext& aRenderingContext,
+                                   nsIFrame* aForFrame,
+                                   const nsRect& aDirtyRect,
+                                   const nsRect& aBorderArea,
+                                   uint32_t aFlags);
 
   /**
    * Same as |PaintBackground|, except using the provided style structs.
    * This short-circuits the code that ensures that the root element's
    * background is drawn on the canvas.
+   * The aLayer parameter allows you to paint a single layer of the background.
+   * The default value for aLayer, -1, means that all layers will be painted.
+   * The background color will only be painted if the back-most layer is also
+   * being painted.
    */
   static void PaintBackgroundWithSC(nsPresContext* aPresContext,
                                     nsRenderingContext& aRenderingContext,
@@ -350,8 +372,17 @@ struct nsCSSRendering {
                                     nsStyleContext *aStyleContext,
                                     const nsStyleBorder& aBorder,
                                     uint32_t aFlags,
-                                    nsRect* aBGClipRect = nullptr);
+                                    nsRect* aBGClipRect = nullptr,
+                                    int32_t aLayer = -1);
 
+  static void PaintBackgroundColorWithSC(nsPresContext* aPresContext,
+                                         nsRenderingContext& aRenderingContext,
+                                         nsIFrame* aForFrame,
+                                         const nsRect& aDirtyRect,
+                                         const nsRect& aBorderArea,
+                                         nsStyleContext *aStyleContext,
+                                         const nsStyleBorder& aBorder,
+                                         uint32_t aFlags);
   /**
    * Returns the rectangle covered by the given background layer image, taking
    * into account background positioning, sizing, and repetition, but not
@@ -360,14 +391,22 @@ struct nsCSSRendering {
   static nsRect GetBackgroundLayerRect(nsPresContext* aPresContext,
                                        nsIFrame* aForFrame,
                                        const nsRect& aBorderArea,
+                                       const nsRect& aClipRect,
                                        const nsStyleBackground& aBackground,
-                                       const nsStyleBackground::Layer& aLayer);
+                                       const nsStyleBackground::Layer& aLayer,
+                                       uint32_t aFlags);
 
   /**
-   * Called by the presShell when painting is finished, so we can clear our
-   * inline background data cache.
+   * Called when we start creating a display list. The frame tree will not
+   * change until a matching EndFrameTreeLocked is called.
    */
-  static void DidPaint();
+  static void BeginFrameTreesLocked();
+  /**
+   * Called when we've finished using a display list. When all
+   * BeginFrameTreeLocked calls have been balanced by an EndFrameTreeLocked,
+   * the frame tree may start changing again.
+   */
+  static void EndFrameTreesLocked();
 
   // Draw a border segment in the table collapsing border model without
   // beveling corners

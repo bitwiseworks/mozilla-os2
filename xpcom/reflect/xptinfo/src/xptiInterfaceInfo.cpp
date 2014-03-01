@@ -6,6 +6,7 @@
 /* Implementation of xptiInterfaceEntry and xptiInterfaceInfo. */
 
 #include "xptiprivate.h"
+#include "mozilla/XPTInterfaceInfoManager.h"
 #include "nsAtomicRefcnt.h"
 
 using namespace mozilla;
@@ -70,7 +71,7 @@ xptiInterfaceEntry::xptiInterfaceEntry(const char* name,
 bool 
 xptiInterfaceEntry::Resolve()
 {
-    MutexAutoLock lock(xptiInterfaceInfoManager::GetResolveLock());
+    MutexAutoLock lock(XPTInterfaceInfoManager::GetResolveLock());
     return ResolveLocked();
 }
 
@@ -126,7 +127,7 @@ nsresult
 xptiInterfaceEntry::GetName(char **name)
 {
     // It is not necessary to Resolve because this info is read from manifest.
-    *name = (char*) nsMemory::Clone(mName, PL_strlen(mName)+1);
+    *name = (char*) nsMemory::Clone(mName, strlen(mName)+1);
     return *name ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
 }
 
@@ -157,7 +158,7 @@ xptiInterfaceEntry::IsFunction(bool* result)
 }
 
 nsresult
-xptiInterfaceEntry::GetMethodCount(uint16* count)
+xptiInterfaceEntry::GetMethodCount(uint16_t* count)
 {
     if(!EnsureResolved())
         return NS_ERROR_UNEXPECTED;
@@ -168,7 +169,7 @@ xptiInterfaceEntry::GetMethodCount(uint16* count)
 }
 
 nsresult
-xptiInterfaceEntry::GetConstantCount(uint16* count)
+xptiInterfaceEntry::GetConstantCount(uint16_t* count)
 {
     if(!EnsureResolved())
         return NS_ERROR_UNEXPECTED;
@@ -179,7 +180,7 @@ xptiInterfaceEntry::GetConstantCount(uint16* count)
 }
 
 nsresult
-xptiInterfaceEntry::GetMethodInfo(uint16 index, const nsXPTMethodInfo** info)
+xptiInterfaceEntry::GetMethodInfo(uint16_t index, const nsXPTMethodInfo** info)
 {
     if(!EnsureResolved())
         return NS_ERROR_UNEXPECTED;
@@ -202,14 +203,14 @@ xptiInterfaceEntry::GetMethodInfo(uint16 index, const nsXPTMethodInfo** info)
 }
 
 nsresult
-xptiInterfaceEntry::GetMethodInfoForName(const char* methodName, uint16 *index,
+xptiInterfaceEntry::GetMethodInfoForName(const char* methodName, uint16_t *index,
                                          const nsXPTMethodInfo** result)
 {
     if(!EnsureResolved())
         return NS_ERROR_UNEXPECTED;
 
     // This is a slow algorithm, but this is not expected to be called much.
-    for(uint16 i = 0; i < mDescriptor->num_methods; ++i)
+    for(uint16_t i = 0; i < mDescriptor->num_methods; ++i)
     {
         const nsXPTMethodInfo* info;
         info = reinterpret_cast<nsXPTMethodInfo*>
@@ -233,7 +234,7 @@ xptiInterfaceEntry::GetMethodInfoForName(const char* methodName, uint16 *index,
 }
 
 nsresult
-xptiInterfaceEntry::GetConstant(uint16 index, const nsXPTConstant** constant)
+xptiInterfaceEntry::GetConstant(uint16_t index, const nsXPTConstant** constant)
 {
     if(!EnsureResolved())
         return NS_ERROR_UNEXPECTED;
@@ -305,7 +306,7 @@ xptiInterfaceEntry::GetEntryForParam(uint16_t methodIndex,
 }
 
 nsresult
-xptiInterfaceEntry::GetInfoForParam(uint16 methodIndex,
+xptiInterfaceEntry::GetInfoForParam(uint16_t methodIndex,
                                     const nsXPTParamInfo *param,
                                     nsIInterfaceInfo** info)
 {
@@ -314,17 +315,13 @@ xptiInterfaceEntry::GetInfoForParam(uint16 methodIndex,
     if(NS_FAILED(rv))
         return rv;
 
-    xptiInterfaceInfo* theInfo;
-    rv = entry->GetInterfaceInfo(&theInfo);    
-    if(NS_FAILED(rv))
-        return rv;
+    *info = entry->InterfaceInfo().get();
 
-    *info = static_cast<nsIInterfaceInfo*>(theInfo);
     return NS_OK;
 }
 
 nsresult
-xptiInterfaceEntry::GetIIDForParam(uint16 methodIndex,
+xptiInterfaceEntry::GetIIDForParam(uint16_t methodIndex,
                                    const nsXPTParamInfo* param, nsIID** iid)
 {
     xptiInterfaceEntry* entry;
@@ -350,7 +347,7 @@ xptiInterfaceEntry::GetIIDForParamNoAlloc(uint16_t methodIndex,
 // this is a private helper
 nsresult
 xptiInterfaceEntry::GetTypeInArray(const nsXPTParamInfo* param,
-                                  uint16 dimension,
+                                  uint16_t dimension,
                                   const XPTTypeDescriptor** type)
 {
     NS_ASSERTION(IsFullyResolved(), "bad state");
@@ -359,7 +356,7 @@ xptiInterfaceEntry::GetTypeInArray(const nsXPTParamInfo* param,
     const XPTTypeDescriptor *additional_types =
                 mDescriptor->additional_types;
 
-    for (uint16 i = 0; i < dimension; i++) {
+    for (uint16_t i = 0; i < dimension; i++) {
         if(XPT_TDP_TAG(td->prefix) != TD_ARRAY) {
             NS_ERROR("bad dimension");
             return NS_ERROR_INVALID_ARG;
@@ -372,9 +369,9 @@ xptiInterfaceEntry::GetTypeInArray(const nsXPTParamInfo* param,
 }
 
 nsresult
-xptiInterfaceEntry::GetTypeForParam(uint16 methodIndex,
+xptiInterfaceEntry::GetTypeForParam(uint16_t methodIndex,
                                     const nsXPTParamInfo* param,
-                                    uint16 dimension,
+                                    uint16_t dimension,
                                     nsXPTType* type)
 {
     if(!EnsureResolved())
@@ -406,10 +403,10 @@ xptiInterfaceEntry::GetTypeForParam(uint16 methodIndex,
 }
 
 nsresult
-xptiInterfaceEntry::GetSizeIsArgNumberForParam(uint16 methodIndex,
+xptiInterfaceEntry::GetSizeIsArgNumberForParam(uint16_t methodIndex,
                                                const nsXPTParamInfo* param,
-                                               uint16 dimension,
-                                               uint8* argnum)
+                                               uint16_t dimension,
+                                               uint8_t* argnum)
 {
     if(!EnsureResolved())
         return NS_ERROR_UNEXPECTED;
@@ -451,9 +448,9 @@ xptiInterfaceEntry::GetSizeIsArgNumberForParam(uint16 methodIndex,
 }
 
 nsresult
-xptiInterfaceEntry::GetInterfaceIsArgNumberForParam(uint16 methodIndex,
+xptiInterfaceEntry::GetInterfaceIsArgNumberForParam(uint16_t methodIndex,
                                                     const nsXPTParamInfo* param,
-                                                    uint8* argnum)
+                                                    uint8_t* argnum)
 {
     if(!EnsureResolved())
         return NS_ERROR_UNEXPECTED;
@@ -536,11 +533,11 @@ xptiInterfaceEntry::HasAncestor(const nsIID * iid, bool *_retval)
 
 /***************************************************/
 
-nsresult 
-xptiInterfaceEntry::GetInterfaceInfo(xptiInterfaceInfo** info)
+already_AddRefed<xptiInterfaceInfo> 
+xptiInterfaceEntry::InterfaceInfo()
 {
 #ifdef DEBUG
-    xptiInterfaceInfoManager::GetSingleton()->GetWorkingSet()->mTableReentrantMonitor.
+    XPTInterfaceInfoManager::GetSingleton()->mWorkingSet.mTableReentrantMonitor.
         AssertCurrentThreadIn();
 #endif
     LOG_INFO_MONITOR_ENTRY;
@@ -548,15 +545,10 @@ xptiInterfaceEntry::GetInterfaceInfo(xptiInterfaceInfo** info)
     if(!mInfo)
     {
         mInfo = new xptiInterfaceInfo(this);
-        if(!mInfo)
-        {
-            *info = nullptr;    
-            return NS_ERROR_OUT_OF_MEMORY;
-        }
     }
     
-    NS_ADDREF(*info = mInfo);
-    return NS_OK;    
+    nsRefPtr<xptiInterfaceInfo> info = mInfo;
+    return info.forget();
 }
     
 void     
@@ -572,14 +564,15 @@ xptiInterfaceEntry::LockedInvalidateInterfaceInfo()
 bool
 xptiInterfaceInfo::BuildParent()
 {
-    mozilla::ReentrantMonitorAutoEnter monitor(xptiInterfaceInfoManager::GetSingleton()->
-                                    GetWorkingSet()->mTableReentrantMonitor);
+    mozilla::ReentrantMonitorAutoEnter monitor(XPTInterfaceInfoManager::GetSingleton()->
+                                    mWorkingSet.mTableReentrantMonitor);
     NS_ASSERTION(mEntry && 
                  mEntry->IsFullyResolved() && 
                  !mParent &&
                  mEntry->Parent(),
                 "bad BuildParent call");
-    return NS_SUCCEEDED(mEntry->Parent()->GetInterfaceInfo(&mParent));
+    mParent = mEntry->Parent()->InterfaceInfo().get();
+    return true;
 }
 
 /***************************************************************************/
@@ -615,12 +608,12 @@ xptiInterfaceInfo::Release(void)
     NS_LOG_RELEASE(this, cnt, "xptiInterfaceInfo");
     if(!cnt)
     {
-        mozilla::ReentrantMonitorAutoEnter monitor(xptiInterfaceInfoManager::
-                                          GetSingleton()->GetWorkingSet()->
+        mozilla::ReentrantMonitorAutoEnter monitor(XPTInterfaceInfoManager::
+                                          GetSingleton()->mWorkingSet.
                                           mTableReentrantMonitor);
         LOG_INFO_MONITOR_ENTRY;
 
-        // If GetInterfaceInfo added and *released* a reference before we 
+        // If InterfaceInfo added and *released* a reference before we 
         // acquired the monitor then 'this' might already be dead. In that
         // case we would not want to try to access any instance data. We
         // would want to bail immediately. If 'this' is already dead then the
@@ -629,7 +622,7 @@ xptiInterfaceInfo::Release(void)
         if(entry && !entry->InterfaceInfoEquals(this))
             return 0;
 
-        // If GetInterfaceInfo added a reference before we acquired the monitor
+        // If InterfaceInfo added a reference before we acquired the monitor
         // then we want to bail out of here without destorying the object.
         if(mRefCnt)
             return 1;

@@ -6,36 +6,33 @@
 #include "nsIDOMEventTarget.idl"
 interface nsIDOMBlob;
 interface nsIDOMDOMRequest;
-interface nsIDOMDeviceStorageCursor;
+interface nsIDOMDOMCursor;
 interface nsIDOMDeviceStorageChangeEvent;
 interface nsIDOMEventListener;
+interface nsIFile;
 
-dictionary DeviceStorageEnumerationParameters
-{
-  jsval since;
-};
-
-[scriptable, uuid(36f3b16b-a398-4b19-944e-ce299b714725), builtinclass]
+[scriptable, uuid(7c1b2305-0f14-4c07-8a8a-359eeb850068), builtinclass]
 interface nsIDOMDeviceStorage : nsIDOMEventTarget
 {
-    attribute nsIDOMEventListener onchange;
+    [implicit_jscontext] attribute jsval onchange;
     nsIDOMDOMRequest add(in nsIDOMBlob aBlob);
     nsIDOMDOMRequest addNamed(in nsIDOMBlob aBlob, in DOMString aName);
 
-    [implicit_jscontext]
-    nsIDOMDOMRequest get(in jsval aName);
+    nsIDOMDOMRequest get([Null(Stringify)] in DOMString aName);
+    nsIDOMDOMRequest getEditable([Null(Stringify)] in DOMString aName);
+    nsIDOMDOMRequest delete([Null(Stringify)] in DOMString aName);
 
-    [implicit_jscontext]
-    nsIDOMDOMRequest getEditable(in jsval aName);
+    nsIDOMDOMRequest freeSpace();
+    nsIDOMDOMRequest usedSpace();
+    nsIDOMDOMRequest available();
 
-    [implicit_jscontext]
-    nsIDOMDOMRequest delete(in jsval aName);
+    // Note that the storageName is just a name (like sdcard), and doesn't
+    // include any path information.
+    readonly attribute DOMString storageName;
 
-    [optional_argc, implicit_jscontext]
-    nsIDOMDeviceStorageCursor enumerate([optional] in jsval aName, /* DeviceStorageEnumerationParameters */ [optional] in jsval options);
+    // Determines if this storage area is the one which will be used by default
+    // for storing new files.
+    readonly attribute bool default;
 
-    [optional_argc, implicit_jscontext]
-    nsIDOMDeviceStorageCursor enumerateEditable([optional] in jsval aName, /* DeviceStorageEnumerationParameters */ [optional] in jsval options);
-
-    nsIDOMDOMRequest stat();
+    [noscript] nsIFile getRootDirectoryForFile(in DOMString aName);
 };

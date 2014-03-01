@@ -3,12 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "nsSVGPolyElement.h"
 #include "DOMSVGPointList.h"
 #include "gfxContext.h"
-#include "nsSVGUtils.h"
+#include "SVGContentUtils.h"
 
 using namespace mozilla;
 
@@ -19,7 +17,6 @@ NS_IMPL_ADDREF_INHERITED(nsSVGPolyElement,nsSVGPolyElementBase)
 NS_IMPL_RELEASE_INHERITED(nsSVGPolyElement,nsSVGPolyElementBase)
 
 NS_INTERFACE_MAP_BEGIN(nsSVGPolyElement)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedPoints)
 NS_INTERFACE_MAP_END_INHERITING(nsSVGPolyElementBase)
 
 //----------------------------------------------------------------------
@@ -28,29 +25,24 @@ NS_INTERFACE_MAP_END_INHERITING(nsSVGPolyElementBase)
 nsSVGPolyElement::nsSVGPolyElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsSVGPolyElementBase(aNodeInfo)
 {
-
 }
 
-//----------------------------------------------------------------------
-// nsIDOMSGAnimatedPoints methods:
-
-/* readonly attribute nsIDOMSVGPointList points; */
-NS_IMETHODIMP 
-nsSVGPolyElement::GetPoints(nsIDOMSVGPointList * *aPoints)
+already_AddRefed<DOMSVGPointList>
+nsSVGPolyElement::Points()
 {
   void *key = mPoints.GetBaseValKey();
-  *aPoints = DOMSVGPointList::GetDOMWrapper(key, this, false).get();
-  return NS_OK;
+  nsRefPtr<DOMSVGPointList> points = DOMSVGPointList::GetDOMWrapper(key, this, false);
+  return points.forget();
 }
 
-/* readonly attribute nsIDOMSVGPointList animatedPoints; */
-NS_IMETHODIMP 
-nsSVGPolyElement::GetAnimatedPoints(nsIDOMSVGPointList * *aAnimatedPoints)
+already_AddRefed<DOMSVGPointList>
+nsSVGPolyElement::AnimatedPoints()
 {
   void *key = mPoints.GetAnimValKey();
-  *aAnimatedPoints = DOMSVGPointList::GetDOMWrapper(key, this, true).get();
-  return NS_OK;
+  nsRefPtr<DOMSVGPointList> points = DOMSVGPointList::GetDOMWrapper(key, this, true);
+  return points.forget();
 }
+
 
 //----------------------------------------------------------------------
 // nsIContent methods
@@ -96,7 +88,7 @@ nsSVGPolyElement::GetMarkPoints(nsTArray<nsSVGMark> *aMarks)
       aMarks->ElementAt(aMarks->Length() - 1).angle = angle;
     else if (i > 1)
       aMarks->ElementAt(aMarks->Length() - 1).angle =
-        nsSVGUtils::AngleBisect(prevAngle, angle);
+        SVGContentUtils::AngleBisect(prevAngle, angle);
 
     aMarks->AppendElement(nsSVGMark(x, y, 0));
 

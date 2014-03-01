@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=40: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,7 +11,7 @@
 
 #include "nsIDOMTelephony.h"
 #include "nsIDOMTelephonyCall.h"
-#include "nsIRadioInterfaceLayer.h"
+#include "nsITelephonyProvider.h"
 
 class nsIScriptContext;
 class nsPIDOMWindow;
@@ -21,44 +21,47 @@ BEGIN_TELEPHONY_NAMESPACE
 class Telephony : public nsDOMEventTargetHelper,
                   public nsIDOMTelephony
 {
-  nsCOMPtr<nsIRILContentHelper> mRIL;
-  nsCOMPtr<nsIRILTelephonyCallback> mRILTelephonyCallback;
+  /**
+   * Class Telephony doesn't actually inherit nsITelephonyListener.
+   * Instead, it owns an nsITelephonyListener derived instance mListener
+   * and passes it to nsITelephonyProvider. The onreceived events are first
+   * delivered to mListener and then forwarded to its owner, Telephony. See
+   * also bug 775997 comment #51.
+   */
+  class Listener;
 
-  NS_DECL_EVENT_HANDLER(incoming)
-  NS_DECL_EVENT_HANDLER(callschanged)
+  class EnumerationAck;
+  friend class EnumerationAck;
+
+  nsCOMPtr<nsITelephonyProvider> mProvider;
+  nsRefPtr<Listener> mListener;
 
   TelephonyCall* mActiveCall;
   nsTArray<nsRefPtr<TelephonyCall> > mCalls;
 
   // Cached calls array object. Cleared whenever mCalls changes and then rebuilt
   // once a page looks for the liveCalls attribute.
-  JSObject* mCallsArray;
+  JS::Heap<JSObject*> mCallsArray;
 
   bool mRooted;
+  bool mEnumerated;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMTELEPHONY
-  NS_DECL_NSIRILTELEPHONYCALLBACK
-  NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
+  NS_DECL_NSITELEPHONYLISTENER
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(
                                                    Telephony,
                                                    nsDOMEventTargetHelper)
 
   static already_AddRefed<Telephony>
-  Create(nsPIDOMWindow* aOwner, nsIRILContentHelper* aRIL);
-
-  nsIDOMEventTarget*
-  ToIDOMEventTarget() const
-  {
-    return static_cast<nsDOMEventTargetHelper*>(
-             const_cast<Telephony*>(this));
-  }
+  Create(nsPIDOMWindow* aOwner, nsITelephonyProvider* aProvider);
 
   nsISupports*
-  ToISupports() const
+  ToISupports()
   {
-    return ToIDOMEventTarget();
+    return static_cast<EventTarget*>(this);
   }
 
   void
@@ -79,11 +82,13 @@ public:
     NotifyCallsChanged(aCall);
   }
 
-  nsIRILContentHelper*
-  RIL() const
+  nsITelephonyProvider*
+  Provider() const
   {
-    return mRIL;
+    return mProvider;
   }
+
+  virtual void EventListenerAdded(nsIAtom* aType) MOZ_OVERRIDE;
 
 private:
   Telephony();
@@ -103,20 +108,12 @@ private:
                const nsAString& aNumber,
                nsIDOMTelephonyCall** aResult);
 
-  class RILTelephonyCallback : public nsIRILTelephonyCallback
-  {
-    Telephony* mTelephony;
+  nsresult
+  DispatchCallEvent(const nsAString& aType,
+                    nsIDOMTelephonyCall* aCall);
 
-  public:
-    NS_DECL_ISUPPORTS
-    NS_FORWARD_NSIRILTELEPHONYCALLBACK(mTelephony->)
-
-    RILTelephonyCallback(Telephony* aTelephony)
-    : mTelephony(aTelephony)
-    {
-      NS_ASSERTION(mTelephony, "Null pointer!");
-    }
-  };
+  void
+  EnqueueEnumerationAck();
 };
 
 END_TELEPHONY_NAMESPACE

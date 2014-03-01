@@ -5,14 +5,15 @@
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
+#ifndef nsXBLService_h_
+#define nsXBLService_h_
+
 #include "nsString.h"
 #include "nsIObserver.h"
 #include "nsWeakReference.h"
 #include "jsapi.h"              // nsXBLJSClass derives from JSClass
 #include "jsclist.h"            // nsXBLJSClass derives from JSCList
-#include "nsFixedSizeAllocator.h"
 #include "nsTArray.h"
-#include "mozilla/Types.h"
 
 class nsXBLBinding;
 class nsXBLDocumentInfo;
@@ -23,7 +24,12 @@ class nsIURI;
 class nsIPrincipal;
 class nsSupportsHashtable;
 class nsHashtable;
-class nsIDOMEventTarget;
+
+namespace mozilla {
+namespace dom {
+class EventTarget;
+}
+}
 
 class nsXBLService : public nsIObserver,
                      public nsSupportsWeakReference
@@ -45,7 +51,7 @@ class nsXBLService : public nsIObserver,
   // This function loads a particular XBL file and installs all of the bindings
   // onto the element.  aOriginPrincipal must not be null here.
   nsresult LoadBindings(nsIContent* aContent, nsIURI* aURL,
-                        nsIPrincipal* aOriginPrincipal, bool aAugmentFlag,
+                        nsIPrincipal* aOriginPrincipal,
                         nsXBLBinding** aBinding, bool* aResolveStyle);
 
   // Indicates whether or not a binding is fully loaded.
@@ -62,8 +68,8 @@ class nsXBLService : public nsIObserver,
                                    nsXBLDocumentInfo** aResult);
 
   // Used by XUL key bindings and for window XBL.
-  static nsresult AttachGlobalKeyHandler(nsIDOMEventTarget* aTarget);
-  static nsresult DetachGlobalKeyHandler(nsIDOMEventTarget* aTarget);
+  static nsresult AttachGlobalKeyHandler(mozilla::dom::EventTarget* aTarget);
+  static nsresult DetachGlobalKeyHandler(mozilla::dom::EventTarget* aTarget);
 
   NS_DECL_NSIOBSERVER
 
@@ -124,8 +130,6 @@ public:
   static bool     gAllowDataURIs;            // Whether we should allow data
                                              // urls in -moz-binding. Needed for
                                              // testing.
-
-  nsFixedSizeAllocator mPool;
 };
 
 class nsXBLJSClass : public JSCList, public JSClass
@@ -147,5 +151,8 @@ public:
 
   nsrefcnt Hold() { return ++mRefCnt; }
   nsrefcnt Drop() { return --mRefCnt ? mRefCnt : Destroy(); }
+  nsrefcnt AddRef() { return Hold(); }
+  nsrefcnt Release() { return Drop(); }
 };
 
+#endif

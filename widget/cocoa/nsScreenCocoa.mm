@@ -28,7 +28,9 @@ nsScreenCocoa::~nsScreenCocoa ()
 NS_IMETHODIMP
 nsScreenCocoa::GetRect(int32_t *outX, int32_t *outY, int32_t *outWidth, int32_t *outHeight)
 {
-  nsIntRect r = nsCocoaUtils::CocoaRectToGeckoRect([mScreen frame]);
+  NSRect frame = [mScreen frame];
+
+  nsIntRect r = nsCocoaUtils::CocoaRectToGeckoRectDevPix(frame, BackingScaleFactor());
 
   *outX = r.x;
   *outY = r.y;
@@ -41,7 +43,39 @@ nsScreenCocoa::GetRect(int32_t *outX, int32_t *outY, int32_t *outWidth, int32_t 
 NS_IMETHODIMP
 nsScreenCocoa::GetAvailRect(int32_t *outX, int32_t *outY, int32_t *outWidth, int32_t *outHeight)
 {
-  nsIntRect r = nsCocoaUtils::CocoaRectToGeckoRect([mScreen visibleFrame]);
+  NSRect frame = [mScreen visibleFrame];
+
+  nsIntRect r = nsCocoaUtils::CocoaRectToGeckoRectDevPix(frame, BackingScaleFactor());
+
+  *outX = r.x;
+  *outY = r.y;
+  *outWidth = r.width;
+  *outHeight = r.height;
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScreenCocoa::GetRectDisplayPix(int32_t *outX, int32_t *outY, int32_t *outWidth, int32_t *outHeight)
+{
+  NSRect frame = [mScreen frame];
+
+  nsIntRect r = nsCocoaUtils::CocoaRectToGeckoRect(frame);
+
+  *outX = r.x;
+  *outY = r.y;
+  *outWidth = r.width;
+  *outHeight = r.height;
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScreenCocoa::GetAvailRectDisplayPix(int32_t *outX, int32_t *outY, int32_t *outWidth, int32_t *outHeight)
+{
+  NSRect frame = [mScreen visibleFrame];
+
+  nsIntRect r = nsCocoaUtils::CocoaRectToGeckoRect(frame);
 
   *outX = r.x;
   *outY = r.y;
@@ -77,4 +111,21 @@ nsScreenCocoa::GetColorDepth(int32_t *aColorDepth)
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
+NS_IMETHODIMP
+nsScreenCocoa::GetContentsScaleFactor(double *aContentsScaleFactor)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+
+  *aContentsScaleFactor = (double) BackingScaleFactor();
+  return NS_OK;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
+CGFloat
+nsScreenCocoa::BackingScaleFactor()
+{
+  return nsCocoaUtils::GetBackingScaleFactor(mScreen);
 }

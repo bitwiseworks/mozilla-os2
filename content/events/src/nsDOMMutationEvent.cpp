@@ -4,17 +4,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCOMPtr.h"
-#include "nsDOMClassInfoID.h"
 #include "nsDOMMutationEvent.h"
-#include "nsMutationEvent.h"
-
 
 class nsPresContext;
 
-nsDOMMutationEvent::nsDOMMutationEvent(nsPresContext* aPresContext,
+nsDOMMutationEvent::nsDOMMutationEvent(mozilla::dom::EventTarget* aOwner,
+                                       nsPresContext* aPresContext,
                                        nsMutationEvent* aEvent)
-  : nsDOMEvent(aPresContext, aEvent ? aEvent :
-               new nsMutationEvent(false, 0))
+  : nsDOMEvent(aOwner, aPresContext,
+               aEvent ? aEvent : new nsMutationEvent(false, 0))
 {
   mEventIsInternal = (aEvent == nullptr);
 }
@@ -28,11 +26,8 @@ nsDOMMutationEvent::~nsDOMMutationEvent()
   }
 }
 
-DOMCI_DATA(MutationEvent, nsDOMMutationEvent)
-
 NS_INTERFACE_MAP_BEGIN(nsDOMMutationEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMutationEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MutationEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
 
 NS_IMPL_ADDREF_INHERITED(nsDOMMutationEvent, nsDOMEvent)
@@ -41,10 +36,9 @@ NS_IMPL_RELEASE_INHERITED(nsDOMMutationEvent, nsDOMEvent)
 NS_IMETHODIMP
 nsDOMMutationEvent::GetRelatedNode(nsIDOMNode** aRelatedNode)
 {
-  *aRelatedNode = nullptr;
-  nsMutationEvent* mutation = static_cast<nsMutationEvent*>(mEvent);
-  *aRelatedNode = mutation->mRelatedNode;
-  NS_IF_ADDREF(*aRelatedNode);
+  nsCOMPtr<nsINode> relatedNode = GetRelatedNode();
+  nsCOMPtr<nsIDOMNode> relatedDOMNode = relatedNode ? relatedNode->AsDOMNode() : nullptr;
+  relatedDOMNode.forget(aRelatedNode);
   return NS_OK;
 }
 
@@ -78,10 +72,7 @@ nsDOMMutationEvent::GetAttrName(nsAString& aAttrName)
 NS_IMETHODIMP
 nsDOMMutationEvent::GetAttrChange(uint16_t* aAttrChange)
 {
-  *aAttrChange = 0;
-  nsMutationEvent* mutation = static_cast<nsMutationEvent*>(mEvent);
-  if (mutation->mAttrChange)
-      *aAttrChange = mutation->mAttrChange;
+  *aAttrChange = AttrChange();
   return NS_OK;
 }
 
@@ -106,10 +97,11 @@ nsDOMMutationEvent::InitMutationEvent(const nsAString& aTypeArg, bool aCanBubble
 }
 
 nsresult NS_NewDOMMutationEvent(nsIDOMEvent** aInstancePtrResult,
+                                mozilla::dom::EventTarget* aOwner,
                                 nsPresContext* aPresContext,
                                 nsMutationEvent *aEvent) 
 {
-  nsDOMMutationEvent* it = new nsDOMMutationEvent(aPresContext, aEvent);
+  nsDOMMutationEvent* it = new nsDOMMutationEvent(aOwner, aPresContext, aEvent);
   if (nullptr == it) {
     return NS_ERROR_OUT_OF_MEMORY;
   }

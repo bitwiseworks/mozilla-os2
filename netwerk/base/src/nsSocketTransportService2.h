@@ -19,6 +19,7 @@
 #include "nsASocketHandler.h"
 #include "nsIObserver.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/net/DashboardTypes.h"
 
 //-----------------------------------------------------------------------------
 
@@ -73,6 +74,9 @@ public:
         return mActiveCount + mIdleCount < gMaxCount;
     }
 
+    // Called by the networking dashboard
+    // Fills the passed array with socket information
+    void GetSocketConnections(nsTArray<mozilla::net::SocketInfo> *);
 protected:
 
     virtual ~nsSocketTransportService();
@@ -107,6 +111,11 @@ private:
     bool          mShuttingDown;
                             // indicates whether we are currently in the
                             // process of shutting down
+    bool          mOffline;
+    bool          mGoingOffline;
+
+    // Detaches all sockets.
+    void Reset(bool aGuardLocals);
 
     //-------------------------------------------------------------------------
     // socket lists (socket thread only)
@@ -178,6 +187,14 @@ private:
     void ProbeMaxCount();
 #endif
     bool mProbedMaxCount;
+
+    void AnalyzeConnection(nsTArray<mozilla::net::SocketInfo> *data,
+                           SocketContext *context, bool aActive);
+
+    void ClosePrivateConnections();
+    void DetachSocketWithGuard(bool aGuardLocals,
+                               SocketContext *socketList,
+                               int32_t index);
 };
 
 extern nsSocketTransportService *gSocketTransportService;

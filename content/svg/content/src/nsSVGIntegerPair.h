@@ -14,8 +14,13 @@
 #include "nsSVGElement.h"
 #include "mozilla/Attributes.h"
 
-class nsISMILAnimationElement;
 class nsSMILValue;
+
+namespace mozilla {
+namespace dom {
+class SVGAnimationElement;
+}
+}
 
 class nsSVGIntegerPair
 {
@@ -57,7 +62,10 @@ public:
   nsresult ToDOMAnimatedInteger(nsIDOMSVGAnimatedInteger **aResult,
                                 PairIndex aIndex,
                                 nsSVGElement* aSVGElement);
-  // Returns a new nsISMILAttr object that the caller must delete
+  already_AddRefed<nsIDOMSVGAnimatedInteger>
+    ToDOMAnimatedInteger(PairIndex aIndex,
+                         nsSVGElement* aSVGElement);
+   // Returns a new nsISMILAttr object that the caller must delete
   nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
 
 private:
@@ -76,14 +84,15 @@ public:
 
     DOMAnimatedInteger(nsSVGIntegerPair* aVal, PairIndex aIndex, nsSVGElement *aSVGElement)
       : mVal(aVal), mSVGElement(aSVGElement), mIndex(aIndex) {}
+    virtual ~DOMAnimatedInteger();
 
     nsSVGIntegerPair* mVal; // kept alive because it belongs to content
     nsRefPtr<nsSVGElement> mSVGElement;
     PairIndex mIndex; // are we the first or second integer
 
-    NS_IMETHOD GetBaseVal(int32_t* aResult)
+    NS_IMETHOD GetBaseVal(int32_t* aResult) MOZ_OVERRIDE
       { *aResult = mVal->GetBaseValue(mIndex); return NS_OK; }
-    NS_IMETHOD SetBaseVal(int32_t aValue)
+    NS_IMETHOD SetBaseVal(int32_t aValue) MOZ_OVERRIDE
       {
         mVal->SetBaseValue(aValue, mIndex, mSVGElement);
         return NS_OK;
@@ -91,7 +100,7 @@ public:
 
     // Script may have modified animation parameters or timeline -- DOM getters
     // need to flush any resample requests to reflect these modifications.
-    NS_IMETHOD GetAnimVal(int32_t* aResult)
+    NS_IMETHOD GetAnimVal(int32_t* aResult) MOZ_OVERRIDE
     {
       mSVGElement->FlushAnimations();
       *aResult = mVal->GetAnimValue(mIndex);
@@ -113,12 +122,12 @@ public:
 
     // nsISMILAttr methods
     virtual nsresult ValueFromString(const nsAString& aStr,
-                                     const nsISMILAnimationElement* aSrcElement,
+                                     const mozilla::dom::SVGAnimationElement* aSrcElement,
                                      nsSMILValue& aValue,
-                                     bool& aPreventCachingOfSandwich) const;
-    virtual nsSMILValue GetBaseValue() const;
-    virtual void ClearAnimValue();
-    virtual nsresult SetAnimValue(const nsSMILValue& aValue);
+                                     bool& aPreventCachingOfSandwich) const MOZ_OVERRIDE;
+    virtual nsSMILValue GetBaseValue() const MOZ_OVERRIDE;
+    virtual void ClearAnimValue() MOZ_OVERRIDE;
+    virtual nsresult SetAnimValue(const nsSMILValue& aValue) MOZ_OVERRIDE;
   };
 };
 

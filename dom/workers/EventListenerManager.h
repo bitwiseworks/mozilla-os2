@@ -8,7 +8,7 @@
 
 #include "mozilla/dom/workers/Workers.h"
 
-#include "prclist.h"
+#include "mozilla/LinkedList.h"
 
 #include "mozilla/ErrorResult.h"
 
@@ -20,12 +20,15 @@ class EventTarget;
 // XXX Current impl doesn't handle event target chains.
 class EventListenerManager
 {
-  PRCList mCollectionHead;
+public:
+  struct ListenerCollection;
+
+private:
+  LinkedList<ListenerCollection> mCollections;
 
 public:
   EventListenerManager()
   {
-    PR_INIT_CLIST(&mCollectionHead);
   }
 
 #ifdef DEBUG
@@ -35,7 +38,7 @@ public:
   void
   _trace(JSTracer* aTrc) const
   {
-    if (!PR_CLIST_IS_EMPTY(&mCollectionHead)) {
+    if (!mCollections.isEmpty()) {
       TraceInternal(aTrc);
     }
   }
@@ -43,7 +46,7 @@ public:
   void
   _finalize(JSFreeOp* aFop)
   {
-    if (!PR_CLIST_IS_EMPTY(&mCollectionHead)) {
+    if (!mCollections.isEmpty()) {
       FinalizeInternal(aFop);
     }
   }
@@ -57,7 +60,8 @@ public:
   };
 
   void
-  AddEventListener(JSContext* aCx, const jsid& aType, JSObject* aListener,
+  AddEventListener(JSContext* aCx, const jsid& aType,
+                   JS::Handle<JSObject*> aListener,
                    bool aCapturing, bool aWantsUntrusted, ErrorResult& aRv)
   {
     Add(aCx, aType, aListener, aCapturing ? Capturing : Bubbling,
@@ -65,10 +69,10 @@ public:
   }
 
   void
-  RemoveEventListener(JSContext* aCx, const jsid& aType, JSObject* aListener,
-                      bool aCapturing)
+  RemoveEventListener(JSContext* aCx, const jsid& aType,
+                      JS::Handle<JSObject*> aListener, bool aCapturing)
   {
-    if (PR_CLIST_IS_EMPTY(&mCollectionHead)) {
+    if (mCollections.isEmpty()) {
       return;
     }
     Remove(aCx, aType, aListener, aCapturing ? Capturing : Bubbling, true);
@@ -82,10 +86,11 @@ public:
   GetEventListener(const jsid& aType) const;
 
   void
-  SetEventListener(JSContext* aCx, const jsid& aType, JSObject* aListener,
+  SetEventListener(JSContext* aCx, const jsid& aType,
+                   JS::Handle<JSObject*> aListener,
                    ErrorResult& aRv)
   {
-    JSObject* existing = GetEventListener(aType);
+    JS::Rooted<JSObject*> existing(aCx, GetEventListener(aType));
     if (existing) {
       Remove(aCx, aType, existing, Onfoo, false);
     }
@@ -98,7 +103,7 @@ public:
   bool
   HasListeners() const
   {
-    return !PR_CLIST_IS_EMPTY(&mCollectionHead);
+    return !mCollections.isEmpty();
   }
 
   bool
@@ -115,12 +120,12 @@ private:
   FinalizeInternal(JSFreeOp* aFop);
 
   void
-  Add(JSContext* aCx, const jsid& aType, JSObject* aListener, Phase aPhase,
-      bool aWantsUntrusted, ErrorResult& aRv);
+  Add(JSContext* aCx, const jsid& aType, JS::Handle<JSObject*> aListener,
+      Phase aPhase, bool aWantsUntrusted, ErrorResult& aRv);
 
   void
-  Remove(JSContext* aCx, const jsid& aType, JSObject* aListener, Phase aPhase,
-         bool aClearEmpty);
+  Remove(JSContext* aCx, const jsid& aType, JS::Handle<JSObject*> aListener,
+         Phase aPhase, bool aClearEmpty);
 
   bool
   HasListenersForTypeInternal(JSContext* aCx, const jsid& aType) const;

@@ -11,6 +11,7 @@
 #include "nsPrintfCString.h"
 #include "Nv3DVUtils.h"
 #include "plstr.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace layers {
@@ -236,7 +237,7 @@ DeviceManagerD3D9::Init()
     return false;
   }
 
-  if (!PL_strncasecmp(ident.Driver, "nvumdshim.dll", PL_strlen(ident.Driver))) {
+  if (!PL_strncasecmp(ident.Driver, "nvumdshim.dll", strlen(ident.Driver))) {
     // XXX - This is a device using NVidia Optimus. We have no idea how to do
     // interop here so let's fail and use BasicLayers. See bug 597320.
     return false;
@@ -456,7 +457,7 @@ DeviceManagerD3D9::Init()
   if (console) {
     nsString msg;
     msg +=
-      NS_LITERAL_STRING("Direct3D 9 DeviceManager Initialized Succesfully.\nDriver: ");
+      NS_LITERAL_STRING("Direct3D 9 DeviceManager Initialized Successfully.\nDriver: ");
     msg += NS_ConvertUTF8toUTF16(
       nsDependentCString((const char*)identifier.Driver));
     msg += NS_LITERAL_STRING("\nDescription: ");
@@ -761,7 +762,7 @@ DeviceManagerD3D9::VerifyCaps()
       caps.MaxTextureWidth < 4096) {
     return false;
   }
-  mMaxTextureSize = NS_MIN(caps.MaxTextureHeight, caps.MaxTextureWidth);
+  mMaxTextureSize = std::min(caps.MaxTextureHeight, caps.MaxTextureWidth);
 
   if ((caps.PixelShaderVersion & 0xffff) < 0x200 ||
       (caps.VertexShaderVersion & 0xffff) < 0x200) {

@@ -5,11 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsDOMCompositionEvent.h"
-#include "nsDOMClassInfoID.h"
 
-nsDOMCompositionEvent::nsDOMCompositionEvent(nsPresContext* aPresContext,
+nsDOMCompositionEvent::nsDOMCompositionEvent(mozilla::dom::EventTarget* aOwner,
+                                             nsPresContext* aPresContext,
                                              nsCompositionEvent* aEvent)
-  : nsDOMUIEvent(aPresContext, aEvent ? aEvent :
+  : nsDOMUIEvent(aOwner, aPresContext, aEvent ? aEvent :
                  new nsCompositionEvent(false, 0, nullptr))
 {
   NS_ASSERTION(mEvent->eventStructType == NS_COMPOSITION_EVENT,
@@ -24,7 +24,7 @@ nsDOMCompositionEvent::nsDOMCompositionEvent(nsPresContext* aPresContext,
     // XXX compositionstart is cancelable in draft of DOM3 Events.
     //     However, it doesn't make sence for us, we cannot cancel composition
     //     when we sends compositionstart event.
-    mEvent->flags |= NS_EVENT_FLAG_CANT_CANCEL;
+    mEvent->mFlags.mCancelable = false;
   }
 
   mData = static_cast<nsCompositionEvent*>(mEvent)->data;
@@ -42,11 +42,8 @@ nsDOMCompositionEvent::~nsDOMCompositionEvent()
 NS_IMPL_ADDREF_INHERITED(nsDOMCompositionEvent, nsDOMUIEvent)
 NS_IMPL_RELEASE_INHERITED(nsDOMCompositionEvent, nsDOMUIEvent)
 
-DOMCI_DATA(CompositionEvent, nsDOMCompositionEvent)
-
 NS_INTERFACE_MAP_BEGIN(nsDOMCompositionEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMCompositionEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CompositionEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMUIEvent)
 
 NS_IMETHODIMP
@@ -82,10 +79,11 @@ nsDOMCompositionEvent::InitCompositionEvent(const nsAString& aType,
 
 nsresult
 NS_NewDOMCompositionEvent(nsIDOMEvent** aInstancePtrResult,
+                          mozilla::dom::EventTarget* aOwner,
                           nsPresContext* aPresContext,
                           nsCompositionEvent *aEvent)
 {
   nsDOMCompositionEvent* event =
-    new nsDOMCompositionEvent(aPresContext, aEvent);
+    new nsDOMCompositionEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(event, aInstancePtrResult);
 }

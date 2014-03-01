@@ -19,7 +19,6 @@ class nsAutoScrollTimer;
 class nsIContentIterator;
 class nsIFrame;
 struct SelectionDetails;
-class nsSelectionIterator;
 
 struct RangeData
 {
@@ -52,8 +51,9 @@ public:
   NS_DECL_NSISELECTIONPRIVATE
 
   // utility methods for scrolling the selection into view
-  nsresult      GetPresContext(nsPresContext **aPresContext);
-  nsresult      GetPresShell(nsIPresShell **aPresShell);
+  nsPresContext* GetPresContext() const;
+  nsIPresShell* GetPresShell() const;
+  nsFrameSelection* GetFrameSelection() const { return mFrameSelection; }
   // Returns a rect containing the selection region, and frame that that
   // position is relative to. For SELECTION_ANCHOR_REGION or
   // SELECTION_FOCUS_REGION the rect is a zero-width rectangle. For
@@ -67,13 +67,14 @@ public:
 
   nsresult      PostScrollSelectionIntoViewEvent(
                                         SelectionRegion aRegion,
-                                        bool aFirstAncestorOnly,
+                                        int32_t aFlags,
                                         nsIPresShell::ScrollAxis aVertical,
                                         nsIPresShell::ScrollAxis aHorizontal);
   enum {
     SCROLL_SYNCHRONOUS = 1<<1,
     SCROLL_FIRST_ANCESTOR_ONLY = 1<<2,
-    SCROLL_DO_FLUSH = 1<<3
+    SCROLL_DO_FLUSH = 1<<3,
+    SCROLL_OVERFLOW_HIDDEN = 1<<5
   };
   // aDoFlush only matters if aIsSynchronous is true.  If not, we'll just flush
   // when the scroll event fires so we make sure to scroll to the right place.
@@ -85,7 +86,7 @@ public:
                                int32_t aFlags = 0);
   nsresult      SubtractRange(RangeData* aRange, nsRange* aSubtract,
                               nsTArray<RangeData>* aOutput);
-  nsresult      AddItem(nsRange *aRange, int32_t* aOutIndex = nullptr);
+  nsresult      AddItem(nsRange *aRange, int32_t* aOutIndex);
   nsresult      RemoveItem(nsRange *aRange);
   nsresult      RemoveCollapsedRanges();
   nsresult      Clear(nsPresContext* aPresContext);
@@ -141,7 +142,6 @@ public:
   nsresult     NotifySelectionListeners();
 
 private:
-  friend class ::nsSelectionIterator;
 
   class ScrollSelectionIntoViewEvent;
   friend class ScrollSelectionIntoViewEvent;
@@ -153,12 +153,12 @@ private:
                                  SelectionRegion aRegion,
                                  nsIPresShell::ScrollAxis aVertical,
                                  nsIPresShell::ScrollAxis aHorizontal,
-                                 bool aFirstAncestorOnly)
+                                 int32_t aFlags)
       : mSelection(aSelection),
         mRegion(aRegion),
         mVerticalScroll(aVertical),
         mHorizontalScroll(aHorizontal),
-        mFirstAncestorOnly(aFirstAncestorOnly) {
+        mFlags(aFlags) {
       NS_ASSERTION(aSelection, "null parameter");
     }
     void Revoke() { mSelection = nullptr; }
@@ -167,7 +167,7 @@ private:
     SelectionRegion mRegion;
     nsIPresShell::ScrollAxis mVerticalScroll;
     nsIPresShell::ScrollAxis mHorizontalScroll;
-    bool mFirstAncestorOnly;
+    int32_t mFlags;
   };
 
   void setAnchorFocusRange(int32_t aIndex); // pass in index into mRanges;
@@ -211,7 +211,6 @@ private:
 
   nsRefPtr<nsRange> mAnchorFocusRange;
   nsRefPtr<nsFrameSelection> mFrameSelection;
-  nsWeakPtr mPresShellWeak;
   nsRefPtr<nsAutoScrollTimer> mAutoScrollTimer;
   nsCOMArray<nsISelectionListener> mSelectionListeners;
   nsRevocableEventPtr<ScrollSelectionIntoViewEvent> mScrollEvent;
@@ -221,32 +220,5 @@ private:
 };
 
 } // namespace mozilla
-
-class nsSelectionIterator : public nsIBidirectionalEnumerator
-{
-public:
-/*BEGIN nsIEnumerator interfaces
-see the nsIEnumerator for more details*/
-
-  NS_DECL_ISUPPORTS
-
-  NS_DECL_NSIENUMERATOR
-
-  NS_DECL_NSIBIDIRECTIONALENUMERATOR
-
-/*END nsIEnumerator interfaces*/
-/*BEGIN Helper Methods*/
-  nsRange* CurrentItem();
-/*END Helper Methods*/
-
-  nsSelectionIterator(mozilla::Selection*);
-  virtual ~nsSelectionIterator();
-
-private:
-  int32_t             mIndex;
-  mozilla::Selection* mDomSelection;
-  SelectionType       mType;
-};
-
 
 #endif // mozilla_Selection_h__

@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCOMPtr.h"
+#include "nsICollation.h"
 #include "nsIDOMNode.h"
 #include "nsIRDFNode.h"
 #include "nsIRDFObserver.h"
@@ -45,7 +46,6 @@ nsIRDFContainerUtils*     nsXULTemplateQueryProcessorRDF::gRDFContainerUtils;
 nsIRDFResource*           nsXULTemplateQueryProcessorRDF::kNC_BookmarkSeparator;
 nsIRDFResource*           nsXULTemplateQueryProcessorRDF::kRDF_type;
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTemplateQueryProcessorRDF)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateQueryProcessorRDF)
     tmp->Done();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -94,8 +94,8 @@ RuleToBindingTraverser(nsISupports* key, RDFBindingSet* binding, void* userArg)
 }
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULTemplateQueryProcessorRDF)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mDB)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mLastRef)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDB)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastRef)
     if (tmp->mBindingDependencies.IsInitialized()) {
         tmp->mBindingDependencies.EnumerateRead(BindingDependenciesTraverser,
                                                 &cb);
@@ -107,7 +107,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULTemplateQueryProcessorRDF)
     if (tmp->mRuleToBindingsMap.IsInitialized()) {
         tmp->mRuleToBindingsMap.EnumerateRead(RuleToBindingTraverser, &cb);
     }
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSTARRAY_OF_NSCOMPTR(mQueries)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mQueries)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXULTemplateQueryProcessorRDF)
@@ -170,7 +170,7 @@ nsXULTemplateQueryProcessorRDF::InitGlobals()
                              &kRDF_type);
     }
 
-    return MemoryElement::Init() ? NS_OK : NS_ERROR_FAILURE;
+    return NS_OK;
 }
 
 //----------------------------------------------------------------------
@@ -244,7 +244,7 @@ nsXULTemplateQueryProcessorRDF::GetDatasource(nsIArray* aDataSources,
             continue;
 
         nsCOMPtr<nsIRDFDataSource> ds;
-        nsCAutoString uristrC;
+        nsAutoCString uristrC;
         uri->GetSpec(uristrC);
 
         rv = gRDFService->GetDataSource(uristrC.get(), getter_AddRefs(ds));
@@ -254,7 +254,7 @@ nsXULTemplateQueryProcessorRDF::GetDatasource(nsIArray* aDataSources,
             // be accessible for any number of reasons, including
             // security, a bad URL, etc.
   #ifdef DEBUG
-            nsCAutoString msg;
+            nsAutoCString msg;
             msg.Append("unable to load datasource '");
             msg.Append(uristrC);
             msg.Append('\'');
@@ -691,12 +691,10 @@ nsXULTemplateQueryProcessorRDF::CompareResults(nsIXULTemplateResult* aLeft,
                 l->GetValue(&ldate);
                 r->GetValue(&rdate);
 
-                int64_t delta;
-                LL_SUB(delta, ldate, rdate);
-
-                if (LL_IS_ZERO(delta))
+                int64_t delta = ldate - rdate;
+                if (delta == 0)
                     *aResult = 0;
-                else if (LL_GE_ZERO(delta))
+                else if (delta >= 0)
                     *aResult = 1;
                 else
                     *aResult = -1;
@@ -1065,7 +1063,7 @@ nsXULTemplateQueryProcessorRDF::Log(const char* aOperation,
         if (NS_FAILED(rv))
             return rv;
 
-        nsCAutoString targetstrC;
+        nsAutoCString targetstrC;
         targetstrC.AssignWithConversion(targetStr);
         PR_LOG(gXULTemplateLog, PR_LOG_DEBUG,
                ("                        --[%s]-->[%s]",
@@ -1296,7 +1294,7 @@ nsXULTemplateQueryProcessorRDF::CompileQueryChild(nsIAtom* aTag,
         nsAutoString tagstr;
         aTag->ToString(tagstr);
 
-        nsCAutoString tagstrC;
+        nsAutoCString tagstrC;
         tagstrC.AssignWithConversion(tagstr);
         PR_LOG(gXULTemplateLog, PR_LOG_ALWAYS,
                ("xultemplate[%p] unrecognized condition test <%s>",

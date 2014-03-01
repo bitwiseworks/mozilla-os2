@@ -4,8 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "nsLoadGroup.h"
-#include "nsISupportsArray.h"
+
+#include "nsArrayEnumerator.h"
+#include "nsCOMArray.h"
 #include "nsEnumeratorUtils.h"
 #include "nsIServiceManager.h"
 #include "nsCOMPtr.h"
@@ -17,6 +21,7 @@
 #include "nsReadableUtils.h"
 #include "nsString.h"
 #include "nsTArray.h"
+#include "nsIHttpChannelInternal.h"
 #include "mozilla/Telemetry.h"
 
 using namespace mozilla;
@@ -113,6 +118,7 @@ nsLoadGroup::nsLoadGroup(nsISupports* outer)
     , mDefaultLoadIsTimed(false)
     , mTimedRequests(0)
     , mCachedRequests(0)
+    , mTimedNonCachedRequestsUntilOnEndPageLoad(0)
 {
     NS_INIT_AGGREGATED(outer);
 
@@ -132,9 +138,7 @@ nsLoadGroup::nsLoadGroup(nsISupports* outer)
 
 nsLoadGroup::~nsLoadGroup()
 {
-    nsresult rv;
-
-    rv = Cancel(NS_BINDING_ABORTED);
+    DebugOnly<nsresult> rv = Cancel(NS_BINDING_ABORTED);
     NS_ASSERTION(NS_SUCCEEDED(rv), "Cancel failed");
 
     if (mRequests.ops) {
@@ -147,36 +151,14 @@ nsLoadGroup::~nsLoadGroup()
 }
 
 
-nsresult nsLoadGroup::Init()
-{
-    static PLDHashTableOps hash_table_ops =
-    {
-        PL_DHashAllocTable,
-        PL_DHashFreeTable,
-        PL_DHashVoidPtrKeyStub,
-        RequestHashMatchEntry,
-        PL_DHashMoveEntryStub,
-        RequestHashClearEntry,
-        PL_DHashFinalizeStub,
-        RequestHashInitEntry
-    };
-
-    if (!PL_DHashTableInit(&mRequests, &hash_table_ops, nullptr,
-                           sizeof(RequestMapEntry), 16)) {
-        mRequests.ops = nullptr;
-
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    return NS_OK;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports methods:
 
 NS_IMPL_AGGREGATED(nsLoadGroup)
 NS_INTERFACE_MAP_BEGIN_AGGREGATED(nsLoadGroup)
     NS_INTERFACE_MAP_ENTRY(nsILoadGroup)
+    NS_INTERFACE_MAP_ENTRY(nsPILoadGroupInternal)
+    NS_INTERFACE_MAP_ENTRY(nsILoadGroupChild)
     NS_INTERFACE_MAP_ENTRY(nsIRequest)
     NS_INTERFACE_MAP_ENTRY(nsISupportsPriority)
     NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -289,7 +271,7 @@ nsLoadGroup::Cancel(nsresult status)
         }
 
 #if defined(PR_LOGGING)
-        nsCAutoString nameStr;
+        nsAutoCString nameStr;
         request->GetName(nameStr);
         LOG(("LOADGROUP [%x]: Canceling request %x %s.\n",
              this, request, nameStr.get()));
@@ -357,7 +339,7 @@ nsLoadGroup::Suspend()
             continue;
 
 #if defined(PR_LOGGING)
-        nsCAutoString nameStr;
+        nsAutoCString nameStr;
         request->GetName(nameStr);
         LOG(("LOADGROUP [%x]: Suspending request %x %s.\n",
             this, request, nameStr.get()));
@@ -409,7 +391,7 @@ nsLoadGroup::Resume()
             continue;
 
 #if defined(PR_LOGGING)
-        nsCAutoString nameStr;
+        nsAutoCString nameStr;
         request->GetName(nameStr);
         LOG(("LOADGROUP [%x]: Resuming request %x %s.\n",
             this, request, nameStr.get()));
@@ -499,7 +481,7 @@ nsLoadGroup::AddRequest(nsIRequest *request, nsISupports* ctxt)
 
 #if defined(PR_LOGGING)
     {
-        nsCAutoString nameStr;
+        nsAutoCString nameStr;
         request->GetName(nameStr);
         LOG(("LOADGROUP [%x]: Adding request %x %s (count=%d).\n",
              this, request, nameStr.get(), mRequests.entryCount));
@@ -612,7 +594,7 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports* ctxt,
 
 #if defined(PR_LOGGING)
     {
-        nsCAutoString nameStr;
+        nsAutoCString nameStr;
         request->GetName(nameStr);
         LOG(("LOADGROUP [%x]: Removing request %x %s status %x (count=%d).\n",
             this, request, nameStr.get(), aStatus, mRequests.entryCount-1));
@@ -652,8 +634,12 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports* ctxt,
             ++mTimedRequests;
             TimeStamp timeStamp;
             rv = timedChannel->GetCacheReadStart(&timeStamp);
-            if (NS_SUCCEEDED(rv) && !timeStamp.IsNull())
+            if (NS_SUCCEEDED(rv) && !timeStamp.IsNull()) {
                 ++mCachedRequests;
+            }
+            else {
+                mTimedNonCachedRequestsUntilOnEndPageLoad++;
+            }
 
             rv = timedChannel->GetAsyncOpen(&timeStamp);
             if (NS_SUCCEEDED(rv) && !timeStamp.IsNull()) {
@@ -715,42 +701,25 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports* ctxt,
 }
 
 // PLDHashTable enumeration callback that appends all items in the
-// hash to an nsISupportsArray.
+// hash to an nsCOMArray
 static PLDHashOperator
-AppendRequestsToISupportsArray(PLDHashTable *table, PLDHashEntryHdr *hdr,
-                               uint32_t number, void *arg)
+AppendRequestsToCOMArray(PLDHashTable *table, PLDHashEntryHdr *hdr,
+                         uint32_t number, void *arg)
 {
     RequestMapEntry *e = static_cast<RequestMapEntry *>(hdr);
-    nsISupportsArray *array = static_cast<nsISupportsArray *>(arg);
-
-    // nsISupportsArray::AppendElement returns a bool disguised as nsresult
-    bool ok = static_cast<bool>(array->AppendElement(e->mKey));
-
-    if (!ok) {
-        return PL_DHASH_STOP;
-    }
-
+    static_cast<nsCOMArray<nsIRequest>*>(arg)->AppendObject(e->mKey);
     return PL_DHASH_NEXT;
 }
 
 NS_IMETHODIMP
 nsLoadGroup::GetRequests(nsISimpleEnumerator * *aRequests)
 {
-    nsCOMPtr<nsISupportsArray> array;
-    nsresult rv = NS_NewISupportsArray(getter_AddRefs(array));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMArray<nsIRequest> requests;
+    requests.SetCapacity(mRequests.entryCount);
 
-    PL_DHashTableEnumerate(&mRequests, AppendRequestsToISupportsArray,
-                           array.get());
+    PL_DHashTableEnumerate(&mRequests, AppendRequestsToCOMArray, &requests);
 
-    uint32_t count;
-    array->Count(&count);
-
-    if (count != mRequests.entryCount) {
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
-
-    return NS_NewArrayEnumerator(aRequests, array);
+    return NS_NewArrayEnumerator(aRequests, requests);
 }
 
 NS_IMETHODIMP
@@ -789,6 +758,74 @@ NS_IMETHODIMP
 nsLoadGroup::SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks)
 {
     mCallbacks = aCallbacks;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsLoadGroup::GetConnectionInfo(nsILoadGroupConnectionInfo **aCI)
+{
+    NS_ENSURE_ARG_POINTER(aCI);
+    *aCI = mConnectionInfo;
+    NS_IF_ADDREF(*aCI);
+    return NS_OK;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// nsILoadGroupChild methods:
+
+/* attribute nsILoadGroup parentLoadGroup; */
+NS_IMETHODIMP
+nsLoadGroup::GetParentLoadGroup(nsILoadGroup * *aParentLoadGroup)
+{
+    *aParentLoadGroup = nullptr;
+    nsCOMPtr<nsILoadGroup> parent = do_QueryReferent(mParentLoadGroup);
+    if (!parent)
+        return NS_OK;
+    parent.forget(aParentLoadGroup);
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsLoadGroup::SetParentLoadGroup(nsILoadGroup *aParentLoadGroup)
+{
+    mParentLoadGroup = do_GetWeakReference(aParentLoadGroup);
+    return NS_OK;
+}
+
+/* readonly attribute nsILoadGroup childLoadGroup; */
+NS_IMETHODIMP
+nsLoadGroup::GetChildLoadGroup(nsILoadGroup * *aChildLoadGroup)
+{
+    NS_ADDREF(*aChildLoadGroup = this);
+    return NS_OK;
+}
+
+/* readonly attribute nsILoadGroup rootLoadGroup; */
+NS_IMETHODIMP
+nsLoadGroup::GetRootLoadGroup(nsILoadGroup * *aRootLoadGroup)
+{
+    // first recursively try the root load group of our parent
+    nsCOMPtr<nsILoadGroupChild> ancestor = do_QueryReferent(mParentLoadGroup);
+    if (ancestor)
+        return ancestor->GetRootLoadGroup(aRootLoadGroup);
+
+    // next recursively try the root load group of our own load grop
+    ancestor = do_QueryInterface(mLoadGroup);
+    if (ancestor)
+        return ancestor->GetRootLoadGroup(aRootLoadGroup);
+
+    // finally just return this
+    NS_ADDREF(*aRootLoadGroup = this);
+    return NS_OK;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// nsPILoadGroupInternal methods:
+
+NS_IMETHODIMP
+nsLoadGroup::OnEndPageLoad(nsIChannel *aDefaultChannel)
+{
+    // for the moment, nothing to do here.
     return NS_OK;
 }
 
@@ -1004,4 +1041,89 @@ nsresult nsLoadGroup::MergeLoadFlags(nsIRequest *aRequest, nsLoadFlags& outFlags
 
     outFlags = flags;
     return rv;
+}
+
+// nsLoadGroupConnectionInfo
+
+class nsLoadGroupConnectionInfo MOZ_FINAL : public nsILoadGroupConnectionInfo
+{
+public:
+    NS_DECL_ISUPPORTS
+    NS_DECL_NSILOADGROUPCONNECTIONINFO
+
+    nsLoadGroupConnectionInfo();
+private:
+    int32_t       mBlockingTransactionCount; // signed for PR_ATOMIC_*
+    nsAutoPtr<mozilla::net::SpdyPushCache3> mSpdyCache3;
+};
+
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsLoadGroupConnectionInfo, nsILoadGroupConnectionInfo)
+
+nsLoadGroupConnectionInfo::nsLoadGroupConnectionInfo()
+    : mBlockingTransactionCount(0)
+{
+}
+
+NS_IMETHODIMP
+nsLoadGroupConnectionInfo::GetBlockingTransactionCount(uint32_t *aBlockingTransactionCount)
+{
+    NS_ENSURE_ARG_POINTER(aBlockingTransactionCount);
+    *aBlockingTransactionCount = static_cast<uint32_t>(mBlockingTransactionCount);
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsLoadGroupConnectionInfo::AddBlockingTransaction()
+{
+    PR_ATOMIC_INCREMENT(&mBlockingTransactionCount);
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsLoadGroupConnectionInfo::RemoveBlockingTransaction(uint32_t *_retval)
+{
+    NS_ENSURE_ARG_POINTER(_retval);
+    *_retval =
+        static_cast<uint32_t>(PR_ATOMIC_DECREMENT(&mBlockingTransactionCount));
+    return NS_OK;
+}
+
+/* [noscript] attribute SpdyPushCache3Ptr spdyPushCache3; */
+NS_IMETHODIMP
+nsLoadGroupConnectionInfo::GetSpdyPushCache3(mozilla::net::SpdyPushCache3 **aSpdyPushCache3)
+{
+    *aSpdyPushCache3 = mSpdyCache3.get();
+    return NS_OK;
+}
+NS_IMETHODIMP
+nsLoadGroupConnectionInfo::SetSpdyPushCache3(mozilla::net::SpdyPushCache3 *aSpdyPushCache3)
+{
+    mSpdyCache3 = aSpdyPushCache3;
+    return NS_OK;
+}
+
+nsresult nsLoadGroup::Init()
+{
+    static PLDHashTableOps hash_table_ops =
+    {
+        PL_DHashAllocTable,
+        PL_DHashFreeTable,
+        PL_DHashVoidPtrKeyStub,
+        RequestHashMatchEntry,
+        PL_DHashMoveEntryStub,
+        RequestHashClearEntry,
+        PL_DHashFinalizeStub,
+        RequestHashInitEntry
+    };
+
+    if (!PL_DHashTableInit(&mRequests, &hash_table_ops, nullptr,
+                           sizeof(RequestMapEntry), 16)) {
+        mRequests.ops = nullptr;
+
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    mConnectionInfo = new nsLoadGroupConnectionInfo();
+
+    return NS_OK;
 }

@@ -5,6 +5,7 @@
 
 
 interface nsIDOMBlob;
+interface nsIDOMDeviceStorage;
 
 /* Used to set the dimensions of a captured picture,
    a preview stream, a video capture stream, etc. */
@@ -35,12 +36,7 @@ dictionary CameraPosition {
     double timestamp;
 };
 
-/* Select a camera to use. */
-dictionary CameraSelector {
-    DOMString camera = "back";
-};
-
-[scriptable, uuid(64196840-0d03-4b65-a955-790f43a4b810)]
+[scriptable, uuid(177472c9-f83d-48b5-8782-03b43b27f25d)]
 interface nsICameraCapabilities : nsISupports
 {
     /* an array of objects with 'height' and 'width' properties
@@ -106,45 +102,59 @@ interface nsICameraCapabilities : nsISupports
        supported for video recording */
     [implicit_jscontext]
     readonly attribute jsval        videoSizes;
+
+    /* an object with attributes for each of the supported recorder
+       profiles, e.g. recorderProfiles.cif, recorderProfiles.qvga,
+       etc. */
+    [implicit_jscontext]
+    readonly attribute jsval        recorderProfiles;
 };
 
-/*
-    These properties only affect the captured image;
-    invalid property settings are ignored.
+/* These properties affect the video recording preview, e.g.
+      {
+         profile: "1080p",
+         rotation: 0
+      }
+
+   'profile' is one of the profiles returned by
+   nsICameraCapabilities.recorderProfiles'; if this profile is missing,
+   an arbitrary profile will be chosen.
+
+   'rotation' is the degrees clockwise to rotate the preview; if
+   this option is not supported, it will be ignored; if this option
+   is missing, the default is 0.
 */
-dictionary CameraPictureOptions
+dictionary CameraRecorderOptions
 {
-    /* an object with a combination of 'height' and 'width' properties
-       chosen from nsICameraCapabilities.pictureSizes */
-    jsval     pictureSize;
-
-    /* one of the file formats chosen from
-       nsICameraCapabilities.fileFormats */
-    DOMString fileFormat;
-
-    /* the rotation of the image in degrees, from 0 to 270 in
-       steps of 90; this doesn't affect the image, only the
-       rotation recorded in the image header.*/
+    DOMString profile;
     long      rotation;
+};
 
-    /* an object containing any or all of 'latitude', 'longitude',
-       'altitude', and 'timestamp', used to record when and where
-       the image was taken.  e.g.
-        {
-            latitude:  43.647118,
-            longitude: -79.3943,
-            altitude:  500
-            // timestamp not specified, in this case, and
-            // won't be included in the image header
-        }
+/* These properties affect the actual video recording, e.g.
+      {
+         rotation: 0,
+         maxFileSizeBytes: 1024 * 1024,
+         maxVideoLengthMs: 0
+      }
 
-        can be null in the case where position information isn't
-        available/desired.
+   'rotation' is the degrees clockwise to rotate the recorded video; if
+   this options is not supported, it will be ignored; if this option is
+   missing, the default is 0.
 
-        'altitude' is in metres; 'timestamp' is UTC, in seconds from
-        January 1, 1970.
-    */
-    jsval     position;
+   'maxFileSizeBytes' is the maximum size in bytes to which the recorded
+   video file will be allowed to grow.
+
+   'maxVideoLengthMs' is the maximum length in milliseconds to which the
+   recorded video will be allowed to grow.
+
+   if either 'maxFileSizeBytes' or 'maxVideoLengthMs' is missing, zero,
+   or negative, that limit will be disabled.
+*/
+dictionary CameraStartRecordingOptions
+{
+    long      rotation;
+    long long maxFileSizeBytes;
+    long long maxVideoLengthMs;
 };
 
 [scriptable, function, uuid(0444a687-4bc9-462c-8246-5423f0fe46a4)]
@@ -165,14 +175,32 @@ interface nsICameraTakePictureCallback : nsISupports
     void handleEvent(in nsIDOMBlob picture);
 };
 
-[scriptable, function, uuid(ac43f123-529c-48d3-84dd-ad206b7aca9b)]
+[scriptable, function, uuid(89a762f8-581b-410a-ad86-e2bd2113ad82)]
 interface nsICameraStartRecordingCallback : nsISupports
 {
-    void handleEvent(in nsIDOMMediaStream stream);
+    void handleEvent();
 };
 
 [scriptable, function, uuid(fb80db71-e315-42f0-9ea9-dd3dd312ed70)]
 interface nsICameraShutterCallback : nsISupports
+{
+    void handleEvent();
+};
+
+[scriptable, function, uuid(0ef0f01e-ce74-4741-9bba-54376adfb7a2)]
+interface nsICameraClosedCallback : nsISupports
+{
+    void handleEvent();
+};
+
+[scriptable, function, uuid(550d675a-257d-4713-8b3d-0da53eba68fc)]
+interface nsICameraRecorderStateChange : nsISupports
+{
+    void handleStateChange(in DOMString newState);
+};
+
+[scriptable, function, uuid(f84d607b-554c-413d-8810-cf848642765a)]
+interface nsICameraReleaseCallback : nsISupports
 {
     void handleEvent();
 };
@@ -187,7 +215,7 @@ interface nsICameraErrorCallback : nsISupports
     attributes here affect the preview, any pictures taken, and/or
     any video recorded by the camera.
 */
-[scriptable, uuid(3066c884-d2c3-4477-847d-08ea1c2d188a)]
+[scriptable, uuid(c8e7418d-8913-4b66-bd9f-562fba627266)]
 interface nsICameraControl : nsISupports
 {
     readonly attribute nsICameraCapabilities capabilities;
@@ -278,6 +306,16 @@ interface nsICameraControl : nsISupports
        a shutter sound and/or a visual shutter indicator. */
     attribute nsICameraShutterCallback onShutter;
 
+    /* the function to call when the camera hardware is closed
+       by the underlying framework, e.g. when another app makes a more
+       recent call to get the camera. */
+    attribute nsICameraClosedCallback onClosed;
+
+    /* the function to call when the recorder changes state, either because
+       the recording process encountered an error, or because one of the
+       recording limits (see CameraStartRecordingOptions) was reached. */
+    attribute nsICameraRecorderStateChange onRecorderStateChange;
+
     /* tell the camera to attempt to focus the image */
     void autoFocus(in nsICameraAutoFocusCallback onSuccess, [optional] in nsICameraErrorCallback onError);
 
@@ -290,15 +328,15 @@ interface nsICameraControl : nsISupports
     [implicit_jscontext]
     void takePicture(in jsval aOptions, in nsICameraTakePictureCallback onSuccess, [optional] in nsICameraErrorCallback onError);
 
-    /* start recording video; 'aOptions' define the frame size of to
-       capture, chosen from capabilities.videoSizes, e.g.:
-        {
-            width: 640,
-            height: 480
-        }
-    */
+    /* get a media stream to be used as a camera viewfinder in video mode;
+       'aOptions' is an CameraRecorderOptions object. */
     [implicit_jscontext]
-    void startRecording(in jsval aOptions, in nsICameraStartRecordingCallback onSuccess, [optional] in nsICameraErrorCallback onError);
+    void getPreviewStreamVideoMode(in jsval aOptions, in nsICameraPreviewStreamCallback onSuccess, [optional] in nsICameraErrorCallback onError);
+
+    /* start recording video; 'aOptions' is a
+       CameraStartRecordingOptions object. */
+    [implicit_jscontext]
+    void startRecording(in jsval aOptions, in nsIDOMDeviceStorage storageArea, in DOMString filename, in nsICameraStartRecordingCallback onSuccess, [optional] in nsICameraErrorCallback onError);
 
     /* stop precording video. */
     void stopRecording();
@@ -313,29 +351,25 @@ interface nsICameraControl : nsISupports
     */
     [implicit_jscontext]
     void getPreviewStream(in jsval aOptions, in nsICameraPreviewStreamCallback onSuccess, [optional] in nsICameraErrorCallback onError);
+
+    /* call in or after the takePicture() onSuccess callback to
+       resume the camera preview stream. */
+    void resumePreview();
+
+    /* release the camera so that other applications can use it; you should
+       probably call this whenever the camera is not longer in the foreground
+       (depending on your usage model).
+
+       the callbacks are optional, unless you really need to know when
+       the hardware is ultimately released.
+
+       once this is called, the camera control object is to be considered
+       defunct; a new instance will need to be created to access the camera. */
+    [binaryname(ReleaseHardware)] void release([optional] in nsICameraReleaseCallback onSuccess, [optional] in nsICameraErrorCallback onError);
 };
 
 [scriptable, function, uuid(a267afbc-d91c-413a-8de5-0b94aecffa3e)]
 interface nsICameraGetCameraCallback : nsISupports
 {
     void handleEvent(in nsICameraControl camera);
-};
-
-[scriptable, uuid(671ee624-0336-441a-a24e-26b5319f14fe)]
-interface nsIDOMCameraManager : nsISupports
-{
-    /* get a camera instance; options will be used to specify which
-       camera to get from the list returned by getListOfCameras(), e.g.:
-        {
-            camera: front
-        }
-    */
-    [implicit_jscontext]
-    void getCamera([optional] in jsval aOptions, in nsICameraGetCameraCallback onSuccess, [optional] in nsICameraErrorCallback onError);
-
-    /* return a JSON array of camera   identifiers, e.g.
-        [ "front", "back" ]
-    */
-    [implicit_jscontext]
-    jsval getListOfCameras();
 };

@@ -9,19 +9,16 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= imgpnge
-LIBRARY_NAME	= imgpnge_s
 FORCE_STATIC_LIB = 1
 MODULE_NAME	= imgEncoderPNGModule
 LIBXUL_LIBRARY = 1
+FAIL_ON_WARNINGS = 1
 
 DEFINES		+= -DMOZ_PNG_WRITE \
 	-DMOZ_PNG_READ \
 	$(NULL)
 
 LOCAL_INCLUDES += -I$(topsrcdir)/image/src/
-
-CPPSRCS		= nsPNGEncoder.cpp
 
 include $(topsrcdir)/config/rules.mk
 

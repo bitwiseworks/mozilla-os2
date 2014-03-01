@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 let Cu = Components.utils;
 let Ci = Components.interfaces;
 let Cc = Components.classes;
@@ -11,9 +13,9 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 const STORAGE_MAX_EVENTS = 200;
 
-var EXPORTED_SYMBOLS = ["ConsoleAPIStorage"];
+this.EXPORTED_SYMBOLS = ["ConsoleAPIStorage"];
 
-var _consoleStorage = {};
+var _consoleStorage = new Map();
 
 /**
  * The ConsoleAPIStorage is meant to cache window.console API calls for later
@@ -36,27 +38,23 @@ var _consoleStorage = {};
  *    // Clear the events for the given inner window ID.
  *    ConsoleAPIStorage.clearEvents(innerWindowID);
  */
-var ConsoleAPIStorage = {
+this.ConsoleAPIStorage = {
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
 
-  /** @private */
   observe: function CS_observe(aSubject, aTopic, aData)
   {
     if (aTopic == "xpcom-shutdown") {
       Services.obs.removeObserver(this, "xpcom-shutdown");
       Services.obs.removeObserver(this, "inner-window-destroyed");
       Services.obs.removeObserver(this, "memory-pressure");
-      delete _consoleStorage;
     }
     else if (aTopic == "inner-window-destroyed") {
       let innerWindowID = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
       this.clearEvents(innerWindowID);
     }
     else if (aTopic == "memory-pressure") {
-      if (aData == "low-memory") {
-        this.clearEvents();
-      }
+      this.clearEvents();
     }
   },
 
@@ -69,38 +67,49 @@ var ConsoleAPIStorage = {
   },
 
   /**
-   * Get the events array by inner window ID.
+   * Get the events array by inner window ID or all events from all windows.
    *
-   * @param string aId
-   *        The inner window ID for which you want to get the array of cached
-   *        events.
+   * @param string [aId]
+   *        Optional, the inner window ID for which you want to get the array of
+   *        cached events.
    * @returns array
-   *          The array of cached events for the given window.
+   *          The array of cached events for the given window. If no |aId| is
+   *          given this function returns all of the cached events, from any
+   *          window.
    */
   getEvents: function CS_getEvents(aId)
   {
-    return (_consoleStorage[aId] || []).slice(0);
+    if (aId != null) {
+      return (_consoleStorage.get(aId) || []).slice(0);
+    }
+
+    let result = [];
+
+    for (let [id, events] of _consoleStorage) {
+      result.push.apply(result, events);
+    }
+
+    return result.sort(function(a, b) {
+      return a.timeStamp - b.timeStamp;
+    });
   },
 
   /**
    * Record an event associated with the given window ID.
    *
-   * @param string aWindowID
-   *        The ID of the inner window for which the event occurred.
+   * @param string aId
+   *        The ID of the inner window for which the event occurred or "jsm" for
+   *        messages logged from JavaScript modules..
    * @param object aEvent
    *        A JavaScript object you want to store.
    */
-  recordEvent: function CS_recordEvent(aWindowID, aEvent)
+  recordEvent: function CS_recordEvent(aId, aEvent)
   {
-    let ID = parseInt(aWindowID);
-    if (isNaN(ID)) {
-      throw new Error("Invalid window ID argument");
+    if (!_consoleStorage.has(aId)) {
+      _consoleStorage.set(aId, []);
     }
 
-    if (!_consoleStorage[ID]) {
-      _consoleStorage[ID] = [];
-    }
-    let storage = _consoleStorage[ID];
+    let storage = _consoleStorage.get(aId);
     storage.push(aEvent);
 
     // truncate
@@ -108,7 +117,7 @@ var ConsoleAPIStorage = {
       storage.shift();
     }
 
-    Services.obs.notifyObservers(aEvent, "console-storage-cache-event", ID);
+    Services.obs.notifyObservers(aEvent, "console-storage-cache-event", aId);
   },
 
   /**
@@ -122,10 +131,10 @@ var ConsoleAPIStorage = {
   clearEvents: function CS_clearEvents(aId)
   {
     if (aId != null) {
-      delete _consoleStorage[aId];
+      _consoleStorage.delete(aId);
     }
     else {
-      _consoleStorage = {};
+      _consoleStorage.clear();
       Services.obs.notifyObservers(null, "console-storage-reset", null);
     }
   },

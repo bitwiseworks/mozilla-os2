@@ -4,7 +4,7 @@
 
 "use strict";
 
-let EXPORTED_SYMBOLS = ["MigrationUtils", "MigratorPrototype"];
+this.EXPORTED_SYMBOLS = ["MigrationUtils", "MigratorPrototype"];
 
 const Cu = Components.utils;
 const Ci = Components.interfaces;
@@ -86,7 +86,7 @@ function getMigratorKeyForDefaultBrowser() {
  *    override |sourceHomePageURL| getter.
  * 7. For startup-only migrators, override |startupOnlyMigrator|.
  */
-let MigratorPrototype = {
+this.MigratorPrototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIBrowserProfileMigrator]),
 
   /**
@@ -266,13 +266,14 @@ let MigratorPrototype = {
                           getService(Ci.nsIObserver);
         browserGlue.observe(null, TOPIC_WILL_IMPORT_BOOKMARKS, "");
 
-        // Note doMigrate doesn't care about the success value of the
-        // callback.
+        // Note doMigrate doesn't care about the success of the import.
+        let onImportComplete = function() {
+          browserGlue.observe(null, TOPIC_DID_IMPORT_BOOKMARKS, "");
+          doMigrate();
+        };
         BookmarkHTMLUtils.importFromURL(
-          "resource:///defaults/profile/bookmarks.html", true, function(a) {
-            browserGlue.observe(null, TOPIC_DID_IMPORT_BOOKMARKS, "");
-            doMigrate();
-          });
+          "resource:///defaults/profile/bookmarks.html", true).then(
+          onImportComplete, onImportComplete);
         return;
       }
     }
@@ -323,7 +324,7 @@ let MigratorPrototype = {
   }
 };
 
-let MigrationUtils = Object.freeze({
+this.MigrationUtils = Object.freeze({
   resourceTypes: {
     SETTINGS:   Ci.nsIBrowserProfileMigrator.SETTINGS,
     COOKIES:    Ci.nsIBrowserProfileMigrator.COOKIES,
@@ -404,7 +405,8 @@ let MigrationUtils = Object.freeze({
    */
   getLocalizedString: function MU_getLocalizedString(aKey, aReplacements) {
     const OVERRIDES = {
-      "4_firefox": "4_firefox_history_and_bookmarks"
+      "4_firefox": "4_firefox_history_and_bookmarks",
+      "64_firefox": "64_firefox_other"
     };
     aKey = OVERRIDES[aKey] || aKey;
 

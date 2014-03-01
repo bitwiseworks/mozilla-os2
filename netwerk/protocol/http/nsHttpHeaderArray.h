@@ -61,7 +61,7 @@ public:
     void     ClearHeader(nsHttpAtom h);
 
     // Find the location of the given header value, or null if none exists.
-    const char *FindHeaderValue(nsHttpAtom header, const char *value) const 
+    const char *FindHeaderValue(nsHttpAtom header, const char *value) const
     {
         return nsHttp::FindToken(PeekHeader(header), value,
                                  HTTP_HEADER_VALUE_SEPS);
@@ -75,7 +75,7 @@ public:
 
     nsresult VisitHeaders(nsIHttpHeaderVisitor *visitor);
 
-    // parse a header line, return the header atom and a pointer to the 
+    // parse a header line, return the header atom and a pointer to the
     // header value (the substring of the header line -- do not free).
     nsresult ParseHeaderLine(const char *line,
                              nsHttpAtom *header=nullptr,
@@ -133,7 +133,7 @@ inline int32_t
 nsHttpHeaderArray::LookupEntry(nsHttpAtom header, const nsEntry **entry) const
 {
     uint32_t index = mHeaders.IndexOf(header, 0, nsEntry::MatchHeader());
-    if (index != PR_UINT32_MAX)
+    if (index != UINT32_MAX)
         *entry = &mHeaders[index];
     return index;
 }
@@ -142,7 +142,7 @@ inline int32_t
 nsHttpHeaderArray::LookupEntry(nsHttpAtom header, nsEntry **entry)
 {
     uint32_t index = mHeaders.IndexOf(header, 0, nsEntry::MatchHeader());
-    if (index != PR_UINT32_MAX)
+    if (index != UINT32_MAX)
         *entry = &mHeaders[index];
     return index;
 }
@@ -203,8 +203,8 @@ nsHttpHeaderArray::IsSuspectDuplicateHeader(nsHttpAtom header)
                      header == nsHttp::Content_Disposition    ||
                      header == nsHttp::Location;
 
-    NS_ASSERTION(!retval || IsSingletonHeader(header),
-                 "Only non-mergeable headers should be in this list\n");
+    MOZ_ASSERT(!retval || IsSingletonHeader(header),
+               "Only non-mergeable headers should be in this list\n");
 
     return retval;
 }

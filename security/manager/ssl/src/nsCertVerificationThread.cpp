@@ -2,10 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsMemory.h"
-#include "nsAutoPtr.h"
 #include "nsCertVerificationThread.h"
 #include "nsThreadUtils.h"
+#include "nsProxyRelease.h"
 
 using namespace mozilla;
 
@@ -17,7 +16,7 @@ namespace {
 class DispatchCertVerificationResult : public nsRunnable
 {
 public:
-  DispatchCertVerificationResult(nsICertVerificationListener* aListener,
+  DispatchCertVerificationResult(const nsMainThreadPtrHandle<nsICertVerificationListener>& aListener,
                                  nsIX509Cert3* aCert,
                                  nsICertVerificationResult* aResult)
     : mListener(aListener)
@@ -31,7 +30,7 @@ public:
   }
 
 private:
-  nsCOMPtr<nsICertVerificationListener> mListener;
+  nsMainThreadPtrHandle<nsICertVerificationListener> mListener;
   nsCOMPtr<nsIX509Cert3> mCert;
   nsCOMPtr<nsICertVerificationResult> mResult;
 };
@@ -47,7 +46,7 @@ void nsCertVerificationJob::Run()
   PRUnichar **usages;
 
   nsCOMPtr<nsICertVerificationResult> ires;
-  nsRefPtr<nsCertVerificationResult> vres = new nsCertVerificationResult;
+  RefPtr<nsCertVerificationResult> vres(new nsCertVerificationResult);
   if (vres)
   {
     nsresult rv = mCert->GetUsagesArray(false, // do not ignore OCSP

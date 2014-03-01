@@ -19,17 +19,16 @@
 "use strict";
 
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
-
   // We're going to open a remote frame if OOP off by default.  If OOP is on by
   // default, we're going to open an in-process frame.
   var remote = !browserElementTestHelpers.getOOPByDefaultPref();
 
   var iframe = document.createElement('iframe');
-  iframe.mozbrowser = true;
+  SpecialPowers.wrap(iframe).mozbrowser = true;
   iframe.setAttribute('remote', remote);
 
   // The page we load does window.open, then checks some things and reports
@@ -55,8 +54,10 @@ function runTest() {
     else if (e.detail.message == 'finish') {
       // We assume here that iframe is completely blank, and spin until popup's
       // screenshot is not the same as iframe.
-      iframe.getScreenshot().onsuccess = function(e) {
-        test2(popup, e.target.result, popup);
+      iframe.getScreenshot(1000, 1000).onsuccess = function(e) {
+        var fr = FileReader();
+        fr.onloadend = function() { test2(popup, fr.result); };
+        fr.readAsArrayBuffer(e.target.result);
       };
     }
     else {
@@ -68,23 +69,38 @@ function runTest() {
   iframe.src = 'file_browserElement_OpenMixedProcess.html';
 }
 
-var prevScreenshot;
-function test2(popup, blankScreenshot) {
+function arrayBuffersEqual(a, b) {
+  var x = new Int8Array(a);
+  var y = new Int8Array(b);
+  if (x.length != y.length) {
+    return false;
+  }
+
+  for (var i = 0; i < x.length; i++) {
+    if (x[i] != y[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function test2(popup, blankScreenshotArrayBuffer) {
   // Take screenshots of popup until it doesn't equal blankScreenshot (or we
   // time out).
-  popup.getScreenshot().onsuccess = function(e) {
-    var screenshot = e.target.result;
-    if (screenshot != blankScreenshot) {
-      SimpleTest.finish();
-      return;
-    }
+  popup.getScreenshot(1000, 1000).onsuccess = function(e) {
+    var fr = new FileReader();
+    fr.onloadend = function() {
+      if (!arrayBuffersEqual(blankScreenshotArrayBuffer, fr.result)) {
+        ok(true, "Finally got a non-blank screenshot.");
+        SimpleTest.finish();
+        return;
+      }
 
-    if (screenshot != prevScreenshot) {
-      prevScreenshot = screenshot;
-      dump("Got screenshot: " + screenshot + "\n");
-    }
-    SimpleTest.executeSoon(function() { test2(popup, blankScreenshot) });
+      SimpleTest.executeSoon(function() { test2(popup, blankScreenshot) });
+    };
+    fr.readAsArrayBuffer(e.target.result);
   };
 }
 
-runTest();
+addEventListener('testready', runTest);

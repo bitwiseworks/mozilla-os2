@@ -2,8 +2,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import os
+import time
 from marionette_test import MarionetteTestCase
+
 
 class TestClick(MarionetteTestCase):
     def test_click(self):
@@ -17,16 +18,27 @@ class TestClick(MarionetteTestCase):
         test_html = self.marionette.absolute_url("clicks.html")
         self.marionette.navigate(test_html)
         self.marionette.find_element("link text", "333333").click()
+        count = 0
+        while len(self.marionette.find_elements("id", "username")) == 0:
+            count += 1
+            time.sleep(1)
+            if count == 30:
+                self.fail("Element id=username not found after 30 seconds")
+
         self.assertEqual(self.marionette.title, "XHTML Test Page")
+
 
 class TestClickChrome(MarionetteTestCase):
     def setUp(self):
         MarionetteTestCase.setUp(self)
         self.marionette.set_context("chrome")
         self.win = self.marionette.current_window_handle
-        self.marionette.execute_script("window.open('chrome://marionette/content/test.xul', '_blank', 'chrome,centerscreen');")
+        self.marionette.execute_script("window.open('chrome://marionette/content/test.xul', 'foo', 'chrome,centerscreen');")
+        self.marionette.switch_to_window('foo')
+        self.assertNotEqual(self.win, self.marionette.current_window_handle)
 
     def tearDown(self):
+        self.assertNotEqual(self.win, self.marionette.current_window_handle)
         self.marionette.execute_script("window.close();")
         self.marionette.switch_to_window(self.win)
         MarionetteTestCase.tearDown(self)

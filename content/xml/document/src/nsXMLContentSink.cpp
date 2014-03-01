@@ -10,16 +10,14 @@
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMDocumentType.h"
-#include "nsIDOMDOMImplementation.h"
 #include "nsIContent.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIDOMComment.h"
 #include "nsIDOMCDATASection.h"
-#include "nsDOMDocumentType.h"
+#include "DocumentType.h"
 #include "nsHTMLParts.h"
 #include "nsCRT.h"
 #include "nsCSSStyleSheet.h"
@@ -35,7 +33,6 @@
 #include "prlog.h"
 #include "prmem.h"
 #include "nsRect.h"
-#include "nsGenericElement.h"
 #include "nsIWebNavigation.h"
 #include "nsIScriptElement.h"
 #include "nsScriptLoader.h"
@@ -59,6 +56,10 @@
 #include "mozAutoDocUpdate.h"
 #include "nsMimeTypes.h"
 #include "nsHtml5SVGLoadDispatcher.h"
+#include "nsTextNode.h"
+#include "mozilla/dom/CDATASection.h"
+#include "mozilla/dom/Comment.h"
+#include "mozilla/dom/ProcessingInstruction.h"
 
 using namespace mozilla::dom;
 
@@ -102,7 +103,6 @@ nsXMLContentSink::nsXMLContentSink()
 
 nsXMLContentSink::~nsXMLContentSink()
 {
-  NS_IF_RELEASE(mDocElement);
   if (mText) {
     PR_Free(mText);  //  Doesn't null out, unlike PR_FREEIF
   }
@@ -140,12 +140,10 @@ NS_INTERFACE_MAP_END_INHERITING(nsContentSink)
 NS_IMPL_ADDREF_INHERITED(nsXMLContentSink, nsContentSink)
 NS_IMPL_RELEASE_INHERITED(nsXMLContentSink, nsContentSink)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLContentSink)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXMLContentSink,
                                                   nsContentSink)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mCurrentHead)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mDocElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCurrentHead)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocElement)
   for (uint32_t i = 0, count = tmp->mContentStack.Length(); i < count; i++) {
     const StackNode& node = tmp->mContentStack.ElementAt(i);
     cb.NoteXPCOMChild(node.mContent);
@@ -169,7 +167,7 @@ nsXMLContentSink::WillBuildModel(nsDTDMode aDTDMode)
 
   // Check for correct load-command for maybe prettyprinting
   if (mPrettyPrintXML) {
-    nsCAutoString command;
+    nsAutoCString command;
     GetParser()->GetCommand(command);
     if (!command.EqualsLiteral("view")) {
       mPrettyPrintXML = false;
@@ -531,15 +529,10 @@ nsXMLContentSink::CloseElement(nsIContent* aContent)
   if ((nodeInfo->NamespaceID() == kNameSpaceID_XHTML &&
        (nodeInfo->NameAtom() == nsGkAtoms::select ||
         nodeInfo->NameAtom() == nsGkAtoms::textarea ||
-#ifdef MOZ_MEDIA
         nodeInfo->NameAtom() == nsGkAtoms::video ||
         nodeInfo->NameAtom() == nsGkAtoms::audio ||
-#endif
         nodeInfo->NameAtom() == nsGkAtoms::object ||
         nodeInfo->NameAtom() == nsGkAtoms::applet))
-#ifdef MOZ_XTF
-      || nodeInfo->NamespaceID() > kNameSpaceID_LastBuiltin
-#endif
       || nodeInfo->NameAtom() == nsGkAtoms::title
       ) {
     aContent->DoneAddingChildren(HaveNotifiedForCurrentContent());
@@ -697,7 +690,7 @@ nsXMLContentSink::ProcessStyleLink(nsIContent* aElement,
   nsresult rv = NS_OK;
   mPrettyPrintXML = false;
 
-  nsCAutoString cmd;
+  nsAutoCString cmd;
   if (mParser)
     GetParser()->GetCommand(cmd);
   if (cmd.EqualsASCII(kLoadAsData))
@@ -809,10 +802,7 @@ nsXMLContentSink::FlushText(bool aReleaseTextNode)
         mTextLength = 0;
       }
     } else {
-      nsCOMPtr<nsIContent> textContent;
-      rv = NS_NewTextNode(getter_AddRefs(textContent),
-                          mNodeInfoManager);
-      NS_ENSURE_SUCCESS(rv, rv);
+      nsRefPtr<nsTextNode> textContent = new nsTextNode(mNodeInfoManager);
 
       mLastTextNode = textContent;
       
@@ -928,7 +918,6 @@ nsXMLContentSink::SetDocElement(int32_t aNameSpaceID,
   }
 
   mDocElement = aContent;
-  NS_ADDREF(mDocElement);
   nsresult rv = mDocument->AppendChildTo(mDocElement, NotifyForDocElement());
   if (NS_FAILED(rv)) {
     // If we return false here, the caller will bail out because it won't
@@ -994,7 +983,6 @@ nsXMLContentSink::HandleStartElement(const PRUnichar *aName,
   nsCOMPtr<nsINodeInfo> nodeInfo;
   nodeInfo = mNodeInfoManager->GetNodeInfo(localName, prefix, nameSpaceID,
                                            nsIDOMNode::ELEMENT_NODE);
-  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
 
   result = CreateElement(aAtts, aAttsCount, nodeInfo, aLineNumber,
                          getter_AddRefs(content), &appendContent,
@@ -1020,11 +1008,6 @@ nsXMLContentSink::HandleStartElement(const PRUnichar *aName,
       nodeInfo->SetIDAttributeAtom(IDAttr);
     }
   }
-  
-#ifdef MOZ_XTF
-  if (nameSpaceID > kNameSpaceID_LastBuiltin)
-    content->BeginAddingChildren();
-#endif
 
   // Set the attributes on the new content element
   result = AddAttributes(aAtts, content);
@@ -1043,13 +1026,9 @@ nsXMLContentSink::HandleStartElement(const PRUnichar *aName,
   if (nodeInfo->NamespaceID() == kNameSpaceID_XHTML) {
     if (nodeInfo->NameAtom() == nsGkAtoms::input ||
         nodeInfo->NameAtom() == nsGkAtoms::button ||
-        nodeInfo->NameAtom() == nsGkAtoms::menuitem
-#ifdef MOZ_MEDIA
-        ||
+        nodeInfo->NameAtom() == nsGkAtoms::menuitem ||
         nodeInfo->NameAtom() == nsGkAtoms::audio ||
-        nodeInfo->NameAtom() == nsGkAtoms::video
-#endif
-        ) {
+        nodeInfo->NameAtom() == nsGkAtoms::video) {
       content->DoneCreatingElement();
     } else if (nodeInfo->NameAtom() == nsGkAtoms::head && !mCurrentHead) {
       mCurrentHead = content;
@@ -1156,13 +1135,10 @@ nsXMLContentSink::HandleComment(const PRUnichar *aName)
 {
   FlushText();
 
-  nsCOMPtr<nsIContent> comment;
-  nsresult rv = NS_NewCommentNode(getter_AddRefs(comment), mNodeInfoManager);
-  if (comment) {
-    comment->SetText(nsDependentString(aName), false);
-    rv = AddContentAsLeaf(comment);
-    DidAddContent();
-  }
+  nsRefPtr<Comment> comment = new Comment(mNodeInfoManager);
+  comment->SetText(nsDependentString(aName), false);
+  nsresult rv = AddContentAsLeaf(comment);
+  DidAddContent();
 
   return NS_SUCCEEDED(rv) ? DidProcessATokenImpl() : rv;
 }
@@ -1179,13 +1155,10 @@ nsXMLContentSink::HandleCDataSection(const PRUnichar *aData,
 
   FlushText();
   
-  nsCOMPtr<nsIContent> cdata;
-  nsresult rv = NS_NewXMLCDATASection(getter_AddRefs(cdata), mNodeInfoManager);
-  if (cdata) {
-    cdata->SetText(aData, aLength, false);
-    rv = AddContentAsLeaf(cdata);
-    DidAddContent();
-  }
+  nsRefPtr<CDATASection> cdata = new CDATASection(mNodeInfoManager);
+  cdata->SetText(aData, aLength, false);
+  nsresult rv = AddContentAsLeaf(cdata);
+  DidAddContent();
 
   return NS_SUCCEEDED(rv) ? DidProcessATokenImpl() : rv;
 }
@@ -1223,7 +1196,7 @@ nsXMLContentSink::HandleDoctypeDecl(const nsAString & aSubset,
       mCSSLoader->LoadSheetSync(uri, true, true, getter_AddRefs(sheet));
 
 #ifdef DEBUG
-      nsCAutoString uriStr;
+      nsAutoCString uriStr;
       uri->GetSpec(uriStr);
       printf("Loading catalog stylesheet: %s ... %s\n", uriStr.get(), sheet.get() ? "Done" : "Failed");
 #endif
@@ -1271,11 +1244,8 @@ nsXMLContentSink::HandleProcessingInstruction(const PRUnichar *aTarget,
   const nsDependentString target(aTarget);
   const nsDependentString data(aData);
 
-  nsCOMPtr<nsIContent> node;
-
-  nsresult rv = NS_NewXMLProcessingInstruction(getter_AddRefs(node),
-                                               mNodeInfoManager, target, data);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIContent> node =
+    NS_NewXMLProcessingInstruction(mNodeInfoManager, target, data);
 
   nsCOMPtr<nsIStyleSheetLinkingElement> ssle(do_QueryInterface(node));
   if (ssle) {
@@ -1284,7 +1254,7 @@ nsXMLContentSink::HandleProcessingInstruction(const PRUnichar *aTarget,
     mPrettyPrintXML = false;
   }
 
-  rv = AddContentAsLeaf(node);
+  nsresult rv = AddContentAsLeaf(node);
   NS_ENSURE_SUCCESS(rv, rv);
   DidAddContent();
 
@@ -1402,7 +1372,7 @@ nsXMLContentSink::ReportError(const PRUnichar* aErrorText,
       node->RemoveChild(child, getter_AddRefs(dummy));
     }
   }
-  NS_IF_RELEASE(mDocElement); 
+  mDocElement = nullptr;
 
   // Clear any buffered-up text we have.  It's enough to set the length to 0.
   // The buffer itself is allocated when we're created and deleted in our

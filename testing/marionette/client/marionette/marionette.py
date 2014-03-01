@@ -2,13 +2,20 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import datetime
+import os
 import socket
+import sys
+import time
+import traceback
 
 from client import MarionetteClient
+from application_cache import ApplicationCache
 from keys import Keys
 from errors import *
 from emulator import Emulator
-from geckoinstance import GeckoInstance
+import geckoinstance
+
 
 class HTMLElement(object):
 
@@ -44,6 +51,9 @@ class HTMLElement(object):
     def click(self):
         return self.marionette._send_message('clickElement', 'ok', element=self.id)
 
+    def tap(self, x=None, y=None):
+        return self.marionette._send_message('singleTap', 'ok', element=self.id, x=x, y=y)
+
     @property
     def text(self):
         return self.marionette._send_message('getElementText', 'value', element=self.id)
@@ -75,21 +85,127 @@ class HTMLElement(object):
         return self.marionette._send_message('isElementDisplayed', 'value', element=self.id)
 
     @property
+    def size(self):
+        return self.marionette._send_message('getElementSize', 'value', element=self.id)
+
+    @property
     def tag_name(self):
         return self.marionette._send_message('getElementTagName', 'value', element=self.id)
 
+    @property
+    def location(self):
+        return self.marionette._send_message('getElementPosition', 'value', element=self.id)
+
+    def value_of_css_property(self, property_name):
+        return self.marionette._send_message('getElementValueOfCssProperty', 'value',
+                                             element=self.id,
+                                             propertyName=property_name)
+
+class Actions(object):
+    def __init__(self, marionette):
+        self.action_chain = []
+        self.marionette = marionette
+        self.current_id = None
+
+    def press(self, element, x=None, y=None):
+        element=element.id
+        self.action_chain.append(['press', element, x, y])
+        return self
+
+    def release(self):
+        self.action_chain.append(['release'])
+        return self
+
+    def move(self, element):
+        element=element.id
+        self.action_chain.append(['move', element])
+        return self
+
+    def move_by_offset(self, x, y):
+        self.action_chain.append(['moveByOffset', x, y])
+        return self
+
+    def wait(self, time=None):
+        self.action_chain.append(['wait', time])
+        return self
+
+    def cancel(self):
+        self.action_chain.append(['cancel'])
+        return self
+
+    def tap(self, element, x=None, y=None):
+        element=element.id
+        self.action_chain.append(['press', element, x, y])
+        self.action_chain.append(['release'])
+        return self
+
+    def double_tap(self, element, x=None, y=None):
+        element=element.id
+        self.action_chain.append(['press', element, x, y])
+        self.action_chain.append(['release'])
+        self.action_chain.append(['press', element, x, y])
+        self.action_chain.append(['release'])
+        return self
+
+    def flick(self, element, x1, y1, x2, y2, duration=200):
+        element = element.id
+        time = 0
+        time_increment = 10
+        if time_increment >= duration:
+            time_increment = duration
+        move_x = time_increment*1.0/duration * (x2 - x1)
+        move_y = time_increment*1.0/duration * (y2 - y1)
+        self.action_chain.append(['press', element, x1, y1])
+        while (time < duration):
+            time += time_increment
+            self.action_chain.append(['moveByOffset', move_x, move_y])
+            self.action_chain.append(['wait', time_increment/1000])
+        self.action_chain.append(['release'])
+        return self
+
+    def long_press(self, element, time_in_seconds):
+        element = element.id
+        self.action_chain.append(['press', element])
+        self.action_chain.append(['wait', time_in_seconds])
+        self.action_chain.append(['release'])
+        return self
+
+    def perform(self):
+        self.current_id = self.marionette._send_message('actionChain', 'value', chain=self.action_chain, nextId=self.current_id)
+        self.action_chain = []
+        return self
+
+class MultiActions(object):
+    def __init__(self, marionette):
+        self.multi_actions = []
+        self.max_length = 0
+        self.marionette = marionette
+
+    def add(self, action):
+        self.multi_actions.append(action.action_chain)
+        if len(action.action_chain) > self.max_length:
+          self.max_length = len(action.action_chain)
+        return self
+
+    def perform(self):
+        return self.marionette._send_message('multiAction', 'ok', value=self.multi_actions, max_length=self.max_length)
 
 class Marionette(object):
 
     CONTEXT_CHROME = 'chrome'
     CONTEXT_CONTENT = 'content'
+    TIMEOUT_SEARCH = 'implicit'
+    TIMEOUT_SCRIPT = 'script'
+    TIMEOUT_PAGE = 'page load'
 
-    def __init__(self, host='localhost', port=2828, bin=None, profile=None,
-                 emulator=None, emulatorBinary=None, emulatorImg=None,
-                 emulator_res='480x800', connectToRunningEmulator=False,
-                 homedir=None, baseurl=None, noWindow=False, logcat_dir=None):
+    def __init__(self, host='localhost', port=2828, app=None, bin=None,
+                 profile=None, emulator=None, sdcard=None, emulatorBinary=None,
+                 emulatorImg=None, emulator_res=None, gecko_path=None,
+                 connectToRunningEmulator=False, homedir=None, baseurl=None,
+                 noWindow=False, logcat_dir=None, busybox=None, symbols_path=None, timeout=None):
         self.host = host
         self.port = self.local_port = port
+        self.app = app
         self.bin = bin
         self.instance = None
         self.profile = profile
@@ -101,17 +217,35 @@ class Marionette(object):
         self.baseurl = baseurl
         self.noWindow = noWindow
         self.logcat_dir = logcat_dir
+        self._test_name = None
+        self.symbols_path = symbols_path
+        self.timeout = timeout
 
         if bin:
-            self.instance = GeckoInstance(host=self.host, port=self.port,
-                                          bin=self.bin, profile=self.profile)
+            port = int(self.port)
+            if not Marionette.is_port_available(port, host=self.host):
+                ex_msg = "%s:%d is unavailable." % (self.host, port)
+                raise MarionetteException(message=ex_msg)
+            if app:
+                # select instance class for the given app
+                try:
+                    instance_class = geckoinstance.apps[app]
+                except KeyError:
+                    msg = 'Application "%s" unknown (should be one of %s)'
+                    raise NotImplementedError(msg % (app, geckoinstance.apps.keys()))
+            else:
+                instance_class = geckoinstance.GeckoInstance
+            self.instance = instance_class(host=self.host, port=self.port,
+                                           bin=self.bin, profile=self.profile)
             self.instance.start()
-            assert(self.instance.wait_for_port())
+            assert(self.wait_for_port())
+
         if emulator:
             self.emulator = Emulator(homedir=homedir,
                                      noWindow=self.noWindow,
                                      logcat_dir=self.logcat_dir,
                                      arch=emulator,
+                                     sdcard=sdcard,
                                      emulatorBinary=emulatorBinary,
                                      userdata=emulatorImg,
                                      res=emulator_res)
@@ -120,20 +254,74 @@ class Marionette(object):
             assert(self.emulator.wait_for_port())
 
         if connectToRunningEmulator:
-            self.emulator = Emulator(homedir=homedir, logcat_dir=self.logcat_dir)
+            self.emulator = Emulator(homedir=homedir,
+                                     logcat_dir=self.logcat_dir)
             self.emulator.connect()
             self.port = self.emulator.setup_port_forwarding(self.port)
             assert(self.emulator.wait_for_port())
 
         self.client = MarionetteClient(self.host, self.port)
 
+        if emulator:
+            self.emulator.setup(self,
+                                gecko_path=gecko_path,
+                                busybox=busybox)
+
     def __del__(self):
         if self.emulator:
             self.emulator.close()
-        if self.bin:
+        if self.instance:
             self.instance.close()
         for qemu in self.extra_emulators:
             qemu.emulator.close()
+
+    @staticmethod
+    def is_port_available(port, host=''):
+        port = int(port)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind((host, port))
+            return True
+        except socket.error:
+            return False
+        finally:
+            s.close()
+
+    @classmethod
+    def getMarionetteOrExit(cls, *args, **kwargs):
+        try:
+            m = cls(*args, **kwargs)
+            return m
+        except InstallGeckoError:
+            # Bug 812395 - the process of installing gecko into the emulator
+            # and then restarting B2G tickles some bug in the emulator/b2g
+            # that intermittently causes B2G to fail to restart.  To work
+            # around this in TBPL runs, we will fail gracefully from this
+            # error so that the mozharness script can try the run again.
+
+            # This string will get caught by mozharness and will cause it
+            # to retry the tests.
+            print "Error installing gecko!"
+
+            # Exit without a normal exception to prevent mozharness from
+            # flagging the error.
+            sys.exit()
+
+    def wait_for_port(self, timeout=3000):
+        starttime = datetime.datetime.now()
+        while datetime.datetime.now() - starttime < datetime.timedelta(seconds=timeout):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((self.host, self.port))
+                data = sock.recv(16)
+                sock.close()
+                if '"from"' in data:
+                    time.sleep(5)
+                    return True
+            except socket.error:
+                pass
+            time.sleep(1)
+        return False
 
     def _send_message(self, command, response_key, **kwargs):
         if not self.session and command not in ('newSession', 'getStatus'):
@@ -151,10 +339,6 @@ class Marionette(object):
             self.session = None
             self.window = None
             self.client.close()
-            if self.emulator:
-                port = self.emulator.restart(self.local_port)
-                if port is not None:
-                    self.port = self.client.port = port
             raise TimeoutException(message='socket.timeout', status=ErrorCodes.TIMEOUT, stacktrace=None)
 
         # Process any emulator commands that are sent from a script
@@ -220,10 +404,35 @@ class Marionette(object):
                  or status == ErrorCodes.INVALID_XPATH_SELECTOR_RETURN_TYPER:
                 raise InvalidSelectorException(message=message, status=status, stacktrace=stacktrace)
             elif status == ErrorCodes.MOVE_TARGET_OUT_OF_BOUNDS:
-                MoveTargetOutOfBoundsException(message=message, status=status, stacktrace=stacktrace)
+                raise MoveTargetOutOfBoundsException(message=message, status=status, stacktrace=stacktrace)
+            elif status == ErrorCodes.FRAME_SEND_NOT_INITIALIZED_ERROR:
+                raise FrameSendNotInitializedError(message=message, status=status, stacktrace=stacktrace)
+            elif status == ErrorCodes.FRAME_SEND_FAILURE_ERROR:
+                raise FrameSendFailureError(message=message, status=status, stacktrace=stacktrace)
             else:
                 raise MarionetteException(message=message, status=status, stacktrace=stacktrace)
         raise MarionetteException(message=response, status=500)
+
+    def check_for_crash(self):
+        returncode = None
+        name = None
+        crashed = False
+        if self.emulator:
+            if self.emulator.check_for_crash():
+                returncode = self.emulator.proc.returncode
+                name = 'emulator'
+                crashed = True
+
+            if self.symbols_path and self.emulator.check_for_minidumps(self.symbols_path):
+                crashed = True
+        elif self.instance:
+            # In the future, a check for crashed Firefox processes
+            # should be here.
+            pass
+        if returncode is not None:
+            print ('PROCESS-CRASH | %s | abnormal termination with exit code %d' %
+                (name, returncode))
+        return crashed
 
     def absolute_url(self, relative_url):
         return "%s%s" % (self.baseurl, relative_url)
@@ -232,10 +441,25 @@ class Marionette(object):
         return self._send_message('getStatus', 'value')
 
     def start_session(self, desired_capabilities=None):
-        # We are ignoring desired_capabilities, at least for now.
-        self.session = self._send_message('newSession', 'value')
+        try:
+            # We are ignoring desired_capabilities, at least for now.
+            self.session = self._send_message('newSession', 'value')
+        except:
+            exc, val, tb = sys.exc_info()
+            self.check_for_crash()
+            raise exc, val, tb
+
         self.b2g = 'b2g' in self.session
         return self.session
+
+    @property
+    def test_name(self):
+        return self._test_name
+
+    @test_name.setter
+    def test_name(self, test_name):
+        if self._send_message('setTestName', 'ok', value=test_name):
+            self._test_name = test_name
 
     def delete_session(self):
         response = self._send_message('deleteSession', 'ok')
@@ -261,7 +485,7 @@ class Marionette(object):
     def current_window_handle(self):
         self.window = self._send_message('getWindow', 'value')
         return self.window
-    
+
     @property
     def title(self):
         response = self._send_message('getTitle', 'value') 
@@ -292,19 +516,28 @@ class Marionette(object):
         self.window = window_id
         return response
 
-    def switch_to_frame(self, frame=None):
+    def switch_to_frame(self, frame=None, focus=True):
         if isinstance(frame, HTMLElement):
-            response = self._send_message('switchToFrame', 'ok', element=frame.id)
+            response = self._send_message('switchToFrame', 'ok', element=frame.id, focus=focus)
         else:
-            response = self._send_message('switchToFrame', 'ok', value=frame)
+            response = self._send_message('switchToFrame', 'ok', value=frame, focus=focus)
         return response
 
     def get_url(self):
         response = self._send_message('getUrl', 'value')
         return response
 
+    def get_window_type(self):
+        response = self._send_message('getWindowType', 'value')
+        return response
+
     def navigate(self, url):
         response = self._send_message('goUrl', 'ok', value=url)
+        return response
+
+    def timeouts(self, timeout_type, ms):
+        assert(timeout_type == self.TIMEOUT_SEARCH or timeout_type == self.TIMEOUT_SCRIPT or timeout_type == self.TIMEOUT_PAGE)
+        response = self._send_message('timeouts', 'ok', timeoutType=timeout_type, ms=ms)
         return response
 
     def go_back(self):
@@ -353,7 +586,7 @@ class Marionette(object):
 
         return unwrapped
 
-    def execute_js_script(self, script, script_args=None, timeout=True, new_sandbox=True, special_powers=False):
+    def execute_js_script(self, script, script_args=None, async=True, new_sandbox=True, special_powers=False, script_timeout=None):
         if script_args is None:
             script_args = []
         args = self.wrapArguments(script_args)
@@ -361,33 +594,44 @@ class Marionette(object):
                                       'value',
                                       value=script,
                                       args=args,
-                                      timeout=timeout,
+                                      async=async,
                                       newSandbox=new_sandbox,
-                                      specialPowers=special_powers)
+                                      specialPowers=special_powers, 
+                                      scriptTimeout=script_timeout)
         return self.unwrapValue(response)
 
-    def execute_script(self, script, script_args=None, new_sandbox=True, special_powers=False):
+    def execute_script(self, script, script_args=None, new_sandbox=True, special_powers=False, script_timeout=None):
         if script_args is None:
             script_args = []
         args = self.wrapArguments(script_args)
+        stack = traceback.extract_stack()
+        frame = stack[-2:-1][0] # grab the second-to-last frame
         response = self._send_message('executeScript',
-                                     'value',
+                                      'value',
                                       value=script,
                                       args=args,
                                       newSandbox=new_sandbox,
-                                      specialPowers=special_powers)
+                                      specialPowers=special_powers,
+                                      scriptTimeout=script_timeout,
+                                      line=int(frame[1]),
+                                      filename=os.path.basename(frame[0]))
         return self.unwrapValue(response)
 
-    def execute_async_script(self, script, script_args=None, new_sandbox=True, special_powers=False):
+    def execute_async_script(self, script, script_args=None, new_sandbox=True, special_powers=False, script_timeout=None):
         if script_args is None:
             script_args = []
         args = self.wrapArguments(script_args)
+        stack = traceback.extract_stack()
+        frame = stack[-2:-1][0] # grab the second-to-last frame
         response = self._send_message('executeAsyncScript',
                                       'value',
                                       value=script,
                                       args=args,
                                       newSandbox=new_sandbox,
-                                      specialPowers=special_powers)
+                                      specialPowers=special_powers,
+                                      scriptTimeout=script_timeout,
+                                      line=int(frame[1]),
+                                      filename=os.path.basename(frame[0]))
         return self.unwrapValue(response)
 
     def find_element(self, method, target, id=None):
@@ -409,19 +653,76 @@ class Marionette(object):
             elements.append(HTMLElement(self, x))
         return elements
 
+    def get_active_element(self):
+        response = self._send_message('getActiveElement', 'value')
+        return HTMLElement(self, response)
+
     def log(self, msg, level=None):
         return self._send_message('log', 'ok', value=msg, level=level)
 
     def get_logs(self):
         return self._send_message('getLogs', 'value')
 
-    def add_perf_data(self, suite, name, value):
-        return self._send_message('addPerfData', 'ok', suite=suite, name=name, value=value)
-
-    def get_perf_data(self):
-        return self._send_message('getPerfData', 'value')
-
-    def import_script(self, file):
-        f = open(file, "r")
-        js = f.read()
+    def import_script(self, js_file):
+        js = ''
+        with open(js_file, 'r') as f:
+            js = f.read()
         return self._send_message('importScript', 'ok', script=js)
+
+    def add_cookie(self, cookie):
+        """
+           Adds a cookie to your current session.
+
+           :Args:
+           - cookie_dict: A dictionary object, with required keys - "name" and "value";
+           optional keys - "path", "domain", "secure", "expiry"
+
+           Usage:
+              driver.add_cookie({'name' : 'foo', 'value' : 'bar'})
+              driver.add_cookie({'name' : 'foo', 'value' : 'bar', 'path' : '/'})
+              driver.add_cookie({'name' : 'foo', 'value' : 'bar', 'path' : '/',
+                                 'secure':True})
+        """
+        return self._send_message('addCookie', 'ok', cookie=cookie)
+
+    def delete_all_cookies(self):
+        """
+            Delete all cookies in the scope of the session.
+            :Usage:
+                driver.delete_all_cookies()
+        """
+        return self._send_message('deleteAllCookies', 'ok')
+
+    def delete_cookie(self, name):
+        """
+            Delete a cookie by its name
+            :Usage:
+                driver.delete_cookie('foo')
+
+        """
+        return self._send_message('deleteCookie', 'ok', name=name);
+
+    def get_cookie(self, name):
+        """
+            Get a single cookie by name. Returns the cookie if found, None if not.
+
+            :Usage:
+                driver.get_cookie('my_cookie')
+        """
+        cookies = self.get_cookies()
+        for cookie in cookies:
+            if cookie['name'] == name:
+                return cookie
+        return None
+
+    def get_cookies(self):
+        return self._send_message("getAllCookies", "value")
+
+    @property
+    def application_cache(self):
+        return ApplicationCache(self)
+
+    def screenshot(self, element=None, highlights=None):
+        if element is not None:
+            element = element.id
+        return self._send_message("screenShot", 'value', element=element, highlights=highlights)

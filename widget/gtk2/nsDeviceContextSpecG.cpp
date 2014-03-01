@@ -42,10 +42,17 @@
 using namespace mozilla;
 
 #ifdef PR_LOGGING 
-static PRLogModuleInfo *DeviceContextSpecGTKLM = PR_NewLogModule("DeviceContextSpecGTK");
+static PRLogModuleInfo *
+GetDeviceContextSpecGTKLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("DeviceContextSpecGTK");
+  return sLog;
+}
 #endif /* PR_LOGGING */
 /* Macro to make lines shorter */
-#define DO_PR_DEBUG_LOG(x) PR_LOG(DeviceContextSpecGTKLM, PR_LOG_DEBUG, x)
+#define DO_PR_DEBUG_LOG(x) PR_LOG(GetDeviceContextSpecGTKLog(), PR_LOG_DEBUG, x)
 
 //----------------------------------------------------------------------------------
 // The printer data is shared between the PrinterEnumerator and the nsDeviceContextSpecGTK
@@ -748,7 +755,7 @@ NS_IMETHODIMP nsPrinterEnumeratorGTK::InitPrintSettingsFromPrinter(const PRUnich
 
   
   /* Set filename */
-  nsCAutoString filename;
+  nsAutoCString filename;
   if (NS_FAILED(CopyPrinterCharPref(nullptr, printerName, "filename", filename))) {
     const char *path;
   
@@ -782,7 +789,7 @@ NS_IMETHODIMP nsPrinterEnumeratorGTK::InitPrintSettingsFromPrinter(const PRUnich
     printerFeatures.SetCanChangeOrientation(true);
 #endif /* SET_PRINTER_FEATURES_VIA_PREFS */
 
-    nsCAutoString orientation;
+    nsAutoCString orientation;
     if (NS_SUCCEEDED(CopyPrinterCharPref("postscript", printerName,
                                          "orientation", orientation))) {
       if (orientation.LowerCaseEqualsLiteral("portrait")) {
@@ -840,7 +847,7 @@ NS_IMETHODIMP nsPrinterEnumeratorGTK::InitPrintSettingsFromPrinter(const PRUnich
 #ifdef SET_PRINTER_FEATURES_VIA_PREFS
     printerFeatures.SetCanChangePaperSize(true);
 #endif /* SET_PRINTER_FEATURES_VIA_PREFS */
-    nsCAutoString papername;
+    nsAutoCString papername;
     if (NS_SUCCEEDED(CopyPrinterCharPref("postscript", printerName,
                                          "paper_size", papername))) {
       nsPaperSizePS paper;
@@ -888,7 +895,7 @@ NS_IMETHODIMP nsPrinterEnumeratorGTK::InitPrintSettingsFromPrinter(const PRUnich
 #endif /* SET_PRINTER_FEATURES_VIA_PREFS */
 
     if (hasSpoolerCmd) {
-      nsCAutoString command;
+      nsAutoCString command;
       if (NS_SUCCEEDED(CopyPrinterCharPref("postscript",
             printerName, "print_command", command))) {
         DO_PR_DEBUG_LOG(("setting default print command to '%s'\n",

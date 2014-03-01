@@ -21,14 +21,38 @@
 #include "xpcprivate.h"
 #include "nsStringBuffer.h"
 
-static void
-FinalizeDOMString(const JSStringFinalizer *fin, jschar *chars)
+
+// static
+void
+XPCStringConvert::FreeZoneCache(JS::Zone *zone)
 {
-    nsStringBuffer::FromData(chars)->Release();
+    // Put the zone user data into an AutoPtr (which will do the cleanup for us),
+    // and null out the user data (which may already be null).
+    nsAutoPtr<ZoneStringCache> cache(static_cast<ZoneStringCache*>(JS_GetZoneUserData(zone)));
+    JS_SetZoneUserData(zone, nullptr);
 }
 
-static const JSStringFinalizer sDOMStringFinalizer = { FinalizeDOMString };
+// static
+void
+XPCStringConvert::ClearZoneCache(JS::Zone *zone)
+{
+    ZoneStringCache *cache = static_cast<ZoneStringCache*>(JS_GetZoneUserData(zone));
+    if (cache) {
+        cache->mBuffer = nullptr;
+        cache->mString = nullptr;
+    }
+}
 
+// static
+void
+XPCStringConvert::FinalizeDOMString(const JSStringFinalizer *fin, jschar *chars)
+{
+    nsStringBuffer* buf = nsStringBuffer::FromData(chars);
+    buf->Release();
+}
+
+const JSStringFinalizer XPCStringConvert::sDOMStringFinalizer =
+    { XPCStringConvert::FinalizeDOMString };
 
 // convert a readable to a JSString, copying string data
 // static
@@ -47,36 +71,40 @@ XPCStringConvert::ReadableToJSVal(JSContext *cx,
 
     nsStringBuffer *buf = nsStringBuffer::FromString(readable);
     if (buf) {
-        // yay, we can share the string's buffer!
+        JS::RootedValue val(cx);
+        bool shared;
+        bool ok = StringBufferToJSVal(cx, buf, length, val.address(), &shared);
+        if (!ok) {
+            return JS::NullValue();
+        }
 
-        str = JS_NewExternalString(cx,
-                                   reinterpret_cast<jschar *>(buf->Data()),
-                                   length, &sDOMStringFinalizer);
-
-        if (str) {
+        if (shared) {
             *sharedBuffer = buf;
         }
-    } else {
-        // blech, have to copy.
-
-        jschar *chars = reinterpret_cast<jschar *>
-                                        (JS_malloc(cx, (length + 1) *
-                                                   sizeof(jschar)));
-        if (!chars)
-            return JSVAL_NULL;
-
-        if (length && !CopyUnicodeTo(readable, 0,
-                                     reinterpret_cast<PRUnichar *>(chars),
-                                     length)) {
-            JS_free(cx, chars);
-            return JSVAL_NULL;
-        }
-
-        chars[length] = 0;
-
-        str = JS_NewUCString(cx, chars, length);
-        if (!str)
-            JS_free(cx, chars);
+        return val;
     }
+
+    // blech, have to copy.
+
+    jschar *chars = reinterpret_cast<jschar *>
+                                    (JS_malloc(cx, (length + 1) *
+                                               sizeof(jschar)));
+    if (!chars)
+        return JS::NullValue();
+
+    if (length && !CopyUnicodeTo(readable, 0,
+                                 reinterpret_cast<PRUnichar *>(chars),
+                                 length)) {
+        JS_free(cx, chars);
+        return JS::NullValue();
+    }
+
+    chars[length] = 0;
+
+    str = JS_NewUCString(cx, chars, length);
+    if (!str) {
+        JS_free(cx, chars);
+    }
+
     return str ? STRING_TO_JSVAL(str) : JSVAL_NULL;
 }

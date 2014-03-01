@@ -12,10 +12,14 @@ interface nsIInputStream;
 
 #include "nsISupports.idl"
 
-/** 
- *  You probably want nsI{Moz}WebSocket.idl
+/**
+ * Low-level websocket API: handles network protocol.  
+ *
+ * This is primarly intended for use by the higher-level nsIWebSocket.idl.
+ * We are also making it scriptable for now, but this may change once we have
+ * WebSockets for Workers.
  */
-[uuid(0683E9A4-994D-11E1-9478-1E356188709B)]
+[scriptable, uuid(9ee5874c-ec39-4bc2-b2d7-194a4c98c9d2)]
 interface nsIWebSocketChannel : nsISupports
 {
     /**
@@ -129,4 +133,27 @@ interface nsIWebSocketChannel : nsISupports
      */
     void sendBinaryStream(in nsIInputStream aStream, 
                           in unsigned long length);
+
+    /**
+     * This value determines how often (in seconds) websocket keepalive
+     * pings are sent.  If set to 0 (the default), no pings are ever sent.
+     *
+     * This value can currently only be set before asyncOpen is called, else 
+     * NS_ERROR_IN_PROGRESS is thrown.
+     *
+     * Be careful using this setting: ping traffic can consume lots of power and
+     * bandwidth over time.
+     */
+    attribute unsigned long pingInterval;
+
+    /**
+     * This value determines how long (in seconds) the websocket waits for
+     * the server to reply to a ping that has been sent before considering the
+     * connection broken.
+     *
+     * This value can currently only be set before asyncOpen is called, else 
+     * NS_ERROR_IN_PROGRESS is thrown.
+     */
+    attribute unsigned long pingTimeout;
+
 };

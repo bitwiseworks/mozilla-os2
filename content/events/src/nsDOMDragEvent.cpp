@@ -9,11 +9,11 @@
 #include "nsContentUtils.h"
 #include "nsDOMDataTransfer.h"
 #include "nsIDragService.h"
-#include "nsDOMClassInfoID.h"
 
-nsDOMDragEvent::nsDOMDragEvent(nsPresContext* aPresContext,
+nsDOMDragEvent::nsDOMDragEvent(mozilla::dom::EventTarget* aOwner,
+                               nsPresContext* aPresContext,
                                nsInputEvent* aEvent)
-  : nsDOMMouseEvent(aPresContext, aEvent ? aEvent :
+  : nsDOMMouseEvent(aOwner, aPresContext, aEvent ? aEvent :
                     new nsDragEvent(false, 0, nullptr))
 {
   if (aEvent) {
@@ -39,11 +39,8 @@ nsDOMDragEvent::~nsDOMDragEvent()
 NS_IMPL_ADDREF_INHERITED(nsDOMDragEvent, nsDOMMouseEvent)
 NS_IMPL_RELEASE_INHERITED(nsDOMDragEvent, nsDOMMouseEvent)
 
-DOMCI_DATA(DragEvent, nsDOMDragEvent)
-
 NS_INTERFACE_MAP_BEGIN(nsDOMDragEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMDragEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DragEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMMouseEvent)
 
 NS_IMETHODIMP
@@ -74,32 +71,37 @@ nsDOMDragEvent::InitDragEvent(const nsAString & aType,
 NS_IMETHODIMP
 nsDOMDragEvent::GetDataTransfer(nsIDOMDataTransfer** aDataTransfer)
 {
+  NS_IF_ADDREF(*aDataTransfer = GetDataTransfer());
+  return NS_OK;
+}
+
+nsIDOMDataTransfer*
+nsDOMDragEvent::GetDataTransfer()
+{
   // the dataTransfer field of the event caches the DataTransfer associated
   // with the drag. It is initialized when an attempt is made to retrieve it
   // rather that when the event is created to avoid duplicating the data when
   // no listener ever uses it.
-  *aDataTransfer = nullptr;
-
   if (!mEvent || mEvent->eventStructType != NS_DRAG_EVENT) {
     NS_WARNING("Tried to get dataTransfer from non-drag event!");
-    return NS_OK;
+    return nullptr;
   }
 
   nsDragEvent* dragEvent = static_cast<nsDragEvent*>(mEvent);
   // for synthetic events, just use the supplied data transfer object even if null
   if (!mEventIsInternal) {
     nsresult rv = nsContentUtils::SetDataTransferInEvent(dragEvent);
-    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ENSURE_SUCCESS(rv, nullptr);
   }
 
-  NS_IF_ADDREF(*aDataTransfer = dragEvent->dataTransfer);
-  return NS_OK;
+  return dragEvent->dataTransfer;
 }
 
 nsresult NS_NewDOMDragEvent(nsIDOMEvent** aInstancePtrResult,
+                            mozilla::dom::EventTarget* aOwner,
                             nsPresContext* aPresContext,
                             nsDragEvent *aEvent) 
 {
-  nsDOMDragEvent* event = new nsDOMDragEvent(aPresContext, aEvent);
+  nsDOMDragEvent* event = new nsDOMDragEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(event, aInstancePtrResult);
 }

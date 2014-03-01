@@ -6,25 +6,54 @@
 // is disabled inside the private browsing mode.
 
 function test() {
-  // initialization
-  let pb = Cc["@mozilla.org/privatebrowsing;1"].
-           getService(Ci.nsIPrivateBrowsingService);
+  waitForExplicitFinish();
 
-  let crhCommand = document.getElementById("Tools:Sanitize");
+  function checkDisableOption(aPrivateMode, aWindow, aCallback) {
+    executeSoon(function() {
+      let crhCommand = aWindow.document.getElementById("Tools:Sanitize");
+      ok(crhCommand, "The clear recent history command should exist");
 
-  // make sure the command is not disabled to begin with
-  ok(!crhCommand.hasAttribute("disabled"),
-    "Clear Recent History command should not be disabled outside of the private browsing mode");
+      is(PrivateBrowsingUtils.isWindowPrivate(aWindow), aPrivateMode,
+        "PrivateBrowsingUtils should report the correct per-window private browsing status");
+      is(crhCommand.hasAttribute("disabled"), aPrivateMode,
+        "Clear Recent History command should be disabled according to the private browsing mode");
 
-  // enter private browsing mode
-  pb.privateBrowsingEnabled = true;
+      executeSoon(aCallback);
+    });
+  };
 
-  ok(crhCommand.hasAttribute("disabled"),
-    "Clear Recent History command should be disabled inside of the private browsing mode");
+  let windowsToClose = [];
+  let testURI = "http://mochi.test:8888/";
 
-  // leave private browsing mode
-  pb.privateBrowsingEnabled = false;
+  function testOnWindow(aIsPrivate, aCallback) {
+    whenNewWindowLoaded({private: aIsPrivate}, function(aWin) {
+      windowsToClose.push(aWin);
+      aWin.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+        if (aWin.content.location.href != testURI) {
+          aWin.gBrowser.loadURI(testURI);
+          return;
+        }
+        aWin.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
+        executeSoon(function() aCallback(aWin));
+      }, true);
 
-  ok(!crhCommand.hasAttribute("disabled"),
-    "Clear Recent History command should not be disabled after leaving the private browsing mode");
+      aWin.gBrowser.loadURI(testURI);
+    });
+  };
+
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(aWin) {
+      aWin.close();
+    });
+  });
+
+  testOnWindow(true, function(aWin) {
+    info("Test on private window");
+    checkDisableOption(true, aWin, function() {
+      testOnWindow(false, function(aPrivWin) {
+        info("Test on public window");
+        checkDisableOption(false, aPrivWin, finish);
+      });
+    });
+  });
 }

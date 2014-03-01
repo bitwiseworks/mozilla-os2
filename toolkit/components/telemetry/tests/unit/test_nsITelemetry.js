@@ -14,14 +14,37 @@ function test_histogram(histogram_type, name, min, max, bucket_count) {
   
   var r = h.snapshot().ranges;
   var sum = 0;
+  var log_sum = 0;
+  var log_sum_squares = 0;
   for(var i=0;i<r.length;i++) {
     var v = r[i];
     sum += v;
+    if (histogram_type == Telemetry.HISTOGRAM_EXPONENTIAL) {
+      var log_v = Math.log(1+v);
+      log_sum += log_v;
+      log_sum_squares += log_v*log_v;
+    }
     h.add(v);
   }
   var s = h.snapshot();
-  // verify sum
-  do_check_eq(sum, h.snapshot().sum);;
+  // verify properties
+  do_check_eq(sum, s.sum);
+  if (histogram_type == Telemetry.HISTOGRAM_EXPONENTIAL) {
+    // We do the log with float precision in C++ and double precision in
+    // JS, so there's bound to be tiny discrepancies.  Just check the
+    // integer part.
+    do_check_eq(Math.floor(log_sum), Math.floor(s.log_sum));
+    do_check_eq(Math.floor(log_sum_squares), Math.floor(s.log_sum_squares));
+    do_check_false("sum_squares_lo" in s);
+    do_check_false("sum_squares_hi" in s);
+  } else {
+    // Doing the math to verify sum_squares was reflected correctly is
+    // tedious in JavaScript.  Just make sure we have something.
+    do_check_neq(s.sum_squares_lo + s.sum_squares_hi, 0);
+    do_check_false("log_sum" in s);
+    do_check_false("log_sum_squares" in s);
+  }
+
   // there should be exactly one element per bucket
   for each(var i in s.counts) {
     do_check_eq(i, 1);
@@ -47,6 +70,13 @@ function test_histogram(histogram_type, name, min, max, bucket_count) {
     do_check_eq(i, 0);
   }
   do_check_eq(s.sum, 0);
+  if (histogram_type == Telemetry.HISTOGRAM_EXPONENTIAL) {
+    do_check_eq(s.log_sum, 0);
+    do_check_eq(s.log_sum_squares, 0);
+  } else {
+    do_check_eq(s.sum_squares_lo, 0);
+    do_check_eq(s.sum_squares_hi, 0);
+  }
 
   h.add(0);
   h.add(1);
@@ -147,6 +177,13 @@ function compareHistograms(h1, h2) {
   do_check_eq(s1.min, s2.min);
   do_check_eq(s1.max, s2.max);
   do_check_eq(s1.sum, s2.sum);
+  if (s1.histogram_type == Telemetry.HISTOGRAM_EXPONENTIAL) {
+    do_check_eq(s1.log_sum, s2.log_sum);
+    do_check_eq(s1.log_sum_squares, s2.log_sum_squares);
+  } else {
+    do_check_eq(s1.sum_squares_lo, s2.sum_squares_lo);
+    do_check_eq(s1.sum_squares_hi, s2.sum_squares_hi);
+  }
 
   do_check_eq(s1.counts.length, s2.counts.length);
   for (let i = 0; i < s1.counts.length; i++)
@@ -285,6 +322,21 @@ function test_privateMode() {
   do_check_neq(uneval(orig), uneval(h.snapshot()));
 }
 
+// Check that histograms that aren't flagged as needing extended stats
+// don't record extended stats.
+function test_extended_stats() {
+  var h = Telemetry.getHistogramById("GRADIENT_DURATION");
+  var s = h.snapshot();
+  do_check_eq(s.sum, 0);
+  do_check_eq(s.log_sum, 0);
+  do_check_eq(s.log_sum_squares, 0);
+  h.add(1);
+  s = h.snapshot();
+  do_check_eq(s.sum, 1);
+  do_check_eq(s.log_sum, 0);
+  do_check_eq(s.log_sum_squares, 0);
+}
+
 function generateUUID() {
   let str = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator).generateUUID().toString();
   // strip {}
@@ -314,4 +366,5 @@ function run_test()
   test_getSlowSQL();
   test_privateMode();
   test_addons();
+  test_extended_stats();
 }

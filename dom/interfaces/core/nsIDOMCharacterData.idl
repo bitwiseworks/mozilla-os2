@@ -13,7 +13,7 @@
  * http://www.w3.org/TR/DOM-Level-2-Core/
  */
 
-[scriptable, uuid(cb75c251-afc7-444f-b2d6-b9635555f3ed)]
+[scriptable, uuid(84f72a38-1873-46f8-937c-1df22d7e7cae)]
 interface nsIDOMCharacterData : nsIDOMNode
 {
            attribute DOMString            data;
@@ -36,4 +36,7 @@ interface nsIDOMCharacterData : nsIDOMNode
                                         in unsigned long count, 
                                         in DOMString arg)
                                   raises(DOMException);
+
+  [binaryname(MozRemove)]
+  void remove();
 };

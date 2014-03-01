@@ -22,8 +22,7 @@ function createFileWithData(fileName, fileData)
                          .getService(Components.interfaces.nsIProperties);
   var testFile = dirSvc.get("ProfD", Components.interfaces.nsIFile);
   testFile.append(fileName);
-  var outStream = Components.
-                  classes["@mozilla.org/network/file-output-stream;1"].
+  var outStream = Components.classes["@mozilla.org/network/file-output-stream;1"].
                   createInstance(Components.interfaces.nsIFileOutputStream);
   outStream.init(testFile, 0x02 | 0x08 | 0x20, // write, create, truncate
                  0666, 0);
@@ -50,10 +49,10 @@ var types = [
   // These types can be too long.
   [ "text", "email", "password", "url", "search", "tel" ],
   // These types can't be too long.
-  [ "radio", "checkbox", "submit", "button", "reset", "image", "hidden",  ],
+  [ "radio", "checkbox", "submit", "button", "reset", "image", "hidden",
+    'number', 'range', 'date', 'time', 'color' ],
   // These types can't be too long but are not implemented yet.
-  [ "number", "range", "color", "datetime", "date", "month", "week", "time",
-    "datetime-local" ],
+  [ "datetime", "month", "week", 'datetime-local' ]
 ];
 
 var input = document.createElement("input");
@@ -61,7 +60,7 @@ input.maxLength = 1;
 input.value = "foo";
 
 // Too long types.
-for each (type in types[0]) {
+for (type of types[0]) {
   input.type = type
   if (type == 'email') {
     input.value = "foo@bar.com";
@@ -79,7 +78,7 @@ for each (type in types[0]) {
 }
 
 // Not too long types.
-for each (type in types[1]) {
+for (type of types[1]) {
   input.type = type
   ok(input.validity.valid, "the element should be valid [type=" + type + "]");
   ok(!input.validity.tooLong,
@@ -87,11 +86,9 @@ for each (type in types[1]) {
 }
 
 // Not too long types but TODO.
-for each (type in types[2]) {
+for (type of types[2]) {
   input.type = type
-  ok(input.validity.valid, "the element should be valid [type=" + type + "]");
-  ok(!input.validity.tooLong,
-     "the element shouldn't suffer from being too long [type=" + type + "]");
+  todo_is(input.type, type, type + " should not be implemented");
 }
 
 testFileControl(input);

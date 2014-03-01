@@ -38,7 +38,8 @@ public:
   Relation(const RelationCopyHelper aRelation) :
     mFirstIter(aRelation.mFirstIter), mLastIter(aRelation.mLastIter) { }
 
-  Relation(AccIterable* aIter) : mFirstIter(aIter), mLastIter(aIter) { }
+  Relation(AccIterable* aIter) :
+    mFirstIter(aIter), mLastIter(aIter) { }
 
   Relation(Accessible* aAcc) :
     mFirstIter(nullptr), mLastIter(nullptr)

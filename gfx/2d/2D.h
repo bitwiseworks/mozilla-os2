@@ -30,12 +30,16 @@ struct ID3D10Device1;
 struct ID3D10Texture2D;
 struct IDWriteRenderingParams;
 
+class GrContext;
+
 namespace mozilla {
+
 namespace gfx {
 
 class SourceSurface;
 class DataSourceSurface;
 class DrawTarget;
+class DrawEventRecorder;
 
 struct NativeSurface {
   NativeSurfaceType mType;
@@ -62,7 +66,7 @@ struct NativeFont {
 struct DrawOptions {
   DrawOptions(Float aAlpha = 1.0f,
               CompositionOp aCompositionOp = OP_OVER,
-              AntialiasMode aAntialiasMode = AA_GRAY,
+              AntialiasMode aAntialiasMode = AA_DEFAULT,
               Snapping aSnapping = SNAP_NONE)
     : mAlpha(aAlpha)
     , mCompositionOp(aCompositionOp)
@@ -72,7 +76,7 @@ struct DrawOptions {
 
   Float mAlpha;
   CompositionOp mCompositionOp : 8;
-  AntialiasMode mAntialiasMode : 2;
+  AntialiasMode mAntialiasMode : 3;
   Snapping mSnapping : 1;
 };
 
@@ -322,11 +326,16 @@ class DataSourceSurface : public SourceSurface
 {
 public:
   virtual SurfaceType GetType() const { return SURFACE_DATA; }
-  /* Get the raw bitmap data of the surface */
+  /*
+   * Get the raw bitmap data of the surface.
+   * Can return null if there was OOM allocating surface data.
+   */
   virtual uint8_t *GetData() = 0;
+
   /*
    * Stride of the surface, distance in bytes between the start of the image
    * data belonging to row y and row y+1. This may be negative.
+   * Can return 0 if there was OOM allocating surface data.
    */
   virtual int32_t Stride() = 0;
 
@@ -397,6 +406,15 @@ public:
    */
   virtual bool ContainsPoint(const Point &aPoint, const Matrix &aTransform) const = 0;
 
+
+  /* This function checks if a point lies within the stroke of a path using the
+   * specified strokeoptions. It allows passing a transform that will transform
+   * the path to the coordinate space in which aPoint is given.
+   */
+  virtual bool StrokeContainsPoint(const StrokeOptions &aStrokeOptions,
+                                   const Point &aPoint,
+                                   const Matrix &aTransform) const = 0;
+
   /* This functions gets the bounds of this path. These bounds are not
    * guaranteed to be tight. A transform may be specified that gives the bounds
    * after application of the transform.
@@ -456,6 +474,8 @@ class ScaledFont : public RefCounted<ScaledFont>
 public:
   virtual ~ScaledFont() {}
 
+  typedef void (*FontFileDataOutput)(const uint8_t *aData, uint32_t aLength, uint32_t aIndex, Float aGlyphSize, void *aBaton);
+
   virtual FontType GetType() const = 0;
 
   /* This allows getting a path that describes the outline of a set of glyphs.
@@ -472,8 +492,19 @@ public:
    */
   virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder) = 0;
 
+  virtual bool GetFontFileData(FontFileDataOutput, void *) { return false; }
+
+  void AddUserData(UserDataKey *key, void *userData, void (*destroy)(void*)) {
+    mUserData.Add(key, userData, destroy);
+  }
+  void *GetUserData(UserDataKey *key) {
+    return mUserData.Get(key);
+  }
+
 protected:
   ScaledFont() {}
+
+  UserData mUserData;
 };
 
 #ifdef MOZ_ENABLE_FREETYPE
@@ -676,6 +707,21 @@ public:
                     const DrawOptions &aOptions = DrawOptions()) = 0;
 
   /*
+   * This takes a source pattern and a mask, and composites the source pattern
+   * onto the destination surface using the alpha channel of the mask source.
+   * The operation is bound by the extents of the mask.
+   *
+   * aSource Source pattern
+   * aMask Mask surface
+   * aOffset a transformed offset that the surface is masked at
+   * aOptions Drawing options
+   */
+  virtual void MaskSurface(const Pattern &aSource,
+                           SourceSurface *aMask,
+                           Point aOffset,
+                           const DrawOptions &aOptions = DrawOptions()) = 0;
+
+  /*
    * Push a clip to the DrawTarget.
    *
    * aPath The path to clip to
@@ -726,6 +772,21 @@ public:
    */
   virtual TemporaryRef<DrawTarget>
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const = 0;
+
+  /*
+   * Create a draw target optimized for drawing a shadow.
+   *
+   * Note that aSigma is the blur radius that must be used when we draw the
+   * shadow. Also note that this doesn't affect the size of the allocated
+   * surface, the caller is still responsible for including the shadow area in
+   * its size.
+   */
+  virtual TemporaryRef<DrawTarget>
+    CreateShadowDrawTarget(const IntSize &aSize, SurfaceFormat aFormat,
+                           float aSigma) const
+  {
+    return CreateSimilarDrawTarget(aSize, aFormat);
+  }
 
   /*
    * Create a path builder with the specified fillmode.
@@ -805,6 +866,12 @@ protected:
   SurfaceFormat mFormat;
 };
 
+class DrawEventRecorder : public RefCounted<DrawEventRecorder>
+{
+public:
+  virtual ~DrawEventRecorder() { }
+};
+
 class GFX2D_API Factory
 {
 public:
@@ -814,12 +881,27 @@ public:
 
   static TemporaryRef<DrawTarget>
     CreateDrawTarget(BackendType aBackend, const IntSize &aSize, SurfaceFormat aFormat);
-  
+
+  static TemporaryRef<DrawTarget>
+    CreateRecordingDrawTarget(DrawEventRecorder *aRecorder, DrawTarget *aDT);
+     
   static TemporaryRef<DrawTarget>
     CreateDrawTargetForData(BackendType aBackend, unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat);
 
   static TemporaryRef<ScaledFont>
     CreateScaledFontForNativeFont(const NativeFont &aNativeFont, Float aSize);
+
+  /**
+   * This creates a ScaledFont from TrueType data.
+   *
+   * aData - Pointer to the data
+   * aSize - Size of the TrueType data
+   * aFaceIndex - Index of the font face in the truetype data this ScaledFont needs to represent.
+   * aGlyphSize - Size of the glyphs in this ScaledFont
+   * aType - Type of ScaledFont that should be created.
+   */
+  static TemporaryRef<ScaledFont>
+    CreateScaledFontForTrueTypeData(uint8_t *aData, uint32_t aSize, uint32_t aFaceIndex, Float aGlyphSize, FontType aType);
 
   /*
    * This creates a scaled font with an associated cairo_scaled_font_t, and
@@ -847,6 +929,16 @@ public:
     CreateWrappingDataSourceSurface(uint8_t *aData, int32_t aStride,
                                     const IntSize &aSize, SurfaceFormat aFormat);
 
+  static TemporaryRef<DrawEventRecorder>
+    CreateEventRecorderForFile(const char *aFilename);
+
+  static void SetGlobalEventRecorder(DrawEventRecorder *aRecorder);
+
+#ifdef USE_SKIA_GPU
+  static TemporaryRef<DrawTarget>
+    CreateSkiaDrawTargetForFBO(unsigned int aFBOID, GrContext *aContext, const IntSize &aSize, SurfaceFormat aFormat);
+#endif
+
 #ifdef WIN32
   static TemporaryRef<DrawTarget> CreateDrawTargetForD3D10Texture(ID3D10Texture2D *aTexture, SurfaceFormat aFormat);
   static TemporaryRef<DrawTarget>
@@ -862,10 +954,13 @@ public:
 
   static uint64_t GetD2DVRAMUsageDrawTarget();
   static uint64_t GetD2DVRAMUsageSourceSurface();
+  static void D2DCleanup();
 
 private:
   static ID3D10Device1 *mD3D10Device;
 #endif
+
+  static DrawEventRecorder *mRecorder;
 };
 
 }

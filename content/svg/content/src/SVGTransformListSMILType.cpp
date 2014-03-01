@@ -4,17 +4,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SVGTransformListSMILType.h"
-#include "SVGTransform.h"
 #include "SVGTransformList.h"
+#include "nsSVGTransform.h"
 #include "nsSMILValue.h"
 #include "nsCRT.h"
 #include <math.h>
 
 using namespace mozilla;
 
-/*static*/ SVGTransformListSMILType SVGTransformListSMILType::sSingleton;
-
-typedef nsTArray<SVGTransformSMILData> TransformArray;
+typedef FallibleTArray<SVGTransformSMILData> TransformArray;
 
 //----------------------------------------------------------------------
 // nsISMILType implementation
@@ -36,7 +34,7 @@ SVGTransformListSMILType::Destroy(nsSMILValue& aValue) const
   TransformArray* params = static_cast<TransformArray*>(aValue.mU.mPtr);
   delete params;
   aValue.mU.mPtr = nullptr;
-  aValue.mType = &nsSMILNullType::sSingleton;
+  aValue.mType = nsSMILNullType::Singleton();
 }
 
 nsresult
@@ -130,7 +128,7 @@ SVGTransformListSMILType::Add(nsSMILValue& aDest,
 
   // And it should be impossible that one of them is of matrix type
   NS_ASSERTION(
-    srcTransform.mTransformType != nsIDOMSVGTransform::SVG_TRANSFORM_MATRIX,
+    srcTransform.mTransformType != SVG_TRANSFORM_MATRIX,
     "Trying to perform simple add with matrix transform");
 
   // Add the parameters
@@ -211,8 +209,8 @@ SVGTransformListSMILType::ComputeDistance(const nsSMILValue& aFrom,
     // We adopt the SVGT1.2 notions of distance here
     // See: http://www.w3.org/TR/SVGTiny12/animate.html#complexDistances
     // (As discussed in bug #469040)
-    case nsIDOMSVGTransform::SVG_TRANSFORM_TRANSLATE:
-    case nsIDOMSVGTransform::SVG_TRANSFORM_SCALE:
+    case SVG_TRANSFORM_TRANSLATE:
+    case SVG_TRANSFORM_SCALE:
       {
         const float& a_tx = fromTransform.mParams[0];
         const float& a_ty = fromTransform.mParams[1];
@@ -222,9 +220,9 @@ SVGTransformListSMILType::ComputeDistance(const nsSMILValue& aFrom,
       }
       break;
 
-    case nsIDOMSVGTransform::SVG_TRANSFORM_ROTATE:
-    case nsIDOMSVGTransform::SVG_TRANSFORM_SKEWX:
-    case nsIDOMSVGTransform::SVG_TRANSFORM_SKEWY:
+    case SVG_TRANSFORM_ROTATE:
+    case SVG_TRANSFORM_SKEWX:
+    case SVG_TRANSFORM_SKEWY:
       {
         const float& a = fromTransform.mParams[0];
         const float& b = toTransform.mParams[0];
@@ -266,7 +264,7 @@ SVGTransformListSMILType::Interpolate(const nsSMILValue& aStartVal,
   // The end point should never be a matrix transform
   const SVGTransformSMILData& endTransform = endTransforms[0];
   NS_ASSERTION(
-    endTransform.mTransformType != nsIDOMSVGTransform::SVG_TRANSFORM_MATRIX,
+    endTransform.mTransformType != SVG_TRANSFORM_MATRIX,
     "End point for interpolation should not be a matrix transform");
 
   // If we have 0 or more than 1 transform in the start transform array then we
@@ -321,7 +319,7 @@ SVGTransformListSMILType::AppendTransform(
   const SVGTransformSMILData& aTransform,
   nsSMILValue& aValue)
 {
-  NS_PRECONDITION(aValue.mType == &sSingleton, "Unexpected SMIL value type");
+  NS_PRECONDITION(aValue.mType == Singleton(), "Unexpected SMIL value type");
 
   TransformArray& transforms = *static_cast<TransformArray*>(aValue.mU.mPtr);
   return transforms.AppendElement(aTransform) ?
@@ -333,7 +331,7 @@ bool
 SVGTransformListSMILType::AppendTransforms(const SVGTransformList& aList,
                                            nsSMILValue& aValue)
 {
-  NS_PRECONDITION(aValue.mType == &sSingleton, "Unexpected SMIL value type");
+  NS_PRECONDITION(aValue.mType == Singleton(), "Unexpected SMIL value type");
 
   TransformArray& transforms = *static_cast<TransformArray*>(aValue.mU.mPtr);
 
@@ -351,9 +349,9 @@ SVGTransformListSMILType::AppendTransforms(const SVGTransformList& aList,
 // static
 bool
 SVGTransformListSMILType::GetTransforms(const nsSMILValue& aValue,
-                                        nsTArray<SVGTransform>& aTransforms)
+                                        FallibleTArray<nsSVGTransform>& aTransforms)
 {
-  NS_PRECONDITION(aValue.mType == &sSingleton, "Unexpected SMIL value type");
+  NS_PRECONDITION(aValue.mType == Singleton(), "Unexpected SMIL value type");
 
   const TransformArray& smilTransforms =
     *static_cast<const TransformArray*>(aValue.mU.mPtr);

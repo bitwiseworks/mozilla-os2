@@ -4,7 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsXMLElement.h"
+#include "mozilla/dom/ElementBinding.h"
 #include "nsContentUtils.h" // nsAutoScriptBlocker
+
+using namespace mozilla::dom;
 
 nsresult
 NS_NewXMLElement(nsIContent** aInstancePtrResult, already_AddRefed<nsINodeInfo> aNodeInfo)
@@ -18,16 +21,19 @@ DOMCI_NODE_DATA(Element, nsXMLElement)
 
 // QueryInterface implementation for nsXMLElement
 NS_INTERFACE_TABLE_HEAD(nsXMLElement)
-  NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsXMLElement)
-    NS_INTERFACE_TABLE_ENTRY(nsXMLElement, nsIDOMNode)
-    NS_INTERFACE_TABLE_ENTRY(nsXMLElement, nsIDOMElement)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
+  NS_INTERFACE_TABLE_INHERITED2(nsXMLElement, nsIDOMNode, nsIDOMElement)
   NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Element)
 NS_ELEMENT_INTERFACE_MAP_END
 
-NS_IMPL_ADDREF_INHERITED(nsXMLElement, nsGenericElement)
-NS_IMPL_RELEASE_INHERITED(nsXMLElement, nsGenericElement)
+NS_IMPL_ADDREF_INHERITED(nsXMLElement, Element)
+NS_IMPL_RELEASE_INHERITED(nsXMLElement, Element)
+
+JSObject*
+nsXMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
+{
+  return ElementBinding::Wrap(aCx, aScope, this);
+}
 
 NS_IMPL_ELEMENT_CLONE(nsXMLElement)
 
@@ -46,7 +52,7 @@ nsXMLElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
 
   nsMutationGuard guard;
 
-  nsresult rv = nsGenericElement::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
+  nsresult rv = Element::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
 
   if (isId &&
       (!guard.Mutated(0) ||
@@ -140,9 +146,9 @@ nsXMLElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                          nsIContent* aBindingParent,
                          bool aCompileEventHandlers)
 {
-  nsresult rv = nsGenericElement::BindToTree(aDocument, aParent,
-                                             aBindingParent,
-                                             aCompileEventHandlers);
+  nsresult rv = Element::BindToTree(aDocument, aParent,
+                                    aBindingParent,
+                                    aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aDocument && HasID() && !GetBindingParent()) {
@@ -157,5 +163,5 @@ nsXMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
   RemoveFromIdTable();
 
-  return nsGenericElement::UnbindFromTree(aDeep, aNullParent);
+  return Element::UnbindFromTree(aDeep, aNullParent);
 }

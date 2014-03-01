@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+Components.utils.import("resource://gre/modules/ForgetAboutSite.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 
@@ -138,10 +139,8 @@ PlacesController.prototype = {
       // Otherwise fallback to cmd_delete check.
     case "cmd_delete":
     case "placesCmd_delete":
-      return this._hasRemovableSelection(false);
     case "placesCmd_deleteDataHost":
-      return this._hasRemovableSelection(false) &&
-        !PlacesUIUtils.privateBrowsing.privateBrowsingEnabled;
+      return this._hasRemovableSelection(false);
     case "placesCmd_moveBookmarks":
       return this._hasRemovableSelection(true);
     case "cmd_copy":
@@ -226,7 +225,7 @@ PlacesController.prototype = {
       }
       else
         host = NetUtil.newURI(this._view.selectedNode.uri).host;
-      PlacesUIUtils.privateBrowsing.removeDataFromDomain(host);
+      ForgetAboutSite.removeDataFromDomain(host);
       break;
     case "cmd_selectAll":
       this.selectAll();
@@ -460,8 +459,6 @@ PlacesController.prototype = {
           nodeData["separator"] = true;
           break;
         case Ci.nsINavHistoryResultNode.RESULT_TYPE_URI:
-        case Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT:
-        case Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT:
           nodeData["link"] = true;
           uri = NetUtil.newURI(node.uri);
           if (PlacesUtils.nodeIsBookmark(node)) {
@@ -527,30 +524,30 @@ PlacesController.prototype = {
     }
 
     var selectionAttr = aMenuItem.getAttribute("selection");
-    if (selectionAttr) {
-      if (selectionAttr == "any")
-        return true;
-
-      var showRules = selectionAttr.split("|");
-      var anyMatched = false;
-      function metaDataNodeMatches(metaDataNode, rules) {
-        for (var i=0; i < rules.length; i++) {
-          if (rules[i] in metaDataNode)
-            return true;
-        }
-
-        return false;
-      }
-      for (var i = 0; i < aMetaData.length; ++i) {
-        if (metaDataNodeMatches(aMetaData[i], showRules))
-          anyMatched = true;
-        else
-          return false;
-      }
-      return anyMatched;
+    if (!selectionAttr) {
+      return !aMenuItem.hidden;
     }
 
-    return !aMenuItem.hidden;
+    if (selectionAttr == "any")
+      return true;
+
+    var showRules = selectionAttr.split("|");
+    var anyMatched = false;
+    function metaDataNodeMatches(metaDataNode, rules) {
+      for (var i = 0; i < rules.length; i++) {
+        if (rules[i] in metaDataNode)
+          return true;
+      }
+      return false;
+    }
+
+    for (var i = 0; i < aMetaData.length; ++i) {
+      if (metaDataNodeMatches(aMetaData[i], showRules))
+        anyMatched = true;
+      else
+        return false;
+    }
+    return anyMatched;
   },
 
   /**
@@ -600,10 +597,7 @@ PlacesController.prototype = {
         // We allow pasting into tag containers, so special case that.
         var hideIfNoIP = item.getAttribute("hideifnoinsertionpoint") == "true" &&
                          noIp && !(ip && ip.isTag && item.id == "placesContext_paste");
-        var hideIfPB = item.getAttribute("hideifprivatebrowsing") == "true" &&
-                       PlacesUIUtils.privateBrowsing.privateBrowsingEnabled;
-        item.hidden = hideIfNoIP || hideIfPB ||
-                      !this._shouldShowMenuItem(item, metadata);
+        item.hidden = hideIfNoIP || !this._shouldShowMenuItem(item, metadata);
 
         if (!item.hidden) {
           visibleItemsBeforeSep = true;
@@ -1020,21 +1014,21 @@ PlacesController.prototype = {
     if (!didSuppressNotifications)
       result.suppressNotifications = true;
 
+    function addData(type, index, overrideURI) {
+      let wrapNode = PlacesUtils.wrapNode(node, type, overrideURI, doCopy);
+      dt.mozSetDataAt(type, wrapNode, index);
+    }
+
+    function addURIData(index, overrideURI) {
+      addData(PlacesUtils.TYPE_X_MOZ_URL, index, overrideURI);
+      addData(PlacesUtils.TYPE_UNICODE, index, overrideURI);
+      addData(PlacesUtils.TYPE_HTML, index, overrideURI);
+    }
+
     try {
       let nodes = this._view.draggableSelection;
       for (let i = 0; i < nodes.length; ++i) {
         var node = nodes[i];
-
-        function addData(type, index, overrideURI) {
-          let wrapNode = PlacesUtils.wrapNode(node, type, overrideURI, doCopy);
-          dt.mozSetDataAt(type, wrapNode, index);
-        }
-
-        function addURIData(index, overrideURI) {
-          addData(PlacesUtils.TYPE_X_MOZ_URL, index, overrideURI);
-          addData(PlacesUtils.TYPE_UNICODE, index, overrideURI);
-          addData(PlacesUtils.TYPE_HTML, index, overrideURI);
-        }
 
         // This order is _important_! It controls how this and other
         // applications select data to be inserted based on type.
@@ -1425,13 +1419,13 @@ let PlacesControllerDragHelper = {
       if (ip.isTag && ip.orientation == Ci.nsITreeView.DROP_ON &&
           dragged.type != PlacesUtils.TYPE_X_MOZ_URL &&
           (dragged.type != PlacesUtils.TYPE_X_MOZ_PLACE ||
-           /^place:/.test(dragged.uri)))
+           (dragged.uri && dragged.uri.startsWith("place:")) ))
         return false;
 
       // The following loop disallows the dropping of a folder on itself or
       // on any of its descendants.
       if (dragged.type == PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER ||
-          /^place:/.test(dragged.uri)) {
+          (dragged.uri && dragged.uri.startsWith("place:")) ) {
         let parentId = ip.itemId;
         while (parentId != PlacesUtils.placesRootId) {
           if (dragged.concreteId == parentId || dragged.id == parentId)
@@ -1606,11 +1600,9 @@ XPCOMUtils.defineLazyServiceGetter(PlacesControllerDragHelper, "dragService",
 function goUpdatePlacesCommands() {
   // Get the controller for one of the places commands.
   var placesController = doGetPlacesControllerForCommand("placesCmd_open");
-  if (!placesController)
-    return;
-
   function updatePlacesCommand(aCommand) {
-    goSetCommandEnabled(aCommand, placesController.isCommandEnabled(aCommand));
+    goSetCommandEnabled(aCommand, placesController &&
+                                  placesController.isCommandEnabled(aCommand));
   }
 
   updatePlacesCommand("placesCmd_open");
@@ -1634,7 +1626,13 @@ function doGetPlacesControllerForCommand(aCommand)
 {
   // A context menu may be built for non-focusable views.  Thus, we first try
   // to look for a view associated with document.popupNode
-  let popupNode = document.popupNode;
+  let popupNode; 
+  try {
+    popupNode = document.popupNode;
+  } catch (e) {
+    // The document went away (bug 797307).
+    return null;
+  }
   if (popupNode) {
     let view = PlacesUIUtils.getViewForNode(popupNode);
     if (view && view._contextMenuShown)

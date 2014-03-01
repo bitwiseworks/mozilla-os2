@@ -48,7 +48,7 @@ SVGAnimatedPathSegList::SetBaseValueString(const nsAString& aValue)
   // Only now may we modify mBaseVal!
 
   // We don't need to call DidChange* here - we're only called by
-  // nsSVGElement::ParseAttribute under nsGenericElement::SetAttr,
+  // nsSVGElement::ParseAttribute under Element::SetAttr,
   // which takes care of notifying.
 
   nsresult rv2 = mBaseVal.CopyFrom(newBaseValue);
@@ -150,11 +150,11 @@ SVGAnimatedPathSegList::ToSMILAttr(nsSVGElement *aElement)
 nsresult
 SVGAnimatedPathSegList::
   SMILAnimatedPathSegList::ValueFromString(const nsAString& aStr,
-                               const nsISMILAnimationElement* /*aSrcElement*/,
+                               const dom::SVGAnimationElement* /*aSrcElement*/,
                                nsSMILValue& aValue,
                                bool& aPreventCachingOfSandwich) const
 {
-  nsSMILValue val(&SVGPathSegListSMILType::sSingleton);
+  nsSMILValue val(SVGPathSegListSMILType::Singleton());
   SVGPathDataAndOwner *list = static_cast<SVGPathDataAndOwner*>(val.mU.mPtr);
   nsresult rv = list->SetValueFromString(aStr);
   if (NS_SUCCEEDED(rv)) {
@@ -173,7 +173,7 @@ SVGAnimatedPathSegList::SMILAnimatedPathSegList::GetBaseValue() const
   // from ALL return points. This function must only return THIS variable:
   nsSMILValue val;
 
-  nsSMILValue tmp(&SVGPathSegListSMILType::sSingleton);
+  nsSMILValue tmp(SVGPathSegListSMILType::Singleton());
   SVGPathDataAndOwner *list = static_cast<SVGPathDataAndOwner*>(tmp.mU.mPtr);
   nsresult rv = list->CopyFrom(mVal->mBaseVal);
   if (NS_SUCCEEDED(rv)) {
@@ -186,9 +186,9 @@ SVGAnimatedPathSegList::SMILAnimatedPathSegList::GetBaseValue() const
 nsresult
 SVGAnimatedPathSegList::SMILAnimatedPathSegList::SetAnimValue(const nsSMILValue& aValue)
 {
-  NS_ASSERTION(aValue.mType == &SVGPathSegListSMILType::sSingleton,
+  NS_ASSERTION(aValue.mType == SVGPathSegListSMILType::Singleton(),
                "Unexpected type to assign animated value");
-  if (aValue.mType == &SVGPathSegListSMILType::sSingleton) {
+  if (aValue.mType == SVGPathSegListSMILType::Singleton()) {
     mVal->SetAnimValue(*static_cast<SVGPathDataAndOwner*>(aValue.mU.mPtr),
                        mElement);
   }

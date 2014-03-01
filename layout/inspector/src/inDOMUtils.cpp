@@ -1,3 +1,4 @@
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -27,7 +28,14 @@
 #include "nsRange.h"
 #include "mozilla/dom/Element.h"
 #include "nsCSSStyleSheet.h"
+#include "nsRuleWalker.h"
+#include "nsRuleProcessorData.h"
+#include "nsCSSRuleProcessor.h"
+#include "mozilla/dom/InspectorUtilsBinding.h"
 
+using namespace mozilla;
+using namespace mozilla::css;
+using namespace mozilla::dom;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -63,17 +71,9 @@ inDOMUtils::IsIgnorableWhitespace(nsIDOMCharacterData *aDataNode,
 
   // Okay.  We have only white space.  Let's check the white-space
   // property now and make sure that this isn't preformatted text...
-
-  nsCOMPtr<nsIDOMWindow> win = inLayoutUtils::GetWindowFor(aDataNode);
-  if (!win) {
-    // Hmm.  Things are screwy if we have no window...
-    NS_ERROR("No window!");
-    return NS_OK;
-  }
-
   nsIFrame* frame = content->GetPrimaryFrame();
   if (frame) {
-    const nsStyleText* text = frame->GetStyleText();
+    const nsStyleText* text = frame->StyleText();
     *aReturn = !text->WhiteSpaceIsSignificant();
   }
   else {
@@ -132,14 +132,7 @@ inDOMUtils::GetChildrenForNode(nsIDOMNode* aNode,
   if (aShowingAnonymousContent) {
     nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
     if (content) {
-      nsRefPtr<nsBindingManager> bindingManager =
-        inLayoutUtils::GetBindingManagerFor(aNode);
-      if (bindingManager) {
-        bindingManager->GetAnonymousNodesFor(content, getter_AddRefs(kids));
-        if (!kids) {
-          bindingManager->GetContentListFor(content, getter_AddRefs(kids));
-        }
-      }
+      kids = content->GetChildren(nsIContent::eAllChildren);
     }
   }
 
@@ -196,19 +189,148 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
   return NS_OK;
 }
 
+static already_AddRefed<StyleRule>
+GetRuleFromDOMRule(nsIDOMCSSStyleRule *aRule, ErrorResult& rv)
+{
+  nsCOMPtr<nsICSSStyleRuleDOMWrapper> rule = do_QueryInterface(aRule);
+  if (!rule) {
+    rv.Throw(NS_ERROR_INVALID_POINTER);
+    return nullptr;
+  }
+
+  nsRefPtr<StyleRule> cssrule;
+  rv = rule->GetCSSStyleRule(getter_AddRefs(cssrule));
+  if (rv.Failed()) {
+    return nullptr;
+  }
+
+  if (!cssrule) {
+    rv.Throw(NS_ERROR_FAILURE);
+  }
+  return cssrule.forget();
+}
+
 NS_IMETHODIMP
 inDOMUtils::GetRuleLine(nsIDOMCSSStyleRule *aRule, uint32_t *_retval)
 {
-  *_retval = 0;
+  ErrorResult rv;
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
 
-  NS_ENSURE_ARG_POINTER(aRule);
+  *_retval = rule->GetLineNumber();
+  return NS_OK;
+}
 
-  nsCOMPtr<nsICSSStyleRuleDOMWrapper> rule = do_QueryInterface(aRule);
-  nsRefPtr<mozilla::css::StyleRule> cssrule;
-  nsresult rv = rule->GetCSSStyleRule(getter_AddRefs(cssrule));
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(cssrule != nullptr, NS_ERROR_FAILURE);
-  *_retval = cssrule->GetLineNumber();
+NS_IMETHODIMP
+inDOMUtils::GetRuleColumn(nsIDOMCSSStyleRule *aRule, uint32_t *_retval)
+{
+  ErrorResult rv;
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
+  *_retval = rule->GetColumnNumber();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+inDOMUtils::GetSelectorCount(nsIDOMCSSStyleRule* aRule, uint32_t *aCount)
+{
+  ErrorResult rv;
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
+
+  uint32_t count = 0;
+  for (nsCSSSelectorList* sel = rule->Selector(); sel; sel = sel->mNext) {
+    ++count;
+  }
+  *aCount = count;
+  return NS_OK;
+}
+
+static nsCSSSelectorList*
+GetSelectorAtIndex(nsIDOMCSSStyleRule* aRule, uint32_t aIndex, ErrorResult& rv)
+{
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  if (rv.Failed()) {
+    return nullptr;
+  }
+
+  for (nsCSSSelectorList* sel = rule->Selector(); sel;
+       sel = sel->mNext, --aIndex) {
+    if (aIndex == 0) {
+      return sel;
+    }
+  }
+
+  // Ran out of selectors
+  rv.Throw(NS_ERROR_INVALID_ARG);
+  return nullptr;
+}
+
+NS_IMETHODIMP
+inDOMUtils::GetSelectorText(nsIDOMCSSStyleRule* aRule,
+                            uint32_t aSelectorIndex,
+                            nsAString& aText)
+{
+  ErrorResult rv;
+  nsCSSSelectorList* sel = GetSelectorAtIndex(aRule, aSelectorIndex, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
+
+  nsRefPtr<StyleRule> rule = GetRuleFromDOMRule(aRule, rv);
+  MOZ_ASSERT(!rv.Failed(), "How could we get a selector but not a rule?");
+
+  sel->mSelectors->ToString(aText, rule->GetStyleSheet(), false);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+inDOMUtils::GetSpecificity(nsIDOMCSSStyleRule* aRule,
+                            uint32_t aSelectorIndex,
+                            uint64_t* aSpecificity)
+{
+  ErrorResult rv;
+  nsCSSSelectorList* sel = GetSelectorAtIndex(aRule, aSelectorIndex, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
+
+  *aSpecificity = sel->mWeight;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+inDOMUtils::SelectorMatchesElement(nsIDOMElement* aElement,
+                                   nsIDOMCSSStyleRule* aRule,
+                                   uint32_t aSelectorIndex,
+                                   bool* aMatches)
+{
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
+  NS_ENSURE_ARG_POINTER(element);
+
+  ErrorResult rv;
+  nsCSSSelectorList* tail = GetSelectorAtIndex(aRule, aSelectorIndex, rv);
+  if (rv.Failed()) {
+    return rv.ErrorCode();
+  }
+
+  // We want just the one list item, not the whole list tail
+  nsAutoPtr<nsCSSSelectorList> sel(tail->Clone(false));
+
+  element->OwnerDoc()->FlushPendingLinkUpdates();
+  // XXXbz what exactly should we do with visited state here?
+  TreeMatchContext matchingContext(false,
+                                   nsRuleWalker::eRelevantLinkUnvisited,
+                                   element->OwnerDoc(),
+                                   TreeMatchContext::eNeverMatchVisited);
+  *aMatches = nsCSSRuleProcessor::SelectorListMatches(element, matchingContext,
+                                                      sel);
   return NS_OK;
 }
 
@@ -228,6 +350,109 @@ inDOMUtils::IsInheritedProperty(const nsAString &aPropertyName, bool *_retval)
 
   nsStyleStructID sid = nsCSSProps::kSIDTable[prop];
   *_retval = !nsCachedStyleData::IsReset(sid);
+  return NS_OK;
+}
+
+extern const char* const kCSSRawProperties[];
+
+NS_IMETHODIMP
+inDOMUtils::GetCSSPropertyNames(uint32_t aFlags, uint32_t* aCount,
+                                PRUnichar*** aProps)
+{
+  // maxCount is the largest number of properties we could have; our actual
+  // number might be smaller because properties might be disabled.
+  uint32_t maxCount;
+  if (aFlags & EXCLUDE_SHORTHANDS) {
+    maxCount = eCSSProperty_COUNT_no_shorthands;
+  } else {
+    maxCount = eCSSProperty_COUNT;
+  }
+
+  if (aFlags & INCLUDE_ALIASES) {
+    maxCount += (eCSSProperty_COUNT_with_aliases - eCSSProperty_COUNT);
+  }
+
+  PRUnichar** props =
+    static_cast<PRUnichar**>(nsMemory::Alloc(maxCount * sizeof(PRUnichar*)));
+
+#define DO_PROP(_prop)                                                  \
+  PR_BEGIN_MACRO                                                        \
+    nsCSSProperty cssProp = nsCSSProperty(_prop);                       \
+    if (nsCSSProps::IsEnabled(cssProp)) {                               \
+      props[propCount] =                                                \
+        ToNewUnicode(nsDependentCString(kCSSRawProperties[_prop]));     \
+      ++propCount;                                                      \
+    }                                                                   \
+  PR_END_MACRO
+
+  // prop is the property id we're considering; propCount is how many properties
+  // we've put into props so far.
+  uint32_t prop = 0, propCount = 0;
+  for ( ; prop < eCSSProperty_COUNT_no_shorthands; ++prop) {
+    if (nsCSSProps::PropertyParseType(nsCSSProperty(prop)) !=
+        CSS_PROPERTY_PARSE_INACCESSIBLE) {
+      DO_PROP(prop);
+    }
+  }
+
+  if (!(aFlags & EXCLUDE_SHORTHANDS)) {
+    for ( ; prop < eCSSProperty_COUNT; ++prop) {
+      // Some shorthands are also aliases
+      if ((aFlags & INCLUDE_ALIASES) ||
+          !nsCSSProps::PropHasFlags(nsCSSProperty(prop),
+                                    CSS_PROPERTY_IS_ALIAS)) {
+        DO_PROP(prop);
+      }
+    }
+  }
+
+  if (aFlags & INCLUDE_ALIASES) {
+    for (prop = eCSSProperty_COUNT; prop < eCSSProperty_COUNT_with_aliases; ++prop) {
+      DO_PROP(prop);
+    }
+  }
+
+#undef DO_PROP
+
+  *aCount = propCount;
+  *aProps = props;
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+inDOMUtils::ColorNameToRGB(const nsAString& aColorName, JSContext* aCx,
+                           JS::Value* aValue)
+{
+  nscolor color;
+  if (!NS_ColorNameToRGB(aColorName, &color)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  InspectorRGBTriple triple;
+  triple.mR = NS_GET_R(color);
+  triple.mG = NS_GET_G(color);
+  triple.mB = NS_GET_B(color);
+
+  if (!triple.ToObject(aCx, JS::NullPtr(),
+                       JS::MutableHandle<JS::Value>::fromMarkedLocation(aValue))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+inDOMUtils::RgbToColorName(uint8_t aR, uint8_t aG, uint8_t aB,
+                           nsAString& aColorName)
+{
+  const char* color = NS_RGBToColorName(NS_RGB(aR, aG, aB));
+  if (!color) {
+    aColorName.Truncate();
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  aColorName.AssignASCII(color);
   return NS_OK;
 }
 
@@ -315,7 +540,7 @@ inDOMUtils::GetRuleNodeForContent(nsIContent* aContent,
   nsRefPtr<nsStyleContext> sContext =
     nsComputedDOMStyle::GetStyleContextForElement(aContent->AsElement(), aPseudo, presShell);
   if (sContext) {
-    *aRuleNode = sContext->GetRuleNode();
+    *aRuleNode = sContext->RuleNode();
     sContext.forget(aStyleContext);
   }
   return NS_OK;
@@ -334,9 +559,9 @@ GetStatesForPseudoClass(const nsAString& aStatePseudo)
   // An array of the states that are relevant for various pseudoclasses.
   // XXXbz this duplicates code in nsCSSRuleProcessor
   static const nsEventStates sPseudoClassStates[] = {
-#define CSS_PSEUDO_CLASS(_name, _value) \
+#define CSS_PSEUDO_CLASS(_name, _value, _pref)	\
     nsEventStates(),
-#define CSS_STATE_PSEUDO_CLASS(_name, _value, _states) \
+#define CSS_STATE_PSEUDO_CLASS(_name, _value, _pref, _states)	\
     _states,
 #include "nsCSSPseudoClassList.h"
 #undef CSS_STATE_PSEUDO_CLASS

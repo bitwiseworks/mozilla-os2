@@ -3,21 +3,25 @@
 
 "use strict";
 
+Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("resource://services-sync/engines/addons.js");
 Cu.import("resource://services-sync/constants.js");
+Cu.import("resource://services-sync/service.js");
 Cu.import("resource://services-sync/util.js");
-Cu.import("resource://gre/modules/AddonManager.jsm");
 
 loadAddonTestFunctions();
 startupManager();
 Svc.Prefs.set("addons.ignoreRepositoryChecking", true);
 Svc.Prefs.set("engine.addons", true);
 
-Engines.register(AddonsEngine);
-let engine     = Engines.get("addons");
+Service.engineManager.register(AddonsEngine);
+let engine     = Service.engineManager.get("addons");
 let reconciler = engine._reconciler;
 let store      = engine._store;
 let tracker    = engine._tracker;
+
+// Don't write out by default.
+tracker.persistChangedIDs = false;
 
 const addon1ID = "addon1@tests.mozilla.org";
 
@@ -27,7 +31,6 @@ function cleanup_and_advance() {
 
   tracker.resetScore();
   tracker.clearChangedIDs();
-  tracker._lazySave.clear();
 
   reconciler._addons = {};
   reconciler._changes = [];

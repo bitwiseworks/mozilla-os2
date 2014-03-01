@@ -12,11 +12,10 @@
 #ifndef FragmentOrElement_h___
 #define FragmentOrElement_h___
 
+#include "mozilla/Attributes.h"
 #include "nsAttrAndChildArray.h"          // member
-#include "nsCOMPtr.h"                     // member
 #include "nsCycleCollectionParticipant.h" // NS_DECL_CYCLE_*
 #include "nsIContent.h"                   // base class
-#include "nsIDOMNodeSelector.h"           // base class
 #include "nsIDOMTouchEvent.h"             // base class (nsITouchEventReceiver)
 #include "nsIDOMXPathNSResolver.h"        // base class
 #include "nsIInlineEventHandlers.h"       // base class
@@ -31,8 +30,8 @@ class nsDOMTokenList;
 class nsIControllers;
 class nsICSSDeclaration;
 class nsIDocument;
-class nsIDOMDOMStringMap;
-class nsIDOMNamedNodeMap;
+class nsDOMStringMap;
+class nsIHTMLCollection;
 class nsINodeInfo;
 class nsIURI;
 
@@ -55,21 +54,22 @@ public:
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(nsChildContentList)
 
   // nsWrapperCache
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // nsIDOMNodeList interface
   NS_DECL_NSIDOMNODELIST
 
   // nsINodeList interface
-  virtual int32_t IndexOf(nsIContent* aContent);
+  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
+  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
 
   void DropReference()
   {
     mNode = nullptr;
   }
 
-  virtual nsINode* GetParentObject()
+  virtual nsINode* GetParentObject() MOZ_OVERRIDE
   {
     return mNode;
   }
@@ -154,29 +154,6 @@ private:
   nsCOMPtr<nsINode> mNode;
 };
 
-/**
- * A tearoff class for FragmentOrElement to implement NodeSelector
- */
-class nsNodeSelectorTearoff MOZ_FINAL : public nsIDOMNodeSelector
-{
-public:
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-
-  NS_DECL_NSIDOMNODESELECTOR
-
-  NS_DECL_CYCLE_COLLECTION_CLASS(nsNodeSelectorTearoff)
-
-  nsNodeSelectorTearoff(nsINode *aNode) : mNode(aNode)
-  {
-  }
-
-private:
-  ~nsNodeSelectorTearoff() {}
-
-private:
-  nsCOMPtr<nsINode> mNode;
-};
-
 // Forward declare to allow being a friend
 class nsTouchEventReceiverTearoff;
 class nsInlineEventHandlersTearoff;
@@ -187,6 +164,8 @@ class nsInlineEventHandlersTearoff;
  */
 namespace mozilla {
 namespace dom {
+
+class UndoManager;
 
 class FragmentOrElement : public nsIContent
 {
@@ -208,97 +187,44 @@ public:
   nsresult PostQueryInterface(REFNSIID aIID, void** aInstancePtr);
 
   // nsINode interface methods
-  virtual uint32_t GetChildCount() const;
-  virtual nsIContent *GetChildAt(uint32_t aIndex) const;
-  virtual nsIContent * const * GetChildArray(uint32_t* aChildCount) const;
-  virtual int32_t IndexOf(nsINode* aPossibleChild) const;
+  virtual uint32_t GetChildCount() const MOZ_OVERRIDE;
+  virtual nsIContent *GetChildAt(uint32_t aIndex) const MOZ_OVERRIDE;
+  virtual nsIContent * const * GetChildArray(uint32_t* aChildCount) const MOZ_OVERRIDE;
+  virtual int32_t IndexOf(const nsINode* aPossibleChild) const MOZ_OVERRIDE;
   virtual nsresult InsertChildAt(nsIContent* aKid, uint32_t aIndex,
-                                 bool aNotify);
-  virtual void RemoveChildAt(uint32_t aIndex, bool aNotify);
-  NS_IMETHOD GetTextContent(nsAString &aTextContent);
-  NS_IMETHOD SetTextContent(const nsAString& aTextContent);
+                                 bool aNotify) MOZ_OVERRIDE;
+  virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) MOZ_OVERRIDE;
+  virtual void GetTextContentInternal(nsAString& aTextContent) MOZ_OVERRIDE;
+  virtual void SetTextContentInternal(const nsAString& aTextContent,
+                                      mozilla::ErrorResult& aError) MOZ_OVERRIDE;
 
   // nsIContent interface methods
-  virtual already_AddRefed<nsINodeList> GetChildren(uint32_t aFilter);
-  virtual const nsTextFragment *GetText();
-  virtual uint32_t TextLength() const;
+  virtual already_AddRefed<nsINodeList> GetChildren(uint32_t aFilter) MOZ_OVERRIDE;
+  virtual const nsTextFragment *GetText() MOZ_OVERRIDE;
+  virtual uint32_t TextLength() const MOZ_OVERRIDE;
   virtual nsresult SetText(const PRUnichar* aBuffer, uint32_t aLength,
-                           bool aNotify);
+                           bool aNotify) MOZ_OVERRIDE;
   // Need to implement this here too to avoid hiding.
   nsresult SetText(const nsAString& aStr, bool aNotify)
   {
     return SetText(aStr.BeginReading(), aStr.Length(), aNotify);
   }
   virtual nsresult AppendText(const PRUnichar* aBuffer, uint32_t aLength,
-                              bool aNotify);
-  virtual bool TextIsOnlyWhitespace();
-  virtual void AppendTextTo(nsAString& aResult);
-  virtual nsIContent *GetBindingParent() const;
-  virtual bool IsLink(nsIURI** aURI) const;
+                              bool aNotify) MOZ_OVERRIDE;
+  virtual bool TextIsOnlyWhitespace() MOZ_OVERRIDE;
+  virtual void AppendTextTo(nsAString& aResult) MOZ_OVERRIDE;
+  virtual nsIContent *GetBindingParent() const MOZ_OVERRIDE;
+  virtual bool IsLink(nsIURI** aURI) const MOZ_OVERRIDE;
 
-  virtual void DestroyContent();
-  virtual void SaveSubtreeState();
+  virtual void DestroyContent() MOZ_OVERRIDE;
+  virtual void SaveSubtreeState() MOZ_OVERRIDE;
 
-  virtual const nsAttrValue* DoGetClasses() const;
-  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker);
+  virtual const nsAttrValue* DoGetClasses() const MOZ_OVERRIDE;
+  NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) MOZ_OVERRIDE;
+
+  nsIHTMLCollection* Children();
 
 public:
-  // nsIDOMNode method implementation
-  NS_IMETHOD GetNodeName(nsAString& aNodeName);
-  NS_IMETHOD GetLocalName(nsAString& aLocalName);
-  NS_IMETHOD GetNodeValue(nsAString& aNodeValue);
-  NS_IMETHOD SetNodeValue(const nsAString& aNodeValue);
-  NS_IMETHOD GetNodeType(uint16_t* aNodeType);
-  NS_IMETHOD GetAttributes(nsIDOMNamedNodeMap** aAttributes);
-  NS_IMETHOD GetNamespaceURI(nsAString& aNamespaceURI);
-  NS_IMETHOD GetPrefix(nsAString& aPrefix);
-  NS_IMETHOD IsSupported(const nsAString& aFeature,
-                         const nsAString& aVersion, bool* aReturn);
-  NS_IMETHOD HasAttributes(bool* aHasAttributes);
-  NS_IMETHOD HasChildNodes(bool* aHasChildNodes);
-  nsresult InsertBefore(nsIDOMNode* aNewChild, nsIDOMNode* aRefChild,
-                        nsIDOMNode** aReturn)
-  {
-    return ReplaceOrInsertBefore(false, aNewChild, aRefChild, aReturn);
-  }
-  nsresult ReplaceChild(nsIDOMNode* aNewChild, nsIDOMNode* aOldChild,
-                        nsIDOMNode** aReturn)
-  {
-    return ReplaceOrInsertBefore(true, aNewChild, aOldChild, aReturn);
-  }
-  nsresult RemoveChild(nsIDOMNode* aOldChild, nsIDOMNode** aReturn)
-  {
-    return nsINode::RemoveChild(aOldChild, aReturn);
-  }
-  nsresult AppendChild(nsIDOMNode* aNewChild, nsIDOMNode** aReturn)
-  {
-    return InsertBefore(aNewChild, nullptr, aReturn);
-  }
-
-  nsresult CloneNode(bool aDeep, uint8_t aOptionalArgc, nsIDOMNode **aResult)
-  {
-    if (!aOptionalArgc) {
-      aDeep = true;
-    }
-    
-    return nsNodeUtils::CloneNodeImpl(this, aDeep, true, aResult);
-  }
-
-  //----------------------------------------
-
-  /**
-   * Check whether a spec feature/version is supported.
-   * @param aObject the object, which should support the feature,
-   *        for example nsIDOMNode or nsIDOMDOMImplementation
-   * @param aFeature the feature ("Views", "Core", "HTML", "Range" ...)
-   * @param aVersion the version ("1.0", "2.0", ...)
-   * @param aReturn whether the feature is supported or not [OUT]
-   */
-  static nsresult InternalIsSupported(nsISupports* aObject,
-                                      const nsAString& aFeature,
-                                      const nsAString& aVersion,
-                                      bool* aReturn);
-
   /**
    * If there are listeners for DOMNodeInserted event, fires the event on all
    * aNodes
@@ -307,15 +233,6 @@ public:
                                nsINode* aParent,
                                nsTArray<nsCOMPtr<nsIContent> >& aNodes);
 
-  /**
-   * Helper methods for implementing querySelector/querySelectorAll
-   */
-  static nsIContent* doQuerySelector(nsINode* aRoot, const nsAString& aSelector,
-                                     nsresult *aResult);
-  static nsresult doQuerySelectorAll(nsINode* aRoot,
-                                     const nsAString& aSelector,
-                                     nsIDOMNodeList **aReturn);
-
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(FragmentOrElement)
 
   /**
@@ -323,7 +240,7 @@ public:
    */
   void FireNodeRemovedForChildren();
 
-  virtual bool OwnedOnlyByTheDOMTree()
+  virtual bool OwnedOnlyByTheDOMTree() MOZ_OVERRIDE
   {
     uint32_t rc = mRefCnt.get();
     if (GetParent()) {
@@ -333,12 +250,12 @@ public:
     return rc == 0;
   }
 
-  virtual bool IsPurple()
+  virtual bool IsPurple() MOZ_OVERRIDE
   {
     return mRefCnt.IsPurple();
   }
 
-  virtual void RemovePurple()
+  virtual void RemovePurple() MOZ_OVERRIDE
   {
     mRefCnt.RemovePurple();
   }
@@ -381,6 +298,8 @@ public:
     void Traverse(nsCycleCollectionTraversalCallback &cb, bool aIsXUL);
     void Unlink(bool aIsXUL);
 
+    size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+
     /**
      * The .style attribute (an interface that forwards to the actual
      * style rules)
@@ -392,7 +311,13 @@ public:
      * The .dataset attribute.
      * @see nsGenericHTMLElement::GetDataset
      */
-    nsIDOMDOMStringMap* mDataset; // [Weak]
+    nsDOMStringMap* mDataset; // [Weak]
+
+    /**
+     * The .undoManager property.
+     * @see nsGenericHTMLElement::GetUndoManager
+     */
+    nsRefPtr<UndoManager> mUndoManager;
 
     /**
      * SMIL Overridde style rules (for SMIL animation of CSS properties)
@@ -406,7 +331,7 @@ public:
     nsRefPtr<mozilla::css::StyleRule> mSMILOverrideStyleRule;
 
     /**
-     * An object implementing nsIDOMNamedNodeMap for this content (attributes)
+     * An object implementing nsIDOMMozNamedAttrMap for this content (attributes)
      * @see FragmentOrElement::GetAttributes
      */
     nsRefPtr<nsDOMAttributeMap> mAttributeMap;
@@ -437,11 +362,11 @@ public:
 
 protected:
   // Override from nsINode
-  virtual nsINode::nsSlots* CreateSlots();
+  virtual nsINode::nsSlots* CreateSlots() MOZ_OVERRIDE;
 
   nsDOMSlots *DOMSlots()
   {
-    return static_cast<nsDOMSlots*>(GetSlots());
+    return static_cast<nsDOMSlots*>(Slots());
   }
 
   nsDOMSlots *GetExistingDOMSlots() const
@@ -454,8 +379,6 @@ protected:
    * Array containing all attributes and children for this element
    */
   nsAttrAndChildArray mAttrsAndChildren;
-
-  nsContentList* GetChildrenList();
 };
 
 } // namespace dom
@@ -502,11 +425,11 @@ private:
 };
 
 #define NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE                               \
-    rv = FragmentOrElement::QueryInterface(aIID, aInstancePtr);                \
     if (NS_SUCCEEDED(rv))                                                     \
       return rv;                                                              \
                                                                               \
-    NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
+    rv = FragmentOrElement::QueryInterface(aIID, aInstancePtr);               \
+    NS_INTERFACE_TABLE_TO_MAP_SEGUE
 
 #define NS_ELEMENT_INTERFACE_MAP_END                                          \
     {                                                                         \

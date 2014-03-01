@@ -14,8 +14,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xremoteclient
-LIBRARY_NAME = xremote_client_s
 FORCE_STATIC_LIB = 1
 
 DEFINES += -DXPCOM_GLUE
@@ -29,16 +27,12 @@ EXTRA_DSO_LDOPTS = \
 		$(MOZ_COMPONENT_LIBS) \
 		$(NULL)
 
-PROGRAM         = mozilla-xremote-client$(BIN_SUFFIX)
-
 PROGCPPSRCS = \
   mozilla-xremote-client.cpp \
   XRemoteClient.cpp \
   $(NULL)
 
 PROGOBJS = $(PROGCPPSRCS:.cpp=.$(OBJ_SUFFIX))
-
-CPPSRCS = $(filter-out $(LIBCPPSRCS),$(PROGCPPSRCS)) $(LIBCPPSRCS)
 
 LIBS            = \
 		$(NSPR_LIBS) \

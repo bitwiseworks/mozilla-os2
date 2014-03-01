@@ -4,7 +4,6 @@
 
 #include "tests.h"
 #include "jsdbgapi.h"
-#include "jsobjinlines.h"
 
 JSPrincipals *sOriginPrincipalsInErrorReporter = NULL;
 
@@ -85,10 +84,10 @@ testOuter(const char *asciiChars)
 bool
 testInner(const char *asciiChars, JSPrincipals *principal, JSPrincipals *originPrincipal)
 {
-    jsval rval;
-    CHECK(eval(asciiChars, principal, originPrincipal, &rval));
+    JS::RootedValue rval(cx);
+    CHECK(eval(asciiChars, principal, originPrincipal, rval.address()));
 
-    JSScript *script = JS_GetFunctionScript(cx, JSVAL_TO_OBJECT(rval)->toFunction());
+    JSScript *script = JS_GetFunctionScript(cx, &rval.toObject().as<JSFunction>());
     CHECK(JS_GetScriptPrincipals(script) == principal);
     CHECK(JS_GetScriptOriginPrincipals(script) == originPrincipal);
 

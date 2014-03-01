@@ -27,7 +27,7 @@ interface nsIDOMMediaStream;
 #endif
 %}
 
-[scriptable, uuid(f49b0fea-dc13-47bd-b43e-606044280741)]
+[scriptable, uuid(21354ac9-7166-46a0-a3f0-a3135c3cc804)]
 interface nsIDOMHTMLMediaElement : nsIDOMHTMLElement
 {
   // error state
@@ -35,15 +35,15 @@ interface nsIDOMHTMLMediaElement : nsIDOMHTMLElement
 
   // network state
            attribute DOMString src;
-  [implicit_jscontext] attribute jsval mozSrcObject;
+           attribute nsIDOMMediaStream mozSrcObject;
   readonly attribute DOMString currentSrc;
-           attribute DOMString crossorigin;
+           attribute DOMString crossOrigin;
   const unsigned short NETWORK_EMPTY = 0;
   const unsigned short NETWORK_IDLE = 1;
   const unsigned short NETWORK_LOADING = 2;
   const unsigned short NETWORK_NO_SOURCE = 3;
   readonly attribute unsigned short networkState;
-           attribute DOMString preload;  
+           attribute DOMString preload;
   readonly attribute nsIDOMTimeRanges buffered;
   void load();
   DOMString canPlayType(in DOMString type);
@@ -59,9 +59,11 @@ interface nsIDOMHTMLMediaElement : nsIDOMHTMLElement
 
   // playback state
            attribute double currentTime;
-  readonly attribute double initialTime;
   readonly attribute double duration;
   readonly attribute boolean paused;
+           attribute double defaultPlaybackRate;
+           attribute double playbackRate;
+           attribute boolean mozPreservesPitch;
   readonly attribute nsIDOMTimeRanges played;
   readonly attribute nsIDOMTimeRanges seekable;
   readonly attribute boolean ended;
@@ -98,16 +100,47 @@ interface nsIDOMHTMLMediaElement : nsIDOMHTMLElement
   [implicit_jscontext]
   jsval mozGetMetadata();
 
-  // Mozilla extension: load data from another media element. This is like
-  // load() but we don't run the resource selection algorithm; instead
-  // we just set our source to other's currentSrc. This is optimized
-  // so that this element will get access to all of other's cached/
-  // buffered data. In fact any future data downloaded by this element or
-  // other will be sharable by both elements.
-  void mozLoadFrom(in nsIDOMHTMLMediaElement other);
-
   // Mozilla extension: provides access to the fragment end time if
   // the media element has a fragment URI for the currentSrc, otherwise
   // it is equal to the media duration.
   readonly attribute double mozFragmentEnd;
+
+   // Mozilla extension: an audio channel type for media elements.
+   // An exception is thrown if the app tries to change the audio channel type
+   // without the permission (manifest file for B2G apps).
+   // The supported values are:
+   // * normal (default value)
+   //   Automatically paused if "notification" or higher priority channel
+   //   is played
+   //   Use case: normal applications
+   // * content
+   //   Automatically paused if "notification" or higher priority channel
+   //   is played. Also paused if another app starts using "content"
+   //   channel. Using this channel never affects applications using
+   //   the "normal" channel.
+   //   Use case: video/audio players
+   // * notification
+   //   Automatically paused if "alarm" or higher priority channel is played.
+   //   Use case: New email, incoming SMS
+   // * alarm
+   //   Automatically paused if "telephony" or higher priority channel is
+   //   played.
+   //   User case: Alarm clock, calendar alarms
+   // * telephony
+   //   Automatically paused if "ringer" or higher priority
+   //   channel is played.
+   //   Use case: dialer, voip
+   // * ringer
+   //   Automatically paused if "publicnotification" or higher priority
+   //   channel is played.
+   //   Use case: dialer, voip
+   // * publicnotification
+   //   Always plays in speaker, even when headphones are plugged in.
+   //   Use case: Camera shutter sound.
+   attribute DOMString mozAudioChannelType;
+
+  // In addition the media element has this new events:
+  // * onmozinterruptbegin - called when the media element is interrupted
+  //   because of the audiochannel manager.
+  // * onmozinterruptend - called when the interruption is concluded
 };

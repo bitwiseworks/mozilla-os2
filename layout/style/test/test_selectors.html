@@ -246,6 +246,18 @@ function run() {
         }
     }
 
+    function test_parseable_via_api(selector)
+    {
+        var threw = false;
+        try {
+          // Test that a selector is parseable when followed by EOF.
+          ifdoc.body.mozMatchesSelector(selector);
+        } catch(ex) {
+          threw = true;
+        }
+        ok(!threw, "selector '" + selector + "' was parsed");
+    }
+
     function test_balanced_unparseable(selector)
     {
         var zi1 = ++gCounter;
@@ -452,6 +464,195 @@ function run() {
     test_balanced_unparseable(":nth-child(2-n)");
     test_balanced_unparseable(":nth-child(2-n-1)");
     test_balanced_unparseable(":nth-child(n-2-1)");
+    // Bug 750388
+    test_parseable(":nth-child(+n)");
+    test_balanced_unparseable(":nth-child(+ n)");
+    test_parseable(":nth-child(+n+2)");
+    test_parseable(":nth-child(+n-2)");
+    test_parseable(":nth-child(+n + 2)");
+    test_parseable(":nth-child(+n - 2)");
+    test_balanced_unparseable(":nth-child(+ n+2)");
+    test_balanced_unparseable(":nth-child(+ n-2)");
+    test_balanced_unparseable(":nth-child(+ n + 2)");
+    test_balanced_unparseable(":nth-child(+ n - 2)");
+    test_parseable(":nth-child(+n-100)");
+    test_parseable(":nth-child(+n - 100)");
+    test_balanced_unparseable(":nth-child(+ n-100)");
+    test_balanced_unparseable(":nth-child(+-n+2)");
+    test_balanced_unparseable(":nth-child(+ -n+2)");
+    test_balanced_unparseable(":nth-child(+-n-100)");
+    test_balanced_unparseable(":nth-child(+ -n-100)");
+    test_balanced_unparseable(":nth-child(++n-100)");
+    test_balanced_unparseable(":nth-child(-+n-100)");
+    test_balanced_unparseable(":nth-child(++2n - 100)");
+    test_balanced_unparseable(":nth-child(+-2n - 100)");
+    test_balanced_unparseable(":nth-child(-+2n - 100)");
+    test_balanced_unparseable(":nth-child(--2n - 100)");
+    test_balanced_unparseable(":nth-child(+/**/+2n - 100)");
+    test_balanced_unparseable(":nth-child(+/**/-2n - 100)");
+    test_balanced_unparseable(":nth-child(-/**/+2n - 100)");
+    test_balanced_unparseable(":nth-child(-/**/-2n - 100)");
+    test_balanced_unparseable(":nth-child(+/**/+/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(+/**/-/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(-/**/+/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(-/**/-/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(++/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(+-/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(-+/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(--/**/2n - 100)");
+    test_balanced_unparseable(":nth-child(-even)");
+    test_balanced_unparseable(":nth-child(-odd)");
+    test_balanced_unparseable(":nth-child(+even)");
+    test_balanced_unparseable(":nth-child(+odd)");
+    test_balanced_unparseable(":nth-child(+ even)");
+    test_balanced_unparseable(":nth-child(+ odd)");
+    test_balanced_unparseable(":nth-child(+-n)");
+    test_balanced_unparseable(":nth-child(+-n-)");
+    test_balanced_unparseable(":nth-child(-+n)");
+    test_balanced_unparseable(":nth-child(+n--)");
+    test_parseable(":nth-child(n+2)");
+    test_parseable(":nth-child(n/**/+/**/2)");
+    test_parseable(":nth-child(n-2)");
+    test_parseable(":nth-child(n/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(n++2)");
+    test_balanced_unparseable(":nth-child(n+-2)");
+    test_balanced_unparseable(":nth-child(n-+2)");
+    test_balanced_unparseable(":nth-child(n--2)");
+    test_balanced_unparseable(":nth-child(n/**/++2)");
+    test_balanced_unparseable(":nth-child(n/**/+-2)");
+    test_balanced_unparseable(":nth-child(n/**/-+2)");
+    test_balanced_unparseable(":nth-child(n/**/--2)");
+    test_balanced_unparseable(":nth-child(n/**/+/**/+2)");
+    test_balanced_unparseable(":nth-child(n/**/+/**/-2)");
+    test_balanced_unparseable(":nth-child(n/**/-/**/+2)");
+    test_balanced_unparseable(":nth-child(n/**/-/**/-2)");
+    test_balanced_unparseable(":nth-child(n+/**/+2)");
+    test_balanced_unparseable(":nth-child(n+/**/-2)");
+    test_balanced_unparseable(":nth-child(n-/**/+2)");
+    test_balanced_unparseable(":nth-child(n-/**/-2)");
+    test_balanced_unparseable(":nth-child(n++/**/2)");
+    test_balanced_unparseable(":nth-child(n+-/**/2)");
+    test_balanced_unparseable(":nth-child(n-+/**/2)");
+    test_balanced_unparseable(":nth-child(n--/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/++/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/+-/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/-+/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/--/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/+/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/+/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/-/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(n/**/-/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(n+/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(n+/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(n-/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(n-/**/-/**/2)");
+    test_parseable(":nth-child(2n+2)");
+    test_parseable(":nth-child(2n/**/+/**/2)");
+    test_parseable(":nth-child(2n-2)");
+    test_parseable(":nth-child(2n/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(2n++2)");
+    test_balanced_unparseable(":nth-child(2n+-2)");
+    test_balanced_unparseable(":nth-child(2n-+2)");
+    test_balanced_unparseable(":nth-child(2n--2)");
+    test_balanced_unparseable(":nth-child(2n/**/++2)");
+    test_balanced_unparseable(":nth-child(2n/**/+-2)");
+    test_balanced_unparseable(":nth-child(2n/**/-+2)");
+    test_balanced_unparseable(":nth-child(2n/**/--2)");
+    test_balanced_unparseable(":nth-child(2n/**/+/**/+2)");
+    test_balanced_unparseable(":nth-child(2n/**/+/**/-2)");
+    test_balanced_unparseable(":nth-child(2n/**/-/**/+2)");
+    test_balanced_unparseable(":nth-child(2n/**/-/**/-2)");
+    test_balanced_unparseable(":nth-child(2n+/**/+2)");
+    test_balanced_unparseable(":nth-child(2n+/**/-2)");
+    test_balanced_unparseable(":nth-child(2n-/**/+2)");
+    test_balanced_unparseable(":nth-child(2n-/**/-2)");
+    test_balanced_unparseable(":nth-child(2n++/**/2)");
+    test_balanced_unparseable(":nth-child(2n+-/**/2)");
+    test_balanced_unparseable(":nth-child(2n-+/**/2)");
+    test_balanced_unparseable(":nth-child(2n--/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/++/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/+-/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/-+/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/--/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/+/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/+/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/-/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(2n/**/-/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(2n+/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(2n+/**/-/**/2)");
+    test_balanced_unparseable(":nth-child(2n-/**/+/**/2)");
+    test_balanced_unparseable(":nth-child(2n-/**/-/**/2)");
+    test_parseable(":nth-child(+/**/n+2)");
+    test_parseable(":nth-child(+n/**/+2)");
+    test_parseable(":nth-child(+n/**/+2)");
+    test_parseable(":nth-child(+n+/**/2)");
+    test_parseable(":nth-child(+n+2/**/)");
+    test_parseable(":nth-child(+1/**/n+2)");
+    test_parseable(":nth-child(+1n/**/+2)");
+    test_parseable(":nth-child(+1n/**/+2)");
+    test_parseable(":nth-child(+1n+/**/2)");
+    test_parseable(":nth-child(+1n+2/**/)");
+    test_parseable(":nth-child(-/**/n+2)");
+    test_parseable(":nth-child(-n/**/+2)");
+    test_parseable(":nth-child(-n/**/+2)");
+    test_parseable(":nth-child(-n+/**/2)");
+    test_parseable(":nth-child(-n+2/**/)");
+    test_parseable(":nth-child(-1/**/n+2)");
+    test_parseable(":nth-child(-1n/**/+2)");
+    test_parseable(":nth-child(-1n/**/+2)");
+    test_parseable(":nth-child(-1n+/**/2)");
+    test_parseable(":nth-child(-1n+2/**/)");
+    test_balanced_unparseable(":nth-child(-/**/ n+2)");
+    test_balanced_unparseable(":nth-child(- /**/n+2)");
+    test_balanced_unparseable(":nth-child(+/**/ n+2)");
+    test_balanced_unparseable(":nth-child(+ /**/n+2)");
+    test_parseable(":nth-child(+/**/n-2)");
+    test_parseable(":nth-child(+n/**/-2)");
+    test_parseable(":nth-child(+n/**/-2)");
+    test_parseable(":nth-child(+n-/**/2)");
+    test_parseable(":nth-child(+n-2/**/)");
+    test_parseable(":nth-child(+1/**/n-2)");
+    test_parseable(":nth-child(+1n/**/-2)");
+    test_parseable(":nth-child(+1n/**/-2)");
+    test_parseable(":nth-child(+1n-/**/2)");
+    test_parseable(":nth-child(+1n-2/**/)");
+    test_parseable(":nth-child(-/**/n-2)");
+    test_parseable(":nth-child(-n/**/-2)");
+    test_parseable(":nth-child(-n/**/-2)");
+    test_parseable(":nth-child(-n-/**/2)");
+    test_parseable(":nth-child(-n-2/**/)");
+    test_parseable(":nth-child(-1/**/n-2)");
+    test_parseable(":nth-child(-1n/**/-2)");
+    test_parseable(":nth-child(-1n/**/-2)");
+    test_parseable(":nth-child(-1n-/**/2)");
+    test_parseable(":nth-child(-1n-2/**/)");
+    test_balanced_unparseable(":nth-child(-/**/ n-2)");
+    test_balanced_unparseable(":nth-child(- /**/n-2)");
+    test_balanced_unparseable(":nth-child(+/**/ n-2)");
+    test_balanced_unparseable(":nth-child(+ /**/n-2)");
+    test_parseable(":nth-child( +n + 1 )");
+    test_parseable(":nth-child( +/**/n + 1 )");
+    test_parseable(":nth-child( -/**/2/**/n/**/+/**/4 )");
+    test_balanced_unparseable(":nth-child( -/**/ 2/**/n/**/+/**/4 )");
+    test_balanced_unparseable(":nth-child( -/**/2 /**/n/**/+/**/4 )");
+    test_balanced_unparseable(":nth-child( -/**/2/**/ n/**/+/**/4 )");
+    test_parseable(":nth-child( -/**/2/**/n /**/+/**/4 )");
+    test_parseable(":nth-child( -/**/2/**/n/**/ +/**/4 )");
+    test_parseable(":nth-child(+1/**/n-1)");
+    test_parseable(":nth-child(1/**/n-1)");
+    // bug 876570
+    test_balanced_unparseable(":nth-child(+2n-)");
+    test_balanced_unparseable(":nth-child(+n-)");
+    test_balanced_unparseable(":nth-child(-2n-)");
+    test_balanced_unparseable(":nth-child(-n-)");
+    test_balanced_unparseable(":nth-child(2n-)");
+    test_balanced_unparseable(":nth-child(n-)");
+    test_balanced_unparseable(":nth-child(+2n+)");
+    test_balanced_unparseable(":nth-child(+n+)");
+    test_balanced_unparseable(":nth-child(-2n+)");
+    test_balanced_unparseable(":nth-child(-n+)");
+    test_balanced_unparseable(":nth-child(2n+)");
+    test_balanced_unparseable(":nth-child(n+)");
 
     // exercise the an+b matching logic particularly hard for
     // :nth-child() (since we know we use the same code for all 4)
@@ -536,7 +737,7 @@ function run() {
     function idset(ids) { // takes an array of ids
         return function idset_filter(doc) {
             var result = [];
-            for each (var id in ids)
+            for (var id of ids)
                 result.push(doc.getElementById(id));
             return result;
         }
@@ -970,8 +1171,11 @@ function run() {
     test_balanced_unparseable("p #, p");
     test_balanced_unparseable("p # , p");
 
-    // Test that a backslash alone is not treated as an escape.
-    test_unparseable_via_api("#\\");
+    // Test that a backslash alone at EOF outside of a string is treated
+    // as U+FFFD.
+    test_parseable_via_api("#a\\");
+    test_parseable_via_api("#\\");
+    test_parseable_via_api("\\");
 
     // Test that newline escapes are only supported in strings.
     test_balanced_unparseable("di\\\nv");
@@ -979,6 +1183,9 @@ function run() {
     test_balanced_unparseable("div\\\n p");
     test_balanced_unparseable("div \\\np");
     test_balanced_unparseable("div\\\np");
+
+    // Test that :-moz-placeholder is parsable.
+    test_parseable(":-moz-placeholder");
 
     run_deferred_tests();
 }

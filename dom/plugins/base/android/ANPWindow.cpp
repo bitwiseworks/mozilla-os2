@@ -1,4 +1,4 @@
-/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,23 +9,17 @@
 #include <android/log.h>
 #include "AndroidBridge.h"
 #include "nsNPAPIPluginInstance.h"
-#include "nsIPluginInstanceOwner.h"
 #include "nsPluginInstanceOwner.h"
 #include "nsWindow.h"
 #include "mozilla/dom/ScreenOrientation.h"
 
+#undef LOG
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GeckoPlugins" , ## args)
 #define ASSIGN(obj, name)   (obj)->name = anp_window_##name
 
 using namespace mozilla;
 using namespace mozilla::widget;
 using namespace mozilla::dom;
-
-static nsresult GetOwner(NPP instance, nsPluginInstanceOwner** owner) {
-  nsNPAPIPluginInstance* pinst = static_cast<nsNPAPIPluginInstance*>(instance->ndata);
-
-  return pinst->GetOwner((nsIPluginInstanceOwner**)owner);
-}
 
 void
 anp_window_setVisibleRects(NPP instance, const ANPRectI rects[], int32_t count)
@@ -63,10 +57,10 @@ anp_window_showKeyboard(NPP instance, bool value)
 void
 anp_window_requestFullScreen(NPP instance)
 {
-  nsNPAPIPluginInstance* pinst = static_cast<nsNPAPIPluginInstance*>(instance->ndata);
+  nsNPAPIPluginInstance* inst = static_cast<nsNPAPIPluginInstance*>(instance->ndata);
 
-  nsRefPtr<nsPluginInstanceOwner> owner;
-  if (NS_FAILED(GetOwner(instance, getter_AddRefs(owner)))) {
+  nsRefPtr<nsPluginInstanceOwner> owner = inst->GetOwner();
+  if (!owner) {
     return;
   }
 
@@ -76,10 +70,10 @@ anp_window_requestFullScreen(NPP instance)
 void
 anp_window_exitFullScreen(NPP instance)
 {
-  nsNPAPIPluginInstance* pinst = static_cast<nsNPAPIPluginInstance*>(instance->ndata);
+  nsNPAPIPluginInstance* inst = static_cast<nsNPAPIPluginInstance*>(instance->ndata);
 
-  nsRefPtr<nsPluginInstanceOwner> owner;
-  if (NS_FAILED(GetOwner(instance, getter_AddRefs(owner)))) {
+  nsRefPtr<nsPluginInstanceOwner> owner = inst->GetOwner();
+  if (!owner) {
     return;
   }
 
@@ -120,10 +114,12 @@ void anp_window_requestFullScreenOrientation(NPP instance, ANPScreenOrientation 
       newOrientation = eScreenOrientation_PortraitPrimary;
       break;
     case kLandscape_ANPScreenOrientation:
-      newOrientation = eScreenOrientation_Landscape;
+      newOrientation = eScreenOrientation_LandscapePrimary |
+                       eScreenOrientation_LandscapeSecondary;
       break;
     case kPortrait_ANPScreenOrientation:
-      newOrientation = eScreenOrientation_Portrait;
+      newOrientation = eScreenOrientation_PortraitPrimary |
+                       eScreenOrientation_PortraitSecondary;
       break;
     default:
       newOrientation = eScreenOrientation_None;

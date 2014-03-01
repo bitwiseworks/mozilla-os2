@@ -1,0 +1,70 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+if CONFIG['MOZ_PLACES']:
+    TEST_DIRS += ['tests']
+
+XPIDL_SOURCES += [
+    'nsINavHistoryService.idl',
+]
+
+if CONFIG['MOZ_PLACES']:
+    XPIDL_SOURCES += [
+        'mozIAsyncFavicons.idl',
+        'mozIAsyncHistory.idl',
+        'mozIAsyncLivemarks.idl',
+        'mozIColorAnalyzer.idl',
+        'mozIPlacesAutoComplete.idl',
+        'nsIAnnotationService.idl',
+        'nsIBrowserHistory.idl',
+        'nsIFaviconService.idl',
+        'nsINavBookmarksService.idl',
+        'nsITaggingService.idl ',
+        'nsPIPlacesDatabase.idl',
+        'nsPIPlacesHistoryListenersNotifier.idl',
+    ]
+
+    EXPORTS.mozilla.places = [
+        'History.h',
+        'Database.h',
+    ]
+
+    CPP_SOURCES += [
+        'nsAnnoProtocolHandler.cpp',
+        'nsAnnotationService.cpp',
+        'nsFaviconService.cpp',
+        'nsNavHistory.cpp',
+        'nsNavHistoryQuery.cpp',
+        'nsNavHistoryResult.cpp',
+        'nsNavBookmarks.cpp',
+        'nsMaybeWeakPtr.cpp',
+        'nsPlacesModule.cpp',
+        'SQLFunctions.cpp',
+        'Helpers.cpp',
+        'History.cpp',
+        'AsyncFaviconHelpers.cpp',
+        'PlaceInfo.cpp',
+        'VisitInfo.cpp',
+        'Database.cpp',
+    ]
+
+MODULE = 'places'
+
+
+if CONFIG['MOZ_PLACES']:
+    EXTRA_COMPONENTS += [
+        'ColorAnalyzer.js',
+        'PlacesCategoriesStarter.js',
+        'nsLivemarkService.js',
+        'nsPlacesExpiration.js',
+        'nsTaggingService.js',
+        'toolkitplaces.manifest',
+    ]
+    if CONFIG['MOZ_XUL']:
+        EXTRA_COMPONENTS += [
+            'nsPlacesAutoComplete.js',
+            'nsPlacesAutoComplete.manifest',
+        ]

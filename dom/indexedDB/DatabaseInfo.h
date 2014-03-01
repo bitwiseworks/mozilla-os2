@@ -62,8 +62,6 @@ struct DatabaseInfo : public DatabaseInfoGuts
 
   static void Remove(nsIAtom* aId);
 
-  static void RemoveAllForOrigin(const nsACString& aOrigin);
-
   bool GetObjectStoreNames(nsTArray<nsString>& aNames);
   bool ContainsStoreName(const nsAString& aName);
 
@@ -92,7 +90,7 @@ struct IndexInfo
   ~IndexInfo();
 #else
   IndexInfo()
-  : id(LL_MININT), keyPath(0), unique(false), multiEntry(false) { }
+  : id(INT64_MIN), keyPath(0), unique(false), multiEntry(false) { }
 #endif
 
   bool operator==(const IndexInfo& aOther) const

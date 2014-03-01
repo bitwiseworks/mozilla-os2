@@ -35,7 +35,7 @@
 == percent-truncation-1.html percent-truncation-1-ref.html
 == percent-truncation-2.html percent-truncation-2-ref.html
 == percent-truncation-3.html percent-truncation-3-ref.html
-== balancing-1.html balancing-1-ref.html
+skip-if(B2G) == balancing-1.html balancing-1-ref.html # bug 773482
 == balancing-2.html balancing-2-ref.html
 == cellpadding.html cellpadding-ref.html
 == cellspacing.html cellspacing-ref.html
@@ -60,3 +60,7 @@ fails == default-box-sizing-collapse-quirks.html default-box-sizing-collapse-qui
 == colgroup-vs-column-4.html colgroup-vs-column-4-ref.html
 == dynamic-fixed-layout-1.html dynamic-fixed-layout-1-ref.html
 == cell-pref-width-border-box.html cell-pref-width-border-box-ref.html
+== colspan-distribute-to-empty-1a.html colspan-distribute-to-empty-1-ref.html
+== colspan-distribute-to-empty-1b.html colspan-distribute-to-empty-1-ref.html
+== colspan-distribute-to-empty-2.html colspan-distribute-to-empty-2-ref.html
+== distribute-percent-nonoriginating.html distribute-percent-nonoriginating-ref.html

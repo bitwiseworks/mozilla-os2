@@ -21,6 +21,7 @@
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIDOMElement.h"
+#include "nsIDOMHTMLCollection.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsTArray.h"
@@ -32,6 +33,7 @@
 
 using namespace mozilla::widget;
 using namespace mozilla;
+using mozilla::MutexAutoLock;
 
 nsTArray<GfxDriverInfo>* GfxInfoBase::mDriverInfo;
 bool GfxInfoBase::mDriverInfoObserverInitialized;
@@ -63,7 +65,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(ShutdownObserver, nsIObserver);
+NS_IMPL_ISUPPORTS1(ShutdownObserver, nsIObserver)
 
 void InitGfxDriverInfoShutdownObserver()
 {
@@ -85,7 +87,7 @@ void InitGfxDriverInfoShutdownObserver()
 using namespace mozilla::widget;
 using namespace mozilla;
 
-NS_IMPL_ISUPPORTS3(GfxInfoBase, nsIGfxInfo, nsIObserver, nsISupportsWeakReference)
+NS_IMPL_THREADSAFE_ISUPPORTS3(GfxInfoBase, nsIGfxInfo, nsIObserver, nsISupportsWeakReference)
 
 #define BLACKLIST_PREF_BRANCH "gfx.blacklist."
 #define SUGGESTED_VERSION_PREF BLACKLIST_PREF_BRANCH "suggested-driver-version"
@@ -228,7 +230,7 @@ BlacklistOSToOperatingSystem(const nsAString& os)
 }
 
 static GfxDeviceFamily*
-BlacklistDevicesToDeviceFamily(nsIDOMNodeList* aDevices)
+BlacklistDevicesToDeviceFamily(nsIDOMHTMLCollection* aDevices)
 {
   uint32_t length;
   if (NS_FAILED(aDevices->GetLength(&length)))
@@ -327,7 +329,7 @@ BlacklistNodeGetChildByName(nsIDOMElement *element,
                             const nsAString& tagname,
                             nsIDOMNode** firstchild)
 {
-  nsCOMPtr<nsIDOMNodeList> nodelist;
+  nsCOMPtr<nsIDOMHTMLCollection> nodelist;
   if (NS_FAILED(element->GetElementsByTagName(tagname,
                                               getter_AddRefs(nodelist))) ||
       !nodelist) {
@@ -407,7 +409,7 @@ BlacklistEntryToDriverInfo(nsIDOMNode* aBlacklistEntry,
 
       // Get only the <device> nodes, because BlacklistDevicesToDeviceFamily
       // assumes it is passed no other nodes.
-      nsCOMPtr<nsIDOMNodeList> devices;
+      nsCOMPtr<nsIDOMHTMLCollection> devices;
       if (NS_SUCCEEDED(devicesElement->GetElementsByTagName(NS_LITERAL_STRING("device"),
                                                             getter_AddRefs(devices)))) {
         GfxDeviceFamily* deviceIds = BlacklistDevicesToDeviceFamily(devices);
@@ -481,7 +483,7 @@ BlacklistEntryToDriverInfo(nsIDOMNode* aBlacklistEntry,
 }
 
 static void
-BlacklistEntriesToDriverInfo(nsIDOMNodeList* aBlacklistEntries,
+BlacklistEntriesToDriverInfo(nsIDOMHTMLCollection* aBlacklistEntries,
                              nsTArray<GfxDriverInfo>& aDriverInfo)
 {
   uint32_t length;
@@ -512,7 +514,7 @@ GfxInfoBase::Observe(nsISupports* aSubject, const char* aTopic,
   if (strcmp(aTopic, "blocklist-data-gfxItems") == 0) {
     nsCOMPtr<nsIDOMElement> gfxItems = do_QueryInterface(aSubject);
     if (gfxItems) {
-      nsCOMPtr<nsIDOMNodeList> blacklistEntries;
+      nsCOMPtr<nsIDOMHTMLCollection> blacklistEntries;
       if (NS_SUCCEEDED(gfxItems->
             GetElementsByTagName(NS_LITERAL_STRING(BLACKLIST_ENTRY_TAG_NAME),
                                  getter_AddRefs(blacklistEntries))) &&
@@ -530,6 +532,7 @@ GfxInfoBase::Observe(nsISupports* aSubject, const char* aTopic,
 
 GfxInfoBase::GfxInfoBase()
     : mFailureCount(0)
+    , mMutex("GfxInfoBase")
 {
 }
 
@@ -837,14 +840,15 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
 NS_IMETHODIMP_(void)
 GfxInfoBase::LogFailure(const nsACString &failure)
 {
+  MutexAutoLock lock(mMutex);
   /* We only keep the first 9 failures */
   if (mFailureCount < ArrayLength(mFailures)) {
     mFailures[mFailureCount++] = failure;
 
     /* record it in the crash notes too */
-#if defined(MOZ_CRASHREPORTER)
-    CrashReporter::AppendAppNotesToCrashReport(failure);
-#endif
+    #if defined(MOZ_CRASHREPORTER)
+      CrashReporter::AppendAppNotesToCrashReport(failure);
+    #endif
   }
 
 }

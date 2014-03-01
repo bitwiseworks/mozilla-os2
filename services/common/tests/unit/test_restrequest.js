@@ -41,7 +41,8 @@ add_test(function test_attributes() {
   do_check_eq(request.response, null);
   do_check_eq(request.status, request.NOT_SENT);
   let expectedLoadFlags = Ci.nsIRequest.LOAD_BYPASS_CACHE |
-                          Ci.nsIRequest.INHIBIT_CACHING;
+                          Ci.nsIRequest.INHIBIT_CACHING |
+                          Ci.nsIRequest.LOAD_ANONYMOUS;
   do_check_eq(request.loadFlags, expectedLoadFlags);
 
   run_next_test();
@@ -85,6 +86,22 @@ add_test(function test_proxy_auth_redirect() {
     do_check_eq("TADA!", this.response.body);
     uninstallFakePAC();
     server.stop(run_next_test);
+  });
+});
+
+/**
+ * Ensure that failures that cause asyncOpen to throw
+ * result in callbacks being invoked.
+ * Bug 826086.
+ */
+add_test(function test_forbidden_port() {
+  let request = new RESTRequest("http://localhost:6000/");
+  request.get(function(error) {
+    if (!error) {
+      do_throw("Should have got an error.");
+    }
+    do_check_eq(error.result, Components.results.NS_ERROR_PORT_ACCESS_NOT_ALLOWED);
+    run_next_test();
   });
 });
 
@@ -783,7 +800,32 @@ add_test(function test_new_channel() {
 
     do_check_eq(200, response.status);
     do_check_eq("Test", response.body);
+    do_check_true(redirectRequested);
+    do_check_true(resourceRequested);
 
     advance();
+  });
+});
+
+add_test(function test_not_sending_cookie() {
+  function handler(metadata, response) {
+    let body = "COOKIE!";
+    response.setStatusLine(metadata.httpVersion, 200, "OK");
+    response.bodyOutputStream.write(body, body.length);
+    do_check_false(metadata.hasHeader("Cookie"));
+  }
+  let server = httpd_setup({"/test": handler});
+
+  let cookieSer = Cc["@mozilla.org/cookieService;1"]
+                    .getService(Ci.nsICookieService);
+  let uri = CommonUtils.makeURI("http://localhost:8080");
+  cookieSer.setCookieString(uri, null, "test=test; path=/;", null);
+
+  let res = new RESTRequest("http://localhost:8080/test");
+  res.get(function (error) {
+    do_check_null(error);
+    do_check_true(this.response.success);
+    do_check_eq("COOKIE!", this.response.body);
+    server.stop(run_next_test);
   });
 });

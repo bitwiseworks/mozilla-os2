@@ -9,74 +9,11 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = dom
 LIBRARY_NAME = domipc_s
 LIBXUL_LIBRARY = 1
 FORCE_STATIC_LIB = 1
 EXPORT_LIBRARY = 1
 FAIL_ON_WARNINGS := 1
-
-ifneq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-TEST_DIRS += tests
-endif
-
-EXPORTS = PCOMContentPermissionRequestChild.h
-
-EXPORTS_NAMESPACES = \
-  mozilla \
-  mozilla/dom \
-  mozilla/dom/ipc \
-  $(NULL)
-
-EXPORTS_mozilla = \
-  AppProcessPermissions.h \
-  $(NULL)
-
-EXPORTS_mozilla/dom = \
-  ContentChild.h \
-  ContentParent.h \
-  ContentProcess.h \
-  CrashReporterChild.h \
-  CrashReporterParent.h \
-  PermissionMessageUtils.h \
-  StructuredCloneUtils.h \
-  TabParent.h \
-  TabChild.h \
-  TabMessageUtils.h \
-  $(NULL)
-
-EXPORTS_mozilla/dom/ipc = \
-  Blob.h \
-  ProcessPriorityManager.h \
-  nsIRemoteBlob.h \
-  $(NULL)
-
-CPPSRCS = \
-  AppProcessPermissions.cpp \
-  Blob.cpp \
-  ContentProcess.cpp \
-  ContentParent.cpp \
-  ContentChild.cpp \
-  CrashReporterParent.cpp \
-  CrashReporterChild.cpp \
-  PermissionMessageUtils.cpp \
-  ProcessPriorityManager.cpp \
-  StructuredCloneUtils.cpp \
-  TabParent.cpp \
-  TabChild.cpp \
-  TabMessageUtils.cpp \
-  $(NULL)
-
-ifdef MOZ_SYDNEYAUDIO
-EXPORTS_mozilla/dom += \
-  AudioChild.h \
-  AudioParent.h \
-  $(NULL)
-CPPSRCS += \
-  AudioChild.cpp \
-  AudioParent.cpp \
-  $(NULL)
-endif
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
@@ -85,11 +22,12 @@ include $(topsrcdir)/config/rules.mk
 LOCAL_INCLUDES += \
 	-I$(srcdir)/../../content/base/src \
 	-I$(srcdir)/../../content/events/src \
-	-I$(srcdir)/../../toolkit/components/places \
+	-I$(srcdir)/../../docshell/base \
 	-I$(topsrcdir)/chrome/src \
 	-I$(topsrcdir)/uriloader/exthandler \
 	-I$(srcdir)/../../netwerk/base/src \
 	-I$(srcdir)/../src/base \
+	-I$(srcdir)/../src/geolocation \
 	-I$(srcdir)/../src/storage \
 	-I$(srcdir)/../../xpcom/base \
 	-I$(topsrcdir)/dom/indexedDB \
@@ -98,8 +36,13 @@ LOCAL_INCLUDES += \
 	-I$(topsrcdir)/dom/base \
 	-I$(topsrcdir)/toolkit/xre \
 	-I$(topsrcdir)/hal/sandbox \
-	-I$(topsrcdir)/dom/sms/src/ipc \
+	-I$(topsrcdir)/dom/mobilemessage/src/ipc \
 	-I$(topsrcdir)/dom/devicestorage \
+	-I$(topsrcdir)/widget/xpwidgets \
+	-I$(topsrcdir)/dom/bluetooth \
+	-I$(topsrcdir)/dom/bluetooth/ipc \
+	-I$(topsrcdir)/content/media/webspeech/synth/ipc \
+	-I$(topsrcdir)/js/ipc \
 	$(NULL)
 
 DEFINES += -DBIN_SUFFIX='"$(BIN_SUFFIX)"'

@@ -10,11 +10,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= test_startupcache
-
 CPP_UNIT_TESTS = TestStartupCache.cpp
 
-EXTRA_DSO_LIBS += xul
 LIBS += $(MOZ_COMPONENT_LIBS)
 
 include $(topsrcdir)/config/rules.mk

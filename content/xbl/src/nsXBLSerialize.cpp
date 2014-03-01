@@ -4,23 +4,28 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsXBLSerialize.h"
-#include "nsDOMScriptObjectHolder.h"
+#include "nsIXPConnect.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
+#include "jsdbgapi.h"
+
+using namespace mozilla;
 
 nsresult
 XBL_SerializeFunction(nsIScriptContext* aContext,
                       nsIObjectOutputStream* aStream,
-                      JSObject* aFunctionObject)
+                      JS::Handle<JSObject*> aFunction)
 {
-  JSContext* cx = aContext->GetNativeContext();
-  return nsContentUtils::XPConnect()->WriteFunction(aStream, cx, aFunctionObject);
+  AutoPushJSContext cx(aContext->GetNativeContext());
+  return nsContentUtils::XPConnect()->WriteFunction(aStream, cx, aFunction);
 }
 
 nsresult
 XBL_DeserializeFunction(nsIScriptContext* aContext,
                         nsIObjectInputStream* aStream,
-                        JSObject** aFunctionObjectp)
+                        JS::MutableHandle<JSObject*> aFunctionObjectp)
 {
-  JSContext* cx = aContext->GetNativeContext();
-  return nsContentUtils::XPConnect()->ReadFunction(aStream, cx, aFunctionObjectp);
+  AutoPushJSContext cx(aContext->GetNativeContext());
+  return nsContentUtils::XPConnect()->ReadFunction(aStream, cx,
+                                                   aFunctionObjectp.address());
 }

@@ -18,7 +18,7 @@ class ReadbackProcessor;
  * These update callbacks are always called on the main thread, either during
  * EndTransaction or from the event loop.
  */
-class THEBES_API ReadbackSink {
+class ReadbackSink {
 public:
   ReadbackSink() {}
   virtual ~ReadbackSink() {}
@@ -66,7 +66,7 @@ public:
  * This API exists to work around the limitations of transparent windowless
  * plugin rendering APIs. It should not be used for anything else.
  */
-class THEBES_API ReadbackLayer : public Layer {
+class ReadbackLayer : public Layer {
 public:
   MOZ_LAYER_DECL_NAME("ReadbackLayer", TYPE_READBACK)
 
@@ -79,7 +79,7 @@ public:
     mEffectiveTransform =
         SnapTransform(GetLocalTransform(), gfxRect(0, 0, mSize.width, mSize.height),
                       nullptr)*
-        SnapTransform(aTransformToSurface, gfxRect(0, 0, 0, 0), nullptr);
+        SnapTransformTranslation(aTransformToSurface, nullptr);
   }
 
   /**

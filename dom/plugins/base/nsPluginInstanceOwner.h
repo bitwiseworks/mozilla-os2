@@ -7,23 +7,17 @@
 #ifndef nsPluginInstanceOwner_h_
 #define nsPluginInstanceOwner_h_
 
-#include "prtypes.h"
+#include "mozilla/Attributes.h"
 #include "npapi.h"
 #include "nsCOMPtr.h"
 #include "nsIPluginInstanceOwner.h"
 #include "nsIPluginTagInfo.h"
 #include "nsIPrivacyTransitionObserver.h"
 #include "nsIDOMEventListener.h"
-#include "nsIScrollPositionListener.h"
 #include "nsPluginHost.h"
 #include "nsPluginNativeWindow.h"
 #include "nsWeakReference.h"
 #include "gfxRect.h"
-
-// X.h defines KeyPress
-#ifdef KeyPress
-#undef KeyPress
-#endif
 
 #ifdef XP_MACOSX
 #include "mozilla/gfx/QuartzSupport.h"
@@ -51,15 +45,9 @@ class gfxXlibSurface;
 #include <os2.h>
 #endif
 
-// X.h defines KeyPress
-#ifdef KeyPress
-#undef KeyPress
-#endif
-
 class nsPluginInstanceOwner : public nsIPluginInstanceOwner,
                               public nsIPluginTagInfo,
                               public nsIDOMEventListener,
-                              public nsIScrollPositionListener,
                               public nsIPrivacyTransitionObserver,
                               public nsSupportsWeakReference
 {
@@ -73,19 +61,19 @@ public:
   
   NS_IMETHOD GetURL(const char *aURL, const char *aTarget,
                     nsIInputStream *aPostStream, 
-                    void *aHeadersData, uint32_t aHeadersDataLen);
+                    void *aHeadersData, uint32_t aHeadersDataLen) MOZ_OVERRIDE;
   
-  NS_IMETHOD ShowStatus(const PRUnichar *aStatusMsg);
+  NS_IMETHOD ShowStatus(const PRUnichar *aStatusMsg) MOZ_OVERRIDE;
   
-  NPError    ShowNativeContextMenu(NPMenu* menu, void* event);
+  NPError    ShowNativeContextMenu(NPMenu* menu, void* event) MOZ_OVERRIDE;
   
   NPBool     ConvertPoint(double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
-                          double *destX, double *destY, NPCoordinateSpace destSpace);
+                          double *destX, double *destY, NPCoordinateSpace destSpace) MOZ_OVERRIDE;
   
   virtual NPError InitAsyncSurface(NPSize *size, NPImageFormat format,
-                                   void *initData, NPAsyncSurface *surface);
-  virtual NPError FinalizeAsyncSurface(NPAsyncSurface *surface);
-  virtual void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed);
+                                   void *initData, NPAsyncSurface *surface) MOZ_OVERRIDE;
+  virtual NPError FinalizeAsyncSurface(NPAsyncSurface *surface) MOZ_OVERRIDE;
+  virtual void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed) MOZ_OVERRIDE;
 
   //nsIPluginTagInfo interface
   NS_DECL_NSIPLUGINTAGINFO
@@ -93,8 +81,8 @@ public:
   // nsIDOMEventListener interfaces 
   NS_DECL_NSIDOMEVENTLISTENER
   
-  nsresult MouseDown(nsIDOMEvent* aKeyEvent);
-  nsresult KeyPress(nsIDOMEvent* aKeyEvent);
+  nsresult ProcessMouseDown(nsIDOMEvent* aKeyEvent);
+  nsresult ProcessKeyPress(nsIDOMEvent* aKeyEvent);
 #if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
   nsresult Text(nsIDOMEvent* aTextEvent);
 #endif
@@ -114,17 +102,7 @@ public:
 #elif defined(XP_OS2)
   void Paint(const nsRect& aDirtyRect, HPS aHPS);
 #endif
-  
-#ifdef MAC_CARBON_PLUGINS
-  void CancelTimer();
-  void StartTimer(bool isVisible);
-#endif
-  void SendIdleEvent();
-  
-  // nsIScrollPositionListener interface
-  virtual void ScrollPositionWillChange(nscoord aX, nscoord aY);
-  virtual void ScrollPositionDidChange(nscoord aX, nscoord aY);
-  
+
   //locals
   
   nsresult Init(nsIContent* aContent);
@@ -139,6 +117,7 @@ public:
   
   NPDrawingModel GetDrawingModel();
   bool IsRemoteDrawingCoreAnimation();
+  nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
   NPEventModel GetEventModel();
   static void CARefresh(nsITimer *aTimer, void *aClosure);
   void AddToCARefreshTimer();
@@ -235,7 +214,7 @@ public:
   void NotifyPaintWaiter(nsDisplayListBuilder* aBuilder);
 
   // Returns the image container that has our currently displayed image.
-  already_AddRefed<ImageContainer> GetImageContainer();
+  already_AddRefed<mozilla::layers::ImageContainer> GetImageContainer();
 
   /**
    * Returns the bounds of the current async-rendered surface. This can only
@@ -258,7 +237,7 @@ public:
 #ifdef MOZ_WIDGET_ANDROID
   // Returns the image container for the specified VideoInfo
   void GetVideos(nsTArray<nsNPAPIPluginInstance::VideoInfo*>& aVideos);
-  already_AddRefed<ImageContainer> GetImageContainerForVideo(nsNPAPIPluginInstance::VideoInfo* aVideoInfo);
+  already_AddRefed<mozilla::layers::ImageContainer> GetImageContainerForVideo(nsNPAPIPluginInstance::VideoInfo* aVideoInfo);
 
   void Invalidate();
 
@@ -288,27 +267,18 @@ private:
   bool mFullScreen;
   void* mJavaView;
 #endif 
-
-#if defined(XP_MACOSX) && !defined(NP_NO_CARBON)
-  void AddScrollPositionListener();
-  void RemoveScrollPositionListener();
-#endif
  
   nsPluginNativeWindow       *mPluginWindow;
   nsRefPtr<nsNPAPIPluginInstance> mInstance;
   nsObjectFrame              *mObjectFrame;
   nsIContent                 *mContent; // WEAK, content owns us
   nsCString                   mDocumentBase;
-  char                       *mTagText;
   bool                        mWidgetCreationComplete;
   nsCOMPtr<nsIWidget>         mWidget;
   nsRefPtr<nsPluginHost>      mPluginHost;
   
 #ifdef XP_MACOSX
   NP_CGContext                              mCGPluginPortCopy;
-#ifndef NP_NO_QUICKDRAW
-  NP_Port                                   mQDPluginPortCopy;
-#endif
   int32_t                                   mInCGPaintLevel;
   mozilla::RefPtr<MacIOSurface>             mIOSurface;
   mozilla::RefPtr<nsCARenderer>             mCARenderer;
@@ -333,9 +303,6 @@ private:
 #endif
   bool                        mPluginWindowVisible;
   bool                        mPluginDocumentActiveState;
-#if defined(XP_MACOSX) && !defined(NP_NO_CARBON)
-  bool                        mRegisteredScrollPositionListener;
-#endif
 
   uint16_t          mNumCachedAttrs;
   uint16_t          mNumCachedParams;

@@ -16,7 +16,7 @@
 #include "nsXBLPrototypeResources.h"
 #include "nsIDocumentObserver.h"
 #include "imgILoader.h"
-#include "imgIRequest.h"
+#include "imgRequestProxy.h"
 #include "mozilla/css/Loader.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
@@ -29,13 +29,7 @@
 #include "nsStyleSet.h"
 #include "nsIScriptSecurityManager.h"
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXBLResourceLoader)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXBLResourceLoader)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMARRAY(mBoundElements)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXBLResourceLoader)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMARRAY(mBoundElements)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_1(nsXBLResourceLoader, mBoundElements)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsXBLResourceLoader)
   NS_INTERFACE_MAP_ENTRY(nsICSSLoaderObserver)
@@ -44,6 +38,27 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXBLResourceLoader)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXBLResourceLoader)
+
+struct nsXBLResource
+{
+  nsXBLResource* mNext;
+  nsIAtom* mType;
+  nsString mSrc;
+
+  nsXBLResource(nsIAtom* aType, const nsAString& aSrc)
+  {
+    MOZ_COUNT_CTOR(nsXBLResource);
+    mNext = nullptr;
+    mType = aType;
+    mSrc = aSrc;
+  }
+
+  ~nsXBLResource()
+  {
+    MOZ_COUNT_DTOR(nsXBLResource);
+    NS_CONTENT_DELETE_LIST_MEMBER(nsXBLResource, this, mNext);
+  }
+};
 
 nsXBLResourceLoader::nsXBLResourceLoader(nsXBLPrototypeBinding* aBinding,
                                          nsXBLPrototypeResources* aResources)
@@ -100,9 +115,9 @@ nsXBLResourceLoader::LoadResources(bool* aResult)
       }
 
       // Now kick off the image load...
-      // Passing NULL for pretty much everything -- cause we don't care!
-      // XXX: initialDocumentURI is NULL! 
-      nsCOMPtr<imgIRequest> req;
+      // Passing nullptr for pretty much everything -- cause we don't care!
+      // XXX: initialDocumentURI is nullptr! 
+      nsRefPtr<imgRequestProxy> req;
       nsContentUtils::LoadImage(url, doc, docPrincipal, docURL, nullptr,
                                 nsIRequest::LOAD_BACKGROUND,
                                 getter_AddRefs(req));
@@ -167,7 +182,8 @@ nsXBLResourceLoader::StyleSheetLoaded(nsCSSStyleSheet* aSheet,
     // All stylesheets are loaded.  
     mResources->mRuleProcessor =
       new nsCSSRuleProcessor(mResources->mStyleSheetList, 
-                             nsStyleSet::eDocSheet);
+                             nsStyleSet::eDocSheet,
+                             nullptr);
 
     // XXX Check for mPendingScripts when scripts also come online.
     if (!mInLoadResourcesFunc)

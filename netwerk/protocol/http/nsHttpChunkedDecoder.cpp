@@ -3,8 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttpChunkedDecoder.h"
 #include "nsHttp.h"
+#include <algorithm>
 
 //-----------------------------------------------------------------------------
 // nsHttpChunkedDecoder <public>
@@ -19,7 +23,7 @@ nsHttpChunkedDecoder::HandleChunkedContent(char *buf,
     LOG(("nsHttpChunkedDecoder::HandleChunkedContent [count=%u]\n", count));
 
     *contentRead = 0;
-    
+
     // from RFC2617 section 3.6.1, the chunked transfer coding is defined as:
     //
     //   Chunked-Body    = *chunk
@@ -30,7 +34,7 @@ nsHttpChunkedDecoder::HandleChunkedContent(char *buf,
     //                     chunk-data CRLF
     //   chunk-size      = 1*HEX
     //   last-chunk      = 1*("0") [ chunk-extension ] CRLF
-    //       
+    //
     //   chunk-extension = *( ";" chunk-ext-name [ "=" chunk-ext-val ] )
     //   chunk-ext-name  = token
     //   chunk-ext-val   = token | quoted-string
@@ -38,12 +42,12 @@ nsHttpChunkedDecoder::HandleChunkedContent(char *buf,
     //   trailer         = *(entity-header CRLF)
     //
     // the chunk-size field is a string of hex digits indicating the size of the
-    // chunk.  the chunked encoding is ended by any chunk whose size is zero, 
+    // chunk.  the chunked encoding is ended by any chunk whose size is zero,
     // followed by the trailer, which is terminated by an empty line.
 
     while (count) {
         if (mChunkRemaining) {
-            uint32_t amt = NS_MIN(mChunkRemaining, count);
+            uint32_t amt = std::min(mChunkRemaining, count);
 
             count -= amt;
             mChunkRemaining -= amt;
@@ -67,7 +71,7 @@ nsHttpChunkedDecoder::HandleChunkedContent(char *buf,
             }
         }
     }
-    
+
     *contentRemaining = count;
     return NS_OK;
 }
@@ -85,7 +89,7 @@ nsHttpChunkedDecoder::ParseChunkRemaining(char *buf,
     NS_PRECONDITION(count, "unexpected");
 
     *bytesConsumed = 0;
-    
+
     char *p = static_cast<char *>(memchr(buf, '\n', count));
     if (p) {
         *p = 0;

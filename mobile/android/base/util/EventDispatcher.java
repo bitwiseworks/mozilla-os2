@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class EventDispatcher {
-    private static final String LOGTAG = "EventDispatcher";
+    private static final String LOGTAG = "GeckoEventDispatcher";
 
     private final Map<String, CopyOnWriteArrayList<GeckoEventListener>> mEventListeners
                   = new HashMap<String, CopyOnWriteArrayList<GeckoEventListener>>();
@@ -27,7 +27,7 @@ public final class EventDispatcher {
                 // Otherwise we could end up throwing a ConcurrentModificationException.
                 listeners = new CopyOnWriteArrayList<GeckoEventListener>();
             } else if (listeners.contains(listener)) {
-                Log.w(LOGTAG, "EventListener already registered for event \"" + event + "\"",
+                Log.w(LOGTAG, "EventListener already registered for event '" + event + "'",
                       new IllegalArgumentException());
             }
             listeners.add(listener);
@@ -39,9 +39,13 @@ public final class EventDispatcher {
         synchronized (mEventListeners) {
             CopyOnWriteArrayList<GeckoEventListener> listeners = mEventListeners.get(event);
             if (listeners == null) {
+                Log.w(LOGTAG, "unregisterEventListener: event '" + event + "' has no listeners");
                 return;
             }
-            listeners.remove(listener);
+            if (!listeners.remove(listener)) {
+                Log.w(LOGTAG, "unregisterEventListener: tried to remove an unregistered listener " +
+                              "for event '" + event + "'");
+            }
             if (listeners.size() == 0) {
                 mEventListeners.remove(event);
             }
@@ -49,30 +53,49 @@ public final class EventDispatcher {
     }
 
     public String dispatchEvent(String message) {
-        //
-        //        {"gecko": {
-        //                "type": "value",
-        //                "event_specific": "value",
-        //                ....
         try {
             JSONObject json = new JSONObject(message);
-            final JSONObject geckoObject = json.getJSONObject("gecko");
-            String type = geckoObject.getString("type");
+            return dispatchEvent(json);
+        } catch (Exception e) {
+            Log.e(LOGTAG, "dispatchEvent: malformed JSON.", e);
+        }
+
+        return "";
+    }
+
+    public String dispatchEvent(JSONObject json) {
+        // {
+        //   "type": "value",
+        //   "event_specific": "value",
+        //   ...
+        try {
+            JSONObject gecko = json.has("gecko") ? json.getJSONObject("gecko") : null;
+            if (gecko != null) {
+                json = gecko;
+            }
+
+            String type = json.getString("type");
+
+            if (gecko != null) {
+                Log.w(LOGTAG, "Message '" + type + "' has deprecated 'gecko' property!");
+            }
 
             CopyOnWriteArrayList<GeckoEventListener> listeners;
             synchronized (mEventListeners) {
                 listeners = mEventListeners.get(type);
             }
 
-            if (listeners == null)
+            if (listeners == null || listeners.size() == 0) {
+                Log.d(LOGTAG, "dispatchEvent: no listeners registered for event '" + type + "'");
                 return "";
+            }
 
             String response = null;
 
             for (GeckoEventListener listener : listeners) {
-                listener.handleMessage(type, geckoObject);
+                listener.handleMessage(type, json);
                 if (listener instanceof GeckoEventResponder) {
-                    String newResponse = ((GeckoEventResponder)listener).getResponse();
+                    String newResponse = ((GeckoEventResponder)listener).getResponse(json);
                     if (response != null && newResponse != null) {
                         Log.e(LOGTAG, "Received two responses for message of type " + type);
                     }

@@ -11,16 +11,6 @@ relativesrcdir = @relativesrcdir@
 
 include $(topsrcdir)/config/config.mk
 
-ifneq (mobile,$(MOZ_BUILD_APP))
-DIRS = \
-    browser \
-    $(NULL)
-endif
-
-# Module name for xpcshell tests.
-MODULE = test_passwordmgr
-XPCSHELL_TESTS = unit
-
 # Mochitest tests
 MOCHITEST_FILES = \
     test_basic_form.html \
@@ -45,13 +35,16 @@ MOCHITEST_FILES = \
     test_bug_427033.html \
     test_bug_444968.html \
     test_bug_627616.html \
+    test_bug_654348.html \
+    test_bug_776171.html \
     test_master_password.html \
     test_master_password_cleanup.html \
     test_maxforms_1.html \
     test_maxforms_2.html \
     test_maxforms_3.html \
     test_notifications.html \
-    test_privbrowsing.html \
+    test_notifications_popup.html \
+    privbrowsing_perwindowpb_iframe.html \
     test_prompt_async.html \
     test_xhr.html \
     test_xml_load.html \
@@ -76,6 +69,8 @@ MOCHITEST_FILES = \
     subtst_notifications_8.html \
     subtst_notifications_9.html \
     subtst_notifications_10.html \
+    subtst_notifications_11.html \
+    subtst_notifications_11_popup.html \
     subtst_prompt_async.html \
     $(NULL)
 
@@ -84,6 +79,13 @@ MOCHITEST_FILES += \
     test_prompt.html \
     $(NULL)
 endif
+
+MOCHITEST_CHROME_FILES += \
+    test_privbrowsing_perwindowpb.html \
+    notification_common.js \
+    pwmgr_common.js \
+    formsubmit.sjs \
+    $(NULL)
 
 # This test doesn't pass because we can't ensure a cross-platform
 # event that occurs between DOMContentLoaded and Pageload

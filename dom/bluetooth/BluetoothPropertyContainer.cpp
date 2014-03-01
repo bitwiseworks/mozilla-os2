@@ -7,8 +7,8 @@
 #include "base/basictypes.h"
 #include "BluetoothPropertyContainer.h"
 #include "BluetoothService.h"
-#include "BluetoothTypes.h"
-#include "nsIDOMDOMRequest.h"
+#include "DOMRequest.h"
+#include "mozilla/dom/bluetooth/BluetoothTypes.h"
 
 USING_BLUETOOTH_NAMESPACE
 
@@ -16,12 +16,9 @@ nsresult
 BluetoothPropertyContainer::FirePropertyAlreadySet(nsIDOMWindow* aOwner,
                                                    nsIDOMDOMRequest** aRequest)
 {
-  nsCOMPtr<nsIDOMRequestService> rs = do_GetService("@mozilla.org/dom/dom-request-service;1");
-    
-  if (!rs) {
-    NS_WARNING("No DOMRequest Service!");
-    return NS_ERROR_FAILURE;
-  }
+  nsCOMPtr<nsIDOMRequestService> rs =
+    do_GetService(DOMREQUEST_SERVICE_CONTRACTID);
+  NS_ENSURE_TRUE(rs, NS_ERROR_FAILURE);
 
   nsCOMPtr<nsIDOMDOMRequest> req;
   nsresult rv = rs->CreateRequest(aOwner, getter_AddRefs(req));
@@ -45,12 +42,10 @@ BluetoothPropertyContainer::SetProperty(nsIDOMWindow* aOwner,
     NS_WARNING("Bluetooth service not available!");
     return NS_ERROR_FAILURE;
   }
-  nsCOMPtr<nsIDOMRequestService> rs = do_GetService("@mozilla.org/dom/dom-request-service;1");
-    
-  if (!rs) {
-    NS_WARNING("No DOMRequest Service!");
-    return NS_ERROR_FAILURE;
-  }
+
+  nsCOMPtr<nsIDOMRequestService> rs =
+    do_GetService(DOMREQUEST_SERVICE_CONTRACTID);
+  NS_ENSURE_TRUE(rs, NS_ERROR_FAILURE);
 
   nsCOMPtr<nsIDOMDOMRequest> req;
   nsresult rv = rs->CreateRequest(aOwner, getter_AddRefs(req));
@@ -60,10 +55,10 @@ BluetoothPropertyContainer::SetProperty(nsIDOMWindow* aOwner,
   }
 
   nsRefPtr<BluetoothReplyRunnable> task = new BluetoothVoidReplyRunnable(req);
-  
-  rv = bs->SetProperty(mObjectType, mPath, aProperty, task);
+
+  rv = bs->SetProperty(mObjectType, aProperty, task);
   NS_ENSURE_SUCCESS(rv, rv);
-  
+
   req.forget(aRequest);
   return NS_OK;
 }

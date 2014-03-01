@@ -40,7 +40,7 @@ nsRDFConInstanceTestNode::nsRDFConInstanceTestNode(TestNode* aParent,
 {
 #ifdef PR_LOGGING
     if (PR_LOG_TEST(gXULTemplateLog, PR_LOG_DEBUG)) {
-        nsCAutoString props;
+        nsAutoCString props;
 
         nsResourceSet& containmentProps = aProcessor->ContainmentProperties();
         nsResourceSet::ConstIterator last = containmentProps.Last();
@@ -211,7 +211,7 @@ nsRDFConInstanceTestNode::FilterInstantiations(InstantiationSet& aInstantiations
                 ((mContainer == eDontCare) && (mEmpty == empty)))
             {
                 Element* element =
-                    nsRDFConInstanceTestNode::Element::Create(valueres, container, empty);
+                    new nsRDFConInstanceTestNode::Element(valueres, container, empty);
 
                 if (! element)
                     return NS_ERROR_OUT_OF_MEMORY;

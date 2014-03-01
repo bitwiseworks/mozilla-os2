@@ -29,27 +29,11 @@ GetScriptContextFromJSContext(JSContext *cx)
   return scx;
 }
 
-inline nsIScriptContextPrincipal*
-GetScriptContextPrincipalFromJSContext(JSContext *cx)
-{
-  if (!(::JS_GetOptions(cx) & JSOPTION_PRIVATE_IS_NSISUPPORTS)) {
-    return nullptr;
-  }
-
-  nsCOMPtr<nsIScriptContextPrincipal> scx =
-    do_QueryInterface(static_cast<nsISupports *>
-                                 (::JS_GetContextPrivate(cx)));
-
-  // This will return a pointer to something that's about to be
-  // released, but that's ok here.
-  return scx;
-}
-
-// A factory function for turning a jsval argv into an nsIArray
+// A factory function for turning a JS::Value argv into an nsIArray
 // but also supports an effecient way of extracting the original argv.
 // Bug 312003 describes why this must be "void *", but argv will be cast to
-// jsval* and the args are found at:
-//    ((jsval*)aArgv)[0], ..., ((jsval*)aArgv)[aArgc - 1]
+// JS::Value* and the args are found at:
+//    ((JS::Value*)aArgv)[0], ..., ((JS::Value*)aArgv)[aArgc - 1]
 // The resulting object will take a copy of the array, and ensure each
 // element is rooted.
 // Optionally, aArgv may be NULL, in which case the array is allocated and

@@ -10,15 +10,16 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = sqlite3
-LIBRARY_NAME     = mozsqlite3
 SHORT_LIBNAME    = mozsqlt3
+ifdef MOZ_FOLD_LIBS
+FORCE_STATIC_LIB = 1
+else
 FORCE_SHARED_LIB = 1
+endif
 VISIBILITY_FLAGS =
 LIB_IS_C_ONLY    = 1
 
 ifeq ($(OS_ARCH),WINNT)
-ifndef GNU_CC
 DEFFILE = $(CURDIR)/sqlite-processed.def
 RCFILE  = sqlite.rc
 RESFILE = sqlite.res
@@ -40,7 +41,6 @@ $(DEFFILE): sqlite.def
 
 export:: sqlite-version.h
 endif
-endif
 
 ifeq (Darwin,$(OS_TARGET))
 # On OSX, with jemalloc enabled, having sqlite linked against mozglue
@@ -60,10 +60,6 @@ ifeq ($(OS_ARCH),WINNT)
 MODULE_OPTIMIZE_FLAGS = -O2
 endif
 
-EXPORTS = \
-  sqlite3.h \
-  $(NULL)
-
 CSRCS = \
   sqlite3.c \
   $(NULL)
@@ -73,8 +69,11 @@ CSRCS = \
 # -DSQLITE_ENABLE_FTS3=1 enables the full-text index module.
 # -DSQLITE_CORE=1 statically links that module into the SQLite library.
 # -DSQLITE_DEFAULT_PAGE_SIZE=32768 and SQLITE_MAX_DEFAULT_PAGE_SIZE=32768
-# increases the page size from 1k, see bug 416330.  The value must stay in sync
-# with mozIStorageConnection::DEFAULT_PAGE_SIZE.
+# increases the page size from 1k, see bug 416330.  It must be kept in sync with
+# the value of PREF_TS_PAGESIZE_DEFAULT in mozStorageService.cpp.  The value can
+# be overridden on a per-platform basis through the use of the PREF_TS_PAGESIZE
+# hidden preference.  If that preference is missing or invalid then this value
+# will be used.
 # -DSQLITE_MAX_SCHEMA_RETRY increases the times SQLite may try to reparse
 # statements when the schema changes. This is important when supporting lots of
 # concurrent connections, especially when they use shared cache.

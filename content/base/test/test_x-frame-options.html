@@ -15,19 +15,16 @@
 <script class="testbody" type="text/javascript">
 
 function examiner() {
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-  var obsvc = Components.classes['@mozilla.org/observer-service;1']
-                        .getService(Components.interfaces.nsIObserverService);
-  obsvc.addObserver(this, "http-on-examine-response", false);
+  SpecialPowers.addObserver(this, "http-on-examine-response", false);
 }
 examiner.prototype  = {
   observe: function(subject, topic, data) {
-    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+    subject = SpecialPowers.wrap(subject);
     if(!subject.QueryInterface)
       return;
 
     if (topic == "http-on-examine-response") {
-      var chan = subject.QueryInterface(Components.interfaces.nsIHttpChannel);
+      var chan = subject.QueryInterface(SpecialPowers.Ci.nsIHttpChannel);
       var uri = chan.URI
       if (!uri.path.match(/^\/tests\/content\/base\/test\/file_x-frame-options_page\.sjs/))
         return;
@@ -43,10 +40,7 @@ examiner.prototype  = {
   },
 
   remove: function() {
-    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-    var obsvc = Components.classes['@mozilla.org/observer-service;1']
-                          .getService(Components.interfaces.nsIObserverService);
-    obsvc.removeObserver(this, "http-on-examine-response");
+    SpecialPowers.removeObserver(this, "http-on-examine-response");
   }
 }
 
@@ -55,8 +49,7 @@ window.examiner = new examiner();
 var path = "/tests/content/base/test/";
 
 var testFramesLoaded = function() {
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-  var harness = document.getElementById("harness");
+  var harness = SpecialPowers.wrap(document).getElementById("harness");
 
   // iframe from same origin, no X-F-O header - should load
   var frame = harness.contentDocument.getElementById("control1");
@@ -107,6 +100,42 @@ var testFramesLoaded = function() {
   frame = harness.contentDocument.getElementById("mixedpolicy");
   var test10 = frame.contentDocument.getElementById("test");
   is(test10, null, "test mixedpolicy");
+
+  // iframe from different origin, allow-from: this origin - should load
+  frame = harness.contentDocument.getElementById("allow-from-allow");
+  var test11 = frame.contentDocument.getElementById("test").textContent;
+  is(test11, "allow-from-allow", "test allow-from-allow");
+
+  // iframe from different origin, with allow-from: other - should not load
+  frame = harness.contentDocument.getElementById("allow-from-deny");
+  var test12 = frame.contentDocument.getElementById("test");
+  is(test12, null, "test allow-from-deny");
+
+  // iframe from different origin, X-F-O: SAMEORIGIN, multipart - should not load
+  frame = harness.contentDocument.getElementById("sameorigin-multipart");
+  var test13 = frame.contentDocument.getElementById("test");
+  is(test13, null, "test sameorigin-multipart");
+
+  // iframe from same origin, X-F-O: SAMEORIGIN, multipart - should load
+  frame = harness.contentDocument.getElementById("sameorigin-multipart2");
+  var test14 = frame.contentDocument.getElementById("test").textContent;
+  is(test14, "sameorigin-multipart2", "test sameorigin-multipart2");
+
+
+  // frames from bug 836132 tests
+  {
+    frame = harness.contentDocument.getElementById("allow-from-allow-1");
+    var theTestResult = frame.contentDocument.getElementById("test");
+    isnot(theTestResult, null, "test afa1 should have been allowed");
+    if(theTestResult) {
+      is(theTestResult.textContent, "allow-from-allow-1", "test allow-from-allow-1");
+    }
+  }
+  for (var i = 1; i<=14; i++) {
+    frame = harness.contentDocument.getElementById("allow-from-deny-" + i);
+    var theTestResult = frame.contentDocument.getElementById("test");
+    is(theTestResult, null, "test allow-from-deny-" + i);
+  }
 
   // call tests to check principal comparison, e.g. a document can open a window
   // to a data: or javascript: document which frames an

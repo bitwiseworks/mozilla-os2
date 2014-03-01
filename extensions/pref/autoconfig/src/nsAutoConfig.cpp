@@ -14,7 +14,6 @@
 #include "nsThreadUtils.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "prmem.h"
-#include "nsIProfile.h"
 #include "nsIObserverService.h"
 #include "nsLiteralString.h"
 #include "nsIPromptService.h"
@@ -22,6 +21,7 @@
 #include "nsIStringBundle.h"
 #include "nsCRT.h"
 #include "nspr.h"
+#include <algorithm>
 
 PRLogModuleInfo *MCD;
 
@@ -96,7 +96,7 @@ NS_IMETHODIMP
 nsAutoConfig::OnDataAvailable(nsIRequest *request, 
                               nsISupports *context,
                               nsIInputStream *aIStream, 
-                              uint32_t aSourceOffset,
+                              uint64_t aSourceOffset,
                               uint32_t aLength)
 {    
     uint32_t amt, size;
@@ -104,7 +104,7 @@ nsAutoConfig::OnDataAvailable(nsIRequest *request,
     char buf[1024];
     
     while (aLength) {
-        size = NS_MIN<size_t>(aLength, sizeof(buf));
+        size = std::min<size_t>(aLength, sizeof(buf));
         rv = aIStream->Read(buf, size, &amt);
         if (NS_FAILED(rv))
             return rv;
@@ -180,21 +180,6 @@ NS_IMETHODIMP nsAutoConfig::Observe(nsISupports *aSubject,
     nsresult rv = NS_OK;
     if (!nsCRT::strcmp(aTopic, "profile-after-change")) {
 
-        // Getting the current profile name since we already have the 
-        // pointer to the object.
-        nsCOMPtr<nsIProfile> profile = do_QueryInterface(aSubject);
-        if (profile) {
-            nsXPIDLString profileName;
-            rv = profile->GetCurrentProfile(getter_Copies(profileName));
-            if (NS_SUCCEEDED(rv)) {
-                // setting the member variable to the current profile name
-                CopyUTF16toUTF8(profileName, mCurrProfile);
-            }
-            else {
-                NS_WARNING("nsAutoConfig::GetCurrentProfile() failed");
-            }
-        } 
-
         // We will be calling downloadAutoConfig even if there is no profile 
         // name. Nothing will be passed as a parameter to the URL and the
         // default case will be picked up by the script.
@@ -209,7 +194,7 @@ NS_IMETHODIMP nsAutoConfig::Observe(nsISupports *aSubject,
 nsresult nsAutoConfig::downloadAutoConfig()
 {
     nsresult rv;
-    nsCAutoString emailAddr;
+    nsAutoCString emailAddr;
     nsXPIDLCString urlName;
     static bool firstTime = true;
     
@@ -418,13 +403,13 @@ nsresult nsAutoConfig::evaluateLocalFile(nsIFile *file)
         return rv;
         
     int64_t fileSize;
-    uint32_t fs, amt=0;
     file->GetFileSize(&fileSize);
-    LL_L2UI(fs, fileSize); // Converting 64 bit structure to unsigned int
+    uint32_t fs = fileSize; // Converting 64 bit structure to unsigned int
     char *buf = (char *)PR_Malloc(fs * sizeof(char));
     if (!buf) 
         return NS_ERROR_OUT_OF_MEMORY;
-    
+
+    uint32_t amt = 0;
     rv = inStr->Read(buf, fs, &amt);
     if (NS_SUCCEEDED(rv)) {
       EvaluateAdminConfigScript(buf, fs, nullptr, false, 
@@ -496,8 +481,8 @@ nsresult nsAutoConfig::getEmailAddr(nsACString & emailAddr)
                                   getter_Copies(prefValue));
         if (NS_SUCCEEDED(rv) && !prefValue.IsEmpty())
             emailAddr = prefValue;
-        else if (NS_FAILED(PromptForEMailAddress(emailAddr))  && (!mCurrProfile.IsEmpty()))
-            emailAddr = mCurrProfile;
+        else
+            PromptForEMailAddress(emailAddr);
     }
     
     return NS_OK;

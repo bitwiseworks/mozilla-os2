@@ -63,6 +63,10 @@ namespace plugins {
 
 class BrowserStreamParent;
 
+#ifdef XP_WIN
+class PluginHangUIParent;
+#endif
+
 /**
  * PluginModuleParent
  *
@@ -147,6 +151,13 @@ public:
     GetIdentifierForNPIdentifier(NPP npp, NPIdentifier aIdentifier);
 
     void ProcessRemoteNativeEventsInRPCCall();
+
+    void TerminateChildProcess(MessageLoop* aMsgLoop);
+
+#ifdef XP_WIN
+    void
+    ExitedCxxStack() MOZ_OVERRIDE;
+#endif // XP_WIN
 
 protected:
     virtual mozilla::ipc::RPCChannel::RacyRPCPolicy
@@ -289,6 +300,7 @@ private:
 
 #if defined(XP_MACOSX)
     virtual nsresult IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing);
+    virtual nsresult ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor);
 #endif
 #if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
     virtual nsresult HandleGUIEvent(NPP instance, const nsGUIEvent& anEvent,
@@ -302,9 +314,15 @@ private:
     void ProcessFirstMinidump();
     void WriteExtraDataForMinidump(CrashReporter::AnnotationTable& notes);
 #endif
-    void CleanupFromTimeout();
+    void CleanupFromTimeout(const bool aByHangUI);
+    void SetChildTimeout(const int32_t aChildTimeout);
     static int TimeoutChanged(const char* aPref, void* aModule);
     void NotifyPluginCrashed();
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    void InitPluginProfiling();
+    void ShutdownPluginProfiling();
+#endif
 
     PluginProcessParent* mSubprocess;
     // the plugin thread in mSubprocess
@@ -319,8 +337,34 @@ private:
     nsString mPluginDumpID;
     nsString mBrowserDumpID;
     nsString mHangID;
+    nsRefPtr<nsIObserver> mProfilerObserver;
 #ifdef XP_WIN
     InfallibleTArray<float> mPluginCpuUsageOnHang;
+    PluginHangUIParent *mHangUIParent;
+    bool mHangUIEnabled;
+    bool mIsTimerReset;
+
+    void
+    EvaluateHangUIState(const bool aReset);
+
+    bool
+    GetPluginName(nsAString& aPluginName);
+
+    /**
+     * Launches the Plugin Hang UI.
+     *
+     * @return true if plugin-hang-ui.exe has been successfully launched.
+     *         false if the Plugin Hang UI is disabled, already showing,
+     *               or the launch failed.
+     */
+    bool
+    LaunchHangUI();
+
+    /**
+     * Finishes the Plugin Hang UI and cancels if it is being shown to the user.
+     */
+    void
+    FinishHangUI();
 #endif
 
 #ifdef MOZ_X11

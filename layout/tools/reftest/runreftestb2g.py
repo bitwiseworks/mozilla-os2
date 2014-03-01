@@ -4,11 +4,8 @@
 
 import ConfigParser
 import os
-import re
 import sys
 import tempfile
-import time
-import urllib
 import traceback
 
 # We need to know our current directory so that we can serve our test files from it.
@@ -21,12 +18,7 @@ from runreftest import RefTest
 from runreftest import ReftestOptions
 from remotereftest import ReftestServer
 
-from mozprofile import Profile
-from mozrunner import Runner
-
-import devicemanagerADB
-import manifestparser
-
+from mozdevice import DeviceManagerADB, DMError
 from marionette import Marionette
 
 
@@ -99,7 +91,24 @@ class B2GOptions(ReftestOptions):
                     type = "string", dest = "pidFile",
                     help = "name of the pidfile to generate")
         defaults["pidFile"] = ""
-        defaults["remoteTestRoot"] = None
+        self.add_option("--gecko-path", action="store",
+                        type="string", dest="geckoPath",
+                        help="the path to a gecko distribution that should "
+                        "be installed on the emulator prior to test")
+        defaults["geckoPath"] = None
+        self.add_option("--logcat-dir", action="store",
+                        type="string", dest="logcat_dir",
+                        help="directory to store logcat dump files")
+        defaults["logcat_dir"] = None
+        self.add_option('--busybox', action='store',
+                        type='string', dest='busybox',
+                        help="Path to busybox binary to install on device")
+        defaults['busybox'] = None
+        self.add_option("--httpd-path", action = "store",
+                    type = "string", dest = "httpdPath",
+                    help = "path to the httpd.js file")
+        defaults["httpdPath"] = None
+        defaults["remoteTestRoot"] = "/data/local/tests"
         defaults["logFile"] = "reftest.log"
         defaults["autorun"] = True
         defaults["closeWhenDone"] = True
@@ -108,7 +117,8 @@ class B2GOptions(ReftestOptions):
         self.set_defaults(**defaults)
 
     def verifyRemoteOptions(self, options):
-        options.remoteTestRoot = self._automation._devicemanager.getDeviceRoot() + "/reftest"
+        if not options.remoteTestRoot:
+            options.remoteTestRoot = self._automation._devicemanager.getDeviceRoot() + "/reftest"
         options.remoteProfile = options.remoteTestRoot + "/profile"
 
         productRoot = options.remoteTestRoot + "/" + self._automation._product
@@ -123,6 +133,12 @@ class B2GOptions(ReftestOptions):
                 return None
 
         options.webServer = options.remoteWebServer
+
+        if options.geckoPath and not options.emulator:
+            self.error("You must specify --emulator if you specify --gecko-path")
+
+        if options.logcat_dir and not options.emulator:
+            self.error("You must specify --emulator if you specify --logcat-dir")
 
         #if not options.emulator and not options.deviceIP:
         #    print "ERROR: you must provide a device IP"
@@ -151,6 +167,12 @@ class B2GOptions(ReftestOptions):
             f = open(options.pidFile, 'w')
             f.write("%s" % os.getpid())
             f.close()
+
+        # httpd-path is specified by standard makefile targets and may be specified
+        # on the command line to select a particular version of httpd.js. If not
+        # specified, try to select the one from from the xre bundle, as required in bug 882932.
+        if not options.httpdPath:
+            options.httpdPath = os.path.join(options.xrePath, "components")
 
         return options
 
@@ -199,8 +221,8 @@ class B2GReftest(RefTest):
         self._automation.setRemoteProfile(self.remoteProfile)
         self.localLogName = options.localLogName
         self.remoteLogFile = options.remoteLogFile
+        self.bundlesDir = '/system/b2g/distribution/bundles'
         self.userJS = '/data/local/user.js'
-        self.testDir = '/data/local/tests'
         self.remoteMozillaPath = '/data/b2g/mozilla'
         self.remoteProfilesIniPath = os.path.join(self.remoteMozillaPath, 'profiles.ini')
         self.originalProfilesIni = None
@@ -218,6 +240,15 @@ class B2GReftest(RefTest):
                 print "ERROR: We were not able to retrieve the info from %s" % self.remoteLogFile
                 sys.exit(5)
 
+        # Delete any bundled extensions
+        extensionDir = os.path.join(profileDir, 'extensions', 'staged')
+        for filename in os.listdir(extensionDir):
+            try:
+                self._devicemanager._checkCmdAs(['shell', 'rm', '-rf',
+                                                 os.path.join(self.bundlesDir, filename)])
+            except DMError:
+                pass
+
         # Restore the original profiles.ini.
         if self.originalProfilesIni:
             try:
@@ -233,11 +264,8 @@ class B2GReftest(RefTest):
             self._devicemanager.removeDir(self.remoteTestRoot)
 
             # Restore the original user.js.
-            self._devicemanager.checkCmdAs(['shell', 'rm', '-f', self.userJS])
-            if self._devicemanager.useDDCopy:
-                self._devicemanager.checkCmdAs(['shell', 'dd', 'if=%s.orig' % self.userJS, 'of=%s' % self.userJS])
-            else:
-                self._devicemanager.checkCmdAs(['shell', 'cp', '%s.orig' % self.userJS, self.userJS])
+            self._devicemanager._checkCmdAs(['shell', 'rm', '-f', self.userJS])
+            self._devicemanager._checkCmdAs(['shell', 'dd', 'if=%s.orig' % self.userJS, 'of=%s' % self.userJS])
 
             # We've restored the original profile, so reboot the device so that
             # it gets picked up.
@@ -301,6 +329,12 @@ class B2GReftest(RefTest):
         if options.utilityPath == None:
             print "ERROR: unable to find utility path for %s, please specify with --utility-path" % (os.name)
             sys.exit(1)
+
+        xpcshell = os.path.join(options.utilityPath, xpcshell)
+        if self._automation.elf_arm(xpcshell):
+            raise Exception('xpcshell at %s is an ARM binary; please use '
+                            'the --utility-path argument to specify the path '
+                            'to a desktop version.' % xpcshell)
 
         options.serverProfilePath = tempfile.mkdtemp()
         self.server = ReftestServer(localAutomation, options, self.scriptDir)
@@ -376,10 +410,12 @@ user_pref("dom.mozBrowserFramesWhitelist","app://system.gaiamobile.org");\n
 user_pref("network.dns.localDomains","app://system.gaiamobile.org");\n
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
-user_pref("reftest.browser.iframe.enabled", true);
+user_pref("reftest.browser.iframe.enabled", false);
 user_pref("reftest.remote", true);
 user_pref("reftest.uri", "%s");
-user_pref("toolkit.telemetry.prompted", true);
+// Set a future policy version to avoid the telemetry prompt.
+user_pref("toolkit.telemetry.prompted", 999);
+user_pref("toolkit.telemetry.notifiedOptOut", 999);
 """ % reftestlist)
 
         #workaround for jsreftests.
@@ -394,16 +430,29 @@ user_pref("capability.principal.codebase.p2.id", "http://%s:%s");
 
         # Copy the profile to the device.
         self._devicemanager.removeDir(self.remoteProfile)
-        if self._devicemanager.pushDir(profileDir, self.remoteProfile) == None:
-            raise devicemanager.FileError("Unable to copy profile to device.")
+        try:
+            self._devicemanager.pushDir(profileDir, self.remoteProfile)
+        except DMError:
+            print "Automation Error: Unable to copy profile to device."
+            raise
+
+        # Copy the extensions to the B2G bundles dir.
+        extensionDir = os.path.join(profileDir, 'extensions', 'staged')
+        # need to write to read-only dir
+        self._devicemanager._checkCmdAs(['remount'])
+        for filename in os.listdir(extensionDir):
+            self._devicemanager._checkCmdAs(['shell', 'rm', '-rf',
+                                             os.path.join(self.bundlesDir, filename)])
+        try:
+            self._devicemanager.pushDir(extensionDir, self.bundlesDir)
+        except DMError:
+            print "Automation Error: Unable to copy extensions to device."
+            raise
 
         # In B2G, user.js is always read from /data/local, not the profile
         # directory.  Backup the original user.js first so we can restore it.
-        self._devicemanager.checkCmdAs(['shell', 'rm', '-f', '%s.orig' % self.userJS])
-        if self._devicemanager.useDDCopy:
-            self._devicemanager.checkCmdAs(['shell', 'dd', 'if=%s' % self.userJS, 'of=%s.orig' % self.userJS])
-        else:
-            self._devicemanager.checkCmdAs(['shell', 'cp', self.userJS, '%s.orig' % self.userJS])
+        self._devicemanager._checkCmdAs(['shell', 'rm', '-f', '%s.orig' % self.userJS])
+        self._devicemanager._checkCmdAs(['shell', 'dd', 'if=%s' % self.userJS, 'of=%s.orig' % self.userJS])
         self._devicemanager.pushFile(os.path.join(profileDir, "user.js"), self.userJS)
 
         self.updateProfilesIni(self.remoteProfile)
@@ -413,8 +462,11 @@ user_pref("capability.principal.codebase.p2.id", "http://%s:%s");
 
     def copyExtraFilesToProfile(self, options, profileDir):
         RefTest.copyExtraFilesToProfile(self, options, profileDir)
-        if (self._devicemanager.pushDir(profileDir, options.remoteProfile) == None):
-            raise devicemanager.FileError("Failed to copy extra files to device")
+        try:
+            self._devicemanager.pushDir(profileDir, options.remoteProfile)
+        except DMError:
+            print "Automation Error: Failed to copy extra files to device"
+            raise
 
     def getManifestPath(self, path):
         return path
@@ -432,6 +484,14 @@ def main(args=sys.argv[1:]):
         auto.setEmulator(True)
         if options.noWindow:
             kwargs['noWindow'] = True
+        if options.geckoPath:
+            kwargs['gecko_path'] = options.geckoPath
+        if options.logcat_dir:
+            kwargs['logcat_dir'] = options.logcat_dir
+        if options.busybox:
+            kwargs['busybox'] = options.busybox
+        if options.symbolsPath:
+            kwargs['symbols_path'] = options.symbolsPath
     if options.emulator_res:
         kwargs['emulator_res'] = options.emulator_res
     if options.b2gPath:
@@ -440,18 +500,20 @@ def main(args=sys.argv[1:]):
         host,port = options.marionette.split(':')
         kwargs['host'] = host
         kwargs['port'] = int(port)
-    marionette = Marionette(**kwargs)
+    marionette = Marionette.getMarionetteOrExit(**kwargs)
     auto.marionette = marionette
 
     # create the DeviceManager
-    kwargs = {'adbPath': options.adbPath}
+    kwargs = {'adbPath': options.adbPath,
+              'deviceRoot': options.remoteTestRoot}
     if options.deviceIP:
         kwargs.update({'host': options.deviceIP,
                        'port': options.devicePort})
-    dm = devicemanagerADB.DeviceManagerADB(**kwargs)
+    dm = DeviceManagerADB(**kwargs)
     auto.setDeviceManager(dm)
 
     options = parser.verifyRemoteOptions(options)
+
     if (options == None):
         print "ERROR: Invalid options specified, use --help for a list of valid options"
         sys.exit(1)
@@ -471,9 +533,7 @@ def main(args=sys.argv[1:]):
     auto.logFinish = "REFTEST TEST-START | Shutdown"
 
     reftest = B2GReftest(auto, dm, options, SCRIPT_DIRECTORY)
-    # Create /data/local/tests, to force its use by DeviceManagerADB;
-    # B2G won't run correctly with the profile installed to /mnt/sdcard.
-    dm.mkDirs(reftest.testDir)
+    options = parser.verifyCommonOptions(options, reftest)
 
     logParent = os.path.dirname(options.remoteLogFile)
     dm.mkDir(logParent);

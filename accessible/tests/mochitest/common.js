@@ -73,11 +73,17 @@ const STATE_BUSY = nsIAccessibleStates.STATE_BUSY;
 
 const SCROLL_TYPE_ANYWHERE = nsIAccessibleScrollType.SCROLL_TYPE_ANYWHERE;
 
+const COORDTYPE_SCREEN_RELATIVE = nsIAccessibleCoordinateType.COORDTYPE_SCREEN_RELATIVE;
+const COORDTYPE_WINDOW_RELATIVE = nsIAccessibleCoordinateType.COORDTYPE_WINDOW_RELATIVE;
+const COORDTYPE_PARENT_RELATIVE = nsIAccessibleCoordinateType.COORDTYPE_PARENT_RELATIVE;
+
 const kEmbedChar = String.fromCharCode(0xfffc);
 
 const kDiscBulletText = String.fromCharCode(0x2022) + " ";
 const kCircleBulletText = String.fromCharCode(0x25e6) + " ";
 const kSquareBulletText = String.fromCharCode(0x25aa) + " ";
+
+const MAX_TRIM_LENGTH = 100;
 
 /**
  * nsIAccessibleRetrieval service.
@@ -95,6 +101,10 @@ function enableLogging(aModules)
 function disableLogging()
 {
   gAccRetrieval.setLogging("");
+}
+function isLogged(aModule)
+{
+  return gAccRetrieval.isLogged(aModule);
 }
 
 /**
@@ -359,6 +369,9 @@ function testAccessibleTree(aAccOrElmOrID, aAccTree)
       testStates(acc, statesObj.states, statesObj.extraStates,
                  statesObj.absentStates, statesObj.absentExtraStates);
 
+    } else if (prop == "tagName") {
+      is(accTree[prop], acc.DOMNode.tagName, msg);
+
     } else if (prop != "children") {
       is(acc[prop], accTree[prop], msg);
     }
@@ -569,13 +582,13 @@ function getTextFromClipboard()
   var clip = Components.classes["@mozilla.org/widget/clipboard;1"].
     getService(Components.interfaces.nsIClipboard);
   if (!clip)
-    return;
+    return "";
 
   var trans = Components.classes["@mozilla.org/widget/transferable;1"].
     createInstance(Components.interfaces.nsITransferable);
   trans.init(getLoadContext());
   if (!trans)
-    return;
+    return "";
 
   trans.addDataFlavor("text/unicode");
   clip.getData(trans, clip.kGlobalClipboard);
@@ -597,13 +610,24 @@ function getTextFromClipboard()
  */
 function prettyName(aIdentifier)
 {
+  if (aIdentifier instanceof Array) {
+    var msg = "";
+    for (var idx = 0; idx < aIdentifier.length; idx++) {
+      if (msg != "")
+        msg += ", ";
+
+      msg += prettyName(aIdentifier[idx]);
+    }
+    return msg;
+  }
+
   if (aIdentifier instanceof nsIAccessible) {
     var acc = getAccessible(aIdentifier);
     var msg = "[" + getNodePrettyName(acc.DOMNode);
     try {
       msg += ", role: " + roleToString(acc.role);
       if (acc.name)
-        msg += ", name: '" + acc.name + "'";
+        msg += ", name: '" + shortenString(acc.name) + "'";
     } catch (e) {
       msg += "defunct";
     }
@@ -620,6 +644,39 @@ function prettyName(aIdentifier)
 
   return " '" + aIdentifier + "' ";
 }
+
+/**
+ * Shorten a long string if it exceeds MAX_TRIM_LENGTH.
+ * @param aString the string to shorten.
+ * @returns the shortened string.
+ */
+function shortenString(aString, aMaxLength)
+{
+  if (aString.length <= MAX_TRIM_LENGTH)
+    return aString;
+
+  // Trim the string if its length is > MAX_TRIM_LENGTH characters.
+  var trimOffset = MAX_TRIM_LENGTH / 2;
+  return aString.substring(0, trimOffset - 1) + "..." +
+    aString.substring(aString.length - trimOffset, aString.length);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// General Utils
+////////////////////////////////////////////////////////////////////////////////
+/**
+ * Return main chrome window (crosses chrome boundary)
+ */
+function getMainChromeWindow(aWindow)
+{
+  return aWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                .getInterface(Components.interfaces.nsIWebNavigation)
+                .QueryInterface(Components.interfaces.nsIDocShellTreeItem)
+                .rootTreeItem
+                .QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                .getInterface(Components.interfaces.nsIDOMWindow);
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Private

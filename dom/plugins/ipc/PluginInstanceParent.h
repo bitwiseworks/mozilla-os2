@@ -91,10 +91,6 @@ public:
     DeallocPPluginStream(PPluginStreamParent* stream);
 
     virtual bool
-    AnswerNPN_GetValue_NPNVjavascriptEnabledBool(bool* value, NPError* result);
-    virtual bool
-    AnswerNPN_GetValue_NPNVisOfflineBool(bool* value, NPError* result);
-    virtual bool
     AnswerNPN_GetValue_NPNVnetscapeWindow(NativeWindowHandle* value,
                                           NPError* result);
     virtual bool
@@ -277,6 +273,7 @@ public:
     nsresult GetImageSize(nsIntSize* aSize);
 #ifdef XP_MACOSX
     nsresult IsRemoteDrawingCoreAnimation(bool *aDrawing);
+    nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
 #endif
     nsresult SetBackgroundUnknown();
     nsresult BeginUpdateBackground(const nsIntRect& aRect,

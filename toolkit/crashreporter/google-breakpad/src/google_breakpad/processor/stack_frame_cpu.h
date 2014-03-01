@@ -47,7 +47,7 @@
 namespace google_breakpad {
 
 struct WindowsFrameInfo;
-struct CFIFrameInfo;
+class CFIFrameInfo;
 
 struct StackFrameX86 : public StackFrame {
   // ContextValidity has one entry for each relevant hardware pointer
@@ -70,26 +70,15 @@ struct StackFrameX86 : public StackFrame {
     CONTEXT_VALID_ALL  = -1
   };
 
-  // Indicates how well we trust the instruction pointer we derived
-  // during stack walking. Since the stack walker can resort to
-  // stack scanning, we can wind up with dubious frames.
-  // In rough order of "trust metric".
-  enum FrameTrust {
-    FRAME_TRUST_NONE,     // Unknown
-    FRAME_TRUST_SCAN,     // Scanned the stack, found this
-    FRAME_TRUST_CFI_SCAN, // Scanned the stack using call frame info, found this
-    FRAME_TRUST_FP,       // Derived from frame pointer
-    FRAME_TRUST_CFI,      // Derived from call frame info
-    FRAME_TRUST_CONTEXT   // Given as instruction pointer in a context
-  };
-
- StackFrameX86()
+  StackFrameX86()
      : context(),
        context_validity(CONTEXT_VALID_NONE),
-       trust(FRAME_TRUST_NONE),
        windows_frame_info(NULL),
        cfi_frame_info(NULL) {}
   ~StackFrameX86();
+
+  // Overriden to return the return address as saved on the stack.
+  virtual uint64_t ReturnAddress() const;
 
   // Register state.  This is only fully valid for the topmost frame in a
   // stack.  In other frames, the values of nonvolatile registers may be
@@ -101,10 +90,6 @@ struct StackFrameX86 : public StackFrame {
   // the OR operator doesn't work well with enumerated types.  This indicates
   // which fields in context are valid.
   int context_validity;
-  
-  // Amount of trust the stack walker has in the instruction pointer
-  // of this frame.
-  FrameTrust trust;
 
   // Any stack walking information we found describing this.instruction.
   // These may be NULL if there is no such information for that address.
@@ -164,6 +149,9 @@ struct StackFrameAMD64 : public StackFrame {
   };
 
   StackFrameAMD64() : context(), context_validity(CONTEXT_VALID_NONE) {}
+
+  // Overriden to return the return address as saved on the stack.
+  virtual uint64_t ReturnAddress() const;
 
   // Register state. This is only fully valid for the topmost frame in a
   // stack. In other frames, which registers are present depends on what
@@ -238,7 +226,7 @@ struct StackFrameARM : public StackFrame {
   // Return the ContextValidity flag for register rN.
   static ContextValidity RegisterValidFlag(int n) {
     return ContextValidity(1 << n);
-  } 
+  }
 
   // Register state.  This is only fully valid for the topmost frame in a
   // stack.  In other frames, the values of nonvolatile registers may be

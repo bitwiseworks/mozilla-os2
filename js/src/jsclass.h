@@ -1,12 +1,11 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=79 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsclass_h__
-#define jsclass_h__
+#ifndef jsclass_h
+#define jsclass_h
 /*
  * A JSClass acts as a vtable for JS objects that allows JSAPI clients to
  * control various aspects of the behavior of an object like property lookup.
@@ -15,8 +14,6 @@
  */
 #include "jsapi.h"
 #include "jsprvtd.h"
-
-#ifdef __cplusplus
 
 namespace js {
 
@@ -33,14 +30,14 @@ SPECIALID_TO_JSID(const SpecialId &sid);
  * (PropertyName, see vm/String.h); and by various special values.
  *
  * Special values are encoded using SpecialId, which is layout-compatible but
- * non-interconvertible with jsid.  A SpecialId may be: an object (used by E4X
- * and perhaps eventually by Harmony-proposed private names); JSID_VOID, which
+ * non-interconvertible with jsid.  A SpecialId is used for JSID_VOID, which
  * does not occur in JS scripts but may be used to indicate the absence of a
- * valid identifier; or JS_DEFAULT_XML_NAMESPACE_ID, if E4X is enabled.
+ * valid identifier.  In the future, a SpecialId may also be an object used by
+ * Harmony-proposed private names.
  */
 class SpecialId
 {
-    uintptr_t bits;
+    uintptr_t bits_;
 
     /* Needs access to raw bits. */
     friend JS_ALWAYS_INLINE jsid SPECIALID_TO_JSID(const SpecialId &sid);
@@ -48,30 +45,29 @@ class SpecialId
 
     static const uintptr_t TYPE_VOID = JSID_TYPE_VOID;
     static const uintptr_t TYPE_OBJECT = JSID_TYPE_OBJECT;
-    static const uintptr_t TYPE_DEFAULT_XML_NAMESPACE = JSID_TYPE_DEFAULT_XML_NAMESPACE;
     static const uintptr_t TYPE_MASK = JSID_TYPE_MASK;
 
-    SpecialId(uintptr_t bits) : bits(bits) { }
+    SpecialId(uintptr_t bits) : bits_(bits) { }
 
   public:
-    SpecialId() : bits(TYPE_VOID) { }
+    SpecialId() : bits_(TYPE_VOID) { }
 
     /* Object-valued */
 
     SpecialId(JSObject &obj)
-      : bits(uintptr_t(&obj) | TYPE_OBJECT)
+      : bits_(uintptr_t(&obj) | TYPE_OBJECT)
     {
         JS_ASSERT(&obj != NULL);
         JS_ASSERT((uintptr_t(&obj) & TYPE_MASK) == 0);
     }
 
     bool isObject() const {
-        return (bits & TYPE_MASK) == TYPE_OBJECT && bits != TYPE_OBJECT;
+        return (bits_ & TYPE_MASK) == TYPE_OBJECT && bits_ != TYPE_OBJECT;
     }
 
     JSObject *toObject() const {
         JS_ASSERT(isObject());
-        return reinterpret_cast<JSObject *>(bits & ~TYPE_MASK);
+        return reinterpret_cast<JSObject *>(bits_ & ~TYPE_MASK);
     }
 
     /* Empty */
@@ -83,7 +79,7 @@ class SpecialId
     }
 
     bool isEmpty() const {
-        return bits == TYPE_OBJECT;
+        return bits_ == TYPE_OBJECT;
     }
 
     /* Void */
@@ -95,19 +91,7 @@ class SpecialId
     }
 
     bool isVoid() const {
-        return bits == TYPE_VOID;
-    }
-
-    /* Default XML namespace */
-
-    static SpecialId defaultXMLNamespace() {
-        SpecialId sid(TYPE_DEFAULT_XML_NAMESPACE);
-        JS_ASSERT(sid.isDefaultXMLNamespace());
-        return sid;
-    }
-
-    bool isDefaultXMLNamespace() const {
-        return bits == TYPE_DEFAULT_XML_NAMESPACE;
+        return bits_ == TYPE_VOID;
     }
 };
 
@@ -115,19 +99,17 @@ static JS_ALWAYS_INLINE jsid
 SPECIALID_TO_JSID(const SpecialId &sid)
 {
     jsid id;
-    JSID_BITS(id) = sid.bits;
+    JSID_BITS(id) = sid.bits_;
     JS_ASSERT_IF(sid.isObject(), JSID_IS_OBJECT(id) && JSID_TO_OBJECT(id) == sid.toObject());
     JS_ASSERT_IF(sid.isVoid(), JSID_IS_VOID(id));
     JS_ASSERT_IF(sid.isEmpty(), JSID_IS_EMPTY(id));
-    JS_ASSERT_IF(sid.isDefaultXMLNamespace(), JSID_IS_DEFAULT_XML_NAMESPACE(id));
     return id;
 }
 
 static JS_ALWAYS_INLINE bool
 JSID_IS_SPECIAL(jsid id)
 {
-    return JSID_IS_OBJECT(id) || JSID_IS_EMPTY(id) || JSID_IS_VOID(id) ||
-           JSID_IS_DEFAULT_XML_NAMESPACE(id);
+    return JSID_IS_OBJECT(id) || JSID_IS_EMPTY(id) || JSID_IS_VOID(id);
 }
 
 static JS_ALWAYS_INLINE SpecialId
@@ -138,10 +120,8 @@ JSID_TO_SPECIALID(jsid id)
         return SpecialId(*JSID_TO_OBJECT(id));
     if (JSID_IS_EMPTY(id))
         return SpecialId::empty();
-    if (JSID_IS_VOID(id))
-        return SpecialId::voidId();
-    JS_ASSERT(JSID_IS_DEFAULT_XML_NAMESPACE(id));
-    return SpecialId::defaultXMLNamespace();
+    JS_ASSERT(JSID_IS_VOID(id));
+    return SpecialId::voidId();
 }
 
 typedef JS::Handle<SpecialId> HandleSpecialId;
@@ -199,18 +179,15 @@ typedef JSBool
 typedef JSBool
 (* SpecialAttributesOp)(JSContext *cx, HandleObject obj, HandleSpecialId sid, unsigned *attrsp);
 typedef JSBool
-(* DeletePropertyOp)(JSContext *cx, HandleObject obj, HandlePropertyName name, MutableHandleValue vp, JSBool strict);
+(* DeletePropertyOp)(JSContext *cx, HandleObject obj, HandlePropertyName name, JSBool *succeeded);
 typedef JSBool
-(* DeleteElementOp)(JSContext *cx, HandleObject obj, uint32_t index, MutableHandleValue vp, JSBool strict);
+(* DeleteElementOp)(JSContext *cx, HandleObject obj, uint32_t index, JSBool *succeeded);
 typedef JSBool
-(* DeleteSpecialOp)(JSContext *cx, HandleObject obj, HandleSpecialId sid, MutableHandleValue vp, JSBool strict);
-typedef JSType
-(* TypeOfOp)(JSContext *cx, HandleObject obj);
+(* DeleteSpecialOp)(JSContext *cx, HandleObject obj, HandleSpecialId sid, JSBool *succeeded);
+
 
 typedef JSObject *
 (* ObjectOp)(JSContext *cx, HandleObject obj);
-typedef void
-(* ClearOp)(JSContext *cx, HandleObject obj);
 typedef void
 (* FinalizeOp)(FreeOp *fop, JSObject *obj);
 
@@ -220,7 +197,7 @@ typedef void
                                                                               \
     /* Mandatory non-null function pointer members. */                        \
     JSPropertyOp        addProperty;                                          \
-    JSPropertyOp        delProperty;                                          \
+    JSDeletePropertyOp  delProperty;                                          \
     JSPropertyOp        getProperty;                                          \
     JSStrictPropertyOp  setProperty;                                          \
     JSEnumerateOp       enumerate;                                            \
@@ -246,11 +223,9 @@ struct ClassSizeMeasurement
 
 struct ClassExtension
 {
-    JSEqualityOp        equality;
     JSObjectOp          outerObject;
     JSObjectOp          innerObject;
     JSIteratorOp        iteratorObject;
-    void               *unused;
 
     /*
      * isWrappedNative is true only if the class is an XPCWrappedNative.
@@ -272,7 +247,7 @@ struct ClassExtension
     JSWeakmapKeyDelegateOp weakmapKeyDelegateOp;
 };
 
-#define JS_NULL_CLASS_EXT   {NULL,NULL,NULL,NULL,NULL,false,NULL}
+#define JS_NULL_CLASS_EXT   {NULL,NULL,NULL,false,NULL}
 
 struct ObjectOps
 {
@@ -306,15 +281,13 @@ struct ObjectOps
     DeleteSpecialOp     deleteSpecial;
 
     JSNewEnumerateOp    enumerate;
-    TypeOfOp            typeOf;
     ObjectOp            thisObject;
-    ClearOp             clear;
 };
 
 #define JS_NULL_OBJECT_OPS                                                    \
     {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,   \
      NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,        \
-     NULL,NULL,NULL,NULL,NULL}
+     NULL,NULL,NULL}
 
 struct Class
 {
@@ -334,6 +307,15 @@ struct Class
     bool hasPrivate() const {
         return !!(flags & JSCLASS_HAS_PRIVATE);
     }
+
+    bool emulatesUndefined() const {
+        return flags & JSCLASS_EMULATES_UNDEFINED;
+    }
+
+    /* Defined in jsfuninlines.h */
+    inline bool isCallable() const;
+
+    static size_t offsetOfFlags() { return offsetof(Class, flags); }
 };
 
 JS_STATIC_ASSERT(offsetof(JSClass, name) == offsetof(Class, name));
@@ -381,7 +363,7 @@ Valueify(const JSClass *c)
  */
 enum ESClassValue {
     ESClass_Array, ESClass_Number, ESClass_String, ESClass_Boolean,
-    ESClass_RegExp, ESClass_ArrayBuffer
+    ESClass_RegExp, ESClass_ArrayBuffer, ESClass_Date
 };
 
 /*
@@ -397,10 +379,6 @@ ObjectClassIs(JSObject &obj, ESClassValue classValue, JSContext *cx);
 inline bool
 IsObjectWithClass(const Value &v, ESClassValue classValue, JSContext *cx);
 
-}  /* namespace js */
-
-namespace JS {
-
 inline bool
 IsPoisonedSpecialId(js::SpecialId iden)
 {
@@ -409,15 +387,13 @@ IsPoisonedSpecialId(js::SpecialId iden)
     return false;
 }
 
-template <> struct RootMethods<js::SpecialId>
+template <> struct GCMethods<SpecialId>
 {
-    static js::SpecialId initial() { return js::SpecialId(); }
+    static SpecialId initial() { return SpecialId(); }
     static ThingRootKind kind() { return THING_ROOT_ID; }
-    static bool poisoned(js::SpecialId id) { return IsPoisonedSpecialId(id); }
+    static bool poisoned(SpecialId id) { return IsPoisonedSpecialId(id); }
 };
 
-} /* namespace JS */
+}  /* namespace js */
 
-#endif  /* __cplusplus */
-
-#endif  /* jsclass_h__ */
+#endif  /* jsclass_h */

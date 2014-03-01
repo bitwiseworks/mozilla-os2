@@ -39,6 +39,10 @@ function resetPrefs() {
   Services.prefs.setIntPref("bootstraptest.shutdown_reason", -1);
   Services.prefs.setIntPref("bootstraptest.install_reason", -1);
   Services.prefs.setIntPref("bootstraptest.uninstall_reason", -1);
+  Services.prefs.setIntPref("bootstraptest.startup_oldversion", -1);
+  Services.prefs.setIntPref("bootstraptest.shutdown_newversion", -1);
+  Services.prefs.setIntPref("bootstraptest.install_oldversion", -1);
+  Services.prefs.setIntPref("bootstraptest.uninstall_newversion", -1);
 }
 
 function waitForPref(aPref, aCallback) {
@@ -81,6 +85,55 @@ function getUninstallReason() {
   return Services.prefs.getIntPref("bootstraptest.uninstall_reason");
 }
 
+function getStartupOldVersion() {
+  return Services.prefs.getIntPref("bootstraptest.startup_oldversion");
+}
+
+function getShutdownNewVersion() {
+  return Services.prefs.getIntPref("bootstraptest.shutdown_newversion");
+}
+
+function getInstallOldVersion() {
+  return Services.prefs.getIntPref("bootstraptest.install_oldversion");
+}
+
+function getUninstallNewVersion() {
+  return Services.prefs.getIntPref("bootstraptest.uninstall_newversion");
+}
+
+function do_check_bootstrappedPref(aCallback) {
+  let data = "{}";
+  try {
+    // This is ok to fail, as the pref won't exist on a fresh profile.
+    data = Services.prefs.getCharPref("extensions.bootstrappedAddons");
+  } catch (e) {}
+  data = JSON.parse(data);
+
+  AddonManager.getAddonsByTypes(["extension"], function(aAddons) {
+    for (let addon of aAddons) {
+      if (!addon.id.endsWith("@tests.mozilla.org"))
+        continue;
+      if (!addon.isActive)
+        continue;
+      if (addon.operationsRequiringRestart != AddonManager.OP_NEEDS_RESTART_NONE)
+        continue;
+
+      do_check_true(addon.id in data);
+      let addonData = data[addon.id];
+      delete data[addon.id];
+
+      do_check_eq(addonData.version, addon.version);
+      do_check_eq(addonData.type, addon.type);
+      let file = addon.getResourceURI().QueryInterface(Components.interfaces.nsIFileURL).file;
+      do_check_eq(addonData.descriptor, file.persistentDescriptor);
+    }
+    do_check_eq(Object.keys(data).length, 0);
+
+    aCallback();
+  });
+}
+
+
 function run_test() {
   do_test_pending();
 
@@ -100,7 +153,7 @@ function run_test() {
   file.leafName = "extensions.ini";
   do_check_false(file.exists());
 
-  run_test_1();
+  do_check_bootstrappedPref(run_test_1);
 }
 
 // Tests that installing doesn't require a restart
@@ -141,8 +194,11 @@ function run_test_1() {
       do_check_eq(getActiveVersion(), -1);
 
       waitForPref("bootstraptest.active_version", function() {
-        check_test_1(addon.syncGUID);
+        do_check_bootstrappedPref(function() {
+          check_test_1(addon.syncGUID);
+        });
       });
+
     });
     install.install();
   });
@@ -172,6 +228,7 @@ function check_test_1(installSyncGUID) {
       do_check_eq(getInstalledVersion(), 1);
       do_check_eq(getActiveVersion(), 1);
       do_check_eq(getStartupReason(), ADDON_INSTALL);
+      do_check_eq(getStartupOldVersion(), 0);
       do_check_true(b1.hasResource("install.rdf"));
       do_check_true(b1.hasResource("bootstrap.js"));
       do_check_false(b1.hasResource("foo.bar"));
@@ -212,6 +269,7 @@ function run_test_2() {
     do_check_eq(getInstalledVersion(), 1);
     do_check_eq(getActiveVersion(), 0);
     do_check_eq(getShutdownReason(), ADDON_DISABLE);
+    do_check_eq(getShutdownNewVersion(), 0);
     do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
     AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(newb1) {
@@ -221,7 +279,7 @@ function run_test_2() {
       do_check_true(newb1.userDisabled);
       do_check_false(newb1.isActive);
 
-      run_test_3();
+      do_check_bootstrappedPref(run_test_3);
     });
   });
 }
@@ -232,10 +290,12 @@ function run_test_3() {
   do_check_eq(getInstalledVersion(), 1);
   do_check_eq(getActiveVersion(), 0);
   do_check_eq(getShutdownReason(), ADDON_DISABLE);
+  do_check_eq(getShutdownNewVersion(), 0);
   startupManager(false);
   do_check_eq(getInstalledVersion(), 1);
   do_check_eq(getActiveVersion(), 0);
   do_check_eq(getShutdownReason(), ADDON_DISABLE);
+  do_check_eq(getShutdownNewVersion(), 0);
   do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
   let file = gProfD.clone();
@@ -249,7 +309,7 @@ function run_test_3() {
     do_check_true(b1.userDisabled);
     do_check_false(b1.isActive);
 
-    run_test_4();
+    do_check_bootstrappedPref(run_test_4);
   });
 }
 
@@ -276,6 +336,7 @@ function run_test_4() {
     do_check_eq(getInstalledVersion(), 1);
     do_check_eq(getActiveVersion(), 1);
     do_check_eq(getStartupReason(), ADDON_ENABLE);
+    do_check_eq(getStartupOldVersion(), 0);
     do_check_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
     AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(newb1) {
@@ -285,7 +346,7 @@ function run_test_4() {
       do_check_false(newb1.userDisabled);
       do_check_true(newb1.isActive);
 
-      run_test_5();
+      do_check_bootstrappedPref(run_test_5);
     });
   });
 }
@@ -296,11 +357,13 @@ function run_test_5() {
   do_check_eq(getInstalledVersion(), 1);
   do_check_eq(getActiveVersion(), 0);
   do_check_eq(getShutdownReason(), APP_SHUTDOWN);
+  do_check_eq(getShutdownNewVersion(), 0);
   do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
   startupManager(false);
   do_check_eq(getInstalledVersion(), 1);
   do_check_eq(getActiveVersion(), 1);
   do_check_eq(getStartupReason(), APP_STARTUP);
+  do_check_eq(getStartupOldVersion(), 0);
   do_check_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
   AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
@@ -311,7 +374,7 @@ function run_test_5() {
     do_check_true(b1.isActive);
     do_check_false(isExtensionInAddonsList(profileDir, b1.id));
 
-    run_test_6();
+    do_check_bootstrappedPref(run_test_6);
   });
 }
 
@@ -355,11 +418,15 @@ function check_test_6() {
     do_check_eq(getInstalledVersion(), 2);
     do_check_eq(getActiveVersion(), 2);
     do_check_eq(getStartupReason(), ADDON_UPGRADE);
+    do_check_eq(getInstallOldVersion(), 1);
+    do_check_eq(getStartupOldVersion(), 1);
     do_check_eq(getShutdownReason(), ADDON_UPGRADE);
+    do_check_eq(getShutdownNewVersion(), 2);
+    do_check_eq(getUninstallNewVersion(), 2);
     do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
     do_check_in_crash_annotation("bootstrap1@tests.mozilla.org", "2.0");
 
-    run_test_7();
+    do_check_bootstrappedPref(run_test_7);
   });
 }
 
@@ -377,7 +444,7 @@ function run_test_7() {
                 AddonManager.OP_NEEDS_RESTART_UNINSTALL, 0);
     b1.uninstall();
 
-    check_test_7();
+    do_check_bootstrappedPref(check_test_7);
   });
 }
 
@@ -386,6 +453,7 @@ function check_test_7() {
   do_check_eq(getInstalledVersion(), 0);
   do_check_eq(getActiveVersion(), 0);
   do_check_eq(getShutdownReason(), ADDON_UNINSTALL);
+  do_check_eq(getShutdownNewVersion(), 0);
   do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "2.0");
 
   AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
@@ -396,7 +464,7 @@ function check_test_7() {
     AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(newb1) {
       do_check_eq(newb1, null);
 
-      run_test_8();
+      do_check_bootstrappedPref(run_test_8);
     });
   });
 }
@@ -419,10 +487,11 @@ function run_test_8() {
     do_check_true(b1.isActive);
     do_check_eq(getInstalledVersion(), 1);
     do_check_eq(getActiveVersion(), 1);
-    do_check_eq(getStartupReason(), APP_STARTUP);
+    do_check_eq(getStartupReason(), ADDON_INSTALL);
+    do_check_eq(getStartupOldVersion(), 0);
     do_check_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
-    run_test_9();
+    do_check_bootstrappedPref(run_test_9);
   });
 }
 
@@ -438,7 +507,7 @@ function run_test_9() {
     do_check_eq(b1, null);
     do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
-    run_test_10();
+    do_check_bootstrappedPref(run_test_10);
   });
 }
 
@@ -487,6 +556,7 @@ function check_test_10_pt1() {
     do_check_eq(getInstalledVersion(), 2);
     do_check_eq(getActiveVersion(), 2);
     do_check_eq(getStartupReason(), ADDON_INSTALL);
+    do_check_eq(getStartupOldVersion(), 0);
     do_check_true(b1.hasResource("install.rdf"));
     do_check_true(b1.hasResource("bootstrap.js"));
     do_check_false(b1.hasResource("foo.bar"));
@@ -531,11 +601,15 @@ function check_test_10_pt2() {
     do_check_eq(getInstalledVersion(), 1);
     do_check_eq(getActiveVersion(), 1);
     do_check_eq(getStartupReason(), ADDON_DOWNGRADE);
+    do_check_eq(getInstallOldVersion(), 2);
+    do_check_eq(getStartupOldVersion(), 2);
     do_check_eq(getShutdownReason(), ADDON_DOWNGRADE);
+    do_check_eq(getShutdownNewVersion(), 1);
+    do_check_eq(getUninstallNewVersion(), 1);
     do_check_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
     do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "2.0");
 
-    run_test_11();
+    do_check_bootstrappedPref(run_test_11);
   });
 }
 
@@ -556,6 +630,7 @@ function run_test_11() {
     do_check_eq(getInstalledVersion(), 1);
     do_check_eq(getActiveVersion(), 0);
     do_check_eq(getShutdownReason(), ADDON_DISABLE);
+    do_check_eq(getShutdownNewVersion(), 0);
     do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
     b1.uninstall();
@@ -570,7 +645,7 @@ function check_test_11() {
   do_check_eq(getActiveVersion(), 0);
   do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
-  run_test_12();
+  do_check_bootstrappedPref(run_test_12);
 }
 
 // Tests that bootstrapped extensions are correctly loaded even if the app is
@@ -591,13 +666,14 @@ function run_test_12() {
     do_check_true(b1.isActive);
     do_check_eq(getInstalledVersion(), 1);
     do_check_eq(getActiveVersion(), 1);
-    do_check_eq(getStartupReason(), APP_STARTUP);
+    do_check_eq(getStartupReason(), ADDON_INSTALL);
+    do_check_eq(getStartupOldVersion(), 0);
     do_check_in_crash_annotation("bootstrap1@tests.mozilla.org", "1.0");
 
     b1.uninstall();
     restartManager();
 
-    run_test_13();
+    do_check_bootstrappedPref(run_test_13);
   });
 }
 
@@ -660,10 +736,12 @@ function check_test_13() {
         do_check_eq(getActiveVersion(), 0);     // Should not have called startup though
         do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "3.0");
 
-        b1.uninstall();
-        restartManager();
+        do_check_bootstrappedPref(function() {
+          b1.uninstall();
+          restartManager();
 
-        run_test_14();
+          run_test_14();
+        });
       });
     });
   });
@@ -689,9 +767,11 @@ function run_test_14() {
     do_check_eq(getActiveVersion(), 0);      // Should not have called startup though
     do_check_not_in_crash_annotation("bootstrap1@tests.mozilla.org", "3.0");
 
-    b1.uninstall();
+    do_check_bootstrappedPref(function() {
+      b1.uninstall();
 
-    run_test_15();
+      run_test_15();
+    });
   });
 }
 
@@ -748,20 +828,22 @@ function check_test_15() {
     do_check_eq(getInstalledVersion(), 2);
     do_check_eq(getActiveVersion(), 0);
 
-    restartManager();
+    do_check_bootstrappedPref(function() {
+      restartManager();
 
-    AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
-      do_check_neq(b1, null);
-      do_check_eq(b1.version, "2.0");
-      do_check_false(b1.appDisabled);
-      do_check_true(b1.userDisabled);
-      do_check_false(b1.isActive);
-      do_check_eq(getInstalledVersion(), 2);
-      do_check_eq(getActiveVersion(), 0);
+      AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
+        do_check_neq(b1, null);
+        do_check_eq(b1.version, "2.0");
+        do_check_false(b1.appDisabled);
+        do_check_true(b1.userDisabled);
+        do_check_false(b1.isActive);
+        do_check_eq(getInstalledVersion(), 2);
+        do_check_eq(getActiveVersion(), 0);
 
-      b1.uninstall();
+        b1.uninstall();
 
-      run_test_16();
+        run_test_16();
+      });
     });
   });
 }
@@ -832,7 +914,7 @@ function run_test_17() {
     do_check_eq(b1.version, "1.0");
     do_check_true(b1.isActive);
 
-    run_test_18();
+    do_check_bootstrappedPref(run_test_18);
   });
 }
 
@@ -854,7 +936,12 @@ function run_test_18() {
       do_check_eq(getInstallReason(), ADDON_UPGRADE);
       do_check_eq(getStartupReason(), ADDON_UPGRADE);
 
-      run_test_19();
+      do_check_eq(getShutdownNewVersion(), 2);
+      do_check_eq(getUninstallNewVersion(), 2);
+      do_check_eq(getInstallOldVersion(), 1);
+      do_check_eq(getStartupOldVersion(), 1);
+
+      do_check_bootstrappedPref(run_test_19);
     });
   });
 }
@@ -892,7 +979,12 @@ function check_test_19() {
     do_check_eq(getInstallReason(), ADDON_INSTALL);
     do_check_eq(getStartupReason(), ADDON_INSTALL);
 
-    run_test_20();
+    do_check_eq(getShutdownNewVersion(), 0);
+    do_check_eq(getUninstallNewVersion(), 0);
+    do_check_eq(getInstallOldVersion(), 0);
+    do_check_eq(getStartupOldVersion(), 0);
+
+    do_check_bootstrappedPref(run_test_20);
   });
 }
 
@@ -920,6 +1012,11 @@ function run_test_20() {
     do_check_eq(getInstallReason(), ADDON_UPGRADE);
     do_check_eq(getStartupReason(), APP_STARTUP);
 
+    do_check_eq(getShutdownNewVersion(), 0);
+    do_check_eq(getUninstallNewVersion(), 2);
+    do_check_eq(getInstallOldVersion(), 1);
+    do_check_eq(getStartupOldVersion(), 0);
+
     run_test_21();
   });
 }
@@ -942,21 +1039,26 @@ function run_test_21() {
     do_check_true(b1.isActive);
 
     do_check_eq(getShutdownReason(), APP_SHUTDOWN);
+    do_check_eq(getShutdownNewVersion(), 0);
 
     // This won't be set as the bootstrap script was gone so we couldn't
     // uninstall it properly
     do_check_eq(getUninstallReason(), -1);
+    do_check_eq(getUninstallNewVersion(), -1);
 
     // TODO this reason should probably be ADDON_DOWNGRADE (bug 607818)
     do_check_eq(getInstallReason(), ADDON_INSTALL);
+    do_check_eq(getInstallOldVersion(), 0);
 
     do_check_eq(getStartupReason(), APP_STARTUP);
+    do_check_eq(getStartupOldVersion(), 0);
 
-    manuallyUninstall(userExtDir, "bootstrap1@tests.mozilla.org");
+    do_check_bootstrappedPref(function() {
+      manuallyUninstall(userExtDir, "bootstrap1@tests.mozilla.org");
 
-    restartManager();
-
-    run_test_22();
+      restartManager();
+      run_test_22();
+    });
   });
 }
 
@@ -998,17 +1100,23 @@ function run_test_22() {
       do_check_true(b1.isActive);
 
       do_check_eq(getShutdownReason(), APP_SHUTDOWN);
+      do_check_eq(getShutdownNewVersion(), 0);
 
       // This won't be set as the bootstrap script was gone so we couldn't
       // uninstall it properly
       do_check_eq(getUninstallReason(), -1);
+      do_check_eq(getUninstallNewVersion(), -1);
 
       do_check_eq(getInstallReason(), ADDON_UPGRADE);
+      do_check_eq(getInstallOldVersion(), 1);
       do_check_eq(getStartupReason(), APP_STARTUP);
+      do_check_eq(getStartupOldVersion(), 0);
 
-      b1.uninstall();
+      do_check_bootstrappedPref(function() {
+        b1.uninstall();
 
-      run_test_23();
+        run_test_23();
+      });
     });
   });
 }
@@ -1052,7 +1160,7 @@ function run_test_23() {
         "onInstallEnded",
       ], function() {
         do_check_true(addon.hasResource("install.rdf"));
-        check_test_23();
+        do_check_bootstrappedPref(check_test_23);
       });
     });
     install.install();
@@ -1074,6 +1182,7 @@ function check_test_23() {
       do_check_eq(getInstalledVersion(), 1);
       do_check_eq(getActiveVersion(), 1);
       do_check_eq(getStartupReason(), ADDON_INSTALL);
+      do_check_eq(getStartupOldVersion(), 0);
       do_check_true(b1.hasResource("install.rdf"));
       do_check_true(b1.hasResource("bootstrap.js"));
       do_check_false(b1.hasResource("foo.bar"));
@@ -1107,35 +1216,35 @@ function run_test_24() {
       do_check_eq(getActiveVersion(), 1);
       do_check_eq(getInstalledVersion2(), 1);
       do_check_eq(getActiveVersion2(), 1);
-  
+
       resetPrefs();
-  
+
       restartManager();
-  
+
       do_check_eq(getInstalledVersion(), -1);
       do_check_eq(getActiveVersion(), 1);
       do_check_eq(getInstalledVersion2(), -1);
       do_check_eq(getActiveVersion2(), 1);
-  
+
       shutdownManager();
-  
+
       do_check_eq(getInstalledVersion(), -1);
       do_check_eq(getActiveVersion(), 0);
       do_check_eq(getInstalledVersion2(), -1);
       do_check_eq(getActiveVersion2(), 0);
-  
+
       // Break the preferece
       let bootstrappedAddons = JSON.parse(Services.prefs.getCharPref("extensions.bootstrappedAddons"));
       bootstrappedAddons["bootstrap1@tests.mozilla.org"].descriptor += "foo";
       Services.prefs.setCharPref("extensions.bootstrappedAddons", JSON.stringify(bootstrappedAddons));
-  
+
       startupManager(false);
-  
+
       do_check_eq(getInstalledVersion(), -1);
       do_check_eq(getActiveVersion(), 1);
       do_check_eq(getInstalledVersion2(), -1);
       do_check_eq(getActiveVersion2(), 1);
-  
+
       run_test_25();
     });
   });
@@ -1148,31 +1257,32 @@ function run_test_25() {
     waitForPref("bootstraptest.active_version", function() {
       do_check_eq(getInstalledVersion(), 1);
       do_check_eq(getActiveVersion(), 1);
-  
+
       installAllFiles([do_get_addon("test_bootstrap1_4")], function() {
         // Needs a restart to complete this so the old version stays running
         do_check_eq(getInstalledVersion(), 1);
         do_check_eq(getActiveVersion(), 1);
-  
+
         AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
           do_check_neq(b1, null);
           do_check_eq(b1.version, "1.0");
           do_check_true(b1.isActive);
           do_check_true(hasFlag(b1.pendingOperations, AddonManager.PENDING_UPGRADE));
-  
+
           restartManager();
-  
+
           do_check_eq(getInstalledVersion(), 0);
           do_check_eq(getUninstallReason(), ADDON_UPGRADE);
+          do_check_eq(getUninstallNewVersion(), 4);
           do_check_eq(getActiveVersion(), 0);
-  
+
           AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
             do_check_neq(b1, null);
             do_check_eq(b1.version, "4.0");
             do_check_true(b1.isActive);
             do_check_eq(b1.pendingOperations, AddonManager.PENDING_NONE);
-  
-            run_test_26();
+
+            do_check_bootstrappedPref(run_test_26);
           });
         });
       });
@@ -1198,6 +1308,7 @@ function run_test_26() {
 
       do_check_eq(getInstalledVersion(), 1);
       do_check_eq(getInstallReason(), ADDON_DOWNGRADE);
+      do_check_eq(getInstallOldVersion(), 4);
       do_check_eq(getActiveVersion(), 1);
 
       AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
@@ -1206,7 +1317,7 @@ function run_test_26() {
         do_check_true(b1.isActive);
         do_check_eq(b1.pendingOperations, AddonManager.PENDING_NONE);
 
-        run_test_27();
+        do_check_bootstrappedPref(run_test_27);
       });
     });
   });
@@ -1228,6 +1339,7 @@ function run_test_27() {
       // Updating disabled things happens immediately
       do_check_eq(getInstalledVersion(), 0);
       do_check_eq(getUninstallReason(), ADDON_UPGRADE);
+      do_check_eq(getUninstallNewVersion(), 4);
       do_check_eq(getActiveVersion(), 0);
 
       AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
@@ -1247,7 +1359,7 @@ function run_test_27() {
           do_check_false(b1.isActive);
           do_check_eq(b1.pendingOperations, AddonManager.PENDING_NONE);
 
-          run_test_28();
+          do_check_bootstrappedPref(run_test_28);
         });
       });
     });
@@ -1261,6 +1373,7 @@ function run_test_28() {
     // Doesn't need a restart to complete this
     do_check_eq(getInstalledVersion(), 1);
     do_check_eq(getInstallReason(), ADDON_DOWNGRADE);
+    do_check_eq(getInstallOldVersion(), 4);
     do_check_eq(getActiveVersion(), 0);
 
     AddonManager.getAddonByID("bootstrap1@tests.mozilla.org", function(b1) {
@@ -1283,7 +1396,7 @@ function run_test_28() {
         do_check_eq(getInstalledVersion(), 1);
         do_check_eq(getActiveVersion(), 1);
 
-        do_test_finished();
+        do_check_bootstrappedPref(do_test_finished);
       });
     });
   });

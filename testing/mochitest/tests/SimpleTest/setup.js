@@ -76,10 +76,14 @@ if (params.timeout) {
 var fileLevel =  params.fileLevel || null;
 var consoleLevel = params.consoleLevel || null;
 
-// loop tells us how many times to run the tests
+// repeat tells us how many times to repeat the tests
 if (params.repeat) {
   TestRunner.repeat = params.repeat;
 } 
+
+if (params.runUntilFailure) {
+  TestRunner.runUntilFailure = true;
+}
 
 // closeWhenDone tells us to close the browser when complete
 if (params.closeWhenDone) {
@@ -104,6 +108,12 @@ if (!params.quiet) {
   TestRunner.logger.addListener("dumpListener", consoleLevel + "", dumpListener);
 }
 
+// A temporary hack for android 4.0 where Fennec utilizes the pandaboard so much it reboots
+if (params.runSlower) {
+  TestRunner.runSlower = true;
+}
+
+
 var gTestList = [];
 var RunSet = {}
 RunSet.runall = function(e) {
@@ -115,55 +125,9 @@ RunSet.runall = function(e) {
   var my_tests = gTestList;
 
   if (params.totalChunks && params.thisChunk) {
-    var total_chunks = parseInt(params.totalChunks);
-    // this_chunk is in the range [1,total_chunks]
-    var this_chunk = parseInt(params.thisChunk);
-
-    // We want to split the tests up into chunks according to which directory
-    // they're in
-    if (params.chunkByDir) {
-      var chunkByDir = parseInt(params.chunkByDir);
-      var tests_by_dir = {};
-      var test_dirs = []
-      for (var i = 0; i < gTestList.length; ++i) {
-        var test_path = gTestList[i];
-        if (test_path[0] == '/') {
-          test_path = test_path.substr(1);
-        }
-        var dir = test_path.split("/");
-        // We want the first chunkByDir+1 components, or everything but the
-        // last component, whichever is less.
-        // we add 1 to chunkByDir since 'tests' is always part of the path, and
-        // want to ignore the last component since it's the test filename.
-        dir = dir.slice(0, Math.min(chunkByDir+1, dir.length-1));
-        // reconstruct a directory name
-        dir = dir.join("/");
-        if (!(dir in tests_by_dir)) {
-          tests_by_dir[dir] = [gTestList[i]];
-          test_dirs.push(dir);
-        } else {
-          tests_by_dir[dir].push(gTestList[i]);
-        }
-      }
-      var tests_per_chunk = test_dirs.length / total_chunks;
-      var start = Math.round((this_chunk-1) * tests_per_chunk);
-      var end = Math.round(this_chunk * tests_per_chunk);
-      my_tests = [];
-      var dirs = []
-      for (var i = start; i < end; ++i) {
-        var dir = test_dirs[i];
-        dirs.push(dir);
-        my_tests = my_tests.concat(tests_by_dir[dir]);
-      }
-      TestRunner.logger.log("Running tests in " + dirs.join(", "));
-    } else {
-      var tests_per_chunk = gTestList.length / total_chunks;
-      var start = Math.round((this_chunk-1) * tests_per_chunk);
-      var end = Math.round(this_chunk * tests_per_chunk);
-      my_tests = gTestList.slice(start, end);
-      TestRunner.logger.log("Running tests " + (start+1) + "-" + end + "/" + gTestList.length);
-    }
+    my_tests = chunkifyTests(my_tests, params.totalChunks, params.thisChunk, params.chunkByDir, TestRunner.logger);
   }
+
   if (params.shuffle) {
     for (var i = my_tests.length-1; i > 0; --i) {
       var j = Math.floor(Math.random() * i);
@@ -226,6 +190,7 @@ function filterTests(filterFile, runOnly) {
       excludetests = filter;
   }
 
+  var testRoot = config.testRoot || "tests";
   // Start with gTestList, and put everything that's in 'runtests' in
   // filteredTests.
   if (Object.keys(runtests).length) {
@@ -237,8 +202,8 @@ function filterTests(filterFile, runOnly) {
         file = f.replace(/^\//, '')
         file = file.replace(/^tests\//, '')
 
-        // Match directory or filename, gTestList has tests/<path>
-        if (tmp_path.match("^tests/" + file) != null) {
+        // Match directory or filename, gTestList has <testroot>/<path>
+        if (tmp_path.match(testRoot + "/" + file) != null) {
           filteredTests.push(test_path);
           break;
         }
@@ -262,8 +227,8 @@ function filterTests(filterFile, runOnly) {
         file = f.replace(/^\//, '')
         file = file.replace(/^tests\//, '')
 
-        // Match directory or filename, gTestList has tests/<path>
-        if (tmp_path.match("^tests/" + file) != null) {
+        // Match directory or filename, gTestList has <testroot>/<path>
+        if (tmp_path.match(testRoot + "/" + file) != null) {
           found = true;
           break;
         }
@@ -299,7 +264,7 @@ function isVisible(elem) {
 
 function toggleNonTests (e) {
   e.preventDefault();
-  var elems = document.getElementsClassName("non-test");
+  var elems = document.getElementsByClassName("non-test");
   for (var i="0"; i<elems.length; i++) {
     toggleVisible(elems[i]);
   }

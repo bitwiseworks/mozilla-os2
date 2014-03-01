@@ -40,7 +40,7 @@ nsMIMEInfoUnix::LoadUriInternal(nsIURI * aURI)
   if (NS_FAILED(rv)){
     HildonURIAction *action = hildon_uri_get_default_action(mSchemeOrType.get(), nullptr);
     if (action) {
-      nsCAutoString spec;
+      nsAutoCString spec;
       aURI->GetAsciiSpec(spec);
       if (hildon_uri_open(spec.get(), action, nullptr))
         rv = NS_OK;
@@ -51,7 +51,7 @@ nsMIMEInfoUnix::LoadUriInternal(nsIURI * aURI)
 
 #ifdef MOZ_WIDGET_QT
   if (NS_FAILED(rv)) {
-    nsCAutoString spec;
+    nsAutoCString spec;
     aURI->GetAsciiSpec(spec);
     if (QDesktopServices::openUrl(QUrl(spec.get()))) {
       rv = NS_OK;
@@ -65,10 +65,16 @@ nsMIMEInfoUnix::LoadUriInternal(nsIURI * aURI)
 NS_IMETHODIMP
 nsMIMEInfoUnix::GetHasDefaultHandler(bool *_retval)
 {
+  // if mDefaultApplication is set, it means the application has been set from
+  // either /etc/mailcap or ${HOME}/.mailcap, in which case we don't want to
+  // give the GNOME answer.
+  if (mDefaultApplication)
+    return nsMIMEInfoImpl::GetHasDefaultHandler(_retval);
+
   *_retval = false;
   nsRefPtr<nsMIMEInfoBase> mimeInfo = nsGNOMERegistry::GetFromType(mSchemeOrType);
   if (!mimeInfo) {
-    nsCAutoString ext;
+    nsAutoCString ext;
     nsresult rv = GetPrimaryExtension(ext);
     if (NS_SUCCEEDED(rv)) {
       mimeInfo = nsGNOMERegistry::GetFromExtension(ext);
@@ -98,14 +104,19 @@ nsMIMEInfoUnix::GetHasDefaultHandler(bool *_retval)
   }
 #endif
 
-  // If we didn't find a VFS handler, fallback.
-  return nsMIMEInfoImpl::GetHasDefaultHandler(_retval);
+  return NS_OK;
 }
 
 nsresult
 nsMIMEInfoUnix::LaunchDefaultWithFile(nsIFile *aFile)
 {
-  nsCAutoString nativePath;
+  // if mDefaultApplication is set, it means the application has been set from
+  // either /etc/mailcap or ${HOME}/.mailcap, in which case we don't want to
+  // give the GNOME answer.
+  if (mDefaultApplication)
+    return nsMIMEInfoImpl::LaunchDefaultWithFile(aFile);
+
+  nsAutoCString nativePath;
   aFile->GetNativePath(nativePath);
 
 #if (MOZ_PLATFORM_MAEMO == 5) && defined (MOZ_ENABLE_GNOMEVFS)
@@ -125,7 +136,7 @@ nsMIMEInfoUnix::LaunchDefaultWithFile(nsIFile *aFile)
 #endif
 
   nsCOMPtr<nsIGIOService> giovfs = do_GetService(NS_GIOSERVICE_CONTRACTID);
-  nsCAutoString uriSpec;
+  nsAutoCString uriSpec;
   if (giovfs) {
     // nsGIOMimeApp->Launch wants a URI string instead of local file
     nsresult rv;
@@ -153,7 +164,7 @@ nsMIMEInfoUnix::LaunchDefaultWithFile(nsIFile *aFile)
   // extension mapped type
   nsRefPtr<nsMIMEInfoBase> mimeInfo = nsGNOMERegistry::GetFromExtension(nativePath);
   if (mimeInfo) {
-    nsCAutoString type;
+    nsAutoCString type;
     mimeInfo->GetType(type);
     if (giovfs) {
       nsCOMPtr<nsIGIOMimeApp> app;

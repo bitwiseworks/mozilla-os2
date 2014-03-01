@@ -29,8 +29,6 @@
 
 #include "hb-private.hh"
 
-#include "hb-shape-plan.h" /* TODO remove */
-
 typedef hb_bool_t hb_shape_func_t (hb_shape_plan_t    *shape_plan,
 				   hb_font_t          *font,
 				   hb_buffer_t        *buffer,
@@ -97,7 +95,10 @@ hb_##shaper##_shaper_##object##_data_ensure (hb_##object##_t *object) \
     if (unlikely (!data)) \
       data = (HB_SHAPER_DATA_TYPE (shaper, object) *) HB_SHAPER_DATA_INVALID; \
     if (!hb_atomic_ptr_cmpexch (&HB_SHAPER_DATA (shaper, object), NULL, data)) { \
-      HB_SHAPER_DATA_DESTROY_FUNC (shaper, object) (data); \
+      if (data && \
+	  data != HB_SHAPER_DATA_INVALID && \
+	  data != HB_SHAPER_DATA_SUCCEEDED) \
+	HB_SHAPER_DATA_DESTROY_FUNC (shaper, object) (data); \
       goto retry; \
     } \
   } \

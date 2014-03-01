@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,6 +8,7 @@
 #include "nsUCSupport.h"
 #include "nsUTF8ToUnicode.h"
 #include "mozilla/SSE.h"
+#include <algorithm>
 
 #define UNICODE_BYTE_ORDER_MARK    0xFEFF
 
@@ -188,12 +190,11 @@ NS_IMETHODIMP nsUTF8ToUnicode::Convert(const char * aSrc,
 
   out = aDest;
   if (mState == 0xFF) {
-    // Emit supplementary character left over from previous iteration. If the
-    // buffer size is insufficient, treat it as an illegal character.
+    // Emit supplementary character left over from previous iteration. It is
+    // caller's responsibility to keep a sufficient buffer.
     if (aDestLen < 2) {
-      NS_ERROR("Output buffer insufficient to hold supplementary character");
-      mState = 0;
-      return NS_ERROR_ILLEGAL_INPUT;
+      *aSrcLength = *aDestLength = 0;
+      return NS_OK_UDEC_MOREOUTPUT;
     }
     out = EmitSurrogatePair(mUcs4, out);
     mUcs4 = 0;
@@ -214,90 +215,92 @@ NS_IMETHODIMP nsUTF8ToUnicode::Convert(const char * aSrc,
     mFirst = false;
 
   for (in = aSrc; ((in < inend) && (out < outend)); ++in) {
+    uint8_t c = *in;
     if (0 == mState) {
       // When mState is zero we expect either a US-ASCII character or a
       // multi-octet sequence.
-      if (0 == (0x80 & (*in))) {
-        int32_t max_loops = NS_MIN(inend - in, outend - out);
+      if (c < 0x80) {  // 00..7F
+        int32_t max_loops = std::min(inend - in, outend - out);
         Convert_ascii_run(in, out, max_loops);
         --in; // match the rest of the cases
         mBytes = 1;
-      } else if (0xC0 == (0xE0 & (*in))) {
+      } else if (c < 0xC2) {  // C0/C1
+        // Overlong 2 octet sequence
+        if (mErrBehavior == kOnError_Signal) {
+          res = NS_ERROR_ILLEGAL_INPUT;
+          break;
+        }
+        *out++ = UCS2_REPLACEMENT_CHAR;
+        mFirst = false;
+      } else if (c < 0xE0) {  // C2..DF
         // First octet of 2 octet sequence
-        mUcs4 = (uint32_t)(*in);
+        mUcs4 = c;
         mUcs4 = (mUcs4 & 0x1F) << 6;
         mState = 1;
         mBytes = 2;
-      } else if (0xE0 == (0xF0 & (*in))) {
+      } else if (c < 0xF0) {  // E0..EF
         // First octet of 3 octet sequence
-        mUcs4 = (uint32_t)(*in);
+        mUcs4 = c;
         mUcs4 = (mUcs4 & 0x0F) << 12;
         mState = 2;
         mBytes = 3;
-      } else if (0xF0 == (0xF8 & (*in))) {
+      } else if (c < 0xF5) {  // F0..F4
         // First octet of 4 octet sequence
-        mUcs4 = (uint32_t)(*in);
+        mUcs4 = c;
         mUcs4 = (mUcs4 & 0x07) << 18;
         mState = 3;
         mBytes = 4;
-      } else if (0xF8 == (0xFC & (*in))) {
-        /* First octet of 5 octet sequence.
-         *
-         * This is illegal because the encoded codepoint must be either
-         * (a) not the shortest form or
-         * (b) outside the Unicode range of 0-0x10FFFF.
-         * Rather than trying to resynchronize, we will carry on until the end
-         * of the sequence and let the later error handling code catch it.
-         */
-        mUcs4 = (uint32_t)(*in);
-        mUcs4 = (mUcs4 & 0x03) << 24;
-        mState = 4;
-        mBytes = 5;
-      } else if (0xFC == (0xFE & (*in))) {
-        // First octet of 6 octet sequence, see comments for 5 octet sequence.
-        mUcs4 = (uint32_t)(*in);
-        mUcs4 = (mUcs4 & 1) << 30;
-        mState = 5;
-        mBytes = 6;
-      } else {
+      } else {  // F5..FF
         /* Current octet is neither in the US-ASCII range nor a legal first
          * octet of a multi-octet sequence.
-         *
-         * Return an error condition. Caller is responsible for flushing and
-         * refilling the buffer and resetting state.
          */
-        res = NS_ERROR_ILLEGAL_INPUT;
-        break;
+        if (mErrBehavior == kOnError_Signal) {
+          /* Return an error condition. Caller is responsible for flushing and
+           * refilling the buffer and resetting state.
+           */
+          res = NS_ERROR_ILLEGAL_INPUT;
+          break;
+        }
+        *out++ = UCS2_REPLACEMENT_CHAR;
+        mFirst = false;
       }
     } else {
       // When mState is non-zero, we expect a continuation of the multi-octet
       // sequence
-      if (0x80 == (0xC0 & (*in))) {
+      if (0x80 == (0xC0 & c)) {
+        if (mState > 1) {
+          // If we are here, all possibilities are:
+          // mState == 2 && mBytes == 3 ||
+          // mState == 2 && mBytes == 4 ||
+          // mState == 3 && mBytes == 4
+          if ((mBytes == 3 && ((!mUcs4 && c < 0xA0) ||             // E0 80..9F
+                               (mUcs4 == 0xD000 && c > 0x9F))) ||  // ED A0..BF
+              (mState == 3 && ((!mUcs4 && c < 0x90) ||             // F0 80..8F
+                               (mUcs4 == 0x100000 && c > 0x8F)))) {// F4 90..BF
+            // illegal sequences or sequences converted into illegal ranges.
+            in--;
+            if (mErrBehavior == kOnError_Signal) {
+              res = NS_ERROR_ILLEGAL_INPUT;
+              break;
+            }
+            *out++ = UCS2_REPLACEMENT_CHAR;
+            mState = 0;
+            mFirst = false;
+            continue;
+          }
+        }
+
         // Legal continuation.
         uint32_t shift = (mState - 1) * 6;
-        uint32_t tmp = *in;
+        uint32_t tmp = c;
         tmp = (tmp & 0x0000003FL) << shift;
         mUcs4 |= tmp;
 
         if (0 == --mState) {
           /* End of the multi-octet sequence. mUcs4 now contains the final
            * Unicode codepoint to be output
-           *
-           * Check for illegal sequences and codepoints.
            */
 
-          // From Unicode 3.1, non-shortest form is illegal
-          if (((2 == mBytes) && (mUcs4 < 0x0080)) ||
-              ((3 == mBytes) && (mUcs4 < 0x0800)) ||
-              ((4 == mBytes) && (mUcs4 < 0x10000)) ||
-              (4 < mBytes) ||
-              // From Unicode 3.2, surrogate characters are illegal
-              ((mUcs4 & 0xFFFFF800) == 0xD800) ||
-              // Codepoints outside the Unicode range are illegal
-              (mUcs4 > 0x10FFFF)) {
-            res = NS_ERROR_ILLEGAL_INPUT;
-            break;
-          }
           if (mUcs4 > 0xFFFF) {
             // mUcs4 is in the range 0x10000 - 0x10FFFF. Output a UTF-16 pair
             if (out + 2 > outend) {
@@ -320,15 +323,20 @@ NS_IMETHODIMP nsUTF8ToUnicode::Convert(const char * aSrc,
           mFirst = false;
         }
       } else {
-        /* ((0xC0 & (*in) != 0x80) && (mState != 0))
-         * 
+        /* ((0xC0 & c != 0x80) && (mState != 0))
+         *
          * Incomplete multi-octet sequence. Unconsume this
          * octet and return an error condition. Caller is responsible
          * for flushing and refilling the buffer and resetting state.
          */
         in--;
-        res = NS_ERROR_ILLEGAL_INPUT;
-        break;
+        if (mErrBehavior == kOnError_Signal) {
+          res = NS_ERROR_ILLEGAL_INPUT;
+          break;
+        }
+        *out++ = UCS2_REPLACEMENT_CHAR;
+        mState = 0;
+        mFirst = false;
       }
     }
   }

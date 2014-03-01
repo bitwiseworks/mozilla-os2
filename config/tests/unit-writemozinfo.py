@@ -1,18 +1,16 @@
 #!/usr/bin/env python
-from __future__ import with_statement
 import unittest
-import os, sys, time, tempfile
+import json, os, sys, time, tempfile
 from StringIO import StringIO
 import mozunit
 
-from writemozinfo import build_dict, write_json, JsonValue, jsonify
+from writemozinfo import build_dict, write_json
 
 class TestBuildDict(unittest.TestCase):
     def testMissing(self):
         """
         Test that missing required values raises.
         """
-        self.assertRaises(Exception, build_dict, {})
         self.assertRaises(Exception, build_dict, {'OS_TARGET':'foo'})
         self.assertRaises(Exception, build_dict, {'TARGET_CPU':'foo'})
         self.assertRaises(Exception, build_dict, {'MOZ_WIDGET_TOOLKIT':'foo'})
@@ -159,45 +157,6 @@ class TestBuildDict(unittest.TestCase):
                         'MOZ_CRASHREPORTER':'1'})
         self.assertEqual(True, d['crashreporter'])
 
-class TestJsonValue(unittest.TestCase):
-    def testNone(self):
-        self.assertEqual("null", repr(JsonValue(None)))
-        
-    def testBool(self):
-        self.assertEqual("true", repr(JsonValue(True)))
-        self.assertEqual("false", repr(JsonValue(False)))
-
-    def testStr(self):
-        self.assertEqual("'abc'", repr(JsonValue("abc")))
-
-    def testInt(self):
-        self.assertEqual("100", repr(JsonValue(100)))
-
-    def testInvalid(self):
-        self.assertRaises(Exception, JsonValue, unicode("abc"))
-        self.assertRaises(Exception, JsonValue, 123.45)
-
-def parse_json(j):
-    """
-    Awful hack to parse a restricted subset of JSON strings into Python dicts.
-    """
-    return eval(j, {'true':True,'false':False,'null':None})
-
-class TestJsonify(unittest.TestCase):
-    """
-    Test the jsonify function.
-    """
-    def testBasic(self):
-        """
-        Sanity check the set of accepted Python value types.
-        """
-        j = parse_json(jsonify({'a':True,'b':False,'c':None,'d':100,'e':"abc"}))
-        self.assertEquals(True, j['a'])
-        self.assertEquals(False, j['b'])
-        self.assertEquals(None, j['c'])
-        self.assertEquals(100, j['d'])
-        self.assertEquals("abc", j['e'])
-
 class TestWriteJson(unittest.TestCase):
     """
     Test the write_json function.
@@ -215,12 +174,16 @@ class TestWriteJson(unittest.TestCase):
         """
         write_json(self.f, env={'OS_TARGET':'WINNT',
                                 'TARGET_CPU':'i386',
+                                'TOPSRCDIR':'/tmp',
+                                'MOZCONFIG':'foo',
                                 'MOZ_WIDGET_TOOLKIT':'windows'})
         with open(self.f) as f:
-            d = parse_json(f.read())
+            d = json.load(f)
             self.assertEqual('win', d['os'])
             self.assertEqual('x86', d['processor'])
             self.assertEqual('windows', d['toolkit'])
+            self.assertEqual('/tmp', d['topsrcdir'])
+            self.assertEqual(os.path.normpath('/tmp/foo'), d['mozconfig'])
             self.assertEqual(32, d['bits'])
 
     def testFileObj(self):
@@ -231,7 +194,7 @@ class TestWriteJson(unittest.TestCase):
         write_json(s, env={'OS_TARGET':'WINNT',
                            'TARGET_CPU':'i386',
                            'MOZ_WIDGET_TOOLKIT':'windows'})
-        d = parse_json(s.getvalue())
+        d = json.loads(s.getvalue())
         self.assertEqual('win', d['os'])
         self.assertEqual('x86', d['processor'])
         self.assertEqual('windows', d['toolkit'])

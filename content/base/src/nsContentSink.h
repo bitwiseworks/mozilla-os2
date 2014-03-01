@@ -13,6 +13,7 @@
 
 // Base class for contentsink implementations.
 
+#include "mozilla/Attributes.h"
 #include "nsICSSLoaderObserver.h"
 #include "nsWeakReference.h"
 #include "nsCOMPtr.h"
@@ -34,7 +35,7 @@ class nsIParser;
 class nsIAtom;
 class nsIChannel;
 class nsIContent;
-class nsIViewManager;
+class nsViewManager;
 class nsNodeInfoManager;
 class nsScriptLoader;
 class nsIApplicationCache;
@@ -86,7 +87,7 @@ class nsContentSink : public nsICSSLoaderObserver,
 
   // nsICSSLoaderObserver
   NS_IMETHOD StyleSheetLoaded(nsCSSStyleSheet* aSheet, bool aWasAlternate,
-                              nsresult aStatus);
+                              nsresult aStatus) MOZ_OVERRIDE;
 
   virtual nsresult ProcessMETATag(nsIContent* aContent);
 
@@ -146,9 +147,8 @@ protected:
   nsresult ProcessHTTPHeaders(nsIChannel* aChannel);
   nsresult ProcessHeaderData(nsIAtom* aHeader, const nsAString& aValue,
                              nsIContent* aContent = nullptr);
-  nsresult ProcessLinkHeader(nsIContent* aElement,
-                             const nsAString& aLinkData);
-  nsresult ProcessLink(nsIContent* aElement, const nsSubstring& aAnchor,
+  nsresult ProcessLinkHeader(const nsAString& aLinkData);
+  nsresult ProcessLink(const nsSubstring& aAnchor,
                        const nsSubstring& aHref, const nsSubstring& aRel,
                        const nsSubstring& aTitle, const nsSubstring& aType,
                        const nsSubstring& aMedia);
@@ -160,7 +160,7 @@ protected:
                                     const nsSubstring& aType,
                                     const nsSubstring& aMedia);
 
-  void PrefetchHref(const nsAString &aHref, nsIContent *aSource,
+  void PrefetchHref(const nsAString &aHref, nsINode *aSource,
                     bool aExplicit);
 
   // aHref can either be the usual URI format or of the form "//www.hostname.com"

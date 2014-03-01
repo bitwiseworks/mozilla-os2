@@ -4,9 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsRuleData.h"
-#include "nsCSSProps.h"
-#include "nsPresArena.h"
 
+#include "mozilla/Poison.h"
 #include "mozilla/StandardInteger.h"
 
 inline size_t
@@ -21,7 +20,7 @@ nsRuleData::GetPoisonOffset()
                     "expect uintptr_t to be unsigned");
   MOZ_STATIC_ASSERT(size_t(-1) > size_t(0),
                     "expect size_t to be unsigned");
-  uintptr_t framePoisonValue = nsPresArena::GetPoisonValue();
+  uintptr_t framePoisonValue = mozPoisonValue();
   return size_t(framePoisonValue - uintptr_t(mValueStorage)) /
          sizeof(nsCSSValue);
 }
@@ -32,7 +31,6 @@ nsRuleData::nsRuleData(uint32_t aSIDs, nsCSSValue* aValueStorage,
     mCanStoreInRuleTree(true),
     mPresContext(aContext),
     mStyleContext(aStyleContext),
-    mPostResolveCallback(nullptr),
     mValueStorage(aValueStorage)
 {
 #ifndef MOZ_VALGRIND

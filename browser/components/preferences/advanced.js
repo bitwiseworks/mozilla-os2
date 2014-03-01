@@ -37,6 +37,31 @@ var gAdvancedPane = {
     // in case the default changes.  On other Windows OS's defaults can also
     // be set while the prefs are open.
     window.setInterval(this.updateSetDefaultBrowser, 1000);
+
+#ifdef MOZ_METRO
+    // Pre Windows 8, we should hide the update related settings
+    // for the Metro browser
+    let version = Components.classes["@mozilla.org/system-info;1"].
+                  getService(Components.interfaces.nsIPropertyBag2).
+                  getProperty("version");
+    let preWin8 = parseFloat(version) < 6.2;
+    this._showingWin8Prefs = !preWin8;
+    if (preWin8) {
+      ["autoMetro", "autoMetroIndent"].forEach(
+        function(id) document.getElementById(id).collapsed = true
+      );
+    } else {
+      let brandShortName =
+        document.getElementById("bundleBrand").getString("brandShortName");
+      let bundlePrefs = document.getElementById("bundlePreferences");
+      let autoDesktop = document.getElementById("autoDesktop");
+      autoDesktop.label =
+        bundlePrefs.getFormattedString("updateAutoDesktop.label",
+                                       [brandShortName]);
+      autoDesktop.accessKey =
+        bundlePrefs.getString("updateAutoDesktop.accessKey");
+    }
+#endif
 #endif
 #endif
 
@@ -47,6 +72,11 @@ var gAdvancedPane = {
 #ifdef MOZ_CRASHREPORTER
     this.initSubmitCrashes();
 #endif
+    this.initTelemetry();
+#ifdef MOZ_SERVICES_HEALTHREPORT
+    this.initSubmitHealthReport();
+#endif
+
     this.updateActualCacheSize("disk");
     this.updateActualCacheSize("offline");
 
@@ -126,6 +156,45 @@ var gAdvancedPane = {
   },
 
   /**
+   * When the user toggles the layers.acceleration.disabled pref,
+   * sync its new value to the gfx.direct2d.disabled pref too.
+   */
+  updateHardwareAcceleration: function()
+  {
+#ifdef XP_WIN
+    var fromPref = document.getElementById("layers.acceleration.disabled");
+    var toPref = document.getElementById("gfx.direct2d.disabled");
+    toPref.value = fromPref.value;
+#endif
+  },
+
+  // DATA CHOICES TAB
+
+  /**
+   * opening links behind a modal dialog is poor form. Work around flawed text-link handling here.
+   */
+  openTextLink: function (evt) {
+    let where = Services.prefs.getBoolPref("browser.preferences.instantApply") ? "tab" : "window";
+    openUILinkIn(evt.target.getAttribute("href"), where);
+    evt.preventDefault();
+  },
+
+  /**
+   * Set up or hide the Learn More links for various data collection options
+   */
+  _setupLearnMoreLink: function (pref, element) {
+    // set up the Learn More link with the correct URL
+    let url = Services.prefs.getCharPref(pref);
+    let el = document.getElementById(element);
+
+    if (url) {
+      el.setAttribute("href", url);
+    } else {
+      el.setAttribute("hidden", "true");
+    }
+  },
+
+  /**
    *
    */
   initSubmitCrashes: function ()
@@ -138,6 +207,7 @@ var gAdvancedPane = {
     } catch (e) {
       checkbox.style.display = "none";
     }
+    this._setupLearnMoreLink("toolkit.crashreporter.infoURL", "crashReporterLearnMore");
   },
 
   /**
@@ -153,18 +223,59 @@ var gAdvancedPane = {
     } catch (e) { }
   },
 
+
   /**
-   * When the user toggles the layers.acceleration.disabled pref,
-   * sync its new value to the gfx.direct2d.disabled pref too.
+   * The preference/checkbox is configured in XUL.
+   *
+   * In all cases, set up the Learn More link sanely
    */
-  updateHardwareAcceleration: function()
+  initTelemetry: function ()
   {
-#ifdef XP_WIN
-    var fromPref = document.getElementById("layers.acceleration.disabled");
-    var toPref = document.getElementById("gfx.direct2d.disabled");
-    toPref.value = fromPref.value;
+#ifdef MOZ_TELEMETRY_REPORTING
+    this._setupLearnMoreLink("toolkit.telemetry.infoURL", "telemetryLearnMore");
 #endif
   },
+
+#ifdef MOZ_SERVICES_HEALTHREPORT
+  /**
+   * Initialize the health report service reference and checkbox.
+   */
+  initSubmitHealthReport: function () {
+    this._setupLearnMoreLink("datareporting.healthreport.infoURL", "FHRLearnMore");
+
+    let policy = Components.classes["@mozilla.org/datareporting/service;1"]
+                                   .getService(Components.interfaces.nsISupports)
+                                   .wrappedJSObject
+                                   .policy;
+
+    let checkbox = document.getElementById("submitHealthReportBox");
+
+    if (!policy) {
+      checkbox.setAttribute("disabled", "true");
+      return;
+    }
+
+    checkbox.checked = policy.healthReportUploadEnabled;
+  },
+
+  /**
+   * Update the health report policy acceptance with state from checkbox.
+   */
+  updateSubmitHealthReport: function () {
+    let policy = Components.classes["@mozilla.org/datareporting/service;1"]
+                                   .getService(Components.interfaces.nsISupports)
+                                   .wrappedJSObject
+                                   .policy;
+
+    if (!policy) {
+      return;
+    }
+
+    let checkbox = document.getElementById("submitHealthReportBox");
+    policy.recordHealthReportUploadEnabled(checkbox.checked,
+                                           "Checkbox from preferences pane");
+  },
+#endif
 
   // NETWORK TAB
 
@@ -325,10 +436,6 @@ var gAdvancedPane = {
       }
     }
 
-    var storageManager = Components.classes["@mozilla.org/dom/storagemanager;1"].
-                         getService(Components.interfaces.nsIDOMStorageManager);
-    usage += storageManager.getUsage(host);
-
     return usage;
   },
 
@@ -416,12 +523,6 @@ var gAdvancedPane = {
         }
     }
 
-    // send out an offline-app-removed signal.  The nsDOMStorage
-    // service will clear DOM storage for this host.
-    var obs = Components.classes["@mozilla.org/observer-service;1"]
-                        .getService(Components.interfaces.nsIObserverService);
-    obs.notifyObservers(null, "offline-app-removed", host);
-
     // remove the permission
     var pm = Components.classes["@mozilla.org/permissionmanager;1"]
                        .getService(Components.interfaces.nsIPermissionManager);
@@ -491,12 +592,24 @@ var gAdvancedPane = {
   {
     var enabledPref = document.getElementById("app.update.enabled");
     var autoPref = document.getElementById("app.update.auto");
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+    var metroEnabledPref = document.getElementById("app.update.metro.enabled");
+#endif
+#endif
     var radiogroup = document.getElementById("updateRadioGroup");
 
     if (!enabledPref.value)   // Don't care for autoPref.value in this case.
-      radiogroup.value="manual"     // 3. Never check for updates.
+      radiogroup.value="manual";    // 3. Never check for updates.
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+    // enabledPref.value && autoPref.value && metroEnabledPref.value
+    else if (metroEnabledPref.value && this._showingWin8Prefs)
+      radiogroup.value="autoMetro"; // 0. Automatically install updates for both Metro and Desktop
+#endif
+#endif
     else if (autoPref.value)  // enabledPref.value && autoPref.value
-      radiogroup.value="auto";      // 1. Automatically install updates
+      radiogroup.value="auto";      // 1. Automatically install updates for Desktop only
     else                      // enabledPref.value && !autoPref.value
       radiogroup.value="checkOnly"; // 2. Check, but let me choose
 
@@ -513,6 +626,13 @@ var gAdvancedPane = {
     // the warnIncompatible checkbox value is set by readAddonWarn
     warnIncompatible.disabled = radiogroup.disabled || modePref.locked ||
                                 !enabledPref.value || !autoPref.value;
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+    if (this._showingWin8Prefs) {
+      warnIncompatible.disabled |= metroEnabledPref.value;
+    }
+#endif
+#endif
 
 #ifdef MOZ_MAINTENANCE_SERVICE
     // Check to see if the maintenance service is installed.
@@ -560,12 +680,30 @@ var gAdvancedPane = {
   {
     var enabledPref = document.getElementById("app.update.enabled");
     var autoPref = document.getElementById("app.update.auto");
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+    var metroEnabledPref = document.getElementById("app.update.metro.enabled");
+    // Initialize the pref to false only if we're showing the option
+    if (this._showingWin8Prefs) {
+      metroEnabledPref.value = false;
+    }
+#endif
+#endif
     var radiogroup = document.getElementById("updateRadioGroup");
     switch (radiogroup.value) {
-      case "auto":      // 1. Automatically install updates
+      case "auto":      // 1. Automatically install updates for Desktop only
         enabledPref.value = true;
         autoPref.value = true;
         break;
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+      case "autoMetro": // 0. Automatically install updates for both Metro and Desktop
+        enabledPref.value = true;
+        autoPref.value = true;
+        metroEnabledPref.value = true;
+        break;
+#endif
+#endif
       case "checkOnly": // 2. Check, but let me choose
         enabledPref.value = true;
         autoPref.value = false;
@@ -580,6 +718,14 @@ var gAdvancedPane = {
     warnIncompatible.disabled = enabledPref.locked || !enabledPref.value ||
                                 autoPref.locked || !autoPref.value ||
                                 modePref.locked;
+
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+    if (this._showingWin8Prefs) {
+      warnIncompatible.disabled |= metroEnabledPref.value;
+    }
+#endif
+#endif
   },
 
   /**
@@ -639,10 +785,6 @@ var gAdvancedPane = {
   /*
    * Preferences:
    *
-   * security.enable_ssl3
-   * - true if SSL 3 encryption is enabled, false otherwise
-   * security.enable_tls
-   * - true if TLS encryption is enabled, false otherwise
    * security.default_personal_cert
    * - a string:
    *     "Select Automatically"   select a certificate automatically when a site
@@ -659,16 +801,6 @@ var gAdvancedPane = {
   {
     document.documentElement.openWindow("mozilla:certmanager",
                                         "chrome://pippki/content/certManager.xul",
-                                        "", null);
-  },
-
-  /**
-   * Displays a dialog which describes the user's CRLs.
-   */
-  showCRLs: function ()
-  {
-    document.documentElement.openWindow("mozilla:crlmanager",
-                                        "chrome://pippki/content/crlManager.xul",
                                         "", null);
   },
 

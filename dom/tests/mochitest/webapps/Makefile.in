@@ -10,21 +10,25 @@ relativesrcdir	= @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS = \
-    apps \
-    $(NULL)
-
-MOCHITEST_CHROME_FILES	= \
+MOCHITEST_CHROME_FILES = \
+    bug_765063.xul \
+    cross_origin.html \
+    head.js \
     test_bug_765063.xul \
+    test_cross_origin.xul \
     test_install_app.xul \
     test_list_api.xul \
     test_install_errors.xul \
-    test_cross_domain.xul \
     test_install_utf8.xul \
     test_install_receipts.xul \
     test_getNotInstalled.xul \
-    jshelper.js \
-    apphelper.js \
+    test_launch_paths.xul \
+    $(NULL)
+
+MOCHITEST_FILES = \
+    test_bug_779982.html \
+    file_bug_779982.js \
+    file_bug_779982.html \
     $(NULL)
 
 include $(topsrcdir)/config/rules.mk

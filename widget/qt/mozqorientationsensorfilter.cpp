@@ -12,6 +12,8 @@
 #endif
 #include "nsXULAppAPI.h"
 
+using namespace QtMobility;
+
 int MozQOrientationSensorFilter::mWindowRotationAngle = 0;
 QTransform MozQOrientationSensorFilter::mWindowRotationTransform;
 
@@ -58,7 +60,7 @@ MozQOrientationSensorFilter::filter(QOrientationReading* reading)
         }
     }
 #else
-    emit orientationChanged();
+    Q_EMIT orientationChanged();
 #endif
 
     return true; // don't store the reading in the sensor

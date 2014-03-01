@@ -8,7 +8,6 @@
 #include "mozilla/Util.h"
 
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/jsipc/ContextWrapperParent.h"
 
 #include "nsAutoPtr.h"
 
@@ -17,8 +16,6 @@ using mozilla::ipc::TestShellParent;
 using mozilla::ipc::TestShellCommandParent;
 using mozilla::ipc::PTestShellCommandParent;
 using mozilla::dom::ContentParent;
-using mozilla::jsipc::PContextWrapperParent;
-using mozilla::jsipc::ContextWrapperParent;
 
 PTestShellCommandParent*
 TestShellParent::AllocPTestShellCommand(const nsString& aCommand)
@@ -44,36 +41,9 @@ TestShellParent::CommandDone(TestShellCommandParent* command,
   return true;
 }
 
-PContextWrapperParent*
-TestShellParent::AllocPContextWrapper()
-{
-    ContentParent* cpp = static_cast<ContentParent*>(Manager());
-    return new ContextWrapperParent(cpp);
-}
-
-bool
-TestShellParent::DeallocPContextWrapper(PContextWrapperParent* actor)
-{
-    delete actor;
-    return true;
-}
-
-JSBool
-TestShellParent::GetGlobalJSObject(JSContext* cx, JSObject** globalp)
-{
-    // TODO Unify this code with TabParent::GetGlobalJSObject.
-    InfallibleTArray<PContextWrapperParent*> cwps(1);
-    ManagedPContextWrapperParent(cwps);
-    if (cwps.Length() < 1)
-        return JS_FALSE;
-    NS_ASSERTION(cwps.Length() == 1, "More than one PContextWrapper?");
-    ContextWrapperParent* cwp = static_cast<ContextWrapperParent*>(cwps[0]);
-    return cwp->GetGlobalJSObject(cx, globalp);
-}
-
 JSBool
 TestShellCommandParent::SetCallback(JSContext* aCx,
-                                    jsval aCallback)
+                                    JS::Value aCallback)
 {
   if (!mCallback.Hold(aCx)) {
     return JS_FALSE;
@@ -91,20 +61,18 @@ TestShellCommandParent::RunCallback(const nsString& aResponse)
   NS_ENSURE_TRUE(*mCallback.ToJSValPtr() != JSVAL_NULL && mCx, JS_FALSE);
 
   JSAutoRequest ar(mCx);
-
-  JSObject* global = JS_GetGlobalObject(mCx);
-  NS_ENSURE_TRUE(global, JS_FALSE);
-
-  JSAutoCompartment ac(mCx, global);
+  NS_ENSURE_TRUE(mCallback.ToJSObject(), JS_FALSE);
+  JSAutoCompartment ac(mCx, mCallback.ToJSObject());
+  JS::Rooted<JSObject*> global(mCx, JS_GetGlobalForScopeChain(mCx));
 
   JSString* str = JS_NewUCStringCopyN(mCx, aResponse.get(), aResponse.Length());
   NS_ENSURE_TRUE(str, JS_FALSE);
 
-  jsval argv[] = { STRING_TO_JSVAL(str) };
-  unsigned argc = ArrayLength(argv);
+  JS::Rooted<JS::Value> strVal(mCx, JS::StringValue(str));
 
-  jsval rval;
-  JSBool ok = JS_CallFunctionValue(mCx, global, mCallback, argc, argv, &rval);
+  JS::Rooted<JS::Value> rval(mCx);
+  JSBool ok = JS_CallFunctionValue(mCx, global, mCallback, 1, strVal.address(),
+				   rval.address());
   NS_ENSURE_TRUE(ok, JS_FALSE);
 
   return JS_TRUE;

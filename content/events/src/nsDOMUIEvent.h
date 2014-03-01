@@ -6,16 +6,19 @@
 #ifndef nsDOMUIEvent_h
 #define nsDOMUIEvent_h
 
+#include "mozilla/Attributes.h"
 #include "nsIDOMUIEvent.h"
 #include "nsDOMEvent.h"
 #include "nsLayoutUtils.h"
 #include "nsEvent.h"
+#include "mozilla/dom/UIEventBinding.h"
 
 class nsDOMUIEvent : public nsDOMEvent,
                      public nsIDOMUIEvent
 {
 public:
-  nsDOMUIEvent(nsPresContext* aPresContext, nsGUIEvent* aEvent);
+  nsDOMUIEvent(mozilla::dom::EventTarget* aOwner,
+               nsPresContext* aPresContext, nsGUIEvent* aEvent);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMUIEvent, nsDOMEvent)
@@ -25,22 +28,17 @@ public:
   
   // Forward to nsDOMEvent
   NS_FORWARD_TO_NSDOMEVENT_NO_SERIALIZATION_NO_DUPLICATION
-  NS_IMETHOD DuplicatePrivateData();
-  NS_IMETHOD_(void) Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType);
-  NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg, void** aIter);
-
-  virtual nsresult InitFromCtor(const nsAString& aType,
-                                JSContext* aCx, jsval* aVal);
+  NS_IMETHOD DuplicatePrivateData() MOZ_OVERRIDE;
+  NS_IMETHOD_(void) Serialize(IPC::Message* aMsg, bool aSerializeInterfaceType) MOZ_OVERRIDE;
+  NS_IMETHOD_(bool) Deserialize(const IPC::Message* aMsg, void** aIter) MOZ_OVERRIDE;
 
   static nsIntPoint CalculateScreenPoint(nsPresContext* aPresContext,
                                          nsEvent* aEvent)
   {
     if (!aEvent ||
         (aEvent->eventStructType != NS_MOUSE_EVENT &&
-         aEvent->eventStructType != NS_POPUP_EVENT &&
          aEvent->eventStructType != NS_MOUSE_SCROLL_EVENT &&
          aEvent->eventStructType != NS_WHEEL_EVENT &&
-         aEvent->eventStructType != NS_MOZTOUCH_EVENT &&
          aEvent->eventStructType != NS_DRAG_EVENT &&
          aEvent->eventStructType != NS_SIMPLE_GESTURE_EVENT)) {
       return nsIntPoint(0, 0);
@@ -63,10 +61,8 @@ public:
   {
     if (!aEvent ||
         (aEvent->eventStructType != NS_MOUSE_EVENT &&
-         aEvent->eventStructType != NS_POPUP_EVENT &&
          aEvent->eventStructType != NS_MOUSE_SCROLL_EVENT &&
          aEvent->eventStructType != NS_WHEEL_EVENT &&
-         aEvent->eventStructType != NS_MOZTOUCH_EVENT &&
          aEvent->eventStructType != NS_DRAG_EVENT &&
          aEvent->eventStructType != NS_SIMPLE_GESTURE_EVENT) ||
         !aPresContext ||
@@ -89,21 +85,65 @@ public:
                       nsPresContext::AppUnitsToIntCSSPixels(pt.y));
   }
 
+  static already_AddRefed<nsDOMUIEvent> Constructor(const mozilla::dom::GlobalObject& aGlobal,
+                                                    const nsAString& aType,
+                                                    const mozilla::dom::UIEventInit& aParam,
+                                                    mozilla::ErrorResult& aRv);
+
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
+  {
+    return mozilla::dom::UIEventBinding::Wrap(aCx, aScope, this);
+  }
+
+  nsIDOMWindow* GetView() const
+  {
+    return mView;
+  }
+
+  int32_t Detail() const
+  {
+    return mDetail;
+  }
+
+  int32_t LayerX() const
+  {
+    return GetLayerPoint().x;
+  }
+
+  int32_t LayerY() const
+  {
+    return GetLayerPoint().y;
+  }
+
+  int32_t PageX() const;
+  int32_t PageY() const;
+
+  virtual uint32_t Which()
+  {
+    MOZ_ASSERT(mEvent->eventStructType != NS_KEY_EVENT,
+               "Key events should override Which()");
+    MOZ_ASSERT(mEvent->eventStructType != NS_MOUSE_EVENT,
+               "Mouse events should override Which()");
+    return 0;
+  }
+
+  already_AddRefed<nsINode> GetRangeParent();
+
+  int32_t RangeOffset() const;
+
+  bool CancelBubble() const
+  {
+    return mEvent->mFlags.mPropagationStopped;
+  }
+
+  bool IsChar() const;
+
 protected:
   // Internal helper functions
   nsIntPoint GetClientPoint();
   nsIntPoint GetMovementPoint();
-  nsIntPoint GetLayerPoint();
-  nsIntPoint GetPagePoint();
-
-  // Allow specializations.
-  virtual nsresult Which(uint32_t* aWhich)
-  {
-    NS_ENSURE_ARG_POINTER(aWhich);
-    // Usually we never reach here, as this is reimplemented for mouse and keyboard events.
-    *aWhich = 0;
-    return NS_OK;
-  }
+  nsIntPoint GetLayerPoint() const;
 
   nsCOMPtr<nsIDOMWindow> mView;
   int32_t mDetail;

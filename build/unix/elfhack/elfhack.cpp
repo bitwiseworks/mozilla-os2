@@ -16,6 +16,12 @@
 #ifndef R_ARM_V4BX
 #define R_ARM_V4BX 0x28
 #endif
+#ifndef R_ARM_CALL
+#define R_ARM_CALL 0x1c
+#endif
+#ifndef R_ARM_JUMP24
+#define R_ARM_JUMP24 0x1d
+#endif
 #ifndef R_ARM_THM_JUMP24
 #define R_ARM_THM_JUMP24 0x1e
 #endif
@@ -234,8 +240,25 @@ private:
             unsigned int word0 = addend & 0xffff,
                          word1 = addend >> 16;
 
-            if (((word0 & 0xf800) != 0xf000) || ((word1 & 0x9000) != 0x9000))
+            /* Encoding T4 of B.W is 10x1 ; Encoding T1 of BL is 11x1. */
+            unsigned int type = (word1 & 0xd000) >> 12;
+            if (((word0 & 0xf800) != 0xf000) || ((type & 0x9) != 0x9))
                 throw std::runtime_error("R_ARM_THM_JUMP24/R_ARM_THM_CALL relocation only supported for B.W <label> and BL <label>");
+
+            /* When the target address points to ARM code, switch a BL to a
+             * BLX. This however can't be done with a B.W without adding a
+             * trampoline, which is not supported as of now. */
+            if ((addr & 0x1) == 0) {
+                if (type == 0x9)
+                    throw std::runtime_error("R_ARM_THM_JUMP24/R_ARM_THM_CALL relocation only supported for BL <label> when label points to ARM code");
+                /* The address of the target is always relative to a 4-bytes
+                 * aligned address, so if the address of the BL instruction is
+                 * not 4-bytes aligned, adjust for it. */
+                if ((base_addr + offset) & 0x2)
+                    tmp += 2;
+                /* Encoding T2 of BLX is 11x0. */
+                type = 0xc;
+            }
 
             unsigned int s = (word0 & (1 << 10)) >> 10;
             unsigned int j1 = (word1 & (1 << 13)) >> 13;
@@ -250,7 +273,7 @@ private:
             j2 = ((tmp & (1 << 22)) >> 22) ^ !s;
 
             return 0xf000 | (s << 10) | ((tmp & (0x3ff << 12)) >> 12) |
-                   ((word1 & 0xd000) << 16) | (j1 << 29) | (j2 << 27) | ((tmp & 0xffe) << 15);
+                   (type << 28) | (j1 << 29) | (j2 << 27) | ((tmp & 0xffe) << 15);
         }
     };
 
@@ -326,6 +349,8 @@ private:
             case REL(ARM, REL32):
                 apply_relocation<pc32_relocation>(the_code, buf, &*r, addr);
                 break;
+            case REL(ARM, CALL):
+            case REL(ARM, JUMP24):
             case REL(ARM, PLT32):
                 apply_relocation<arm_plt32_relocation>(the_code, buf, &*r, addr);
                 break;
@@ -376,8 +401,72 @@ void set_relative_reloc(Elf_Rela *rel, Elf *elf, unsigned int value) {
     rel->r_addend = value;
 }
 
+void maybe_split_segment(Elf *elf, ElfSegment *segment, bool fill)
+{
+    std::list<ElfSection *>::iterator it = segment->begin();
+    for (ElfSection *last = *(it++); it != segment->end(); last = *(it++)) {
+        // When two consecutive non-SHT_NOBITS sections are apart by more
+        // than the alignment of the section, the second can be moved closer
+        // to the first, but this requires the segment to be split.
+        if (((*it)->getType() != SHT_NOBITS) && (last->getType() != SHT_NOBITS) &&
+            ((*it)->getOffset() - last->getOffset() - last->getSize() > segment->getAlign())) {
+            // Probably very wrong.
+            Elf_Phdr phdr;
+            phdr.p_type = PT_LOAD;
+            phdr.p_vaddr = 0;
+            phdr.p_paddr = phdr.p_vaddr + segment->getVPDiff();
+            phdr.p_flags = segment->getFlags();
+            phdr.p_align = segment->getAlign();
+            phdr.p_filesz = (unsigned int)-1;
+            phdr.p_memsz = (unsigned int)-1;
+            ElfSegment *newSegment = new ElfSegment(&phdr);
+            elf->insertSegmentAfter(segment, newSegment);
+            ElfSection *section = *it;
+            for (; it != segment->end(); ++it) {
+                newSegment->addSection(*it);
+            }
+            for (it = newSegment->begin(); it != newSegment->end(); it++) {
+                segment->removeSection(*it);
+            }
+            // Fill the virtual address space gap left between the two PT_LOADs
+            // with a new PT_LOAD with no permissions. This avoids the linker
+            // (especially bionic's) filling the gap with anonymous memory,
+            // which breakpad doesn't like.
+            // /!\ running strip on a elfhacked binary will break this filler
+            // PT_LOAD.
+            if (!fill)
+                break;
+            // Insert dummy segment to normalize the entire Elf with the header
+            // sizes adjusted, before inserting a filler segment.
+            {
+              memset(&phdr, 0, sizeof(phdr));
+              ElfSegment dummySegment(&phdr);
+              elf->insertSegmentAfter(segment, &dummySegment);
+              elf->normalize();
+              elf->removeSegment(&dummySegment);
+            }
+            ElfSection *previous = section->getPrevious();
+            phdr.p_type = PT_LOAD;
+            phdr.p_vaddr = (previous->getAddr() + previous->getSize() + segment->getAlign() - 1) & ~(segment->getAlign() - 1);
+            phdr.p_paddr = phdr.p_vaddr + segment->getVPDiff();
+            phdr.p_flags = 0;
+            phdr.p_align = 0;
+            phdr.p_filesz = (section->getAddr() & ~(newSegment->getAlign() - 1)) - phdr.p_vaddr;
+            phdr.p_memsz = phdr.p_filesz;
+            if (phdr.p_filesz) {
+                newSegment = new ElfSegment(&phdr);
+                assert(newSegment->isElfHackFillerSegment());
+                elf->insertSegmentAfter(segment, newSegment);
+            } else {
+                elf->normalize();
+            }
+            break;
+        }
+    }
+}
+
 template <typename Rel_Type>
-int do_relocation_section(Elf *elf, unsigned int rel_type, unsigned int rel_type2, bool force)
+int do_relocation_section(Elf *elf, unsigned int rel_type, unsigned int rel_type2, bool force, bool fill)
 {
     ElfDynamic_Section *dyn = elf->getDynSection();
     if (dyn ==NULL) {
@@ -523,16 +612,23 @@ int do_relocation_section(Elf *elf, unsigned int rel_type, unsigned int rel_type
         }
     }
 
+    section->rels.assign(new_rels.begin(), new_rels.end());
+    section->shrink(new_rels.size() * section->getEntSize());
+
     ElfRelHackCode_Section *relhackcode = new ElfRelHackCode_Section(relhackcode_section, *elf, original_init);
     relhackcode->insertBefore(section);
     relhack->insertAfter(relhackcode);
-
-    section->rels.assign(new_rels.begin(), new_rels.end());
-    section->shrink(new_rels.size() * section->getEntSize());
     if (section->getOffset() + section->getSize() >= old_end) {
         fprintf(stderr, "No gain. Skipping\n");
         return -1;
     }
+
+    // Adjust PT_LOAD segments
+    for (ElfSegment *segment = elf->getSegmentByType(PT_LOAD); segment;
+         segment = elf->getSegmentByType(PT_LOAD, segment)) {
+        maybe_split_segment(elf, segment, fill);
+    }
+
     // Ensure Elf sections will be at their final location.
     elf->normalize();
     ElfLocation *init = new ElfLocation(relhackcode, relhackcode->getEntryPoint());
@@ -561,52 +657,111 @@ static inline int backup_file(const char *name)
     return rename(name, fname.c_str());
 }
 
-void do_file(const char *name, bool backup = false, bool force = false)
+void do_file(const char *name, bool backup = false, bool force = false, bool fill = false)
 {
     std::ifstream file(name, std::ios::in|std::ios::binary);
-    Elf *elf = new Elf(file);
-    unsigned int size = elf->getSize();
+    Elf elf(file);
+    unsigned int size = elf.getSize();
     fprintf(stderr, "%s: ", name);
-    if (elf->getType() != ET_DYN) {
+    if (elf.getType() != ET_DYN) {
         fprintf(stderr, "Not a shared object. Skipping\n");
-        delete elf;
         return;
     }
 
-    for (ElfSection *section = elf->getSection(1); section != NULL;
+    for (ElfSection *section = elf.getSection(1); section != NULL;
          section = section->getNext()) {
         if (section->getName() &&
             (strncmp(section->getName(), ".elfhack.", 9) == 0)) {
             fprintf(stderr, "Already elfhacked. Skipping\n");
-            delete elf;
             return;
         }
     }
 
     int exit = -1;
-    switch (elf->getMachine()) {
+    switch (elf.getMachine()) {
     case EM_386:
-        exit = do_relocation_section<Elf_Rel>(elf, R_386_RELATIVE, R_386_32, force);
+        exit = do_relocation_section<Elf_Rel>(&elf, R_386_RELATIVE, R_386_32, force, fill);
         break;
     case EM_X86_64:
-        exit = do_relocation_section<Elf_Rela>(elf, R_X86_64_RELATIVE, R_X86_64_64, force);
+        exit = do_relocation_section<Elf_Rela>(&elf, R_X86_64_RELATIVE, R_X86_64_64, force, fill);
         break;
     case EM_ARM:
-        exit = do_relocation_section<Elf_Rel>(elf, R_ARM_RELATIVE, R_ARM_ABS32, force);
+        exit = do_relocation_section<Elf_Rel>(&elf, R_ARM_RELATIVE, R_ARM_ABS32, force, fill);
         break;
     }
     if (exit == 0) {
-        if (!force && (elf->getSize() >= size)) {
+        if (!force && (elf.getSize() >= size)) {
             fprintf(stderr, "No gain. Skipping\n");
         } else if (backup && backup_file(name) != 0) {
             fprintf(stderr, "Couln't create backup file\n");
         } else {
             std::ofstream ofile(name, std::ios::out|std::ios::binary|std::ios::trunc);
-            elf->write(ofile);
-            fprintf(stderr, "Reduced by %d bytes\n", size - elf->getSize());
+            elf.write(ofile);
+            fprintf(stderr, "Reduced by %d bytes\n", size - elf.getSize());
         }
     }
-    delete elf;
+}
+
+void undo_file(const char *name, bool backup = false)
+{
+    std::ifstream file(name, std::ios::in|std::ios::binary);
+    Elf elf(file);
+    unsigned int size = elf.getSize();
+    fprintf(stderr, "%s: ", name);
+    if (elf.getType() != ET_DYN) {
+        fprintf(stderr, "Not a shared object. Skipping\n");
+        return;
+    }
+
+    ElfSection *data = NULL, *text = NULL;
+    for (ElfSection *section = elf.getSection(1); section != NULL;
+         section = section->getNext()) {
+        if (section->getName() &&
+            (strcmp(section->getName(), elfhack_data) == 0))
+            data = section;
+        if (section->getName() &&
+            (strcmp(section->getName(), elfhack_text) == 0))
+            text = section;
+    }
+
+    if (!data || !text) {
+        fprintf(stderr, "Not elfhacked. Skipping\n");
+        return;
+    }
+    if (data != text->getNext()) {
+        fprintf(stderr, elfhack_data " section not following " elfhack_text ". Skipping\n");
+        return;
+    }
+
+    ElfSegment *first = elf.getSegmentByType(PT_LOAD);
+    ElfSegment *second = elf.getSegmentByType(PT_LOAD, first);
+    ElfSegment *filler = NULL;
+    // If the second PT_LOAD is a filler from elfhack --fill, check the third.
+    if (!second->isElfHackFillerSegment()) {
+        filler = second;
+        second = elf.getSegmentByType(PT_LOAD, filler);
+    }
+    if (second->getFlags() != first->getFlags()) {
+        fprintf(stderr, "Couldn't identify elfhacked PT_LOAD segments. Skipping\n");
+        return;
+    }
+    // Move sections from the second PT_LOAD to the first, and remove the
+    // second PT_LOAD segment.
+    for (std::list<ElfSection *>::iterator section = second->begin();
+         section != second->end(); ++section)
+        first->addSection(*section);
+
+    elf.removeSegment(second);
+    if (filler)
+        elf.removeSegment(filler);
+
+    if (backup && backup_file(name) != 0) {
+        fprintf(stderr, "Couln't create backup file\n");
+    } else {
+        std::ofstream ofile(name, std::ios::out|std::ios::binary|std::ios::trunc);
+        elf.write(ofile);
+        fprintf(stderr, "Grown by %d bytes\n", elf.getSize() - size);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -614,6 +769,8 @@ int main(int argc, char *argv[])
     int arg;
     bool backup = false;
     bool force = false;
+    bool revert = false;
+    bool fill = false;
     char *lastSlash = rindex(argv[0], '/');
     if (lastSlash != NULL)
         rundir = strndup(argv[0], lastSlash - argv[0]);
@@ -622,8 +779,14 @@ int main(int argc, char *argv[])
             force = true;
         else if (strcmp(argv[arg], "-b") == 0)
             backup = true;
-        else
-            do_file(argv[arg], backup, force);
+        else if (strcmp(argv[arg], "-r") == 0)
+            revert = true;
+        else if (strcmp(argv[arg], "--fill") == 0)
+            fill = true;
+        else if (revert) {
+            undo_file(argv[arg], backup);
+        } else
+            do_file(argv[arg], backup, force, fill);
     }
 
     free(rundir);

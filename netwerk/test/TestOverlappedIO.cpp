@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include <stdio.h>
 #include <signal.h>
+#include <algorithm>
 
 #ifdef WIN32
 #include <windows.h>
@@ -74,10 +75,10 @@ NS_IMETHODIMP
 TestListener::OnDataAvailable(nsIRequest* request,
                               nsISupports* context,
                               nsIInputStream *aIStream, 
-                              uint32_t aSourceOffset,
+                              uint64_t aSourceOffset,
                               uint32_t aLength)
 {
-    LOG(("TestListener::OnDataAvailable [offset=%u length=%u]\n",
+    LOG(("TestListener::OnDataAvailable [offset=%llu length=%u]\n",
         aSourceOffset, aLength));
     char buf[1025];
     uint32_t amt;
@@ -134,18 +135,18 @@ TestProvider::TestProvider(char *data)
     mDataLen = strlen(data);
     mOffset = 0;
     mRequestCount = 0;
-    LOG(("Constructing TestProvider [this=%x]\n", this));
+    LOG(("Constructing TestProvider [this=%p]\n", this));
 }
 
 TestProvider::~TestProvider()
 {
-    LOG(("Destroying TestProvider [this=%x]\n", this));
+    LOG(("Destroying TestProvider [this=%p]\n", this));
 }
 
 NS_IMETHODIMP
 TestProvider::OnStartRequest(nsIRequest* request, nsISupports* context)
 {
-    LOG(("TestProvider::OnStartRequest [this=%x]\n", this));
+    LOG(("TestProvider::OnStartRequest [this=%p]\n", this));
     return NS_OK;
 }
 
@@ -168,7 +169,7 @@ TestProvider::OnDataWritable(nsIRequest *request, nsISupports *context,
         return NS_BASE_STREAM_CLOSED;
 
     uint32_t writeCount, amount;
-    amount = NS_MIN(count, mDataLen - mOffset);
+    amount = std::min(count, mDataLen - mOffset);
     nsresult rv = output->Write(mData + mOffset, amount, &writeCount);
     if (NS_SUCCEEDED(rv)) {
         printf("wrote %u bytes\n", writeCount);

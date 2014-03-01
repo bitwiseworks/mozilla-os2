@@ -81,27 +81,49 @@ repeat (pixman_repeat_t repeat, int *c, int size)
     return TRUE;
 }
 
-#ifdef MOZ_GFX_OPTIMIZE_MOBILE
-#define LOW_QUALITY_INTERPOLATION
-#define LOWER_QUALITY_INTERPOLATION
-#endif
-
-#ifdef LOW_QUALITY_INTERPOLATION
-#define INTERPOLATION_PRECISION_BITS 4
-#else
-#define INTERPOLATION_PRECISION_BITS 8
-#endif
-static force_inline int32_t
-interpolation_coord(pixman_fixed_t t)
+static force_inline int
+pixman_fixed_to_bilinear_weight (pixman_fixed_t x)
 {
-#ifdef LOW_QUALITY_INTERPOLATION
-    return (t >> 12) & 0xf;
-#else
-    return (t >> 8) & 0xff;
-#endif
+    return (x >> (16 - BILINEAR_INTERPOLATION_BITS)) &
+	   ((1 << BILINEAR_INTERPOLATION_BITS) - 1);
 }
 
+#if BILINEAR_INTERPOLATION_BITS <= 4
+/* Inspired by Filter_32_opaque from Skia */
+static force_inline uint32_t
+bilinear_interpolation (uint32_t tl, uint32_t tr,
+			uint32_t bl, uint32_t br,
+			int distx, int disty)
+{
+    int distxy, distxiy, distixy, distixiy;
+    uint32_t lo, hi;
 
+    distx <<= (4 - BILINEAR_INTERPOLATION_BITS);
+    disty <<= (4 - BILINEAR_INTERPOLATION_BITS);
+
+    distxy = distx * disty;
+    distxiy = (distx << 4) - distxy;	/* distx * (16 - disty) */
+    distixy = (disty << 4) - distxy;	/* disty * (16 - distx) */
+    distixiy =
+	16 * 16 - (disty << 4) -
+	(distx << 4) + distxy; /* (16 - distx) * (16 - disty) */
+
+    lo = (tl & 0xff00ff) * distixiy;
+    hi = ((tl >> 8) & 0xff00ff) * distixiy;
+
+    lo += (tr & 0xff00ff) * distxiy;
+    hi += ((tr >> 8) & 0xff00ff) * distxiy;
+
+    lo += (bl & 0xff00ff) * distixy;
+    hi += ((bl >> 8) & 0xff00ff) * distixy;
+
+    lo += (br & 0xff00ff) * distxy;
+    hi += ((br >> 8) & 0xff00ff) * distxy;
+
+    return ((lo >> 8) & 0xff00ff) | (hi & ~0xff00ff);
+}
+
+#else
 #if SIZEOF_LONG > 4
 
 static force_inline uint32_t
@@ -112,6 +134,9 @@ bilinear_interpolation (uint32_t tl, uint32_t tr,
     uint64_t distxy, distxiy, distixy, distixiy;
     uint64_t tl64, tr64, bl64, br64;
     uint64_t f, r;
+
+    distx <<= (8 - BILINEAR_INTERPOLATION_BITS);
+    disty <<= (8 - BILINEAR_INTERPOLATION_BITS);
 
     distxy = distx * disty;
     distxiy = distx * (256 - disty);
@@ -184,6 +209,9 @@ bilinear_interpolation (uint32_t tl, uint32_t tr,
     int distxy, distxiy, distixy, distixiy;
     uint32_t f, r;
 
+    distx <<= (8 - BILINEAR_INTERPOLATION_BITS);
+    disty <<= (8 - BILINEAR_INTERPOLATION_BITS);
+
     distxy = distx * disty;
     distxiy = (distx << 8) - distxy;	/* distx * (256 - disty) */
     distixy = (disty << 8) - distxy;	/* disty * (256 - distx) */
@@ -220,6 +248,7 @@ bilinear_interpolation (uint32_t tl, uint32_t tr,
 }
 #endif
 #endif
+#endif // BILINEAR_INTERPOLATION_BITS <= 4
 
 /*
  * For each scanline fetched from source image with PAD repeat:
@@ -350,36 +379,36 @@ scanline_func_name (dst_type_t       *dst,							\
 												\
 		if (a1 == 0xff)									\
 		{										\
-		    *dst = CONVERT_ ## SRC_FORMAT ## _TO_ ## DST_FORMAT (s1);			\
+		    *dst = convert_ ## SRC_FORMAT ## _to_ ## DST_FORMAT (s1);			\
 		}										\
 		else if (s1)									\
 		{										\
-		    d = CONVERT_ ## DST_FORMAT ## _TO_8888 (*dst);				\
-		    s1 = CONVERT_ ## SRC_FORMAT ## _TO_8888 (s1);				\
+		    d = convert_ ## DST_FORMAT ## _to_8888 (*dst);				\
+		    s1 = convert_ ## SRC_FORMAT ## _to_8888 (s1);				\
 		    a1 ^= 0xff;									\
 		    UN8x4_MUL_UN8_ADD_UN8x4 (d, a1, s1);					\
-		    *dst = CONVERT_8888_TO_ ## DST_FORMAT (d);					\
+		    *dst = convert_8888_to_ ## DST_FORMAT (d);					\
 		}										\
 		dst++;										\
 												\
 		if (a2 == 0xff)									\
 		{										\
-		    *dst = CONVERT_ ## SRC_FORMAT ## _TO_ ## DST_FORMAT (s2);			\
+		    *dst = convert_ ## SRC_FORMAT ## _to_ ## DST_FORMAT (s2);			\
 		}										\
 		else if (s2)									\
 		{										\
-		    d = CONVERT_## DST_FORMAT ## _TO_8888 (*dst);				\
-		    s2 = CONVERT_## SRC_FORMAT ## _TO_8888 (s2);				\
+		    d = convert_## DST_FORMAT ## _to_8888 (*dst);				\
+		    s2 = convert_## SRC_FORMAT ## _to_8888 (s2);				\
 		    a2 ^= 0xff;									\
 		    UN8x4_MUL_UN8_ADD_UN8x4 (d, a2, s2);					\
-		    *dst = CONVERT_8888_TO_ ## DST_FORMAT (d);					\
+		    *dst = convert_8888_to_ ## DST_FORMAT (d);					\
 		}										\
 		dst++;										\
 	    }											\
 	    else /* PIXMAN_OP_SRC */								\
 	    {											\
-		*dst++ = CONVERT_ ## SRC_FORMAT ## _TO_ ## DST_FORMAT (s1);			\
-		*dst++ = CONVERT_ ## SRC_FORMAT ## _TO_ ## DST_FORMAT (s2);			\
+		*dst++ = convert_ ## SRC_FORMAT ## _to_ ## DST_FORMAT (s1);			\
+		*dst++ = convert_ ## SRC_FORMAT ## _to_ ## DST_FORMAT (s2);			\
 	    }											\
 	}											\
 												\
@@ -394,21 +423,21 @@ scanline_func_name (dst_type_t       *dst,							\
 												\
 		if (a1 == 0xff)									\
 		{										\
-		    *dst = CONVERT_ ## SRC_FORMAT ## _TO_ ## DST_FORMAT (s1);			\
+		    *dst = convert_ ## SRC_FORMAT ## _to_ ## DST_FORMAT (s1);			\
 		}										\
 		else if (s1)									\
 		{										\
-		    d = CONVERT_## DST_FORMAT ## _TO_8888 (*dst);				\
-		    s1 = CONVERT_ ## SRC_FORMAT ## _TO_8888 (s1);				\
+		    d = convert_## DST_FORMAT ## _to_8888 (*dst);				\
+		    s1 = convert_ ## SRC_FORMAT ## _to_8888 (s1);				\
 		    a1 ^= 0xff;									\
 		    UN8x4_MUL_UN8_ADD_UN8x4 (d, a1, s1);					\
-		    *dst = CONVERT_8888_TO_ ## DST_FORMAT (d);					\
+		    *dst = convert_8888_to_ ## DST_FORMAT (d);					\
 		}										\
 		dst++;										\
 	    }											\
 	    else /* PIXMAN_OP_SRC */								\
 	    {											\
-		*dst++ = CONVERT_ ## SRC_FORMAT ## _TO_ ## DST_FORMAT (s1);			\
+		*dst++ = convert_ ## SRC_FORMAT ## _to_ ## DST_FORMAT (s1);			\
 	    }											\
 	}											\
 }
@@ -814,12 +843,14 @@ bilinear_pad_repeat_get_scanline_bounds (int32_t         source_image_width,
  *                        all source pixels are fetched from zero padding
  *                        zone for NONE repeat
  *
- * Note: normally the sum of 'weight_top' and 'weight_bottom' is equal to 256,
- *       but sometimes it may be less than that for NONE repeat when handling
- *       fuzzy antialiased top or bottom image edges. Also both top and
- *       bottom weight variables are guaranteed to have value in 0-255
- *       range and can fit into unsigned byte or be used with 8-bit SIMD
- *       multiplication instructions.
+ * Note: normally the sum of 'weight_top' and 'weight_bottom' is equal to
+ *       BILINEAR_INTERPOLATION_RANGE, but sometimes it may be less than that
+ *       for NONE repeat when handling fuzzy antialiased top or bottom image
+ *       edges. Also both top and bottom weight variables are guaranteed to
+ *       have value, which is less than BILINEAR_INTERPOLATION_RANGE.
+ *       For example, the weights can fit into unsigned byte or be used
+ *       with 8-bit SIMD multiplication instructions for 8-bit interpolation
+ *       precision.
  */
 
 /* Replace a single "scanline_func" with "fetch_func" & "op_func" to allow optional
@@ -974,18 +1005,18 @@ fast_composite_scaled_bilinear ## scale_func_name (pixman_implementation_t *imp,
 	}											\
 												\
 	y1 = pixman_fixed_to_int (vy);								\
-	weight2 = (vy >> 8) & 0xff;								\
+	weight2 = pixman_fixed_to_bilinear_weight (vy);						\
 	if (weight2)										\
 	{											\
-	    /* normal case, both row weights are in 0-255 range and fit unsigned byte */	\
+	    /* both weight1 and weight2 are smaller than BILINEAR_INTERPOLATION_RANGE */	\
 	    y2 = y1 + 1;									\
-	    weight1 = 256 - weight2;								\
+	    weight1 = BILINEAR_INTERPOLATION_RANGE - weight2;					\
 	}											\
 	else											\
 	{											\
-	    /* set both top and bottom row to the same scanline, and weights to 128+128 */	\
+	    /* set both top and bottom row to the same scanline and tweak weights */		\
 	    y2 = y1;										\
-	    weight1 = weight2 = 128;								\
+	    weight1 = weight2 = BILINEAR_INTERPOLATION_RANGE / 2;				\
 	}											\
 	vy += unit_y;										\
 	if (PIXMAN_REPEAT_ ## repeat_mode == PIXMAN_REPEAT_PAD)					\

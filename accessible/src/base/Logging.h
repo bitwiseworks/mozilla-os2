@@ -10,10 +10,6 @@
 #include "nscore.h"
 #include "nsAString.h"
 
-class AccEvent;
-class Accessible;
-class DocAccessible;
-
 class nsIDocument;
 class nsINode;
 class nsIRequest;
@@ -23,6 +19,9 @@ class nsIWebProgress;
 namespace mozilla {
 namespace a11y {
 
+class AccEvent;
+class Accessible;
+class DocAccessible;
 class OuterDocAccessible;
 
 namespace logging {
@@ -51,11 +50,17 @@ enum EModules {
 bool IsEnabled(uint32_t aModules);
 
 /**
+ * Return true if the given module is logged.
+ */
+bool IsEnabled(const nsAString& aModules);
+
+/**
  * Log the document loading progress.
  */
 void DocLoad(const char* aMsg, nsIWebProgress* aWebProgress,
              nsIRequest* aRequest, uint32_t aStateFlags);
 void DocLoad(const char* aMsg, nsIDocument* aDocumentNode);
+void DocCompleteLoad(DocAccessible* aDocument, bool aIsLoadEventTarget);
 
 /**
  * Log that document load event was fired.
@@ -85,6 +90,31 @@ void DocDestroy(const char* aMsg, nsIDocument* aDocumentNode,
 void OuterDocDestroy(OuterDocAccessible* OuterDoc);
 
 /**
+ * Log the focus notification target.
+ */
+void FocusNotificationTarget(const char* aMsg, const char* aTargetDescr,
+                             Accessible* aTarget);
+void FocusNotificationTarget(const char* aMsg, const char* aTargetDescr,
+                             nsINode* aTargetNode);
+void FocusNotificationTarget(const char* aMsg, const char* aTargetDescr,
+                             nsISupports* aTargetThing);
+
+/**
+ * Log a cause of active item descendant change (submessage).
+ */
+void ActiveItemChangeCausedBy(const char* aMsg, Accessible* aTarget);
+
+/**
+ * Log the active widget (submessage).
+ */
+void ActiveWidget(Accessible* aWidget);
+
+/**
+ * Log the focus event was dispatched (submessage).
+ */
+void FocusDispatched(Accessible* aTarget);
+
+/**
  * Log the selection change.
  */
 void SelChange(nsISelection* aSelection, DocAccessible* aDocument);
@@ -96,6 +126,13 @@ void SelChange(nsISelection* aSelection, DocAccessible* aDocument);
  */
 void MsgBegin(const char* aTitle, const char* aMsgText, ...);
 void MsgEnd();
+
+/**
+ * Print start and end boundaries of the message body designated by '{' and '}'
+ * (2 spaces indent for body).
+ */
+void SubMsgBegin();
+void SubMsgEnd();
 
 /**
  * Log the entry into message body (4 spaces indent).
@@ -116,6 +153,23 @@ void Address(const char* aDescr, Accessible* aAcc);
  * Log the DOM node info as message entry.
  */
 void Node(const char* aDescr, nsINode* aNode);
+
+/**
+ * Log the document accessible info as message entry.
+ */
+void Document(DocAccessible* aDocument);
+
+/**
+ * Log the accessible and its DOM node as a message entry.
+ */
+void AccessibleNNode(const char* aDescr, Accessible* aAccessible);
+void AccessibleNNode(const char* aDescr, nsINode* aNode);
+
+/**
+ * Log the DOM event.
+ */
+void DOMEvent(const char* aDescr, nsINode* aOrigTarget,
+              const nsAString& aEventType);
 
 /**
  * Log the call stack, two spaces offset is used.

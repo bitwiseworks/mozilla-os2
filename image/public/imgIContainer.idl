@@ -6,8 +6,6 @@
 
 #include "nsISupports.idl"
 
-interface imgIDecoderObserver;
-
 %{C++
 #include "gfxImageSurface.h"
 #include "gfxContext.h"
@@ -30,6 +28,7 @@ class nsIFrame;
 
 namespace mozilla {
 class TimeStamp;
+class SVGImageContext;
 }
 
 %}
@@ -43,21 +42,22 @@ native gfxImageFormat(gfxASurface::gfxImageFormat);
 native gfxGraphicsFilter(gfxPattern::GraphicsFilter);
 [ref] native nsIntRect(nsIntRect);
 [ref] native nsIntSize(nsIntSize);
+native nsSize(nsSize);
 [ptr] native nsIFrame(nsIFrame);
 [ptr] native ImageContainer(mozilla::layers::ImageContainer);
 [ptr] native LayerManager(mozilla::layers::LayerManager);
 [ref] native TimeStamp(mozilla::TimeStamp);
+[ptr] native SVGImageContext(mozilla::SVGImageContext);
 
 
 /**
  * imgIContainer is the interface that represents an image. It allows
- * access to frames as Thebes surfaces, and permits users to extract subregions
- * as other imgIContainers. It also allows drawing of images on to Thebes
- * contexts.
+ * access to frames as Thebes surfaces. It also allows drawing of images
+ * onto Thebes contexts.
  *
  * Internally, imgIContainer also manages animation of images.
  */
-[scriptable, uuid(ead94080-cfd6-4a3e-8353-bd45333061d2)]
+[scriptable, builtinclass, uuid(f9029a03-758c-4047-a1f3-4b2e51e47363)]
 interface imgIContainer : nsISupports
 {
   /**
@@ -71,6 +71,19 @@ interface imgIContainer : nsISupports
    * zero is returned, and an exception will be thrown.
    */
   readonly attribute int32_t height;
+
+  /**
+   * The intrinsic size of this image in appunits. If the image has no intrinsic
+   * size in a dimension, -1 will be returned for that dimension. In the case of
+   * any error, an exception will be thrown.
+   */
+  [noscript] readonly attribute nsSize intrinsicSize;
+
+  /**
+   * The (dimensionless) intrinsic ratio of this image. In the case of any error,
+   * an exception will be thrown.
+   */
+  [noscript] readonly attribute nsSize intrinsicRatio;
 
   /**
     * Enumerated values for the 'type' attribute (below).
@@ -97,12 +110,6 @@ interface imgIContainer : nsISupports
   readonly attribute boolean animated;
 
   /**
-   * Whether the current frame is opaque; that is, needs the background painted
-   * behind it.
-   */
-  readonly attribute boolean currentFrameIsOpaque;
-
-  /**
    * Flags for imgIContainer operations.
    *
    * Meanings:
@@ -123,6 +130,10 @@ interface imgIContainer : nsISupports
    *
    * FLAG_CLAMP: Extend the image to the fill area by clamping image sample
    * coordinates instead of by tiling. This only affects 'draw'.
+   *
+   * FLAG_HIGH_QUALITY_SCALING: A hint as to whether this image should be
+   * scaled using the high quality scaler. Do not set this if not drawing to
+   * a window or not listening to invalidations.
    */
 
   const long FLAG_NONE            = 0x0;
@@ -130,6 +141,7 @@ interface imgIContainer : nsISupports
   const long FLAG_DECODE_NO_PREMULTIPLY_ALPHA = 0x2;
   const long FLAG_DECODE_NO_COLORSPACE_CONVERSION = 0x4;
   const long FLAG_CLAMP           = 0x8;
+  const long FLAG_HIGH_QUALITY_SCALING = 0x10;
 
   /**
     * Constants for specifying various "special" frames.
@@ -146,7 +158,9 @@ interface imgIContainer : nsISupports
 
   /**
    * Get a surface for the given frame. This may be a platform-native,
-   * optimized surface, so you cannot inspect its pixel data.
+   * optimized surface, so you cannot inspect its pixel data. If you
+   * need that, use gfxASurface::GetAsReadableARGB32ImageSurface or
+   * gfxASurface::CopyToARGB32ImageSurface.
    *
    * @param aWhichFrame Frame specifier of the FRAME_* variety.
    * @param aFlags Flags of the FLAG_* variety
@@ -155,36 +169,21 @@ interface imgIContainer : nsISupports
                                   in uint32_t aFlags);
 
   /**
+   * Whether the given frame is opaque; that is, needs the background painted
+   * behind it.
+   *
+   * @param aWhichFrame Frame specifier of the FRAME_* variety.
+   */
+  [notxpcom] boolean frameIsOpaque(in uint32_t aWhichFrame);
+
+  /**
    * Attempts to create an ImageContainer (and Image) containing the current
    * frame. Only valid for RASTER type images.
    */
-  [noscript] ImageContainer getImageContainer();
+  [noscript] ImageContainer getImageContainer(in LayerManager aManager);
 
   /**
-   * Create and return a new copy of the given frame that you can write to
-   * and otherwise inspect the pixels of.
-   *
-   * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aFlags Flags of the FLAG_* variety
-   */
-  [noscript] gfxImageSurface copyFrame(in uint32_t aWhichFrame,
-                                       in uint32_t aFlags);
-
-  /**
-   * Create a new imgContainer that contains only a single frame, which itself
-   * contains a subregion of the given frame.
-   *
-   * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aRect the area of the current frame to be duplicated in the
-   *              returned imgContainer's frame.
-   * @param aFlags Flags of the FLAG_* variety
-   */
-  [noscript] imgIContainer extractFrame(in uint32_t aWhichFrame,
-                                        [const] in nsIntRect aRect,
-                                        in uint32_t aFlags);
-
-  /**
-   * Draw the current frame on to the context specified.
+   * Draw a frame onto the context specified.
    *
    * @param aContext The Thebes context to draw the image to.
    * @param aFilter The filter to be used if we're scaling the image.
@@ -203,6 +202,10 @@ interface imgIContainer : nsISupports
    *          might be restricted by aSubimage -- but we still need the full
    *          image's viewport-size in order for SVG images with the "viewBox"
    *          attribute to position their content correctly.)
+   * @param aSVGContext If non-null, SVG-related rendering context such as
+   *                    overridden attributes on the image document's root <svg>
+   *                    node. Ignored for raster images.
+   * @param aWhichFrame Frame specifier of the FRAME_* variety.
    * @param aFlags Flags of the FLAG_* variety
    */
   [noscript] void draw(in gfxContext aContext,
@@ -211,27 +214,31 @@ interface imgIContainer : nsISupports
                        [const] in gfxRect aFill,
                        [const] in nsIntRect aSubimage,
                        [const] in nsIntSize aViewportSize,
+                       [const] in SVGImageContext aSVGContext,
+                       in uint32_t aWhichFrame,
                        in uint32_t aFlags);
-
-  /**
-   * If this image is TYPE_VECTOR, i.e. is really an embedded SVG document,
-   * this method returns a pointer to the root nsIFrame of that document. If
-   * not (or if the root nsIFrame isn't available for some reason), this method
-   * returns nullptr.
-   *
-   * "notxpcom" for convenience, since we have no need for nsresult return-val.
-   */
-  [notxpcom] nsIFrame GetRootLayoutFrame();
 
   /*
    * Ensures that an image is decoding. Calling this function guarantees that
-   * the image will at some point fire off decode notifications. Calling draw(),
-   * getFrame(), copyFrame(), or extractCurrentFrame() triggers the same
-   * mechanism internally. Thus, if you want to be sure that the image will be
-   * decoded but don't want to access it until then, you must call
-   * requestDecode().
+   * the image will at some point fire off decode notifications. Calling draw()
+   * or getFrame() triggers the same mechanism internally. Thus, if you want to
+   * be sure that the image will be decoded but don't want to access it until
+   * then, you must call requestDecode().
    */
   void requestDecode();
+
+  /*
+   * This is equivalent to requestDecode() but it also decodes some of the image.
+   */
+  [noscript] void startDecoding();
+
+  /*
+   * Returns true if no more decoding can be performed on this image. Images
+   * with errors return true since they cannot be decoded any further. Note that
+   * because decoded images may be discarded, isDecoded() may return false even
+   * if it has returned true in the past.
+   */
+  [noscript, notxpcom, nostdcall] bool isDecoded();
 
   /**
     * Increments the lock count on the image. An image will not be discarded
@@ -280,4 +287,41 @@ interface imgIContainer : nsISupports
 
   /* Methods to control animation */
   void resetAnimation();
+
+  /*
+   * Returns an index for the requested animation frame (either FRAME_FIRST or
+   * FRAME_CURRENT).
+   *
+   * The units of the index aren't specified, and may vary between different
+   * types of images. What you can rely on is that on all occasions when
+   * getFrameIndex(FRAME_CURRENT) returns a certain value,
+   * draw(..FRAME_CURRENT..) will draw the same frame. The same holds for
+   * FRAME_FIRST as well.
+   *
+   * @param aWhichFrame Frame specifier of the FRAME_* variety.
+   */
+  [notxpcom] float getFrameIndex(in uint32_t aWhichFrame);
+
+  /*
+   * Returns the delay, in ms, between the first and second frame. If this
+   * returns 0, there is no delay between first and second frame (i.e., this
+   * image could render differently whenever it draws).
+   *
+   * If this image is not animated, or not known to be animated (see attribute
+   * animated), returns -1.
+   */
+  [notxpcom] int32_t getFirstFrameDelay();
+
+  /*
+   * If this is an animated image that hasn't started animating already, this
+   * sets the animation's start time to the indicated time.
+   *
+   * This has no effect if the image isn't animated or it has started animating
+   * already; it also has no effect if the image format doesn't care about
+   * animation start time.
+   *
+   * In all cases, animation does not actually begin until startAnimation(),
+   * resetAnimation(), or requestRefresh() is called for the first time.
+   */
+  [notxpcom] void setAnimationStartTime([const] in TimeStamp aTime);
 };

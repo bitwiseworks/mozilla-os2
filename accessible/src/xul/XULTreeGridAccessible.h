@@ -24,7 +24,10 @@ class XULTreeGridAccessible : public XULTreeAccessible,
                               public TableAccessible
 {
 public:
-  XULTreeGridAccessible(nsIContent* aContent, DocAccessible* aDoc);
+  XULTreeGridAccessible(nsIContent* aContent, DocAccessible* aDoc,
+                        nsTreeBodyFrame* aTreeFrame) :
+    XULTreeAccessible(aContent, aDoc, aTreeFrame), xpcAccessibleTable(this)
+    { mGenericTypes |= eTable; }
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -49,6 +52,7 @@ public:
   virtual void SelectedRowIndices(nsTArray<uint32_t>* aRows);
   virtual void SelectRow(uint32_t aRowIdx);
   virtual void UnselectRow(uint32_t aRowIdx);
+  virtual Accessible* AsAccessible() { return this; }
 
   // nsAccessNode
   virtual void Shutdown();
@@ -147,17 +151,14 @@ public:
   NS_IMETHOD DoAction(uint8_t aIndex);
 
   // nsIAccessibleTableCell
-  NS_DECL_OR_FORWARD_NSIACCESSIBLETABLECELL_WITH_XPCACCESSIBLETABLECELL
-
-  // nsAccessNode
-  virtual void Init();
-  virtual bool IsPrimaryForNode() const;
+  NS_FORWARD_NSIACCESSIBLETABLECELL(xpcAccessibleTableCell::)
 
   // Accessible
+  virtual TableCellAccessible* AsTableCell() { return this; }
   virtual void Shutdown();
   virtual ENameValueFlag Name(nsString& aName);
   virtual Accessible* FocusedChild();
-  virtual nsresult GetAttributesInternal(nsIPersistentProperties* aAttributes);
+  virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() MOZ_OVERRIDE;
   virtual int32_t IndexInParent() const;
   virtual Relation RelationByType(uint32_t aType);
   virtual a11y::role NativeRole();
@@ -167,13 +168,16 @@ public:
   // ActionAccessible
   virtual uint8_t ActionCount();
 
+  // TableCellAccessible
+  virtual TableAccessible* Table() const MOZ_OVERRIDE;
+  virtual uint32_t ColIdx() const MOZ_OVERRIDE;
+  virtual uint32_t RowIdx() const MOZ_OVERRIDE;
+  virtual void ColHeaderCells(nsTArray<Accessible*>* aHeaderCells) MOZ_OVERRIDE;
+  virtual void RowHeaderCells(nsTArray<Accessible*>* aCells) MOZ_OVERRIDE { }
+  virtual bool Selected() MOZ_OVERRIDE;
+
   // XULTreeGridCellAccessible
   NS_DECLARE_STATIC_IID_ACCESSOR(XULTREEGRIDCELLACCESSIBLE_IMPL_CID)
-
-  /**
-   * Return index of the column.
-   */
-  int32_t GetColumnIndex() const;
 
   /**
    * Fire name or state change event if the accessible text or value has been

@@ -8,6 +8,7 @@
 #include "SVGLengthList.h"
 #include "nsMathUtils.h"
 #include <math.h>
+#include <algorithm>
 
 namespace mozilla {
 
@@ -36,7 +37,7 @@ SVGLengthListSMILType::Destroy(nsSMILValue& aValue) const
   NS_PRECONDITION(aValue.mType == this, "Unexpected SMIL value type");
   delete static_cast<SVGLengthListAndInfo*>(aValue.mU.mPtr);
   aValue.mU.mPtr = nullptr;
-  aValue.mType = &nsSMILNullType::sSingleton;
+  aValue.mType = nsSMILNullType::Singleton();
 }
 
 nsresult
@@ -124,7 +125,7 @@ SVGLengthListSMILType::Add(nsSMILValue& aDest,
   // Zero-pad our |dest| list, if necessary.
   if (dest.Length() < valueToAdd.Length()) {
     if (!dest.CanZeroPadList()) {
-      // nsSVGUtils::ReportToConsole
+      // SVGContentUtils::ReportToConsole
       return NS_ERROR_FAILURE;
     }
 
@@ -188,7 +189,7 @@ SVGLengthListSMILType::ComputeDistance(const nsSMILValue& aFrom,
 
   if ((from.Length() < to.Length() && !from.CanZeroPadList()) ||
       (to.Length() < from.Length() && !to.CanZeroPadList())) {
-    // nsSVGUtils::ReportToConsole
+    // SVGContentUtils::ReportToConsole
     return NS_ERROR_FAILURE;
   }
 
@@ -263,11 +264,11 @@ SVGLengthListSMILType::Interpolate(const nsSMILValue& aStartVal,
 
   if ((start.Length() < end.Length() && !start.CanZeroPadList()) ||
       (end.Length() < start.Length() && !end.CanZeroPadList())) {
-    // nsSVGUtils::ReportToConsole
+    // SVGContentUtils::ReportToConsole
     return NS_ERROR_FAILURE;
   }
 
-  if (!result.SetLength(NS_MAX(start.Length(), end.Length()))) {
+  if (!result.SetLength(std::max(start.Length(), end.Length()))) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 

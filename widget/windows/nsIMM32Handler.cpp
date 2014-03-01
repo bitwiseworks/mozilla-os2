@@ -13,6 +13,7 @@
 #include "nsWindow.h"
 #include "WinUtils.h"
 #include "KeyboardLayout.h"
+#include <algorithm>
 
 using namespace mozilla::widget;
 
@@ -39,10 +40,6 @@ static UINT sWM_MSIME_MOUSE = 0; // mouse message for MSIME 98/2000
 #define IMEMOUSE_MDOWN      0x04
 #define IMEMOUSE_WUP        0x10    // wheel up
 #define IMEMOUSE_WDOWN      0x20    // wheel down
-
-bool nsIMM32Handler::sIsStatusChanged = false;
-bool nsIMM32Handler::sIsIME = true;
-bool nsIMM32Handler::sIsIMEOpening = false;
 
 UINT nsIMM32Handler::sCodePage = 0;
 DWORD nsIMM32Handler::sIMEProperty = 0;
@@ -107,41 +104,6 @@ nsIMM32Handler::IsTopLevelWindowOfComposition(nsWindow* aWindow)
 }
 
 /* static */ bool
-nsIMM32Handler::IsDoingKakuteiUndo(HWND aWnd)
-{
-  // This message pattern is "Kakutei-Undo" on ATOK and WXG.
-  // In this case, the message queue has following messages:
-  // ---------------------------------------------------------------------------
-  // WM_KEYDOWN              * n (wParam = VK_BACK, lParam = 0x1)
-  // WM_KEYUP                * 1 (wParam = VK_BACK, lParam = 0xC0000001) # ATOK
-  // WM_IME_STARTCOMPOSITION * 1 (wParam = 0x0, lParam = 0x0)
-  // WM_IME_COMPOSITION      * 1 (wParam = 0x0, lParam = 0x1BF)
-  // WM_CHAR                 * n (wParam = VK_BACK, lParam = 0x1)
-  // WM_KEYUP                * 1 (wParam = VK_BACK, lParam = 0xC00E0001)
-  // ---------------------------------------------------------------------------
-  // This message pattern does not match to the above case;
-  // i.e.,WM_KEYDOWN -> WM_CHAR -> WM_KEYDOWN -> WM_CHAR.
-  // For more information of this problem:
-  // https://bugzilla.mozilla.gr.jp/show_bug.cgi?id=2885 (written in Japanese)
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=194559 (written in English)
-  MSG imeStartCompositionMsg, imeCompositionMsg, charMsg;
-  return ::PeekMessageW(&imeStartCompositionMsg, aWnd,
-                        WM_IME_STARTCOMPOSITION, WM_IME_STARTCOMPOSITION,
-                        PM_NOREMOVE | PM_NOYIELD) &&
-         ::PeekMessageW(&imeCompositionMsg, aWnd, WM_IME_COMPOSITION,
-                        WM_IME_COMPOSITION, PM_NOREMOVE | PM_NOYIELD) &&
-         ::PeekMessageW(&charMsg, aWnd, WM_CHAR, WM_CHAR,
-                        PM_NOREMOVE | PM_NOYIELD) &&
-         imeStartCompositionMsg.wParam == 0x0 &&
-         imeStartCompositionMsg.lParam == 0x0 &&
-         imeCompositionMsg.wParam == 0x0 &&
-         imeCompositionMsg.lParam == 0x1BF &&
-         charMsg.wParam == VK_BACK && charMsg.lParam == 0x1 &&
-         imeStartCompositionMsg.time <= imeCompositionMsg.time &&
-         imeCompositionMsg.time <= charMsg.time;
-}
-
-/* static */ bool
 nsIMM32Handler::ShouldDrawCompositionStringOurselves()
 {
   // If current IME has special UI or its composition window should not
@@ -159,10 +121,10 @@ nsIMM32Handler::InitKeyboardLayout(HKL aKeyboardLayout)
                    LOCALE_IDEFAULTANSICODEPAGE | LOCALE_RETURN_NUMBER,
                    (PWSTR)&sCodePage, sizeof(sCodePage) / sizeof(WCHAR));
   sIMEProperty = ::ImmGetProperty(aKeyboardLayout, IGP_PROPERTY);
-  sIsIME = ::ImmIsIME(aKeyboardLayout);
   PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
-    ("IMM32: InitKeyboardLayout, aKeyboardLayout=%08x, sCodePage=%lu, sIMEProperty=%08x sIsIME=%s\n",
-     aKeyboardLayout, sCodePage, sIMEProperty, sIsIME ? "TRUE" : "FALSE"));
+    ("IMM32: InitKeyboardLayout, aKeyboardLayout=%08x, sCodePage=%lu, "
+     "sIMEProperty=%08x",
+     aKeyboardLayout, sCodePage, sIMEProperty));
 }
 
 /* static */ UINT
@@ -170,18 +132,6 @@ nsIMM32Handler::GetKeyboardCodePage()
 {
   return sCodePage;
 }
-
-/* static */ bool
-nsIMM32Handler::CanOptimizeKeyAndIMEMessages(MSG *aNextKeyOrIMEMessage)
-{
-  // If IME is opening right now, we shouldn't optimize the key and IME message
-  // order because ATOK (Japanese IME of third party) has some problem with the
-  // optimization.  When it finishes opening completely, it eats all key
-  // messages in the message queue.  And it causes starting composition.  So,
-  // we shouldn't eat the key messages before ATOK.
-  return !sIsIMEOpening;
-}
-
 
 // used for checking the lParam of WM_IME_COMPOSITION
 #define IS_COMPOSING_LPARAM(lParam) \
@@ -212,12 +162,7 @@ nsresult
 nsIMM32Handler::EnsureClauseArray(int32_t aCount)
 {
   NS_ENSURE_ARG_MIN(aCount, 0);
-  if (!mClauseArray.SetCapacity(aCount + 32)) {
-    PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
-      ("IMM32: EnsureClauseArray, aCount=%ld, FAILED to allocate\n",
-       aCount));
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  mClauseArray.SetCapacity(aCount + 32);
   return NS_OK;
 }
 
@@ -225,12 +170,7 @@ nsresult
 nsIMM32Handler::EnsureAttributeArray(int32_t aCount)
 {
   NS_ENSURE_ARG_MIN(aCount, 0);
-  if (!mAttributeArray.SetCapacity(aCount + 64)) {
-    PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
-      ("IMM32: EnsureAttributeArray, aCount=%ld, FAILED to allocate\n",
-       aCount));
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  mAttributeArray.SetCapacity(aCount + 64);
   return NS_OK;
 }
 
@@ -249,19 +189,19 @@ nsIMM32Handler::CommitComposition(nsWindow* aWindow, bool aForce)
     return;
   }
 
-  bool associated = aWindow->AssociateDefaultIMC(true);
+  nsIMEContext IMEContext(aWindow->GetWindowHandle());
+  bool associated = IMEContext.AssociateDefaultContext();
   PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
     ("IMM32: CommitComposition, associated=%s\n",
      associated ? "YES" : "NO"));
 
-  nsIMEContext IMEContext(aWindow->GetWindowHandle());
   if (IMEContext.IsValid()) {
     ::ImmNotifyIME(IMEContext.get(), NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
     ::ImmNotifyIME(IMEContext.get(), NI_COMPOSITIONSTR, CPS_CANCEL, 0);
   }
 
   if (associated) {
-    aWindow->AssociateDefaultIMC(false);
+    IMEContext.Disassociate();
   }
 }
 
@@ -280,18 +220,18 @@ nsIMM32Handler::CancelComposition(nsWindow* aWindow, bool aForce)
     return;
   }
 
-  bool associated = aWindow->AssociateDefaultIMC(true);
+  nsIMEContext IMEContext(aWindow->GetWindowHandle());
+  bool associated = IMEContext.AssociateDefaultContext();
   PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
     ("IMM32: CancelComposition, associated=%s\n",
      associated ? "YES" : "NO"));
 
-  nsIMEContext IMEContext(aWindow->GetWindowHandle());
   if (IMEContext.IsValid()) {
     ::ImmNotifyIME(IMEContext.get(), NI_COMPOSITIONSTR, CPS_CANCEL, 0);
   }
 
   if (associated) {
-    aWindow->AssociateDefaultIMC(false);
+    IMEContext.Disassociate();
   }
 }
 
@@ -326,21 +266,6 @@ nsIMM32Handler::ProcessMessage(nsWindow* aWindow, UINT msg,
   // sent to different window, we should commit the old transaction.  And also
   // if the new window handle is not focused, probably, we should not start
   // the composition, however, such case should not be, it's just bad scenario.
-
-  if (sIsIMEOpening) {
-    switch (msg) {
-      case WM_INPUTLANGCHANGE:
-      case WM_IME_STARTCOMPOSITION:
-      case WM_IME_COMPOSITION:
-      case WM_IME_ENDCOMPOSITION:
-      case WM_IME_CHAR:
-      case WM_IME_SELECT:
-      case WM_IME_SETCONTEXT:
-        // For safety, we should reset sIsIMEOpening when we receive unexpected
-        // message.
-        sIsIMEOpening = false;
-    }
-  }
 
   // When a plug-in has focus or compsition, we should dispatch the IME events
   // to the plug-in.
@@ -451,20 +376,6 @@ nsIMM32Handler::ProcessMessageForPlugin(nsWindow* aWindow, UINT msg,
     case WM_IME_SETCONTEXT:
       aEatMessage = OnIMESetContextOnPlugin(aWindow, wParam, lParam, aRetValue);
       return true;
-    case WM_IME_NOTIFY:
-      if (wParam == IMN_SETOPENSTATUS) {
-        // finished being opening
-        sIsIMEOpening = false;
-      }
-      return false;
-    case WM_KEYDOWN:
-      if (wParam == VK_PROCESSKEY) {
-        // If we receive when IME isn't open, it means IME is opening right now.
-        nsIMEContext IMEContext(aWindow->GetWindowHandle());
-        sIsIMEOpening = IMEContext.IsValid() &&
-                        ::ImmGetOpenStatus(IMEContext.get());
-      }
-      return false;
     case WM_CHAR:
       if (!gIMM32Handler) {
         return false;
@@ -497,7 +408,7 @@ nsIMM32Handler::OnInputLangChange(nsWindow* aWindow,
     ("IMM32: OnInputLangChange, hWnd=%08x, wParam=%08x, lParam=%08x\n",
      aWindow->GetWindowHandle(), wParam, lParam));
 
-  aWindow->ResetInputState();
+  aWindow->NotifyIME(REQUEST_TO_COMMIT_COMPOSITION);
   NS_ASSERTION(!mIsComposing, "ResetInputState failed");
 
   if (mIsComposing) {
@@ -561,9 +472,9 @@ nsIMM32Handler::OnIMEEndComposition(nsWindow* aWindow)
   // composition. Then, we should ignore the message and commit the composition
   // string at following WM_IME_COMPOSITION.
   MSG compositionMsg;
-  if (::PeekMessageW(&compositionMsg, aWindow->GetWindowHandle(),
-                     WM_IME_STARTCOMPOSITION, WM_IME_COMPOSITION,
-                     PM_NOREMOVE) &&
+  if (WinUtils::PeekMessage(&compositionMsg, aWindow->GetWindowHandle(),
+                            WM_IME_STARTCOMPOSITION, WM_IME_COMPOSITION,
+                            PM_NOREMOVE) &&
       compositionMsg.message == WM_IME_COMPOSITION &&
       IS_COMMITTING_LPARAM(compositionMsg.lParam)) {
     PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
@@ -680,7 +591,6 @@ nsIMM32Handler::OnIMENotify(nsWindow* aWindow,
          aWindow->GetWindowHandle()));
       break;
     case IMN_SETOPENSTATUS:
-      sIsIMEOpening = false;
       PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
         ("IMM32: OnIMENotify, hWnd=%08x, IMN_SETOPENSTATUS\n",
          aWindow->GetWindowHandle()));
@@ -702,29 +612,6 @@ nsIMM32Handler::OnIMENotify(nsWindow* aWindow,
       break;
   }
 #endif // PR_LOGGING
-
-  if (::GetKeyState(NS_VK_ALT) >= 0) {
-    return false;
-  }
-
-  // XXXmnakano Following code was added by bug 28852 (Key combo to trun ON/OFF
-  // Japanese IME incorrectly activates "File" menu).  If one or more keypress
-  // events come between Alt keydown event and Alt keyup event, XUL menubar
-  // isn't activated by the Alt keyup event.  Therefore, this code sends dummy
-  // keypress event to Gecko.  But this is ugly, and this fires incorrect DOM
-  // keypress event.  So, we should find another way for the bug.
-
-  // add hacky code here
-  mozilla::widget::ModifierKeyState modKeyState(false, false, true);
-  mozilla::widget::NativeKey nativeKey; // Dummy is okay for this usage.
-  nsKeyEvent keyEvent(true, NS_KEY_PRESS, aWindow);
-  keyEvent.keyCode = 192;
-  aWindow->InitKeyEvent(keyEvent, nativeKey, modKeyState);
-  aWindow->DispatchKeyEvent(keyEvent, nullptr);
-  sIsStatusChanged = sIsStatusChanged || (wParam == IMN_SETOPENSTATUS);
-  PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
-    ("IMM32: OnIMENotify, sIsStatusChanged=%s\n",
-     sIsStatusChanged ? "TRUE" : "FALSE"));
 
   // not implement yet
   return false;
@@ -1070,11 +957,11 @@ nsIMM32Handler::HandleComposition(nsWindow* aWindow,
   if (!mIsComposing) {
     MSG msg1, msg2;
     HWND wnd = aWindow->GetWindowHandle();
-    if (::PeekMessageW(&msg1, wnd, WM_IME_STARTCOMPOSITION, WM_IME_COMPOSITION,
-                       PM_NOREMOVE) &&
+    if (WinUtils::PeekMessage(&msg1, wnd, WM_IME_STARTCOMPOSITION,
+                              WM_IME_COMPOSITION, PM_NOREMOVE) &&
         msg1.message == WM_IME_STARTCOMPOSITION &&
-        ::PeekMessageW(&msg2, wnd, WM_IME_ENDCOMPOSITION, WM_IME_COMPOSITION,
-                       PM_NOREMOVE) &&
+        WinUtils::PeekMessage(&msg2, wnd, WM_IME_ENDCOMPOSITION,
+                              WM_IME_COMPOSITION, PM_NOREMOVE) &&
         msg2.message == WM_IME_COMPOSITION) {
       PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
         ("IMM32: HandleComposition, Ignores due to find a WM_IME_STARTCOMPOSITION\n"));
@@ -1205,13 +1092,13 @@ nsIMM32Handler::HandleComposition(nsWindow* aWindow,
     if (useA_API) {
       // Convert each values of sIMECompClauseArray. The values mean offset of
       // the clauses in ANSI string. But we need the values in Unicode string.
-      nsCAutoString compANSIStr;
+      nsAutoCString compANSIStr;
       if (ConvertToANSIString(mCompositionString, GetKeyboardCodePage(),
                               compANSIStr)) {
         uint32_t maxlen = compANSIStr.Length();
         mClauseArray[0] = 0; // first value must be 0
         for (int32_t i = 1; i < clauseArrayLength; i++) {
-          uint32_t len = NS_MIN(mClauseArray[i], maxlen);
+          uint32_t len = std::min(mClauseArray[i], maxlen);
           mClauseArray[i] = ::MultiByteToWideChar(GetKeyboardCodePage(), 
                                                   MB_PRECOMPOSED,
                                                   (LPCSTR)compANSIStr.get(),
@@ -1222,7 +1109,7 @@ nsIMM32Handler::HandleComposition(nsWindow* aWindow,
   }
   // compClauseArrayLength may be negative. I.e., ImmGetCompositionStringW
   // may return an error code.
-  mClauseArray.SetLength(NS_MAX<long>(0, clauseArrayLength));
+  mClauseArray.SetLength(std::max<long>(0, clauseArrayLength));
 
   PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
     ("IMM32: HandleComposition, GCS_COMPCLAUSE, mClauseLength=%ld\n",
@@ -1248,7 +1135,7 @@ nsIMM32Handler::HandleComposition(nsWindow* aWindow,
 
   // attrStrLen may be negative. I.e., ImmGetCompositionStringW may return an
   // error code.
-  mAttributeArray.SetLength(NS_MAX<long>(0, attrArrayLength));
+  mAttributeArray.SetLength(std::max<long>(0, attrArrayLength));
 
   PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
     ("IMM32: HandleComposition, GCS_COMPATTR, mAttributeLength=%ld\n",
@@ -1482,7 +1369,7 @@ nsIMM32Handler::HandleDocumentFeed(nsWindow* aWindow,
 
   // XXX nsString::Find and nsString::RFind take int32_t for offset, so,
   //     we cannot support this message when the current offset is larger than
-  //     PR_INT32_MAX.
+  //     INT32_MAX.
   if (targetOffset < 0 || targetLength < 0 ||
       targetOffset + targetLength < 0) {
     PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
@@ -1492,7 +1379,7 @@ nsIMM32Handler::HandleDocumentFeed(nsWindow* aWindow,
 
   // Get all contents of the focused editor.
   nsQueryContentEvent textContent(true, NS_QUERY_TEXT_CONTENT, aWindow);
-  textContent.InitForQueryTextContent(0, PR_UINT32_MAX);
+  textContent.InitForQueryTextContent(0, UINT32_MAX);
   aWindow->InitEvent(textContent, &point);
   aWindow->DispatchWindowEvent(&textContent);
   if (!textContent.mSucceeded) {
@@ -1781,7 +1668,7 @@ nsIMM32Handler::GetCompositionString(const nsIMEContext &aIMEContext,
   // Retrieve the size of the required output buffer.
   long lRtn = ::ImmGetCompositionStringW(aIMEContext.get(), aIndex, NULL, 0);
   if (lRtn < 0 ||
-      !EnsureStringLength(mCompositionString, (lRtn / sizeof(WCHAR)) + 1)) {
+      !mCompositionString.SetLength((lRtn / sizeof(WCHAR)) + 1, mozilla::fallible_t())) {
     PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
       ("IMM32: GetCompositionString, FAILED by OOM\n"));
     return; // Error or out of memory.
@@ -1848,7 +1735,7 @@ nsIMM32Handler::ConvertToANSIString(const nsAFlatString& aStr, UINT aCodePage,
                                   NULL, 0, NULL, NULL);
   NS_ENSURE_TRUE(len >= 0, false);
 
-  if (!EnsureStringLength(aANSIStr, len)) {
+  if (!aANSIStr.SetLength(len, mozilla::fallible_t())) {
     PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
       ("IMM32: ConvertToANSIString, FAILED by OOM\n"));
     return false;
@@ -1884,9 +1771,9 @@ nsIMM32Handler::GetCharacterRectOfSelectedTextAt(nsWindow* aWindow,
     useCaretRect = false;
     if (mCursorPosition != NO_IME_CARET) {
       uint32_t cursorPosition =
-        NS_MIN<uint32_t>(mCursorPosition, mCompositionString.Length());
+        std::min<uint32_t>(mCursorPosition, mCompositionString.Length());
+      NS_ASSERTION(offset >= cursorPosition, "offset is less than cursorPosition!");
       offset -= cursorPosition;
-      NS_ASSERTION(offset >= 0, "offset is negative!");
     }
   }
 
@@ -2116,14 +2003,6 @@ nsIMM32Handler::OnKeyDownEvent(nsWindow* aWindow, WPARAM wParam, LPARAM lParam,
      aWindow->GetWindowHandle(), wParam, lParam));
   aEatMessage = false;
   switch (wParam) {
-    case VK_PROCESSKEY:
-      // If we receive when IME isn't open, it means IME is opening right now.
-      if (sIsIME) {
-        nsIMEContext IMEContext(aWindow->GetWindowHandle());
-        sIsIMEOpening =
-          IMEContext.IsValid() && !::ImmGetOpenStatus(IMEContext.get());
-      }
-      return false;
     case VK_TAB:
     case VK_PRIOR:
     case VK_NEXT:

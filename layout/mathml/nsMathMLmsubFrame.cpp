@@ -11,6 +11,7 @@
 #include "nsStyleConsts.h"
 
 #include "nsMathMLmsubFrame.h"
+#include <algorithm>
 
 //
 // <msub> -- attach a subscript to a base - implementation
@@ -63,16 +64,14 @@ nsMathMLmsubFrame::Place (nsRenderingContext& aRenderingContext,
   // default: automatic
   //
   // We use 0 as the default value so unitless values can be ignored.
-  // XXXfredw Should we forbid negative values? (bug 411227)
+  // As a minimum, negative values can be ignored.
   //
   nscoord subScriptShift = 0;
   nsAutoString value;
   GetAttribute(mContent, mPresentationData.mstyle,
                nsGkAtoms::subscriptshift_, value);
   if (!value.IsEmpty()) {
-    ParseNumericValue(value, &subScriptShift,
-                      nsMathMLElement::PARSE_ALLOW_NEGATIVE,
-                      PresContext(), mStyleContext);
+    ParseNumericValue(value, &subScriptShift, 0, PresContext(), mStyleContext);
   }
 
   return nsMathMLmsubFrame::PlaceSubScript(PresContext(), 
@@ -96,7 +95,7 @@ nsMathMLmsubFrame::PlaceSubScript (nsPresContext*      aPresContext,
                                    nscoord              aScriptSpace)
 {
   // force the scriptSpace to be atleast 1 pixel 
-  aScriptSpace = NS_MAX(nsPresContext::CSSPixelsToAppUnits(1), aScriptSpace);
+  aScriptSpace = std::max(nsPresContext::CSSPixelsToAppUnits(1), aScriptSpace);
 
   ////////////////////////////////////
   // Get the children's desired sizes
@@ -110,6 +109,9 @@ nsMathMLmsubFrame::PlaceSubScript (nsPresContext*      aPresContext,
     subScriptFrame = baseFrame->GetNextSibling();
   if (!baseFrame || !subScriptFrame || subScriptFrame->GetNextSibling()) {
     // report an error, encourage people to get their markups in order
+    if (aPlaceOrigin) {
+      aFrame->ReportChildCountError();
+    }
     return aFrame->ReflowError(aRenderingContext, aDesiredSize);
   }
   GetReflowAndBoundingMetricsFor(baseFrame, baseSize, bmBase);
@@ -143,31 +145,31 @@ nsMathMLmsubFrame::PlaceSubScript (nsPresContext*      aPresContext,
   GetSubScriptShifts (fm, subScriptShift, dummy);
 
   subScriptShift = 
-    NS_MAX(subScriptShift, aUserSubScriptShift);
+    std::max(subScriptShift, aUserSubScriptShift);
 
   // get actual subscriptshift to be used
   // Rule 18b, App. G, TeXbook
   nscoord actualSubScriptShift = 
-    NS_MAX(minSubScriptShift,NS_MAX(subScriptShift,minShiftFromXHeight));
+    std::max(minSubScriptShift,std::max(subScriptShift,minShiftFromXHeight));
   // get bounding box for base + subscript
   nsBoundingMetrics boundingMetrics;
   boundingMetrics.ascent = 
-    NS_MAX(bmBase.ascent, bmSubScript.ascent - actualSubScriptShift);
+    std::max(bmBase.ascent, bmSubScript.ascent - actualSubScriptShift);
   boundingMetrics.descent = 
-    NS_MAX(bmBase.descent, bmSubScript.descent + actualSubScriptShift);
+    std::max(bmBase.descent, bmSubScript.descent + actualSubScriptShift);
 
   // add aScriptSpace to the subscript's width
   boundingMetrics.width = bmBase.width + bmSubScript.width + aScriptSpace;
   boundingMetrics.leftBearing = bmBase.leftBearing;
-  boundingMetrics.rightBearing = NS_MAX(bmBase.rightBearing, bmBase.width +
-    NS_MAX(bmSubScript.width + aScriptSpace, bmSubScript.rightBearing));
+  boundingMetrics.rightBearing = std::max(bmBase.rightBearing, bmBase.width +
+    std::max(bmSubScript.width + aScriptSpace, bmSubScript.rightBearing));
   aFrame->SetBoundingMetrics (boundingMetrics);
 
   // reflow metrics
   aDesiredSize.ascent = 
-    NS_MAX(baseSize.ascent, subScriptSize.ascent - actualSubScriptShift);
+    std::max(baseSize.ascent, subScriptSize.ascent - actualSubScriptShift);
   aDesiredSize.height = aDesiredSize.ascent +
-    NS_MAX(baseSize.height - baseSize.ascent,
+    std::max(baseSize.height - baseSize.ascent,
            subScriptSize.height - subScriptSize.ascent + actualSubScriptShift);
   aDesiredSize.width = boundingMetrics.width;
   aDesiredSize.mBoundingMetrics = boundingMetrics;

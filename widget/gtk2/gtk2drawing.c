@@ -1442,9 +1442,6 @@ moz_gtk_scale_paint(GdkDrawable* drawable, GdkRectangle* rect,
   }
 
   TSOffsetStyleGCs(style, rect->x, rect->y);
-  gtk_style_apply_default_background(style, drawable, TRUE, GTK_STATE_NORMAL,
-                                     cliprect, rect->x, rect->y,
-                                     rect->width, rect->height);
 
   gtk_paint_box(style, drawable, GTK_STATE_ACTIVE, GTK_SHADOW_IN, cliprect,
                 widget, "trough", rect->x + x, rect->y + y,
@@ -1547,23 +1544,6 @@ moz_gtk_vpaned_paint(GdkDrawable* drawable, GdkRectangle* rect,
 }
 
 static gint
-moz_gtk_caret_paint(GdkDrawable* drawable, GdkRectangle* rect,
-                    GdkRectangle* cliprect, GtkTextDirection direction)
-{
-    GdkRectangle location = *rect;
-    if (direction == GTK_TEXT_DIR_RTL) {
-        /* gtk_draw_insertion_cursor ignores location.width */
-        location.x = rect->x + rect->width;
-    }
-
-    ensure_entry_widget();
-    gtk_draw_insertion_cursor(gEntryWidget, drawable, cliprect,
-                              &location, TRUE, direction, FALSE);
-
-    return MOZ_GTK_SUCCESS;
-}
-
-static gint
 moz_gtk_entry_paint(GdkDrawable* drawable, GdkRectangle* rect,
                     GdkRectangle* cliprect, GtkWidgetState* state,
                     GtkWidget* widget, GtkTextDirection direction)
@@ -1606,8 +1586,13 @@ moz_gtk_entry_paint(GdkDrawable* drawable, GdkRectangle* rect,
     if (theme_honors_transparency) {
         g_object_set_data(G_OBJECT(widget), "transparent-bg-hint", GINT_TO_POINTER(TRUE));
     } else {
-        gdk_draw_rectangle(drawable, style->base_gc[bg_state], TRUE,
-                           cliprect->x, cliprect->y, cliprect->width, cliprect->height);
+        GdkRectangle clipped_rect;
+        gdk_rectangle_intersect(rect, cliprect, &clipped_rect);
+        if (clipped_rect.width != 0) {
+            gdk_draw_rectangle(drawable, style->base_gc[bg_state], TRUE,
+                               clipped_rect.x, clipped_rect.y,
+                               clipped_rect.width, clipped_rect.height);
+        }
         g_object_set_data(G_OBJECT(widget), "transparent-bg-hint", GINT_TO_POINTER(FALSE));
     }
 
@@ -2998,7 +2983,6 @@ moz_gtk_get_widget_border(GtkThemeWidgetType widget, gint* left, gint* top,
     case MOZ_GTK_TOOLBAR:
     case MOZ_GTK_MENUBAR:
     case MOZ_GTK_TAB_SCROLLARROW:
-    case MOZ_GTK_ENTRY_CARET:
         *left = *top = *right = *bottom = 0;
         return MOZ_GTK_SUCCESS;
     default:
@@ -3280,9 +3264,6 @@ moz_gtk_widget_paint(GtkThemeWidgetType widget, GdkDrawable* drawable,
         ensure_entry_widget();
         return moz_gtk_entry_paint(drawable, rect, cliprect, state,
                                    gEntryWidget, direction);
-        break;
-    case MOZ_GTK_ENTRY_CARET:
-        return moz_gtk_caret_paint(drawable, rect, cliprect, direction);
         break;
     case MOZ_GTK_DROPDOWN:
         return moz_gtk_combo_box_paint(drawable, rect, cliprect, state,

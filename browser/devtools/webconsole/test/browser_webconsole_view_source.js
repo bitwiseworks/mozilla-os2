@@ -10,7 +10,11 @@ function test() {
   addTab(TEST_URI);
   browser.addEventListener("load", function onLoad() {
     browser.removeEventListener("load", onLoad, true);
-    openConsole(null, testViewSource);
+    openConsole(null, function(hud) {
+      executeSoon(function() {
+        testViewSource(hud);
+      });
+    });
   }, true);
 }
 
@@ -20,7 +24,7 @@ function testViewSource(hud) {
   ok(button, "we have the button on the page");
 
   expectUncaughtException();
-  EventUtils.sendMouseEvent({ type: "click" }, button, content);
+  EventUtils.sendMouseEvent({ type: "click" }, button, XPCNativeWrapper.unwrap(content));
 
   waitForSuccess({
     name: "find the location node",

@@ -11,13 +11,7 @@
 #include "EndianMacros.h"
 #include "nsICODecoder.h"
 
-#include "nsIInputStream.h"
-#include "nsIComponentManager.h"
 #include "RasterImage.h"
-#include "imgIContainerObserver.h"
-
-#include "nsIProperties.h"
-#include "nsISupportsPrimitives.h"
 
 namespace mozilla {
 namespace image {
@@ -63,8 +57,8 @@ nsICODecoder::GetNumColors()
 }
 
 
-nsICODecoder::nsICODecoder(RasterImage &aImage, imgIDecoderObserver* aObserver)
- : Decoder(aImage, aObserver)
+nsICODecoder::nsICODecoder(RasterImage &aImage)
+ : Decoder(aImage)
 {
   mPos = mImageOffset = mCurrIcon = mNumIcons = mBPP = mRowBytes = 0;
   mIsPNG = false;
@@ -211,18 +205,7 @@ nsICODecoder::SetHotSpotIfCursor() {
     return;
   }
 
-  nsCOMPtr<nsISupportsPRUint32> intwrapx = 
-    do_CreateInstance("@mozilla.org/supports-PRUint32;1");
-  nsCOMPtr<nsISupportsPRUint32> intwrapy = 
-    do_CreateInstance("@mozilla.org/supports-PRUint32;1");
-
-  if (intwrapx && intwrapy) {
-    intwrapx->SetData(mDirEntry.mXHotspot);
-    intwrapy->SetData(mDirEntry.mYHotspot);
-
-    mImage.Set("hotspotX", intwrapx);
-    mImage.Set("hotspotY", intwrapy);
-  }
+  mImageMetadata.SetHotspot(mDirEntry.mXHotspot, mDirEntry.mYHotspot);
 }
 
 void
@@ -230,8 +213,12 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
 {
   NS_ABORT_IF_FALSE(!HasError(), "Shouldn't call WriteInternal after error!");
 
-  if (!aCount) // aCount=0 means EOF
+  if (!aCount) {
+    if (mContainedDecoder) {
+      WriteToContainedDecoder(aBuffer, aCount);
+    }
     return;
+  }
 
   while (aCount && (mPos < ICONCOUNTOFFSET)) { // Skip to the # of icons.
     if (mPos == 2) { // if the third byte is 1: This is an icon, 2: a cursor
@@ -255,6 +242,17 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
     return; // Nothing to do.
 
   uint16_t colorDepth = 0;
+  nsIntSize prefSize = mImage.GetRequestedResolution();
+  if (prefSize.width == 0 && prefSize.height == 0) {
+    prefSize.SizeTo(PREFICONSIZE, PREFICONSIZE);
+  }
+
+  // A measure of the difference in size between the entry we've found
+  // and the requested size. We will choose the smallest image that is
+  // >= requested size (i.e. we assume it's better to downscale a larger
+  // icon than to upscale a smaller one).
+  int32_t diff = INT_MIN;
+
   // Loop through each entry's dir entry
   while (mCurrIcon < mNumIcons) { 
     if (mPos >= DIRENTRYOFFSET + (mCurrIcon * sizeof(mDirEntryArray)) && 
@@ -278,11 +276,15 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
       mCurrIcon++;
       ProcessDirEntry(e);
       // We can't use GetRealWidth and GetRealHeight here because those operate
-      // on mDirEntry, here we are going through each item in the directory
-      if (((e.mWidth == 0 ? 256 : e.mWidth) == PREFICONSIZE && 
-           (e.mHeight == 0 ? 256 : e.mHeight) == PREFICONSIZE && 
-           (e.mBitCount >= colorDepth)) ||
-          (mCurrIcon == mNumIcons && mImageOffset == 0)) {
+      // on mDirEntry, here we are going through each item in the directory.
+      // Calculate the delta between this image's size and the desired size,
+      // so we can see if it is better than our current-best option.
+      // In the case of several equally-good images, we use the last one.
+      int32_t delta = (e.mWidth == 0 ? 256 : e.mWidth) - prefSize.width +
+                      (e.mHeight == 0 ? 256 : e.mHeight) - prefSize.height;
+      if (e.mBitCount >= colorDepth &&
+          ((diff < 0 && delta >= diff) || (delta >= 0 && delta <= diff))) {
+        diff = delta;
         mImageOffset = e.mImageOffset;
 
         // ensure mImageOffset is >= size of the direntry headers (bug #245631)
@@ -329,8 +331,12 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
     mIsPNG = !memcmp(mSignature, nsPNGDecoder::pngSignatureBytes, 
                      PNGSIGNATURESIZE);
     if (mIsPNG) {
-      mContainedDecoder = new nsPNGDecoder(mImage, mObserver);
-      mContainedDecoder->InitSharedDecoder();
+      mContainedDecoder = new nsPNGDecoder(mImage);
+      mContainedDecoder->SetObserver(mObserver);
+      mContainedDecoder->SetSizeDecode(IsSizeDecode());
+      mContainedDecoder->InitSharedDecoder(mImageData, mImageDataLength,
+                                           mColormap, mColormapSize,
+                                           mCurrentFrame);
       if (!WriteToContainedDecoder(mSignature, PNGSIGNATURESIZE)) {
         return;
       }
@@ -342,13 +348,20 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
     if (!WriteToContainedDecoder(aBuffer, aCount)) {
       return;
     }
+
+    if (!HasSize() && mContainedDecoder->HasSize()) {
+      PostSize(mContainedDecoder->GetImageMetadata().GetWidth(),
+               mContainedDecoder->GetImageMetadata().GetHeight());
+    }
+
     mPos += aCount;
     aBuffer += aCount;
     aCount = 0;
 
     // Raymond Chen says that 32bpp only are valid PNG ICOs
     // http://blogs.msdn.com/b/oldnewthing/archive/2010/10/22/10079192.aspx
-    if (!static_cast<nsPNGDecoder*>(mContainedDecoder.get())->IsValidICO()) {
+    if (!IsSizeDecode() &&
+        !static_cast<nsPNGDecoder*>(mContainedDecoder.get())->IsValidICO()) {
       PostDataError();
     }
     return;
@@ -393,11 +406,14 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
     // Init the bitmap decoder which will do most of the work for us
     // It will do everything except the AND mask which isn't present in bitmaps
     // bmpDecoder is for local scope ease, it will be freed by mContainedDecoder
-    nsBMPDecoder *bmpDecoder = new nsBMPDecoder(mImage, mObserver); 
+    nsBMPDecoder *bmpDecoder = new nsBMPDecoder(mImage);
     mContainedDecoder = bmpDecoder;
     bmpDecoder->SetUseAlphaData(true);
+    mContainedDecoder->SetObserver(mObserver);
     mContainedDecoder->SetSizeDecode(IsSizeDecode());
-    mContainedDecoder->InitSharedDecoder();
+    mContainedDecoder->InitSharedDecoder(mImageData, mImageDataLength,
+                                         mColormap, mColormapSize,
+                                         mCurrentFrame);
 
     // The ICO format when containing a BMP does not include the 14 byte
     // bitmap file header. To use the code of the BMP decoder we need to 
@@ -432,6 +448,9 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
       return;
     }
 
+    PostSize(mContainedDecoder->GetImageMetadata().GetWidth(),
+             mContainedDecoder->GetImageMetadata().GetHeight());
+
     // We have the size. If we're doing a size decode, we got what
     // we came for.
     if (IsSizeDecode())
@@ -458,10 +477,10 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
       return;
     }
     // Feed the actual image data (not including headers) into the BMP decoder
-    int32_t bmpDataOffset = mDirEntry.mImageOffset + BITMAPINFOSIZE;
-    int32_t bmpDataEnd = mDirEntry.mImageOffset + BITMAPINFOSIZE + 
-                         static_cast<nsBMPDecoder*>(mContainedDecoder.get())->GetCompressedImageSize() +
-                         4 * numColors;
+    uint32_t bmpDataOffset = mDirEntry.mImageOffset + BITMAPINFOSIZE;
+    uint32_t bmpDataEnd = mDirEntry.mImageOffset + BITMAPINFOSIZE + 
+                          static_cast<nsBMPDecoder*>(mContainedDecoder.get())->GetCompressedImageSize() +
+                          4 * numColors;
 
     // If we are feeding in the core image data, but we have not yet
     // reached the ICO's 'AND buffer mask'
@@ -511,7 +530,7 @@ nsICODecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
         }
 
         while (mCurLine > 0 && aCount > 0) {
-          uint32_t toCopy = NS_MIN(rowSize - mRowBytes, aCount);
+          uint32_t toCopy = std::min(rowSize - mRowBytes, aCount);
           if (toCopy) {
             memcpy(mRow + mRowBytes, aBuffer, toCopy);
             aCount -= toCopy;
@@ -578,6 +597,28 @@ nsICODecoder::ProcessDirEntry(IconDirEntry& aTarget)
   memcpy(&aTarget.mImageOffset, mDirEntryArray + 12, 
          sizeof(aTarget.mImageOffset));
   aTarget.mImageOffset = LITTLE_TO_NATIVE32(aTarget.mImageOffset);
+}
+
+bool
+nsICODecoder::NeedsNewFrame() const
+{
+  if (mContainedDecoder) {
+    return mContainedDecoder->NeedsNewFrame();
+  }
+
+  return Decoder::NeedsNewFrame();
+}
+
+nsresult
+nsICODecoder::AllocateFrame()
+{
+  if (mContainedDecoder) {
+    nsresult rv = mContainedDecoder->AllocateFrame();
+    mCurrentFrame = mContainedDecoder->GetCurrentFrame();
+    return rv;
+  }
+
+  return Decoder::AllocateFrame();
 }
 
 } // namespace image

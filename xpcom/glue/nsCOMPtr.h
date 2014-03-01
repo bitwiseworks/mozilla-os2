@@ -20,6 +20,9 @@
 */
 
 #include "mozilla/Attributes.h"
+#include "mozilla/TypeTraits.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/NullPtr.h"
 
   // Wrapping includes can speed up compiles (see "Large Scale C++ Software Design")
 #ifndef nsDebug_h___
@@ -36,6 +39,8 @@
 #include "nscore.h"
   // for |NS_COM_GLUE|
 #endif
+
+#include "nsCycleCollectionNoteChild.h"
 
 
 /*
@@ -74,7 +79,7 @@
   #undef NSCAP_FEATURE_TEST_DONTQUERY_CASES
 #endif
 
-#if __GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 3)
+#ifdef __GNUC__
   // Our use of nsCOMPtr_base::mRawPtr violates the C++ standard's aliasing
   // rules. Mark it with the may_alias attribute so that gcc 3.3 and higher
   // don't reorder instructions based on aliasing assumptions for
@@ -141,6 +146,17 @@ struct already_AddRefed
       |nsCOMPtr_helper|.
     */
   {
+#ifdef MOZ_HAVE_CXX11_NULLPTR
+    /* We use decltype(nullptr) instead of std::nullptr_t because the standard
+     * library might be old, and to save including <cstddef>.  All compilers
+     * that support nullptr seem to support decltype. */
+    already_AddRefed(decltype(nullptr) aNullPtr)
+      : mRawPtr(nullptr)
+    {
+    }
+
+    explicit
+#endif
     already_AddRefed( T* aRawPtr )
         : mRawPtr(aRawPtr)
       {
@@ -169,7 +185,33 @@ struct already_AddRefed
     {
       U* tmp = mRawPtr;
       mRawPtr = NULL;
-      return tmp;
+      return already_AddRefed<U>(tmp);
+    }
+
+    /**
+     * This helper provides a static_cast replacement for already_AddRefed, so
+     * if you have
+     *
+     *   already_AddRefed<Parent> F();
+     *
+     * you can write
+     *
+     *   already_AddRefed<Child>
+     *   G()
+     *   {
+     *     return F().downcast<Child>();
+     *   }
+     *
+     * instead of
+     *
+     *     return dont_AddRef(static_cast<Child*>(F().get()));
+     */
+    template<class U>
+    already_AddRefed<U> downcast()
+    {
+      U* tmp = static_cast<U*>(mRawPtr);
+      mRawPtr = nullptr;
+      return already_AddRefed<U>(tmp);
     }
 
     T* mRawPtr;
@@ -243,7 +285,7 @@ class nsCOMPtr_helper
 
 class
   NS_COM_GLUE
-  NS_STACK_CLASS
+  MOZ_STACK_CLASS
 nsQueryInterface MOZ_FINAL
   {
     public:
@@ -546,6 +588,18 @@ class nsCOMPtr MOZ_FINAL
           NSCAP_ASSERT_NO_QUERY_NEEDED();
         }
 
+      template<typename U>
+      nsCOMPtr( const already_AddRefed<U>& aSmartPtr )
+            : NSCAP_CTOR_BASE(static_cast<T*>(aSmartPtr.mRawPtr))
+          // construct from |dont_AddRef(expr)|
+        {
+          // But make sure that U actually inherits from T
+          MOZ_STATIC_ASSERT((mozilla::IsBaseOf<T, U>::value),
+                            "U is not a subclass of T");
+          NSCAP_LOG_ASSIGNMENT(this, static_cast<T*>(aSmartPtr.mRawPtr));
+          NSCAP_ASSERT_NO_QUERY_NEEDED();
+        }
+
       nsCOMPtr( const nsQueryInterface qi )
             : NSCAP_CTOR_BASE(0)
           // construct from |do_QueryInterface(expr)|
@@ -624,11 +678,15 @@ class nsCOMPtr MOZ_FINAL
           return *this;
         }
 
+      template<typename U>
       nsCOMPtr<T>&
-      operator=( const already_AddRefed<T>& rhs )
+      operator=( const already_AddRefed<U>& rhs )
           // assign from |dont_AddRef(expr)|
         {
-          assign_assuming_AddRef(rhs.mRawPtr);
+          // Make sure that U actually inherits from T
+          MOZ_STATIC_ASSERT((mozilla::IsBaseOf<T, U>::value),
+                            "U is not a subclass of T");
+          assign_assuming_AddRef(static_cast<T*>(rhs.mRawPtr));
           NSCAP_ASSERT_NO_QUERY_NEEDED();
           return *this;
         }
@@ -735,7 +793,7 @@ class nsCOMPtr MOZ_FINAL
         {
           T* temp = 0;
           swap(temp);
-          return temp;
+          return already_AddRefed<T>(temp);
         }
 
       template <typename I>
@@ -1042,7 +1100,7 @@ class nsCOMPtr<nsISupports>
         {
           nsISupports* temp = 0;
           swap(temp);
-          return temp;
+          return already_AddRefed<nsISupports>(temp);
         }
 
       void
@@ -1125,6 +1183,23 @@ class nsCOMPtr<nsISupports>
 #endif
         }
   };
+
+template <typename T>
+inline void
+ImplCycleCollectionUnlink(nsCOMPtr<T>& aField)
+{
+  aField = nullptr;
+}
+
+template <typename T>
+inline void
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
+                            nsCOMPtr<T>& aField,
+                            const char* aName,
+                            uint32_t aFlags = 0)
+{
+  CycleCollectionNoteChild(aCallback, aField.get(), aName, aFlags);
+}
 
 #ifndef NSCAP_FEATURE_USE_BASE
 template <class T>
@@ -1421,15 +1496,6 @@ operator!=( const U* lhs, const nsCOMPtr<T>& rhs )
   // better conversion for the other argument, define additional
   // |operator==| without the |const| on the raw pointer.
   // See bug 65664 for details.
-
-// This is defined by an autoconf test, but VC++ also has a bug that
-// prevents us from using these.  (It also, fortunately, has the bug
-// that we don't need them either.)
-#if defined(_MSC_VER) && (_MSC_VER < 1310)
-#ifndef NSCAP_DONT_PROVIDE_NONCONST_OPEQ
-#define NSCAP_DONT_PROVIDE_NONCONST_OPEQ
-#endif
-#endif
 
 #ifndef NSCAP_DONT_PROVIDE_NONCONST_OPEQ
 template <class T, class U>

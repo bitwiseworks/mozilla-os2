@@ -4,13 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsCache.h"
 #include "nsDiskCacheMap.h"
 #include "nsDiskCacheBinding.h"
 #include "nsDiskCacheEntry.h"
 #include "nsDiskCacheDevice.h"
 #include "nsCacheService.h"
-
-#include "nsCache.h"
 
 #include <string.h>
 #include "nsPrintfCString.h"
@@ -19,6 +18,8 @@
 #include "nsSerializationHelper.h"
 
 #include "mozilla/Telemetry.h"
+#include "mozilla/VisualEventTracer.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -32,7 +33,8 @@ using namespace mozilla;
 
 nsresult
 nsDiskCacheMap::Open(nsIFile *  cacheDirectory,
-                     nsDiskCache::CorruptCacheInfo *  corruptInfo)
+                     nsDiskCache::CorruptCacheInfo *  corruptInfo,
+                     bool reportCacheCleanTelemetryData)
 {
     NS_ENSURE_ARG_POINTER(corruptInfo);
 
@@ -62,7 +64,9 @@ nsDiskCacheMap::Open(nsIFile *  cacheDirectory,
     rv = NS_ERROR_FILE_CORRUPTED;  // presume the worst
     uint32_t mapSize = PR_Available(mMapFD);    
 
-    if (NS_FAILED(InitCacheClean(cacheDirectory, corruptInfo))) {
+    if (NS_FAILED(InitCacheClean(cacheDirectory,
+                                 corruptInfo,
+                                 reportCacheCleanTelemetryData))) {
         // corruptInfo is set in the call to InitCacheClean
         goto error_exit;
     }
@@ -178,12 +182,8 @@ nsDiskCacheMap::Open(nsIFile *  cacheDirectory,
         goto error_exit;
     }
     
-    {
-        // extra scope so the compiler doesn't barf on the above gotos jumping
-        // past this declaration down here
-        uint32_t overhead = moz_malloc_size_of(mRecordArray);
-        Telemetry::Accumulate(Telemetry::HTTP_DISK_CACHE_OVERHEAD, overhead);
-    }
+    Telemetry::Accumulate(Telemetry::HTTP_DISK_CACHE_OVERHEAD,
+                          (uint32_t)SizeOfExcludingThis(moz_malloc_size_of));
 
     *corruptInfo = nsDiskCache::kNotCorrupt;
     return NS_OK;
@@ -256,7 +256,6 @@ nsDiskCacheMap::Trim()
 nsresult
 nsDiskCacheMap::FlushHeader()
 {
-    RevalidateCache();
     if (!mMapFD)  return NS_ERROR_NOT_AVAILABLE;
     
     // seek to beginning of cache map
@@ -273,6 +272,11 @@ nsDiskCacheMap::FlushHeader()
 
     PRStatus err = PR_Sync(mMapFD);
     if (err != PR_SUCCESS) return NS_ERROR_UNEXPECTED;
+
+    // If we have a clean header then revalidate the cache clean file
+    if (!mHeader.mIsDirty) {
+        RevalidateCache();
+    }
 
     return NS_OK;
 }
@@ -886,6 +890,12 @@ nsDiskCacheMap::WriteDiskCacheEntry(nsDiskCacheBinding *  binding)
     CACHE_LOG_DEBUG(("CACHE: WriteDiskCacheEntry [%x]\n",
         binding->mRecord.HashNumber()));
 
+    mozilla::eventtracer::AutoEventTracer writeDiskCacheEntry(
+        binding->mCacheEntry,
+        mozilla::eventtracer::eExec,
+        mozilla::eventtracer::eDone,
+        "net::cache::WriteDiskCacheEntry");
+
     nsresult            rv        = NS_OK;
     uint32_t            size;
     nsDiskCacheEntry *  diskEntry =  CreateDiskCacheEntry(binding, &size);
@@ -1010,6 +1020,12 @@ nsDiskCacheMap::WriteDataCacheBlocks(nsDiskCacheBinding * binding, char * buffer
     CACHE_LOG_DEBUG(("CACHE: WriteDataCacheBlocks [%x size=%u]\n",
         binding->mRecord.HashNumber(), size));
 
+    mozilla::eventtracer::AutoEventTracer writeDataCacheBlocks(
+        binding->mCacheEntry,
+        mozilla::eventtracer::eExec,
+        mozilla::eventtracer::eDone,
+        "net::cache::WriteDataCacheBlocks");
+
     nsresult  rv = NS_OK;
     
     // determine block file & number of blocks
@@ -1018,7 +1034,10 @@ nsDiskCacheMap::WriteDataCacheBlocks(nsDiskCacheBinding * binding, char * buffer
     int32_t   startBlock = 0;
 
     if (size > 0) {
-        while (1) {
+        // if fileIndex is 0, bad things happen below, which makes gcc 4.7
+        // complain, but it's not supposed to happen. See bug 854105.
+        MOZ_ASSERT(fileIndex);
+        while (fileIndex) {
             uint32_t  blockSize  = GetBlockSizeForIndex(fileIndex);
             blockCount = ((size - 1) / blockSize) + 1;
 
@@ -1203,16 +1222,35 @@ nsDiskCacheMap::NotifyCapacityChange(uint32_t capacity)
   // Heuristic 2. we don't want more than 32MB reserved to store the record
   //              map in memory.
   const int32_t RECORD_COUNT_LIMIT = 32 * 1024 * 1024 / sizeof(nsDiskCacheRecord);
-  int32_t maxRecordCount = NS_MIN(int32_t(capacity), RECORD_COUNT_LIMIT);
+  int32_t maxRecordCount = std::min(int32_t(capacity), RECORD_COUNT_LIMIT);
   if (mMaxRecordCount < maxRecordCount) {
     // We can only grow
     mMaxRecordCount = maxRecordCount;
   }
 }
 
+size_t
+nsDiskCacheMap::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf)
+{
+  size_t usage = aMallocSizeOf(mRecordArray);
+
+  usage += aMallocSizeOf(mBuffer);
+  usage += aMallocSizeOf(mMapFD);
+  usage += aMallocSizeOf(mCleanFD);
+  usage += aMallocSizeOf(mCacheDirectory);
+  usage += aMallocSizeOf(mCleanCacheTimer);
+
+  for (int i = 0; i < kNumBlockFiles; i++) {
+    usage += mBlockFile[i].SizeOfExcludingThis(aMallocSizeOf);
+  }
+
+  return usage;
+}
+
 nsresult
 nsDiskCacheMap::InitCacheClean(nsIFile *  cacheDirectory,
-                               nsDiskCache::CorruptCacheInfo *  corruptInfo)
+                               nsDiskCache::CorruptCacheInfo *  corruptInfo,
+                               bool reportCacheCleanTelemetryData)
 {
     // The _CACHE_CLEAN_ file will be used in the future to determine
     // if the cache is clean or not. 
@@ -1248,7 +1286,7 @@ nsDiskCacheMap::InitCacheClean(nsIFile *  cacheDirectory,
         int32_t bytesRead = PR_Read(mCleanFD, &clean, 1);
         if (bytesRead != 1) {
             NS_WARNING("Could not read _CACHE_CLEAN_ file contents");
-        } else {
+        } else if (reportCacheCleanTelemetryData) {
             Telemetry::Accumulate(Telemetry::DISK_CACHE_REDUCTION_TRIAL,
                                   clean == '1' ? 1 : 0);
         }
@@ -1312,7 +1350,12 @@ nsDiskCacheMap::InvalidateCache()
   
     if (!mIsDirtyCacheFlushed) {
         rv = WriteCacheClean(false);
-        NS_ENSURE_SUCCESS(rv, rv);
+        if (NS_FAILED(rv)) {
+          Telemetry::Accumulate(Telemetry::DISK_CACHE_INVALIDATION_SUCCESS, 0);
+          return rv;
+        }
+
+        Telemetry::Accumulate(Telemetry::DISK_CACHE_INVALIDATION_SUCCESS, 1);
         mIsDirtyCacheFlushed = true;
     }
 
@@ -1382,9 +1425,16 @@ nsDiskCacheMap::RevalidateCache()
     nsresult rv;
 
     if (!IsCacheInSafeState()) {
-        CACHE_LOG_DEBUG(("CACHE: Revalidation not performed because "
+        Telemetry::Accumulate(Telemetry::DISK_CACHE_REVALIDATION_SAFE, 0);
+        CACHE_LOG_DEBUG(("CACHE: Revalidation should not performed because "
                          "cache not in a safe state\n"));
-        return NS_ERROR_FAILURE;
+        // Normally we would return an error here, but there is a bug where
+        // the doom list sometimes gets an entry 'stuck' and doens't clear it
+        // until browser shutdown.  So we allow revalidation for the time being
+        // to get proper telemetry data of how much the cache corruption plan
+        // would help.
+    } else {
+        Telemetry::Accumulate(Telemetry::DISK_CACHE_REVALIDATION_SAFE, 1);
     }
 
     // We want this after the lock to prove that flushing a file isn't that expensive
@@ -1395,6 +1445,12 @@ nsDiskCacheMap::RevalidateCache()
   
     // Write out the _CACHE_CLEAN_ file with '1'
     rv = WriteCacheClean(true);
+    if (NS_FAILED(rv)) {
+        Telemetry::Accumulate(Telemetry::DISK_CACHE_REVALIDATION_SUCCESS, 0);
+        return rv;
+    }
+
+    Telemetry::Accumulate(Telemetry::DISK_CACHE_REVALIDATION_SUCCESS, 1);
     mIsDirtyCacheFlushed = false;
 
     return NS_OK;

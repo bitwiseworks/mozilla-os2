@@ -6,9 +6,11 @@
 #ifndef MOZILLA_STREAMBUFFER_H_
 #define MOZILLA_STREAMBUFFER_H_
 
-#include "mozilla/Util.h"
+#include "mozilla/DebugOnly.h"
+
 #include "MediaSegment.h"
 #include "nsAutoPtr.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -33,18 +35,18 @@ const TrackRate TRACK_RATE_MAX = 1 << MEDIA_TIME_FRAC_BITS;
 typedef int32_t TrackID;
 const TrackID TRACK_NONE = 0;
 
-inline TrackTicks TimeToTicksRoundUp(TrackRate aRate, StreamTime aMicroseconds)
+inline TrackTicks TimeToTicksRoundUp(TrackRate aRate, StreamTime aTime)
 {
   NS_ASSERTION(0 < aRate && aRate <= TRACK_RATE_MAX, "Bad rate");
-  NS_ASSERTION(0 <= aMicroseconds && aMicroseconds <= STREAM_TIME_MAX, "Bad microseconds");
-  return (aMicroseconds*aRate + (1 << MEDIA_TIME_FRAC_BITS) - 1) >> MEDIA_TIME_FRAC_BITS;
+  NS_ASSERTION(0 <= aTime && aTime <= STREAM_TIME_MAX, "Bad time");
+  return (aTime*aRate + (1 << MEDIA_TIME_FRAC_BITS) - 1) >> MEDIA_TIME_FRAC_BITS;
 }
 
-inline TrackTicks TimeToTicksRoundDown(TrackRate aRate, StreamTime aMicroseconds)
+inline TrackTicks TimeToTicksRoundDown(TrackRate aRate, StreamTime aTime)
 {
   NS_ASSERTION(0 < aRate && aRate <= TRACK_RATE_MAX, "Bad rate");
-  NS_ASSERTION(0 <= aMicroseconds && aMicroseconds <= STREAM_TIME_MAX, "Bad microseconds");
-  return (aMicroseconds*aRate) >> MEDIA_TIME_FRAC_BITS;
+  NS_ASSERTION(0 <= aTime && aTime <= STREAM_TIME_MAX, "Bad time");
+  return (aTime*aRate) >> MEDIA_TIME_FRAC_BITS;
 }
 
 inline StreamTime TicksToTimeRoundUp(TrackRate aRate, TrackTicks aTicks)
@@ -163,7 +165,7 @@ public:
     {
       mSegment->ForgetUpTo(aTime);
 #ifdef DEBUG
-      mForgottenUpTo = NS_MAX<TrackTicks>(mForgottenUpTo, aTime);
+      mForgottenUpTo = std::max<TrackTicks>(mForgottenUpTo, aTime);
 #endif
     }
 #ifdef DEBUG
@@ -231,6 +233,10 @@ public:
    * data for all tracks that haven't ended by that time.
    */
   StreamTime GetEnd() const;
+
+#ifdef DEBUG
+  void DumpTrackInfo() const;
+#endif
 
   Track* FindTrack(TrackID aID);
 

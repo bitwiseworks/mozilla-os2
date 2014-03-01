@@ -22,46 +22,63 @@
     </resources>
 
     <content>
-        <xul:vbox class="mainBox" flex="1" chromedir="&locale.dir;">
-            <xul:spacer flex="1"/>
-            <xul:box class="icon"/>
-            <html:div class="msg msgUnsupported">&missingPlugin;</html:div>
-            <html:div class="msg msgUnsupportedPlatform">&unsupportedPlatform.pre;<html:a class="unsupportedLearnMoreLink" href="" target="_blank">&unsupportedPlatform.learnMore;</html:a>&unsupportedPlatform.post;</html:div>
-            <html:div class="msg msgTapToPlay">&tapToPlayPlugin;</html:div>
-            <html:div class="msg msgVulnerabilityStatus" anonid="vulnerabilityStatus"><!-- set at runtime --></html:div>
-            <html:div class="msg msgCheckForUpdates"><html:a class="checkForUpdatesLink" href="">&checkForUpdates;</html:a></html:div>
-            <html:div class="msg msgClickToPlay">&clickToPlayPlugin;</html:div>
-            <html:div class="msg msgDisabled">&disabledPlugin;</html:div>
-            <html:div class="msg msgBlocked">&blockedPlugin.label;</html:div>
-            <html:div class="msg msgCrashed"><!-- set at runtime --></html:div>
+        <html:div class="mainBox" chromedir="&locale.dir;">
+            <html:div class="hoverBox">
+                <html:label>
+                    <html:button class="icon"/>
+                    <html:div class="msg msgTapToPlay">&tapToPlayPlugin;</html:div>
+                    <html:div class="msg msgClickToPlay">&clickToActivatePlugin;</html:div>
+                    <html:div class="msg msgVulnerabilityStatus" anonid="vulnerabilityStatus"><!-- set at runtime --></html:div>
+                </html:label>
 
-            <html:div class="installStatus">
-                <html:div class="msg msgInstallPlugin"><html:a class="installPluginLink" href="">&installPlugin;</html:a></html:div>
+                <html:div class="msg msgUnsupported">&missingPlugin;</html:div>
+                <html:div class="msg msgUnsupportedPlatform">&unsupportedPlatform.pre;<html:a class="unsupportedLearnMoreLink" href="" target="_blank">&unsupportedPlatform.learnMore;</html:a>&unsupportedPlatform.post;</html:div>
+                <html:div class="msg msgDisabled">&disabledPlugin;</html:div>
+                <html:div class="msg msgBlocked">&blockedPlugin.label;</html:div>
+                <html:div class="msg msgCrashed">
+                    <html:div class="msgCrashedText"><!-- set at runtime --></html:div>
+                    <!-- link href set at runtime -->
+                    <html:div class="msgReload">&reloadPlugin.pre;<html:a class="reloadLink" href="">&reloadPlugin.middle;</html:a>&reloadPlugin.post;</html:div>
+                </html:div>
+
+                <html:div class="installStatus">
+                    <html:div class="msg msgInstallPlugin">
+		        <html:a class="action-link" anonid="installPluginLink" href="">&installPlugin;</html:a>
+		    </html:div>
+                </html:div>
+                <html:div class="msg msgManagePlugins"><html:a class="action-link" anonid="managePluginsLink" href="">&managePlugins;</html:a></html:div>
+                <html:div class="submitStatus">
+                    <html:div class="msg msgPleaseSubmit">
+                        <html:textarea class="submitComment"
+                                       placeholder="&report.comment;"/>
+                        <html:div class="submitURLOptInBox">
+                            <html:label><html:input class="submitURLOptIn" type="checkbox"/> &report.pageURL;</html:label>
+                        </html:div>
+                        <html:div class="submitButtonBox">
+                            <html:span class="helpIcon" role="link"/>
+                            <html:input class="submitButton" type="button"
+                                        value="&report.please;"/>
+                        </html:div>
+                    </html:div>
+                    <html:div class="msg msgSubmitting">&report.submitting;<html:span class="throbber"> </html:span></html:div>
+                    <html:div class="msg msgSubmitted">&report.submitted;</html:div>
+                    <html:div class="msg msgNotSubmitted">&report.disabled;</html:div>
+                    <html:div class="msg msgSubmitFailed">&report.failed;</html:div>
+                    <html:div class="msg msgNoCrashReport">&report.unavailable;</html:div>
+                </html:div>
+                <html:div class="msg msgCheckForUpdates"><html:a class="action-link" anonid="checkForUpdatesLink" href="">&checkForUpdates;</html:a></html:div>
             </html:div>
-            <html:div class="msg msgManagePlugins"><html:a class="managePluginsLink" href="">&managePlugins;</html:a></html:div>
-            <html:div class="submitStatus">
-                <!-- links set at runtime -->
-                <html:div class="msg msgPleaseSubmit"><html:a class="pleaseSubmitLink" href="">&report.please;</html:a></html:div>
-                <html:div class="msg msgSubmitting">&report.submitting;<html:span class="throbber"> </html:span></html:div>
-                <html:div class="msg msgSubmitted">&report.submitted;</html:div>
-                <html:div class="msg msgNotSubmitted">&report.disabled;</html:div>
-                <html:div class="msg msgSubmitFailed">&report.failed;</html:div>
-                <html:div class="msg msgNoCrashReport">&report.unavailable;</html:div>
-                <!-- link href set at runtime -->
-                <html:div class="msg msgReload">&reloadPlugin.pre;<html:a class="reloadLink" href="">&reloadPlugin.middle;</html:a>&reloadPlugin.post;</html:div>
-            </html:div>
-            <xul:spacer flex="1"/>
-            <html:div class="msg msgBottomLinks">
-                <html:span class="helpIcon" role="link"/>
-            </html:div>
-        </xul:vbox>
+            <html:button class="closeIcon" anonid="closeIcon"/>
+        </html:div>
         <html:div class="previewPluginContent"><!-- iframe and its src will be set at runtime --></html:div>
         <html:div style="display:none;"><children/></html:div>
     </content>
     <implementation>
       <constructor>
-        // Notify browser-plugins.js that we were attached
-        this.dispatchEvent(new CustomEvent("PluginBindingAttached"));
+        // Notify browser-plugins.js that we were attached, on a delay because
+        // this binding doesn't complete layout until the constructor
+        // completes.
+        setTimeout(() => { this.dispatchEvent(new CustomEvent("PluginBindingAttached")) }, 0);
       </constructor>
     </implementation>
 </binding>

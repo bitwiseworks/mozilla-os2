@@ -25,10 +25,9 @@ struct nsRuleData
   const uint32_t mSIDs;
   bool mCanStoreInRuleTree;
   bool mIsImportantRule;
-  uint8_t mLevel; // an nsStyleSet::sheetType
+  uint16_t mLevel; // an nsStyleSet::sheetType
   nsPresContext* const mPresContext;
   nsStyleContext* const mStyleContext;
-  const nsPostResolveFunc mPostResolveCallback;
 
   // We store nsCSSValues needed to compute the data for one or more
   // style structs (specified by the bitfield mSIDs).  These are stored
@@ -92,7 +91,7 @@ struct nsRuleData
    * Like ValueFor(), the caller must check that the property is within
    * mSIDs.
    */
-  #define CSS_PROP_DOMPROP_PREFIXED(prop_) prop_
+  #define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) privatename_
   #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_,        \
                    kwtable_, stylestruct_, stylestructoffset_, animtype_)    \
     nsCSSValue* ValueFor##method_() {                                        \
@@ -115,7 +114,7 @@ struct nsRuleData
     /* empty; backend-only structs are not in nsRuleData  */
   #include "nsCSSPropList.h"
   #undef CSS_PROP
-  #undef CSS_PROP_DOMPROP_PREFIXED
+  #undef CSS_PROP_PUBLIC_OR_PRIVATE
   #undef CSS_PROP_BACKENDONLY
 
 private:

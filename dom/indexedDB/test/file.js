@@ -3,6 +3,8 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
+const DEFAULT_QUOTA = 50 * 1024 * 1024;
+
 var bufferCache = [];
 var utils = SpecialPowers.getDOMWindowUtils(window);
 
@@ -47,12 +49,12 @@ function compareBuffers(buffer1, buffer2)
 
 function getBlob(type, view)
 {
-  return utils.getBlob([view], {type: type});
+  return SpecialPowers.unwrap(utils.getBlob([view], {type: type}));
 }
 
 function getFile(name, type, view)
 {
-  return utils.getFile(name, [view], {type: type});
+  return SpecialPowers.unwrap(utils.getFile(name, [view], {type: type}));
 }
 
 function getRandomBlob(size)
@@ -171,36 +173,21 @@ function grabFileUsageAndContinueHandler(usage, fileUsage)
 function getUsage(usageHandler)
 {
   let comp = SpecialPowers.wrap(Components);
-  let idbManager = comp.classes["@mozilla.org/dom/indexeddb/manager;1"]
-                       .getService(comp.interfaces.nsIIndexedDatabaseManager);
+  let quotaManager = comp.classes["@mozilla.org/dom/quota/manager;1"]
+                         .getService(comp.interfaces.nsIQuotaManager);
 
-  let uri = SpecialPowers.getDocumentURIObject(window.document);
-  let callback = {
-    onUsageResult: function(uri, usage, fileUsage) {
-      usageHandler(usage, fileUsage);
-    }
-  };
+  // We need to pass a JS callback to getUsageForURI. However, that callback
+  // takes an XPCOM URI object, which will cause us to throw when we wrap it
+  // for the content compartment. So we need to define the function in a
+  // privileged scope, which we do using a sandbox.
+  var sysPrin = SpecialPowers.Services.scriptSecurityManager.getSystemPrincipal();
+  var sb = new SpecialPowers.Cu.Sandbox(sysPrin);
+  sb.usageHandler = usageHandler;
+  var cb = SpecialPowers.Cu.evalInSandbox((function(uri, usage, fileUsage) {
+                                           usageHandler(usage, fileUsage); }).toSource(), sb);
 
-  idbManager.getUsageForURI(uri, callback);
-}
-
-function getUsageSync()
-{
-  let usage;
-
-  getUsage(function(aUsage, aFileUsage) {
-    usage = aUsage;
-  });
-
-  let comp = SpecialPowers.wrap(Components);
-  let thread = comp.classes["@mozilla.org/thread-manager;1"]
-                   .getService(comp.interfaces.nsIThreadManager)
-                   .currentThread;
-  while (!usage) {
-    thread.processNextEvent(true);
-  }
-
-  return usage;
+  let uri = SpecialPowers.wrap(window).document.documentURIObject;
+  quotaManager.getUsageForURI(uri, cb);
 }
 
 function scheduleGC()

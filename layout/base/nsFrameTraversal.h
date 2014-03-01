@@ -5,6 +5,7 @@
 #ifndef NSFRAMETRAVERSAL_H
 #define NSFRAMETRAVERSAL_H
 
+#include "mozilla/Attributes.h"
 #include "nsIFrame.h"
 #include "nsIFrameTraversal.h"
 
@@ -29,10 +30,10 @@ public:
   NS_IMETHOD NewFrameTraversal(nsIFrameEnumerator **aEnumerator,
                                nsPresContext* aPresContext,
                                nsIFrame *aStart,
-                               PRInt32 aType,
+                               int32_t aType,
                                bool aVisual,
                                bool aLockInScrollView,
-                               bool aFollowOOFs);
+                               bool aFollowOOFs) MOZ_OVERRIDE;
 };
 
 #endif //NSFRAMETRAVERSAL_H

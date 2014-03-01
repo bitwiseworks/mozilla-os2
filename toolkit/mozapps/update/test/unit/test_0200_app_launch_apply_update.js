@@ -46,6 +46,7 @@ function run_test() {
     return;
   }
 
+  gEnvSKipUpdateDirHashing = true;
   let channel = Services.prefs.getCharPref(PREF_APP_UPDATE_CHANNEL);
   let patches = getLocalPatchString(null, null, null, null, null, "true",
                                     STATE_PENDING);
@@ -99,22 +100,22 @@ function run_test() {
   let mar = do_get_file("data/simple.mar");
   mar.copyTo(updatesPatchDir, FILE_UPDATE_ARCHIVE);
 
-  // Backup the updater.ini
+  // Backup the updater.ini file if it exists by moving it. This prevents the
+  // post update executable from being launched if it is specified.
   let updaterIni = processDir.clone();
   updaterIni.append(FILE_UPDATER_INI);
-  updaterIni.moveTo(processDir, FILE_UPDATER_INI_BAK);
-  // Create a new updater.ini to avoid applications that provide a post update
-  // executable.
-  let updaterIniContents = "[Strings]\n" +
-                           "Title=Update Test\n" +
-                           "Info=Application Update XPCShell Test - " +
-                           "test_0200_general.js\n";
-  updaterIni = processDir.clone();
-  updaterIni.append(FILE_UPDATER_INI);
-  writeFile(updaterIni, updaterIniContents);
+  if (updaterIni.exists()) {
+    updaterIni.moveTo(processDir, FILE_UPDATER_INI_BAK);
+  }
 
+  // Backup the updater-settings.ini file if it exists by moving it.
   let updateSettingsIni = processDir.clone();
-  updateSettingsIni.append(UPDATE_SETTINGS_INI_FILE);
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
+  if (updateSettingsIni.exists()) {
+    updateSettingsIni.moveTo(processDir, FILE_UPDATE_SETTINGS_INI_BAK);
+  }
+  updateSettingsIni = processDir.clone();
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
   writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
 
   let launchBin = getLaunchBin();
@@ -151,10 +152,19 @@ function end_test() {
   resetEnvironment();
 
   let processDir = getCurrentProcessDir();
-  // Restore the backed up updater.ini
+  // Restore the backup of the updater.ini if it exists.
   let updaterIni = processDir.clone();
   updaterIni.append(FILE_UPDATER_INI_BAK);
-  updaterIni.moveTo(processDir, FILE_UPDATER_INI);
+  if (updaterIni.exists()) {
+    updaterIni.moveTo(processDir, FILE_UPDATER_INI);
+  }
+
+  // Restore the backed up updater-settings.ini if it exists.
+  let updateSettingsIni = processDir.clone();
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI_BAK);
+  if (updateSettingsIni.exists()) {
+    updateSettingsIni.moveTo(processDir, FILE_UPDATE_SETTINGS_INI);
+  }
 
   if (IS_WIN) {
     // Remove the copy of the application executable used for the test on
@@ -178,7 +188,12 @@ function end_test() {
   }
 
   // This will delete the app console log file if it exists.
-  getAppConsoleLogPath();
+  try {
+    getAppConsoleLogPath();
+  }
+  catch (e) {
+    logTestInfo("unable to remove file during end_test. Exception: " + e);
+  }
 
   if (IS_UNIX) {
     // This will delete the launch script if it exists.
@@ -191,38 +206,6 @@ function end_test() {
 
   cleanUp();
 }
-
-/**
- * The observer for the call to nsIProcess:runAsync.
- */
-let gProcessObserver = {
-  observe: function PO_observe(subject, topic, data) {
-    logTestInfo("topic " + topic + ", process exitValue " + gProcess.exitValue);
-    if (gAppTimer) {
-      gAppTimer.cancel();
-      gAppTimer = null;
-    }
-    if (topic != "process-finished" || gProcess.exitValue != 0) {
-      do_throw("Failed to launch application");
-    }
-    do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateFinished);
-  },
-  QueryInterface: XPCOMUtils.generateQI([AUS_Ci.nsIObserver])
-};
-
-/**
- * The timer callback to kill the process if it takes too long.
- */
-let gTimerCallback = {
-  notify: function TC_notify(aTimer) {
-    gAppTimer = null;
-    if (gProcess.isRunning) {
-      gProcess.kill();
-    }
-    do_throw("launch application timer expired");
-  },
-  QueryInterface: XPCOMUtils.generateQI([AUS_Ci.nsITimerCallback])
-};
 
 /**
  * Gets the directory where the update adds / removes the files contained in the
@@ -241,18 +224,20 @@ function getUpdateTestDir() {
 }
 
 /**
- * Checks if the update has finished and if it has finished performs checks for
- * the test.
+ * Checks if the update has finished, renames the update.log file to make
+ * sure it is not in use, and then calls restoreLogFile to continue the test.
  */
 function checkUpdateFinished() {
   gTimeoutRuns++;
   // Don't proceed until the update.log has been created.
-  let log = getUpdatesDir();
-  log.append("0");
+  let updatesDir = getUpdatesDir();
+  updatesDir.append("0");
+  let log = updatesDir.clone();
   log.append(FILE_UPDATE_LOG);
   if (!log.exists()) {
     if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
-      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for updates log to be created at " + log.path);
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for updates log to " +
+               "be created at " + log.path);
     else
       do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateFinished);
     return;
@@ -262,9 +247,57 @@ function checkUpdateFinished() {
   let status = readStatusFile();
   if (status == STATE_PENDING || status == STATE_APPLYING) {
     if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
-      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for updates status to not be pending or applying, current status is: " + status);
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for updates status " +
+               "to not be pending or applying, current status is: " + status);
     else
       do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateFinished);
+    return;
+  }
+
+  // Don't proceed until the update.log file can be renamed to update.log.bak
+  // (bug 889860).
+  try {
+    log.moveTo(updatesDir, FILE_UPDATE_LOG + ".bak");
+  }
+  catch (e) {
+    logTestInfo("unable to rename file " + FILE_UPDATE_LOG + " to " +
+                FILE_UPDATE_LOG + ".bak. Exception: " + e);
+    if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting to be able to " +
+               "rename " + FILE_UPDATE_LOG + " to " + FILE_UPDATE_LOG +
+               ".bak. Path: " + log.path);
+    else
+      do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateFinished);
+    return;
+  }
+
+  restoreLogFile();
+}
+
+/**
+ * Checks if the renamed the update.log file can be renamed back to make
+ * sure it is not in use and if so, continues the test.
+ */
+function restoreLogFile() {
+  gTimeoutRuns++;
+  // Don't proceed until the update.log.bak file can be renamed back to
+  // update.log (bug 889860).
+  let updatesDir = getUpdatesDir();
+  updatesDir.append("0");
+  let log = updatesDir.clone();
+  log.append(FILE_UPDATE_LOG + ".bak");
+  try {
+    log.moveTo(updatesDir, FILE_UPDATE_LOG);
+  }
+  catch (e) {
+    logTestInfo("unable to rename file " + FILE_UPDATE_LOG + ".bak back to " +
+                FILE_UPDATE_LOG + ". Exception: " + e);
+    if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting to be able to " +
+               "rename " + FILE_UPDATE_LOG + ".bak back to " + FILE_UPDATE_LOG +
+               ". Path: " + log.path);
+    else
+      do_timeout(CHECK_TIMEOUT_MILLI, restoreLogFile);
     return;
   }
 
@@ -279,6 +312,7 @@ function checkUpdateFinished() {
     do_throw("the application can't be in use when running this test");
   }
 
+  let status = readStatusFile();
   do_check_eq(status, STATE_SUCCEEDED);
 
   standardInit();
@@ -301,6 +335,28 @@ function checkUpdateFinished() {
   file.append("removed-files");
   do_check_true(file.exists());
   do_check_eq(readFileBytes(file), "update_test/UpdateTestRemoveFile\n");
+
+  checkLogRenameFinished();
+}
+
+/**
+ * Checks if the update.log file has been renamed after launch and if so,
+ * continues the test.
+ */
+function checkLogRenameFinished() {
+  gTimeoutRuns++;
+  // Don't proceed until the update.log has been renamed to last-update.log.
+  let log = getUpdatesDir();
+  log.append("0");
+  log.append(FILE_UPDATE_LOG);
+  if (log.exists()) {
+    if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for update log to " +
+               "be renamed to last-update.log at " + log.path);
+    else
+      do_timeout(CHECK_TIMEOUT_MILLI, checkLogRenameFinished);
+    return;
+  }
 
   let updatesDir = getUpdatesDir();
   log = updatesDir.clone();

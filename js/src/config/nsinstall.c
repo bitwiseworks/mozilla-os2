@@ -293,20 +293,16 @@ main(int argc, char **argv)
 	    break;
 #if defined(__OS2__)
     /* no proper symlink support so far */
-    case 'l':
     case 'L':
     case 'R':
       break;
 #else
-	  case 'l':
-	    dolink = 1;
-	    break;
 	  case 'L':
 	    linkprefix = optarg;
 	    lplen = strlen(linkprefix);
 	    dolink = 1;
 	    break;
-     case 'R':
+	  case 'R':
 	    dolink = dorelsymlink = 1;
 	    break;
 #endif
@@ -403,7 +399,7 @@ main(int argc, char **argv)
 		linkname = 0;
 	    } else {
 		if (linkprefix) {
-		    /* -L implies -l and prefixes names with a $cwd arg. */
+		    /* -L prefixes names with a $cwd arg. */
 		    len += lplen + 1;
 		    linkname = xmalloc((unsigned int)(len + 1));
 		    sprintf(linkname, "%s/%s", linkprefix, name);

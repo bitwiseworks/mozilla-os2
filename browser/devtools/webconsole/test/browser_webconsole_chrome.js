@@ -6,7 +6,7 @@
 // Tests that code completion works properly.
 
 function test() {
-  addTab("about:addons");
+  addTab("about:credits");
   browser.addEventListener("load", function onLoad() {
     browser.removeEventListener("load", onLoad, true);
     openConsole(null, testChrome);
@@ -15,8 +15,8 @@ function test() {
 
 function testChrome(hud) {
   ok(hud, "we have a console");
-  
-  ok(hud.iframe, "we have the console iframe");
+
+  ok(hud.iframeWindow, "we have the console UI window");
 
   let jsterm = hud.jsterm;
   ok(jsterm, "we have a jsterm");

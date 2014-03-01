@@ -2,11 +2,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import imp
 import os
 import re
 import sys
+import time
 import types
 import unittest
+import weakref
 
 from errors import *
 from marionette import HTMLElement, Marionette
@@ -21,37 +24,91 @@ def skip_if_b2g(target):
 
 class CommonTestCase(unittest.TestCase):
 
+    match_re = None
+
     def __init__(self, methodName):
         unittest.TestCase.__init__(self, methodName)
         self.loglines = None
-        self.perfdata = None
+        self.duration = 0
 
-    def kill_gaia_app(self, url):
-        self.marionette.execute_script("""
-window.wrappedJSObject.getApplicationManager().kill("%s");
-return(true);
-""" % url)
+    def run(self, result=None):
+        orig_result = result
+        if result is None:
+            result = self.defaultTestResult()
+            startTestRun = getattr(result, 'startTestRun', None)
+            if startTestRun is not None:
+                startTestRun()
 
-    def kill_gaia_apps(self):
-        # shut down any running Gaia apps
-        # XXX there's no API to do this currently
-        pass
+        self._resultForDoCleanups = result
+        result.startTest(self)
 
-    def launch_gaia_app(self, url):
-        # launch the app using Gaia's AppManager
-        self.marionette.set_script_timeout(30000)
-        frame = self.marionette.execute_async_script("""
-var frame = window.wrappedJSObject.getApplicationManager().launch("%s").element;
-window.addEventListener('message', function frameload(e) {
-    if (e.data == 'appready') {
-        window.removeEventListener('message', frameload);
-        marionetteScriptFinished(frame);
-    }
-});
-    """ % url)
+        testMethod = getattr(self, self._testMethodName)
+        try:
+            success = False
+            try:
+                self.setUp()
+            except KeyboardInterrupt:
+                raise
+            except:
+                result.addError(self, sys.exc_info())
+            else:
+                try:
+                    testMethod()
+                except KeyboardInterrupt:
+                    raise
+                except AssertionError:
+                    result.addFailure(self, sys.exc_info())
+                except:
+                    result.addError(self, sys.exc_info())
+                else:
+                    success = True
+                try:
+                    self.tearDown()
+                except KeyboardInterrupt:
+                    raise
+                except:
+                    result.addError(self, sys.exc_info())
+                    success = False
+            # Here we could handle doCleanups() instead of calling cleanTest directly
+            self.cleanTest()
 
-        self.assertTrue(isinstance(frame, HTMLElement))
-        return frame
+            if success:
+                result.addSuccess(self)
+
+        finally:
+            result.stopTest(self)
+            if orig_result is None:
+                stopTestRun = getattr(result, 'stopTestRun', None)
+                if stopTestRun is not None:
+                    stopTestRun()
+
+    @classmethod
+    def match(cls, filename):
+        """
+        Determines if the specified filename should be handled by this
+        test class; this is done by looking for a match for the filename
+        using cls.match_re.
+        """
+        if not cls.match_re:
+            return False
+        m = cls.match_re.match(filename)
+        return m is not None
+
+    @classmethod
+    def add_tests_to_suite(cls, mod_name, filepath, suite, testloader, marionette, testvars):
+        """
+        Adds all the tests in the specified file to the specified suite.
+        """
+        raise NotImplementedError
+
+    @property
+    def test_name(self):
+        if hasattr(self, 'jsFile'):
+            return os.path.basename(self.jsFile)
+        else:
+            return '%s.py %s.%s' % (self.__class__.__module__,
+                                    self.__class__.__name__,
+                                    self._testMethodName)
 
     def set_up_test_page(self, emulator, url="test.html", permissions=None):
         emulator.set_context("content")
@@ -77,24 +134,73 @@ permissions.forEach(function (perm) {
         # duration of the test; this is deleted in tearDown() to prevent
         # a persistent circular reference which in turn would prevent
         # proper garbage collection.
+        self.start_time = time.time()
         self.marionette = self._marionette_weakref()
         if self.marionette.session is None:
             self.marionette.start_session()
+        if self.marionette.timeout is not None:
+            self.marionette.timeouts(self.marionette.TIMEOUT_SEARCH, self.marionette.timeout)
+            self.marionette.timeouts(self.marionette.TIMEOUT_SCRIPT, self.marionette.timeout)
+            self.marionette.timeouts(self.marionette.TIMEOUT_PAGE, self.marionette.timeout)
+        else:
+            self.marionette.timeouts(self.marionette.TIMEOUT_PAGE, 30000)
 
     def tearDown(self):
-        if self.marionette.session is not None:
-            self.loglines = self.marionette.get_logs()
-            self.perfdata = self.marionette.get_perf_data()
-            self.marionette.delete_session()
+        self._deleteSession()
+
+    def cleanTest(self):
+        self._deleteSession()
+
+    def _deleteSession(self):
+        self.duration = time.time() - self.start_time
+        if hasattr(self.marionette, 'session'):
+            if self.marionette.session is not None:
+                self.loglines = self.marionette.get_logs()
+                self.marionette.delete_session()
         self.marionette = None
 
 class MarionetteTestCase(CommonTestCase):
 
-    def __init__(self, marionette_weakref, methodName='runTest', **kwargs):
+    match_re = re.compile(r"test_(.*)\.py$")
+
+    def __init__(self, marionette_weakref, methodName='runTest',
+                 filepath='', **kwargs):
         self._marionette_weakref = marionette_weakref
         self.marionette = None
         self.extra_emulator_index = -1
+        self.methodName = methodName
+        self.filepath = filepath
+        self.testvars = kwargs.pop('testvars', None)
         CommonTestCase.__init__(self, methodName, **kwargs)
+
+    @classmethod
+    def add_tests_to_suite(cls, mod_name, filepath, suite, testloader, marionette, testvars, **kwargs):
+        test_mod = imp.load_source(mod_name, filepath)
+
+        for name in dir(test_mod):
+            obj = getattr(test_mod, name)
+            if (isinstance(obj, (type, types.ClassType)) and
+                issubclass(obj, unittest.TestCase)):
+                testnames = testloader.getTestCaseNames(obj)
+                for testname in testnames:
+                    suite.addTest(obj(weakref.ref(marionette),
+                                  methodName=testname,
+                                  filepath=filepath,
+                                  testvars=testvars,
+                                  **kwargs))
+
+    def setUp(self):
+        CommonTestCase.setUp(self)
+        self.marionette.test_name = self.test_name
+        self.marionette.execute_script("log('TEST-START: %s:%s')" % 
+                                       (self.filepath.replace('\\', '\\\\'), self.methodName))
+
+    def tearDown(self):
+        self.marionette.set_context("content")
+        self.marionette.execute_script("log('TEST-END: %s:%s')" % 
+                                       (self.filepath.replace('\\', '\\\\'), self.methodName))
+        self.marionette.test_name = None
+        CommonTestCase.tearDown(self)
 
     def get_new_emulator(self):
         self.extra_emulator_index += 1
@@ -103,19 +209,29 @@ class MarionetteTestCase(CommonTestCase):
                                emulatorBinary=self.marionette.emulator.binary,
                                homedir=self.marionette.homedir,
                                baseurl=self.marionette.baseurl,
-                               noWindow=self.marionette.noWindow)
+                               noWindow=self.marionette.noWindow,
+                               gecko_path=self.marionette.gecko_path)
             qemu.start_session()
             self.marionette.extra_emulators.append(qemu)
         else:
             qemu = self.marionette.extra_emulators[self.extra_emulator_index]
         return qemu
 
+    def wait_for_condition(self, method, timeout=30):
+        timeout = float(timeout) + time.time()
+        while time.time() < timeout:
+            value = method(self.marionette)
+            if value:
+                return value
+            time.sleep(0.5)
+        else:
+            raise TimeoutException("wait_for_condition timed out")
 
 class MarionetteJSTestCase(CommonTestCase):
 
     context_re = re.compile(r"MARIONETTE_CONTEXT(\s*)=(\s*)['|\"](.*?)['|\"];")
     timeout_re = re.compile(r"MARIONETTE_TIMEOUT(\s*)=(\s*)(\d+);")
-    launch_re = re.compile(r"MARIONETTE_LAUNCH_APP(\s*)=(\s*)['|\"](.*?)['|\"];")
+    match_re = re.compile(r"test_(.*)\.js$")
 
     def __init__(self, marionette_weakref, methodName='runTest', jsFile=None):
         assert(jsFile)
@@ -124,9 +240,16 @@ class MarionetteJSTestCase(CommonTestCase):
         self.marionette = None
         CommonTestCase.__init__(self, methodName)
 
+    @classmethod
+    def add_tests_to_suite(cls, mod_name, filepath, suite, testloader, marionette, testvars):
+        suite.addTest(cls(weakref.ref(marionette), jsFile=filepath))
+
     def runTest(self):
         if self.marionette.session is None:
             self.marionette.start_session()
+        self.marionette.test_name = os.path.basename(self.jsFile)
+        self.marionette.execute_script("log('TEST-START: %s');" % self.jsFile.replace('\\', '\\\\'))
+
         f = open(self.jsFile, 'r')
         js = f.read()
         args = []
@@ -150,25 +273,15 @@ class MarionetteJSTestCase(CommonTestCase):
             self.marionette.set_context(context)
 
         if context != "chrome":
-            page = self.marionette.absolute_url("empty.html")
-            self.marionette.navigate(page)
+            self.marionette.navigate('data:text/html,<html>test page</html>')
 
         timeout = self.timeout_re.search(js)
         if timeout:
             timeout = timeout.group(3)
             self.marionette.set_script_timeout(timeout)
 
-        launch_app = self.launch_re.search(js)
-        if launch_app:
-            launch_app = launch_app.group(3)
-            frame = self.launch_gaia_app(launch_app)
-            args.append({'__marionetteArgs': {'appframe': frame}})
-
         try:
             results = self.marionette.execute_js_script(js, args, special_powers=True)
-
-            if launch_app:
-                self.kill_gaia_app(launch_app)
 
             self.assertTrue(not 'timeout' in self.jsFile,
                             'expected timeout not triggered')
@@ -181,13 +294,13 @@ class MarionetteJSTestCase(CommonTestCase):
                 for failure in results['failures']:
                     diag = "" if failure.get('diag') is None else "| %s " % failure['diag']
                     name = "got false, expected true" if failure.get('name') is None else failure['name']
-                    fails.append('TEST-UNEXPECTED-FAIL %s| %s' % (diag, name))
+                    fails.append('TEST-UNEXPECTED-FAIL | %s %s| %s' %
+                                 (os.path.basename(self.jsFile), diag, name))
                 self.assertEqual(0, results['failed'],
                                  '%d tests failed:\n%s' % (results['failed'], '\n'.join(fails)))
 
-            if not self.perfdata:
-                self.assertTrue(results['passed'] + results['failed'] > 0,
-                                'no tests run')
+            self.assertTrue(results['passed'] + results['failed'] > 0,
+                            'no tests run')
 
         except ScriptTimeoutException:
             if 'timeout' in self.jsFile:
@@ -197,6 +310,5 @@ class MarionetteJSTestCase(CommonTestCase):
                 self.loglines = self.marionette.get_logs()
                 raise
 
-
-
-
+        self.marionette.execute_script("log('TEST-END: %s');" % self.jsFile.replace('\\', '\\\\'))
+        self.marionette.test_name = None

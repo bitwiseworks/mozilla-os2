@@ -29,9 +29,13 @@ let histograms = {
   PLACES_FRECENCY_CALC_TIME_MS: function (val) do_check_true(val >= 0),
 }
 
-function run_test() {
-  do_test_pending();
+function run_test()
+{
+  run_next_test();
+}
 
+add_task(function test_execute()
+{
   // Put some trash in the database.
   const URI = NetUtil.newURI("http://moz.org/");
 
@@ -60,15 +64,14 @@ function run_test() {
     .getService(Ci.nsIObserver)
     .observe(null, "gather-telemetry", null);
 
-  waitForAsyncUpdates(continue_test);
-}
+  yield promiseAsyncUpdates();
 
-function continue_test() {
   // Test expiration probes.
   for (let i = 0; i < 2; i++) {
-    PlacesUtils.history.addVisit(NetUtil.newURI("http://" +  i + ".moz.org/"),
-                                 Date.now(), null,
-                                 PlacesUtils.history.TRANSITION_TYPED, false, 0);
+    yield promiseAddVisits({
+      uri: uri("http://" +  i + ".moz.org/"),
+      visitDate: Date.now() // [sic]
+    });
   }
   Services.prefs.setIntPref("places.history.expiration.max_pages", 0);
   let expire = Cc["@mozilla.org/places/expiration;1"].getService(Ci.nsIObserver);
@@ -116,14 +119,8 @@ function continue_test() {
                      .observe(null, "idle-daily", null);
   PlacesDBUtils.maintenanceOnIdle();
 
-  Services.obs.addObserver(function maintenanceObserver() {
-    Services.obs.removeObserver(maintenanceObserver,
-    "places-maintenance-finished");
-    check_telemetry();
-  }, "places-maintenance-finished", false);
-}
+  yield promiseTopicObserved("places-maintenance-finished");
 
-function check_telemetry() {
   for (let histogramId in histograms) {
     do_log_info("checking histogram " + histogramId);
     let validate = histograms[histogramId];
@@ -131,5 +128,17 @@ function check_telemetry() {
     validate(snapshot.sum);
     do_check_true(snapshot.counts.reduce(function(a, b) a + b) > 0);
   }
-  do_test_finished();
-}
+});
+
+add_test(function test_healthreport_callback() {
+  PlacesDBUtils.telemetry(null, function onResult(data) {
+    do_check_neq(data, null);
+
+    do_check_eq(Object.keys(data).length, 2);
+    do_check_eq(data.PLACES_PAGES_COUNT, 1);
+    do_check_eq(data.PLACES_BOOKMARKS_COUNT, 1);
+
+    run_next_test();
+  });
+});
+

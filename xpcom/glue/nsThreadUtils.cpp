@@ -6,6 +6,7 @@
 
 #include "nsThreadUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Likely.h"
 
 #ifdef MOZILLA_INTERNAL_API
 # include "nsThreadManager.h"
@@ -28,9 +29,26 @@
 #ifndef XPCOM_GLUE_AVOID_NSPR
 
 NS_IMPL_THREADSAFE_ISUPPORTS1(nsRunnable, nsIRunnable)
-  
+
 NS_IMETHODIMP
 nsRunnable::Run()
+{
+  // Do nothing
+  return NS_OK;
+}
+
+NS_IMPL_THREADSAFE_ISUPPORTS2(nsCancelableRunnable, nsICancelableRunnable,
+                              nsIRunnable)
+
+NS_IMETHODIMP
+nsCancelableRunnable::Run()
+{
+  // Do nothing
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsCancelableRunnable::Cancel()
 {
   // Do nothing
   return NS_OK;
@@ -314,12 +332,12 @@ nsAutoLowPriorityIO::nsAutoLowPriorityIO()
 nsAutoLowPriorityIO::~nsAutoLowPriorityIO()
 {
 #if defined(XP_WIN)
-  if (NS_LIKELY(lowIOPrioritySet)) {
+  if (MOZ_LIKELY(lowIOPrioritySet)) {
     // On Windows the old thread priority is automatically restored
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END);
   }
 #elif defined(XP_MACOSX)
-  if (NS_LIKELY(lowIOPrioritySet)) {
+  if (MOZ_LIKELY(lowIOPrioritySet)) {
     setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_THREAD, oldPriority);
   }
 #endif

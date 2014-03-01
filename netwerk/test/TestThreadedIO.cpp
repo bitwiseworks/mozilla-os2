@@ -9,6 +9,7 @@
 #include "nsIStreamListener.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
+#include <algorithm>
 //#include "prthread.h"
 
 // This test attempts to load a URL on a separate thread.  It is currently
@@ -128,7 +129,7 @@ NS_IMETHODIMP
 TestListener::OnDataAvailable( nsIChannel *aChannel,
                                nsISupports *aContext,
                                nsIInputStream *aStream,
-                               uint32_t offset,
+                               uint64_t offset,
                                uint32_t aLength ) {
     nsresult rv = NS_OK;
 
@@ -142,7 +143,7 @@ TestListener::OnDataAvailable( nsIChannel *aChannel,
         unsigned int bytesRead;
         // Read a buffer full or the number remaining (whichever is smaller).
         rv = aStream->Read( buffer,
-                            NS_MIN( sizeof( buffer ), bytesRemaining ),
+                            std::min( sizeof( buffer ), bytesRemaining ),
                             &bytesRead );
         if ( NS_SUCCEEDED( rv ) ) {
             // Write the bytes just read to the output file.

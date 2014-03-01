@@ -4,37 +4,37 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsDOMSerializer.h"
-#include "nsIDOMNode.h"
-#include "nsDOMClassInfoID.h"
-#include "nsIOutputStream.h"
+
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDocumentEncoder.h"
-#include "nsString.h"
+#include "nsComponentManagerUtils.h"
 #include "nsContentCID.h"
 #include "nsContentUtils.h"
 #include "nsError.h"
+#include "nsINode.h"
+
+using namespace mozilla;
 
 nsDOMSerializer::nsDOMSerializer()
 {
+  SetIsDOMBinding();
 }
 
 nsDOMSerializer::~nsDOMSerializer()
 {
 }
 
-DOMCI_DATA(XMLSerializer, nsDOMSerializer)
-
 // QueryInterface implementation for nsDOMSerializer
-NS_INTERFACE_MAP_BEGIN(nsDOMSerializer)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMSerializer)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_INTERFACE_MAP_ENTRY(nsIDOMSerializer)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(XMLSerializer)
 NS_INTERFACE_MAP_END
 
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsDOMSerializer, mOwner)
 
-NS_IMPL_ADDREF(nsDOMSerializer)
-NS_IMPL_RELEASE(nsDOMSerializer)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMSerializer)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMSerializer)
 
 
 static nsresult
@@ -66,7 +66,7 @@ SetUpEncoder(nsIDOMNode *aRoot, const nsACString& aCharset,
   if (NS_FAILED(rv))
     return rv;
 
-  nsCAutoString charset(aCharset);
+  nsAutoCString charset(aCharset);
   if (charset.IsEmpty()) {
     nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
     NS_ASSERTION(doc, "Need a document");
@@ -90,6 +90,13 @@ SetUpEncoder(nsIDOMNode *aRoot, const nsACString& aCharset,
   return rv;
 }
 
+void
+nsDOMSerializer::SerializeToString(nsINode& aRoot, nsAString& aStr,
+                                   ErrorResult& rv)
+{
+  rv = nsDOMSerializer::SerializeToString(aRoot.AsDOMNode(), aStr);
+}
+
 NS_IMETHODIMP
 nsDOMSerializer::SerializeToString(nsIDOMNode *aRoot, nsAString& _retval)
 {
@@ -107,6 +114,14 @@ nsDOMSerializer::SerializeToString(nsIDOMNode *aRoot, nsAString& _retval)
     return rv;
 
   return encoder->EncodeToString(_retval);
+}
+
+void
+nsDOMSerializer::SerializeToStream(nsINode& aRoot, nsIOutputStream* aStream,
+                                   const nsAString& aCharset, ErrorResult& rv)
+{
+  rv = nsDOMSerializer::SerializeToStream(aRoot.AsDOMNode(), aStream,
+                                          NS_ConvertUTF16toUTF8(aCharset));
 }
 
 NS_IMETHODIMP

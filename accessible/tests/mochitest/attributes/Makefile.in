@@ -7,7 +7,7 @@ DEPTH		= @DEPTH@
 topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
-relativesrcdir  = accessible/attributes
+relativesrcdir	= @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
@@ -19,7 +19,6 @@ MOCHITEST_A11Y_FILES =\
 		test_obj_group.xul \
 		test_obj_group_tree.xul \
 		test_tag.html \
-		test_text.html \
 		test_xml-roles.html \
 		$(NULL)
 

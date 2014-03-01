@@ -9,82 +9,25 @@
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
-#include "nsIDOMSVGAnimPresAspRatio.h"
-#include "nsIDOMSVGPresAspectRatio.h"
 #include "nsISMILAttr.h"
 #include "nsSVGElement.h"
+#include "SVGPreserveAspectRatio.h"
 #include "mozilla/Attributes.h"
 
-class nsISMILAnimationElement;
 class nsSMILValue;
 
 namespace mozilla {
+namespace dom {
+class DOMSVGAnimatedPreserveAspectRatio;
+class SVGAnimationElement;
+}
 
-class SVGAnimatedPreserveAspectRatio;
-
-class SVGPreserveAspectRatio
-{
-  friend class SVGAnimatedPreserveAspectRatio;
-
-public:
-  SVGPreserveAspectRatio(uint16_t aAlign, uint16_t aMeetOrSlice, bool aDefer = false)
-    : mAlign(aAlign)
-    , mMeetOrSlice(aMeetOrSlice)
-    , mDefer(aDefer)
-  {}
-
-  SVGPreserveAspectRatio()
-    : mAlign(0)
-    , mMeetOrSlice(0)
-    , mDefer(false)
-  {}
-
-  bool operator==(const SVGPreserveAspectRatio& aOther) const;
-
-  nsresult SetAlign(uint16_t aAlign) {
-    if (aAlign < nsIDOMSVGPreserveAspectRatio::SVG_PRESERVEASPECTRATIO_NONE ||
-        aAlign > nsIDOMSVGPreserveAspectRatio::SVG_PRESERVEASPECTRATIO_XMAXYMAX)
-      return NS_ERROR_FAILURE;
-    mAlign = static_cast<uint8_t>(aAlign);
-    return NS_OK;
-  }
-
-  uint16_t GetAlign() const {
-    return mAlign;
-  }
-
-  nsresult SetMeetOrSlice(uint16_t aMeetOrSlice) {
-    if (aMeetOrSlice < nsIDOMSVGPreserveAspectRatio::SVG_MEETORSLICE_MEET ||
-        aMeetOrSlice > nsIDOMSVGPreserveAspectRatio::SVG_MEETORSLICE_SLICE)
-      return NS_ERROR_FAILURE;
-    mMeetOrSlice = static_cast<uint8_t>(aMeetOrSlice);
-    return NS_OK;
-  }
-
-  uint16_t GetMeetOrSlice() const {
-    return mMeetOrSlice;
-  }
-
-  void SetDefer(bool aDefer) {
-    mDefer = aDefer;
-  }
-
-  bool GetDefer() const {
-    return mDefer;
-  }
-
-private:
-  uint8_t mAlign;
-  uint8_t mMeetOrSlice;
-  bool mDefer;
-};
-
-class SVGAnimatedPreserveAspectRatio
+class SVGAnimatedPreserveAspectRatio MOZ_FINAL
 {
 public:
   void Init() {
-    mBaseVal.mAlign = nsIDOMSVGPreserveAspectRatio::SVG_PRESERVEASPECTRATIO_XMIDYMID;
-    mBaseVal.mMeetOrSlice = nsIDOMSVGPreserveAspectRatio::SVG_MEETORSLICE_MEET;
+    mBaseVal.mAlign = SVG_PRESERVEASPECTRATIO_XMIDYMID;
+    mBaseVal.mMeetOrSlice = SVG_MEETORSLICE_MEET;
     mBaseVal.mDefer = false;
     mAnimVal = mBaseVal;
     mIsAnimated = false;
@@ -99,22 +42,23 @@ public:
   void SetBaseValue(const SVGPreserveAspectRatio &aValue,
                     nsSVGElement *aSVGElement);
   nsresult SetBaseAlign(uint16_t aAlign, nsSVGElement *aSVGElement) {
-    if (aAlign < nsIDOMSVGPreserveAspectRatio::SVG_PRESERVEASPECTRATIO_NONE ||
-        aAlign > nsIDOMSVGPreserveAspectRatio::SVG_PRESERVEASPECTRATIO_XMAXYMAX) {
+    if (aAlign < SVG_ALIGN_MIN_VALID || aAlign > SVG_ALIGN_MAX_VALID) {
       return NS_ERROR_FAILURE;
     }
     SetBaseValue(SVGPreserveAspectRatio(
-                   aAlign, mBaseVal.GetMeetOrSlice(), mBaseVal.GetDefer()),
+                   static_cast<SVGAlign>(aAlign), mBaseVal.GetMeetOrSlice(),
+                   mBaseVal.GetDefer()),
                  aSVGElement);
     return NS_OK;
   }
   nsresult SetBaseMeetOrSlice(uint16_t aMeetOrSlice, nsSVGElement *aSVGElement) {
-    if (aMeetOrSlice < nsIDOMSVGPreserveAspectRatio::SVG_MEETORSLICE_MEET ||
-        aMeetOrSlice > nsIDOMSVGPreserveAspectRatio::SVG_MEETORSLICE_SLICE) {
+    if (aMeetOrSlice < SVG_MEETORSLICE_MIN_VALID ||
+        aMeetOrSlice > SVG_MEETORSLICE_MAX_VALID) {
       return NS_ERROR_FAILURE;
     }
     SetBaseValue(SVGPreserveAspectRatio(
-                   mBaseVal.GetAlign(), aMeetOrSlice, mBaseVal.GetDefer()),
+                   mBaseVal.GetAlign(), static_cast<SVGMeetOrSlice>(aMeetOrSlice),
+                   mBaseVal.GetDefer()),
                  aSVGElement);
     return NS_OK;
   }
@@ -130,7 +74,7 @@ public:
     { return mIsAnimated || mIsBaseSet; }
 
   nsresult ToDOMAnimatedPreserveAspectRatio(
-    nsIDOMSVGAnimatedPreserveAspectRatio **aResult,
+    mozilla::dom::DOMSVGAnimatedPreserveAspectRatio **aResult,
     nsSVGElement* aSVGElement);
   // Returns a new nsISMILAttr object that the caller must delete
   nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
@@ -142,87 +86,7 @@ private:
   bool mIsAnimated;
   bool mIsBaseSet;
 
-  nsresult ToDOMBaseVal(nsIDOMSVGPreserveAspectRatio **aResult,
-                        nsSVGElement* aSVGElement);
-  nsresult ToDOMAnimVal(nsIDOMSVGPreserveAspectRatio **aResult,
-                        nsSVGElement* aSVGElement);
-
 public:
-  struct DOMBaseVal MOZ_FINAL : public nsIDOMSVGPreserveAspectRatio
-  {
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_CLASS(DOMBaseVal)
-
-    DOMBaseVal(SVGAnimatedPreserveAspectRatio* aVal, nsSVGElement *aSVGElement)
-      : mVal(aVal), mSVGElement(aSVGElement) {}
-    
-    SVGAnimatedPreserveAspectRatio* mVal; // kept alive because it belongs to mSVGElement
-    nsRefPtr<nsSVGElement> mSVGElement;
-    
-    NS_IMETHOD GetAlign(uint16_t* aAlign)
-      { *aAlign = mVal->GetBaseValue().GetAlign(); return NS_OK; }
-    NS_IMETHOD SetAlign(uint16_t aAlign)
-      { return mVal->SetBaseAlign(aAlign, mSVGElement); }
-
-    NS_IMETHOD GetMeetOrSlice(uint16_t* aMeetOrSlice)
-      { *aMeetOrSlice = mVal->GetBaseValue().GetMeetOrSlice(); return NS_OK; }
-    NS_IMETHOD SetMeetOrSlice(uint16_t aMeetOrSlice)
-      { return mVal->SetBaseMeetOrSlice(aMeetOrSlice, mSVGElement); }
-  };
-
-  struct DOMAnimVal MOZ_FINAL : public nsIDOMSVGPreserveAspectRatio
-  {
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_CLASS(DOMAnimVal)
-
-    DOMAnimVal(SVGAnimatedPreserveAspectRatio* aVal, nsSVGElement *aSVGElement)
-      : mVal(aVal), mSVGElement(aSVGElement) {}
-    
-    SVGAnimatedPreserveAspectRatio* mVal; // kept alive because it belongs to mSVGElement
-    nsRefPtr<nsSVGElement> mSVGElement;
-    
-    // Script may have modified animation parameters or timeline -- DOM getters
-    // need to flush any resample requests to reflect these modifications.
-    NS_IMETHOD GetAlign(uint16_t* aAlign)
-    {
-      mSVGElement->FlushAnimations();
-      *aAlign = mVal->GetAnimValue().GetAlign();
-      return NS_OK;
-    }
-    NS_IMETHOD SetAlign(uint16_t aAlign)
-      { return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR; }
-
-    NS_IMETHOD GetMeetOrSlice(uint16_t* aMeetOrSlice)
-    {
-      mSVGElement->FlushAnimations();
-      *aMeetOrSlice = mVal->GetAnimValue().GetMeetOrSlice();
-      return NS_OK;
-    }
-    NS_IMETHOD SetMeetOrSlice(uint16_t aValue)
-      { return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR; }
-  };
-
-  struct DOMAnimPAspectRatio MOZ_FINAL : public nsIDOMSVGAnimatedPreserveAspectRatio
-  {
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_CLASS(DOMAnimPAspectRatio)
-
-    DOMAnimPAspectRatio(SVGAnimatedPreserveAspectRatio* aVal,
-                        nsSVGElement *aSVGElement)
-      : mVal(aVal), mSVGElement(aSVGElement) {}
-
-    // kept alive because it belongs to content:
-    SVGAnimatedPreserveAspectRatio* mVal;
-
-    nsRefPtr<nsSVGElement> mSVGElement;
-
-    NS_IMETHOD GetBaseVal(nsIDOMSVGPreserveAspectRatio **aBaseVal)
-      { return mVal->ToDOMBaseVal(aBaseVal, mSVGElement); }
-
-    NS_IMETHOD GetAnimVal(nsIDOMSVGPreserveAspectRatio **aAnimVal)
-      { return mVal->ToDOMAnimVal(aAnimVal, mSVGElement); }
-  };
-
   struct SMILPreserveAspectRatio MOZ_FINAL : public nsISMILAttr
   {
   public:
@@ -238,15 +102,46 @@ public:
 
     // nsISMILAttr methods
     virtual nsresult ValueFromString(const nsAString& aStr,
-                                     const nsISMILAnimationElement* aSrcElement,
+                                     const dom::SVGAnimationElement* aSrcElement,
                                      nsSMILValue& aValue,
-                                     bool& aPreventCachingOfSandwich) const;
-    virtual nsSMILValue GetBaseValue() const;
-    virtual void ClearAnimValue();
-    virtual nsresult SetAnimValue(const nsSMILValue& aValue);
+                                     bool& aPreventCachingOfSandwich) const MOZ_OVERRIDE;
+    virtual nsSMILValue GetBaseValue() const MOZ_OVERRIDE;
+    virtual void ClearAnimValue() MOZ_OVERRIDE;
+    virtual nsresult SetAnimValue(const nsSMILValue& aValue) MOZ_OVERRIDE;
   };
 };
 
+namespace dom {
+class DOMSVGAnimatedPreserveAspectRatio MOZ_FINAL : public nsISupports,
+                                                    public nsWrapperCache
+{
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGAnimatedPreserveAspectRatio)
+
+  DOMSVGAnimatedPreserveAspectRatio(SVGAnimatedPreserveAspectRatio* aVal,
+                                    nsSVGElement *aSVGElement)
+    : mVal(aVal), mSVGElement(aSVGElement)
+  {
+    SetIsDOMBinding();
+  }
+  ~DOMSVGAnimatedPreserveAspectRatio();
+
+  // WebIDL
+  nsSVGElement* GetParentObject() const { return mSVGElement; }
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+  // These aren't weak refs because new objects are returned each time
+  already_AddRefed<DOMSVGPreserveAspectRatio> BaseVal();
+  already_AddRefed<DOMSVGPreserveAspectRatio> AnimVal();
+
+protected:
+  // kept alive because it belongs to content:
+  SVGAnimatedPreserveAspectRatio* mVal;
+  nsRefPtr<nsSVGElement> mSVGElement;
+};
+
+} // namespace dom
 } // namespace mozilla
 
 #endif // MOZILLA_SVGANIMATEDPRESERVEASPECTRATIO_H__

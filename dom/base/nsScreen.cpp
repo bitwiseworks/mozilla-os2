@@ -13,6 +13,8 @@
 #include "nsLayoutUtils.h"
 #include "nsDOMEvent.h"
 #include "nsGlobalWindow.h"
+#include "nsJSUtils.h"
+#include "mozilla/dom/ScreenBinding.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -22,13 +24,12 @@ namespace {
 bool
 IsChromeType(nsIDocShell *aDocShell)
 {
-  nsCOMPtr<nsIDocShellTreeItem> ds = do_QueryInterface(aDocShell);
-  if (!ds) {
+  if (!aDocShell) {
     return false;
   }
 
   int32_t itemType;
-  ds->GetItemType(&itemType);
+  aDocShell->GetItemType(&itemType);
   return itemType == nsIDocShellTreeItem::typeChrome;
 }
 
@@ -61,50 +62,19 @@ nsScreen::Create(nsPIDOMWindow* aWindow)
 nsScreen::nsScreen()
   : mEventListener(nullptr)
 {
-}
-
-void
-nsScreen::Reset()
-{
-  hal::UnlockScreenOrientation();
-
-  if (mEventListener) {
-    nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(GetOwner());
-    if (target) {
-      target->RemoveSystemEventListener(NS_LITERAL_STRING("mozfullscreenchange"),
-                                        mEventListener, true);
-    }
-
-    mEventListener = nullptr;
-  }
+  SetIsDOMBinding();
 }
 
 nsScreen::~nsScreen()
 {
-  Reset();
+  MOZ_ASSERT(!mEventListener);
   hal::UnregisterScreenConfigurationObserver(this);
 }
 
 
-DOMCI_DATA(Screen, nsScreen)
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsScreen)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsScreen,
-                                                  nsDOMEventTargetHelper)
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(mozorientationchange)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsScreen,
-                                                nsDOMEventTargetHelper)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(mozorientationchange)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
 // QueryInterface implementation for nsScreen
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsScreen)
+NS_INTERFACE_MAP_BEGIN(nsScreen)
   NS_INTERFACE_MAP_ENTRY(nsIDOMScreen)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMScreen)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Screen)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(nsScreen, nsDOMEventTargetHelper)
@@ -112,120 +82,42 @@ NS_IMPL_RELEASE_INHERITED(nsScreen, nsDOMEventTargetHelper)
 
 NS_IMPL_EVENT_HANDLER(nsScreen, mozorientationchange)
 
-NS_IMETHODIMP
-nsScreen::GetTop(int32_t* aTop)
-{
-  nsRect rect;
-  nsresult rv = GetRect(rect);
-
-  *aTop = rect.y;
-
-  return rv;
-}
-
-
-NS_IMETHODIMP
-nsScreen::GetLeft(int32_t* aLeft)
-{
-  nsRect rect;
-  nsresult rv = GetRect(rect);
-
-  *aLeft = rect.x;
-
-  return rv;
-}
-
-
-NS_IMETHODIMP
-nsScreen::GetWidth(int32_t* aWidth)
-{
-  nsRect rect;
-  nsresult rv = GetRect(rect);
-
-  *aWidth = rect.width;
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsScreen::GetHeight(int32_t* aHeight)
-{
-  nsRect rect;
-  nsresult rv = GetRect(rect);
-
-  *aHeight = rect.height;
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsScreen::GetPixelDepth(int32_t* aPixelDepth)
+int32_t
+nsScreen::GetPixelDepth(ErrorResult& aRv)
 {
   nsDeviceContext* context = GetDeviceContext();
 
   if (!context) {
-    *aPixelDepth = -1;
-
-    return NS_ERROR_FAILURE;
+    aRv.Throw(NS_ERROR_FAILURE);
+    return -1;
   }
 
   uint32_t depth;
   context->GetDepth(depth);
-
-  *aPixelDepth = depth;
-
-  return NS_OK;
+  return depth;
 }
 
-NS_IMETHODIMP
-nsScreen::GetColorDepth(int32_t* aColorDepth)
-{
-  return GetPixelDepth(aColorDepth);
-}
+#define FORWARD_LONG_GETTER(_name)                                              \
+  NS_IMETHODIMP                                                                 \
+  nsScreen::Get ## _name(int32_t* aOut)                                         \
+  {                                                                             \
+    ErrorResult rv;                                                             \
+    *aOut = Get ## _name(rv);                                                   \
+    return rv.ErrorCode();                                                      \
+  }
 
-NS_IMETHODIMP
-nsScreen::GetAvailWidth(int32_t* aAvailWidth)
-{
-  nsRect rect;
-  nsresult rv = GetAvailRect(rect);
+FORWARD_LONG_GETTER(AvailWidth)
+FORWARD_LONG_GETTER(AvailHeight)
+FORWARD_LONG_GETTER(Width)
+FORWARD_LONG_GETTER(Height)
 
-  *aAvailWidth = rect.width;
+FORWARD_LONG_GETTER(Top)
+FORWARD_LONG_GETTER(Left)
+FORWARD_LONG_GETTER(AvailTop)
+FORWARD_LONG_GETTER(AvailLeft)
 
-  return rv;
-}
-
-NS_IMETHODIMP
-nsScreen::GetAvailHeight(int32_t* aAvailHeight)
-{
-  nsRect rect;
-  nsresult rv = GetAvailRect(rect);
-
-  *aAvailHeight = rect.height;
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsScreen::GetAvailLeft(int32_t* aAvailLeft)
-{
-  nsRect rect;
-  nsresult rv = GetAvailRect(rect);
-
-  *aAvailLeft = rect.x;
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsScreen::GetAvailTop(int32_t* aAvailTop)
-{
-  nsRect rect;
-  nsresult rv = GetAvailRect(rect);
-
-  *aAvailTop = rect.y;
-
-  return rv;
-}
+FORWARD_LONG_GETTER(PixelDepth)
+FORWARD_LONG_GETTER(ColorDepth)
 
 nsDeviceContext*
 nsScreen::GetDeviceContext()
@@ -277,145 +169,230 @@ nsScreen::Notify(const hal::ScreenConfiguration& aConfiguration)
   ScreenOrientation previousOrientation = mOrientation;
   mOrientation = aConfiguration.orientation();
 
-  NS_ASSERTION(mOrientation != eScreenOrientation_None &&
-               mOrientation != eScreenOrientation_EndGuard &&
-               mOrientation != eScreenOrientation_Portrait &&
-               mOrientation != eScreenOrientation_Landscape,
+  NS_ASSERTION(mOrientation == eScreenOrientation_PortraitPrimary ||
+               mOrientation == eScreenOrientation_PortraitSecondary ||
+               mOrientation == eScreenOrientation_LandscapePrimary ||
+               mOrientation == eScreenOrientation_LandscapeSecondary,
                "Invalid orientation value passed to notify method!");
 
   if (mOrientation != previousOrientation) {
-    // TODO: use an helper method, see bug 720768.
-    nsRefPtr<nsDOMEvent> event = new nsDOMEvent(nullptr, nullptr);
-    nsresult rv = event->InitEvent(NS_LITERAL_STRING("mozorientationchange"), false, false);
-    if (NS_FAILED(rv)) {
-      return;
-    }
-
-    rv = event->SetTrusted(true);
-    if (NS_FAILED(rv)) {
-      return;
-    }
-
-    bool dummy;
-    rv = DispatchEvent(event, &dummy);
-    if (NS_FAILED(rv)) {
-      return;
-    }
+    DispatchTrustedEvent(NS_LITERAL_STRING("mozorientationchange"));
   }
 }
 
-NS_IMETHODIMP
-nsScreen::GetMozOrientation(nsAString& aOrientation)
+void
+nsScreen::GetMozOrientation(nsString& aOrientation)
 {
   switch (mOrientation) {
-    case eScreenOrientation_None:
-    case eScreenOrientation_EndGuard:
-    case eScreenOrientation_Portrait:
-    case eScreenOrientation_Landscape:
-      NS_ASSERTION(false, "Shouldn't be used when getting value!");
-      return NS_ERROR_FAILURE;
-    case eScreenOrientation_PortraitPrimary:
-      aOrientation.AssignLiteral("portrait-primary");
-      break;
-    case eScreenOrientation_PortraitSecondary:
-      aOrientation.AssignLiteral("portrait-secondary");
-      break;
-    case eScreenOrientation_LandscapePrimary:
-      aOrientation.AssignLiteral("landscape-primary");
-      break;
-    case eScreenOrientation_LandscapeSecondary:
-      aOrientation.AssignLiteral("landscape-secondary");
-      break;
+  case eScreenOrientation_PortraitPrimary:
+    aOrientation.AssignLiteral("portrait-primary");
+    break;
+  case eScreenOrientation_PortraitSecondary:
+    aOrientation.AssignLiteral("portrait-secondary");
+    break;
+  case eScreenOrientation_LandscapePrimary:
+    aOrientation.AssignLiteral("landscape-primary");
+    break;
+  case eScreenOrientation_LandscapeSecondary:
+    aOrientation.AssignLiteral("landscape-secondary");
+    break;
+  case eScreenOrientation_None:
+  default:
+    MOZ_NOT_REACHED("Unacceptable mOrientation value");
   }
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP
-nsScreen::MozLockOrientation(const nsAString& aOrientation, bool* aReturn)
+nsScreen::GetSlowMozOrientation(nsAString& aOrientation)
 {
-  ScreenOrientation orientation;
-  *aReturn = false;
-
-  if (aOrientation.EqualsLiteral("portrait")) {
-    orientation = eScreenOrientation_Portrait;
-  } else if (aOrientation.EqualsLiteral("portrait-primary")) {
-    orientation = eScreenOrientation_PortraitPrimary;
-  } else if (aOrientation.EqualsLiteral("portrait-secondary")) {
-    orientation = eScreenOrientation_PortraitSecondary;
-  } else if (aOrientation.EqualsLiteral("landscape")) {
-    orientation = eScreenOrientation_Landscape;
-  } else if (aOrientation.EqualsLiteral("landscape-primary")) {
-    orientation = eScreenOrientation_LandscapePrimary;
-  } else if (aOrientation.EqualsLiteral("landscape-secondary")) {
-    orientation = eScreenOrientation_LandscapeSecondary;
-  } else {
-    return NS_OK;
-  }
-
-  // Determine whether we can lock the screen orientation.
-  bool canLockOrientation = false;
-  do {
-    nsCOMPtr<nsPIDOMWindow> owner = GetOwner();
-    if (!owner) {
-      break;
-    }
-
-    // Chrome can always lock the screen orientation.
-    if (IsChromeType(owner->GetDocShell())) {
-      canLockOrientation = true;
-      break;
-    }
-
-    nsCOMPtr<nsIDOMDocument> domDoc;
-    owner->GetDocument(getter_AddRefs(domDoc));
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
-    if (!doc) {
-      break;
-    }
-
-    // Apps can always lock the screen orientation.
-    if (doc->NodePrincipal()->GetAppStatus() >=
-          nsIPrincipal::APP_STATUS_INSTALLED) {
-      canLockOrientation = true;
-      break;
-    }
-
-    // Other content must be full-screen in order to lock orientation.
-    bool fullscreen;
-    domDoc->GetMozFullScreen(&fullscreen);
-    if (!fullscreen) {
-      break;
-    }
-
-    // If we're full-screen, register a listener so we learn when we leave
-    // full-screen.
-    nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(owner);
-    if (!target) {
-      break;
-    }
-
-    if (!mEventListener) {
-      mEventListener = new FullScreenEventListener();
-    }
-
-    target->AddSystemEventListener(NS_LITERAL_STRING("mozfullscreenchange"),
-                                   mEventListener, /* useCapture = */ true);
-    canLockOrientation = true;
-  } while(0);
-
-  if (canLockOrientation) {
-    *aReturn = hal::LockScreenOrientation(orientation);
-  }
-
+  nsString orientation;
+  GetMozOrientation(orientation);
+  aOrientation = orientation;
   return NS_OK;
 }
 
+nsScreen::LockPermission
+nsScreen::GetLockOrientationPermission() const
+{
+  nsCOMPtr<nsPIDOMWindow> owner = GetOwner();
+  if (!owner) {
+    return LOCK_DENIED;
+  }
+
+  // Chrome can always lock the screen orientation.
+  if (IsChromeType(owner->GetDocShell())) {
+    return LOCK_ALLOWED;
+  }
+
+  nsCOMPtr<nsIDocument> doc = owner->GetDoc();
+  if (!doc || doc->Hidden()) {
+    return LOCK_DENIED;
+  }
+
+  // Apps can always lock the screen orientation.
+  if (doc->NodePrincipal()->GetAppStatus() >=
+        nsIPrincipal::APP_STATUS_INSTALLED) {
+    return LOCK_ALLOWED;
+  }
+
+  // Other content must be full-screen in order to lock orientation.
+  return doc->MozFullScreen() ? FULLSCREEN_LOCK_ALLOWED : LOCK_DENIED;
+}
+
 NS_IMETHODIMP
+nsScreen::MozLockOrientation(const JS::Value& aOrientation, JSContext* aCx,
+                             bool* aReturn)
+{
+  if (aOrientation.isObject()) {
+    JS::Rooted<JSObject*> seq(aCx, &aOrientation.toObject());
+    if (IsArrayLike(aCx, seq)) {
+      uint32_t length;
+      // JS_GetArrayLength actually works on all objects
+      if (!JS_GetArrayLength(aCx, seq, &length)) {
+        return NS_ERROR_FAILURE;
+      }
+
+      Sequence<nsString> orientations;
+      if (!orientations.SetCapacity(length)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+
+      for (uint32_t i = 0; i < length; ++i) {
+        JS::Rooted<JS::Value> temp(aCx);
+        if (!JS_GetElement(aCx, seq, i, temp.address())) {
+          return NS_ERROR_FAILURE;
+        }
+
+        JS::RootedString jsString(aCx, JS_ValueToString(aCx, temp));
+        if (!jsString) {
+          return NS_ERROR_FAILURE;
+        }
+
+        nsDependentJSString str;
+        if (!str.init(aCx, jsString)) {
+          return NS_ERROR_FAILURE;
+        }
+
+        *orientations.AppendElement() = str;
+      }
+
+      ErrorResult rv;
+      *aReturn = MozLockOrientation(orientations, rv);
+      return rv.ErrorCode();
+    }
+  }
+
+  JS::RootedString jsString(aCx, JS_ValueToString(aCx, aOrientation));
+  if (!jsString) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsDependentJSString orientation;
+  if (!orientation.init(aCx, jsString)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  ErrorResult rv;
+  *aReturn = MozLockOrientation(orientation, rv);
+  return rv.ErrorCode();
+}
+
+bool
+nsScreen::MozLockOrientation(const nsAString& aOrientation, ErrorResult& aRv)
+{
+  nsString orientation(aOrientation);
+  Sequence<nsString> orientations;
+  if (!orientations.AppendElement(orientation)) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return false;
+  }
+  return MozLockOrientation(orientations, aRv);
+}
+
+bool
+nsScreen::MozLockOrientation(const Sequence<nsString>& aOrientations,
+                             ErrorResult& aRv)
+{
+  ScreenOrientation orientation = eScreenOrientation_None;
+
+  for (uint32_t i = 0; i < aOrientations.Length(); ++i) {
+    const nsString& item = aOrientations[i];
+
+    if (item.EqualsLiteral("portrait")) {
+      orientation |= eScreenOrientation_PortraitPrimary |
+                     eScreenOrientation_PortraitSecondary;
+    } else if (item.EqualsLiteral("portrait-primary")) {
+      orientation |= eScreenOrientation_PortraitPrimary;
+    } else if (item.EqualsLiteral("portrait-secondary")) {
+      orientation |= eScreenOrientation_PortraitSecondary;
+    } else if (item.EqualsLiteral("landscape")) {
+      orientation |= eScreenOrientation_LandscapePrimary |
+                     eScreenOrientation_LandscapeSecondary;
+    } else if (item.EqualsLiteral("landscape-primary")) {
+      orientation |= eScreenOrientation_LandscapePrimary;
+    } else if (item.EqualsLiteral("landscape-secondary")) {
+      orientation |= eScreenOrientation_LandscapeSecondary;
+    } else {
+      // If we don't recognize the token, we should just return 'false'
+      // without throwing.
+      return false;
+    }
+  }
+
+  switch (GetLockOrientationPermission()) {
+    case LOCK_DENIED:
+      return false;
+    case LOCK_ALLOWED:
+      return hal::LockScreenOrientation(orientation);
+    case FULLSCREEN_LOCK_ALLOWED: {
+      // We need to register a listener so we learn when we leave full-screen
+      // and when we will have to unlock the screen.
+      // This needs to be done before LockScreenOrientation call to make sure
+      // the locking can be unlocked.
+      nsCOMPtr<EventTarget> target = do_QueryInterface(GetOwner()->GetDoc());
+      if (!target) {
+        return false;
+      }
+
+      if (!hal::LockScreenOrientation(orientation)) {
+        return false;
+      }
+
+      // We are fullscreen and lock has been accepted.
+      if (!mEventListener) {
+        mEventListener = new FullScreenEventListener();
+      }
+
+      aRv = target->AddSystemEventListener(NS_LITERAL_STRING("mozfullscreenchange"),
+                                           mEventListener, /* useCapture = */ true);
+      return true;
+    }
+  }
+
+  // This is only for compilers that don't understand that the previous switch
+  // will always return.
+  MOZ_NOT_REACHED("unexpected lock orientation permission value");
+  return false;
+}
+
+void
 nsScreen::MozUnlockOrientation()
 {
   hal::UnlockScreenOrientation();
+}
+
+NS_IMETHODIMP
+nsScreen::SlowMozUnlockOrientation()
+{
+  MozUnlockOrientation();
   return NS_OK;
+}
+
+/* virtual */
+JSObject*
+nsScreen::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return ScreenBinding::Wrap(aCx, aScope, this);
 }
 
 NS_IMPL_ISUPPORTS1(nsScreen::FullScreenEventListener, nsIDOMEventListener)
@@ -430,25 +407,17 @@ nsScreen::FullScreenEventListener::HandleEvent(nsIDOMEvent* aEvent)
   MOZ_ASSERT(eventType.EqualsLiteral("mozfullscreenchange"));
 #endif
 
-  nsCOMPtr<nsIDOMEventTarget> target;
-  aEvent->GetCurrentTarget(getter_AddRefs(target));
+  nsCOMPtr<EventTarget> target = aEvent->InternalDOMEvent()->GetCurrentTarget();
+  MOZ_ASSERT(target);
+
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(target);
+  MOZ_ASSERT(doc);
 
   // We have to make sure that the event we got is the event sent when
   // fullscreen is disabled because we could get one when fullscreen
   // got enabled if the lock call is done at the same moment.
-  nsCOMPtr<nsIDOMWindow> window = do_QueryInterface(target);
-  MOZ_ASSERT(window);
-
-  nsCOMPtr<nsIDOMDocument> doc;
-  window->GetDocument(getter_AddRefs(doc));
-  // If we have no doc, we will just continue, remove the event and unlock.
-  // This is an edge case were orientation lock and fullscreen is meaningless.
-  if (doc) {
-    bool fullscreen;
-    doc->GetMozFullScreen(&fullscreen);
-    if (fullscreen) {
-      return NS_OK;
-    }
+  if (doc->MozFullScreen()) {
+    return NS_OK;
   }
 
   target->RemoveSystemEventListener(NS_LITERAL_STRING("mozfullscreenchange"),

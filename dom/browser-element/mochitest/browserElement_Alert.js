@@ -5,17 +5,16 @@
 "use strict";
 
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
 
 var numPendingChildTests = 0;
 var iframe;
 var mm;
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
-
   iframe = document.createElement('iframe');
-  iframe.mozbrowser = true;
+  SpecialPowers.wrap(iframe).mozbrowser = true;
   document.body.appendChild(iframe);
 
   mm = SpecialPowers.getBrowserFrameMessageManager(iframe);
@@ -159,5 +158,4 @@ function waitForPendingTests(next) {
   next();
 }
 
-runTest();
-
+addEventListener('testready', runTest);

@@ -17,6 +17,7 @@
 #include "nsCOMArray.h"
 
 class nsDiskCacheMap;
+class nsIMemoryReporter;
 
 
 class nsDiskCacheDevice : public nsCacheDevice {
@@ -53,6 +54,8 @@ public:
     virtual nsresult        EvictEntries(const char * clientID);
 
     bool                    EntryIsTooBig(int64_t entrySize);
+
+    size_t                 SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
 
     /**
      * Preference accessors
@@ -108,6 +111,8 @@ private:
     nsDiskCacheMap          mCacheMap;
     bool                    mInitialized;
     bool                    mClearingDiskCache;
+
+    nsCOMPtr<nsIMemoryReporter> mReporter;
 };
 
 #endif // _nsDiskCacheDevice_h_

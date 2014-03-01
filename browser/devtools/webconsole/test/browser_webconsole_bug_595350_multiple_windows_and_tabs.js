@@ -19,6 +19,8 @@ let openTabs = [];
 let loadedTabCount = 0;
 
 function test() {
+  requestLongerTimeout(3);
+
   // Add two tabs in the main window.
   addTabs(win1);
 
@@ -43,6 +45,7 @@ function addTabs(aWindow) {
       tab.linkedBrowser.removeEventListener(aEvent.type, onLoad, true);
 
       loadedTabCount++;
+      info("tabs loaded: " + loadedTabCount);
       if (loadedTabCount >= 4) {
         executeSoon(openConsoles);
       }
@@ -57,21 +60,15 @@ function openConsoles() {
     let tab = openTabs[i];
     openConsole(tab, function(index, hud) {
       ok(hud, "HUD is open for tab " + index);
-      let window = hud.tab.linkedBrowser.contentWindow;
+      let window = hud.target.tab.linkedBrowser.contentWindow;
       window.console.log("message for tab " + index);
       consolesOpen++;
+      if (consolesOpen == 4) {
+        // Use executeSoon() to allow the promise to resolve.
+        executeSoon(closeConsoles);
+      }
     }.bind(null, i));
   }
-
-  waitForSuccess({
-    name: "4 web consoles opened",
-    validatorFn: function()
-    {
-      return consolesOpen == 4;
-    },
-    successFn: closeConsoles,
-    failureFn: closeConsoles,
-  });
 }
 
 function closeConsoles() {
@@ -80,10 +77,19 @@ function closeConsoles() {
   function onWebConsoleClose(aSubject, aTopic) {
     if (aTopic == "web-console-destroyed") {
       consolesClosed++;
+      info("consoles destroyed: " + consolesClosed);
+      if (consolesClosed == 4) {
+        // Use executeSoon() to allow all the observers to execute.
+        executeSoon(finishTest);
+      }
     }
   }
 
   Services.obs.addObserver(onWebConsoleClose, "web-console-destroyed", false);
+
+  registerCleanupFunction(() => {
+    Services.obs.removeObserver(onWebConsoleClose, "web-console-destroyed");
+  });
 
   win2.close();
 
@@ -91,20 +97,5 @@ function closeConsoles() {
   win1.gBrowser.removeTab(openTabs[1]);
 
   openTabs = win1 = win2 = null;
-
-  function onTimeout() {
-    Services.obs.removeObserver(onWebConsoleClose, "web-console-destroyed");
-    executeSoon(finishTest);
-  }
-
-  waitForSuccess({
-    name: "4 web consoles closed",
-    validatorFn: function()
-    {
-      return consolesClosed == 4;
-    },
-    successFn: onTimeout,
-    failureFn: onTimeout,
-  });
 }
 
