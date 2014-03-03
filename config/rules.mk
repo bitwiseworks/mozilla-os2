@@ -623,8 +623,10 @@ endif
 include $(topsrcdir)/config/makefiles/target_export.mk
 include $(topsrcdir)/config/makefiles/target_tools.mk
 
+ifneq ($(OS_ARCH),OS2)
 ifneq (,$(filter-out %.$(LIB_SUFFIX),$(SHARED_LIBRARY_LIBS)))
-$(error SHARED_LIBRARY_LIBS must contain .$(LIB_SUFFIX) files only)
+$(error SHARED_LIBRARY_LIBS ($(SHARED_LIBRARY_LIBS)) must contain .$(LIB_SUFFIX) files only)
+endif
 endif
 
 HOST_LIBS_DEPS = $(filter %.$(LIB_SUFFIX),$(HOST_LIBS))
