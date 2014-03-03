@@ -163,7 +163,11 @@ ifneq (,$(MOZ_DEBUG)$(MOZ_DEBUG_SYMBOLS))
       endif
     endif
   else
-    _DEBUG_ASFLAGS += $(MOZ_DEBUG_FLAGS)
+    ifeq ($(OS_ARCH),OS2)
+      _DEBUG_ASFLAGS += -g
+    else
+      _DEBUG_ASFLAGS += $(MOZ_DEBUG_FLAGS)
+    endif
   endif
   _DEBUG_CFLAGS += $(MOZ_DEBUG_FLAGS)
   _DEBUG_LDFLAGS += $(MOZ_DEBUG_LDFLAGS)
