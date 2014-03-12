@@ -69,6 +69,7 @@ else:
 
 
 REQUIRED_MODULES = ['os', 'posix', 'posixpath', 'nt', 'ntpath', 'genericpath',
+                    'os2emxpath', 'os2knixpath',
                     'fnmatch', 'locale', 'encodings', 'codecs',
                     'stat', 'UserDict', 'readline', 'copy_reg', 'types',
                     're', 'sre', 'sre_parse', 'sre_constants', 'sre_compile',
