@@ -152,3 +152,12 @@ ifdef LIBRARY_NAME
     IMPORT_LIBRARY = $(OBJDIR)/$(LIBRARY_NAME)$(LIBRARY_VERSION)$(JDK_DEBUG_SUFFIX).lib
 endif
 
+
+GENERATE_SYMFILE = \
+	if test -f $(basename $(1)).map ; then \
+		mapxqs $(basename $(1)).map -o $(basename $(1)).xqs ; \
+	fi
+PROCESS_SYMFILE = \
+	if test -f $(basename $(1)).xqs ; then \
+		$(2) $(basename $(1)).xqs $(3) ; \
+	fi

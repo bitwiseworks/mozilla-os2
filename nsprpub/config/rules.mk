@@ -121,6 +121,17 @@ TARGETS		= $(LIBRARY) $(SHARED_LIBRARY)
 endif
 endif
 
+ifeq ($(OS_ARCH),OS2)
+GENERATE_SYMFILE = \
+	if test -f $(basename $(1)).map ; then \
+		mapxqs $(basename $(1)).map -o $(basename $(1)).xqs ; \
+	fi
+PROCESS_SYMFILE = \
+	if test -f $(basename $(1)).xqs ; then \
+		$(2) $(basename $(1)).xqs $(3) ; \
+	fi
+endif
+
 #
 # OBJS is the list of object files.  It can be constructed by
 # specifying CSRCS (list of C source files) and ASFILES (list
@@ -178,12 +189,14 @@ distclean::
 install:: $(RELEASE_BINS) $(RELEASE_HEADERS) $(RELEASE_LIBS)
 ifdef RELEASE_BINS
 	$(NSINSTALL) -t -m 0755 $(RELEASE_BINS) $(DESTDIR)$(bindir)
+	$(call PROCESS_SYMFILE,$(RELEASE_BINS),$(NSINSTALL) -t -m 0755,$(DESTDIR)$(bindir))
 endif
 ifdef RELEASE_HEADERS
 	$(NSINSTALL) -t -m 0644 $(RELEASE_HEADERS) $(DESTDIR)$(includedir)/$(include_subdir)
 endif
 ifdef RELEASE_LIBS
 	$(NSINSTALL) -t -m 0755 $(RELEASE_LIBS) $(DESTDIR)$(libdir)/$(lib_subdir)
+	$(call PROCESS_SYMFILE,$(RELEASE_LIBS),$(NSINSTALL) -t -m 0755,$(lib_subdir))
 endif
 	+$(LOOP_OVER_DIRS)
 
@@ -203,6 +216,7 @@ ifdef RELEASE_BINS
 		true; \
 	fi
 	cp $(RELEASE_BINS) $(RELEASE_BIN_DIR)
+	$(call PROCESS_SYMFILE,$(RELEASE_BINS),cp,$(RELEASE_BIN_DIR))
 endif
 ifdef RELEASE_LIBS
 	@echo "Copying libraries to release directory"
@@ -219,6 +233,7 @@ ifdef RELEASE_LIBS
 		true; \
 	fi
 	cp $(RELEASE_LIBS) $(RELEASE_LIBS_DEST)
+	$(call PROCESS_SYMFILE,$(RELEASE_LIBS),cp,$(RELEASE_LIBS_DEST))
 endif
 ifdef RELEASE_HEADERS
 	@echo "Copying header files to release directory"
@@ -271,6 +286,7 @@ endif	# MOZ_PROFILE_GENERATE
 else	# WINNT && !GCC
 	$(CC) -o $@ $(CFLAGS) $(OBJS) $(LDFLAGS) $(WRAP_LDFLAGS)
 endif	# WINNT && !GCC
+	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif
@@ -325,6 +341,7 @@ else	# WINNT && !GCC
 	$(MKSHLIB) $(OBJS) $(RES) $(LDFLAGS) $(WRAP_LDFLAGS) $(EXTRA_LIBS)
 endif	# WINNT && !GCC
 endif	# AIX 4.1
+	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif

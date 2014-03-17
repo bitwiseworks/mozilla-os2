@@ -253,6 +253,17 @@ endif # !GNU_CC
 
 endif # WINNT
 
+ifeq ($(OS_ARCH),OS2)
+GENERATE_SYMFILE = \
+	if test -f $(basename $(1)).map ; then \
+		mapxqs $(basename $(1)).map -o $(basename $(1)).xqs ; \
+	fi
+PROCESS_SYMFILE = \
+	if test -f $(basename $(1)).xqs ; then \
+		$(2) $(basename $(1)).xqs $(3) ; \
+	fi
+endif
+
 ifeq ($(SOLARIS_SUNPRO_CXX),1)
 ifeq (86,$(findstring 86,$(OS_TEST)))
 OS_LDFLAGS += -M $(topsrcdir)/config/solaris_ia32.map
@@ -307,7 +318,7 @@ ALL_TRASH = \
 	$(OBJS:.$(OBJ_SUFFIX)=.i) $(OBJS:.$(OBJ_SUFFIX)=.i_o) \
 	$(HOST_PROGOBJS) $(HOST_OBJS) $(IMPORT_LIBRARY) $(DEF_FILE)\
 	$(EXE_DEF_FILE) so_locations _gen _stubs $(wildcard *.res) $(wildcard *.RES) \
-	$(wildcard *.pdb) $(CODFILE) $(MAPFILE) $(IMPORT_LIBRARY) \
+	$(wildcard *.pdb) $(wildcard *.cod) $(wildcard *.map) $(IMPORT_LIBRARY) \
 	$(SHARED_LIBRARY:$(DLL_SUFFIX)=.exp) $(wildcard *.ilk) \
 	$(PROGRAM:$(BIN_SUFFIX)=.exp) $(SIMPLE_PROGRAMS:$(BIN_SUFFIX)=.exp) \
 	$(PROGRAM:$(BIN_SUFFIX)=.lib) $(SIMPLE_PROGRAMS:$(BIN_SUFFIX)=.lib) \
@@ -315,6 +326,13 @@ ALL_TRASH = \
 	$(wildcard gts_tmp_*) $(LIBRARY:%.a=.%.timestamp)
 ALL_TRASH_DIRS = \
 	$(GARBAGE_DIRS) /no-such-file
+
+ifeq ($(OS_ARCH),OS2)
+ALL_TRASH += \
+	$(foreach f, \
+		$(PROGRAM) $(SIMPLE_PROGRAMS) $(SHARED_LIBRARY) $(HOST_PROGRAM) $(HOST_SIMPLE_PROGRAMS), \
+		$(basename $f).map $(basename $f).xqs)
+endif
 
 ifdef QTDIR
 GARBAGE                 += $(MOCSRCS)
@@ -712,9 +730,6 @@ distclean:: $(SUBMAKEFILES)
 	$(wildcard *.$(OBJ_SUFFIX)) $(wildcard *.ho) $(wildcard host_*.o*) \
 	$(wildcard *.$(LIB_SUFFIX)) $(wildcard *$(DLL_SUFFIX)) \
 	$(wildcard *.$(IMPORT_LIB_SUFFIX))
-ifeq ($(OS_ARCH),OS2)
-	-$(RM) $(PROGRAM:.exe=.map)
-endif
 
 alltags:
 	$(RM) TAGS
@@ -752,6 +767,7 @@ else # !WINNT || GNU_CC
 	@$(call CHECK_STDCXX,$@)
 endif # WINNT && !GNU_CC
 
+	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif
@@ -806,6 +822,7 @@ else
 	@$(call CHECK_STDCXX,$@)
 endif # WINNT && !GNU_CC
 
+	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif
@@ -912,6 +929,7 @@ endif
 endif	# WINNT && !GCC
 	@$(RM) foodummyfilefoo $(DELETE_AFTER_LINK)
 	chmod +x $@
+	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif
