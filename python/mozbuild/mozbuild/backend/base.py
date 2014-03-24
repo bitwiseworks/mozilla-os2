@@ -190,7 +190,8 @@ class BuildBackend(LoggingMixin):
         age_file = os.path.join(self.environment.topobjdir,
             'backend.%s.built' % self.__class__.__name__)
         with open(age_file, 'a'):
-            os.utime(age_file, None)
+            pass # can't utime an open file on OS/2, let it get closed first
+        os.utime(age_file, None)
 
         finished_start = time.time()
         self.consume_finished()
