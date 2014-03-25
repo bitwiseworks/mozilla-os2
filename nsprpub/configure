@@ -5458,8 +5458,8 @@ EOF
     CXXFLAGS="$CFLAGS -Wall -Zomf"
     MKSHLIB='$(CC) $(DSO_LDOPTS) -o $@'
     DSO_CFLAGS=
-    DSO_LDOPTS='-Zomf -Zdll'
-    LDFLAGS='-Zmap'
+    DSO_LDOPTS='-Zdll'
+    LDFLAGS="$LDFLAGS -Zomf -Zmap"
     _OPTIMIZE_FLAGS="-O2 -s"
     _DEBUG_FLAGS="-g -fno-inline"
     if test -n "$MOZ_OPTIMIZE"; then
