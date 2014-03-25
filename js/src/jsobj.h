@@ -65,20 +65,6 @@ CastAsObjectJsval(StrictPropertyOp op)
     return ObjectOrNullValue(CastAsObject(op));
 }
 
-/*
- * JSPropertySpec uses JSAPI JSPropertyOp and JSStrictPropertyOp in function
- * signatures, but with JSPROP_NATIVE_ACCESSORS the actual values must be
- * JSNatives. To avoid widespread casting, have JS_PSG and JS_PSGS perform
- * type-safe casts.
- */
-#define JS_PSG(name,getter,flags)                                               \
-    {name, 0, (flags) | JSPROP_SHARED | JSPROP_NATIVE_ACCESSORS,                \
-     JSOP_WRAPPER((JSPropertyOp)getter), JSOP_NULLWRAPPER}
-#define JS_PSGS(name,getter,setter,flags)                                       \
-    {name, 0, (flags) | JSPROP_SHARED | JSPROP_NATIVE_ACCESSORS,                \
-     JSOP_WRAPPER((JSPropertyOp)getter), JSOP_WRAPPER((JSStrictPropertyOp)setter)}
-#define JS_PS_END {0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER}
-
 /******************************************************************************/
 
 typedef Vector<PropDesc, 1> PropDescArray;
@@ -193,10 +179,6 @@ extern JSBool
 DeleteGeneric(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue rval, JSBool strict);
 
 } /* namespace js::baseops */
-
-/* ES5 8.12.8. */
-extern JSBool
-DefaultValue(JSContext *cx, HandleObject obj, JSType hint, MutableHandleValue vp);
 
 extern Class ArrayClass;
 extern Class ArrayBufferClass;

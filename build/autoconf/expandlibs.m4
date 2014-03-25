@@ -20,7 +20,8 @@ AC_CACHE_CHECK(what kind of list files are supported by the linker,
              EXPAND_LIBS_LIST_STYLE=linkerscript
          else
              echo "conftest.${OBJ_SUFFIX}" > conftest.list
-             if AC_TRY_COMMAND(${CC-cc} -o conftest${ac_exeext} $LDFLAGS @conftest.list $LIBS 1>&5) && test -s conftest${ac_exeext}; then
+             if (AC_TRY_COMMAND(${CC-cc} -o conftest${ac_exeext} $LDFLAGS @conftest.list $LIBS 1>&2) ||
+                 AC_TRY_COMMAND(${CC-cc} -o conftest${ac_exeext} $CFLAGS $LDFLAGS @conftest.list $LIBS 1>&2)) && test -s conftest${ac_exeext}; then
                  EXPAND_LIBS_LIST_STYLE=list
              else
                  EXPAND_LIBS_LIST_STYLE=none

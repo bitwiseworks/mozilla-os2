@@ -203,7 +203,7 @@ Section "MaintenanceService"
   ; These keys are used to bypass the installation dir is a valid installation
   ; check from the service so that tests can be run.
   ; WriteRegStr HKLM "${FallbackKey}\0" "name" "Mozilla Corporation"
-  ; WriteRegStr HKLM "${FallbackKey}\0" "issuer" "Thawte Code Signing CA - G2"
+  ; WriteRegStr HKLM "${FallbackKey}\0" "issuer" "DigiCert Assured ID Code Signing CA-1"
   ${If} ${RunningX64}
     SetRegView lastused
   ${EndIf}
@@ -241,6 +241,11 @@ Section "Uninstall"
   Call un.RenameDelete
   Push "$INSTDIR\Uninstall.exe"
   Call un.RenameDelete
+  Push "$INSTDIR\update\updater.ini"
+  Call un.RenameDelete
+  Push "$INSTDIR\update\updater.exe"
+  Call un.RenameDelete
+  RMDir /REBOOTOK "$INSTDIR\update"
   RMDir /REBOOTOK "$INSTDIR"
 
   DeleteRegKey HKLM "${MaintUninstallKey}"

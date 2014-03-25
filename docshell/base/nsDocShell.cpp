@@ -4536,8 +4536,10 @@ nsDocShell::Stop(uint32_t aStopFlags)
 
     if (nsIWebNavigation::STOP_CONTENT & aStopFlags) {
         // Stop the document loading
-        if (mContentViewer)
-            mContentViewer->Stop();
+        if (mContentViewer) {
+            nsCOMPtr<nsIContentViewer> cv = mContentViewer;
+            cv->Stop();
+        }
     }
 
     if (nsIWebNavigation::STOP_NETWORK & aStopFlags) {
@@ -5195,13 +5197,15 @@ nsDocShell::GetSandboxFlags(uint32_t  *aSandboxFlags)
 NS_IMETHODIMP
 nsDocShell::SetVisibility(bool aVisibility)
 {
-    if (!mContentViewer)
+    // Show()/Hide() may change mContentViewer.
+    nsCOMPtr<nsIContentViewer> cv = mContentViewer;
+    if (!cv)
         return NS_OK;
     if (aVisibility) {
-        mContentViewer->Show();
+        cv->Show();
     }
     else {
-        mContentViewer->Hide();
+        cv->Hide();
     }
     
     return NS_OK;
@@ -10313,6 +10317,7 @@ nsDocShell::AddToSessionHistory(nsIURI * aURI, nsIChannel * aChannel,
                 shContainer->GetChildAt(i, getter_AddRefs(child));
                 shContainer->RemoveChild(child);
             }  // for
+            entry->AbandonBFCacheEntry();
         }  // shContainer
     }
 

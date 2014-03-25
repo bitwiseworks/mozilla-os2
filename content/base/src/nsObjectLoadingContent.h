@@ -133,6 +133,17 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     void NotifyOwnerDocumentActivityChanged();
 
     /**
+     * Returns the base URI of the object as seen by plugins. This differs from
+     * the normal codebase in that it takes <param> tags and plugin-specific
+     * quirks into account.
+     *
+     * XXX(johns): This is moving to the nsIObjectLoadingContent interface in
+     *             the future, but was landed here to avoid changing the IDL IID
+     *             on branches.
+     */
+    nsresult GetBaseURI(nsIURI **aResult);
+
+    /**
      * Used by pluginHost to know if we're loading with a channel, so it
      * will not open its own.
      */
@@ -284,10 +295,19 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      * 
      * NOTE This function does not perform security checks, only determining the
      *      requested type and parameters of the object.
-     * 
+     *
+     * @param aJavaURI Specify that the URI will be consumed by java, which
+     *                 changes codebase parsing and URI construction. Used
+     *                 internally.
+     *
      * @return Returns a bitmask of ParameterUpdateFlags values
      */
-    ParameterUpdateFlags UpdateObjectParameters();
+    ParameterUpdateFlags UpdateObjectParameters(bool aJavaURI = false);
+
+    /**
+     * Queue a InDocCheckEvent
+     */
+    void QueueInDocCheckEvent();
 
     void NotifyContentObjectWrapper();
 

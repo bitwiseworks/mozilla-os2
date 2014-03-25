@@ -324,6 +324,7 @@ ifeq ($(OS_ARCH)_$(1), SunOS_$(SOFTOKEN3_LIB))
 	$$(NSINSTALL) -t -m 755 $$(DIST)/lib/$(1) $$(DIST)/bin
 else
 	$$(INSTALL) -m 755 $$(DIST)/lib/$(1) $$(DIST)/bin
+	$$(call PROCESS_SYMFILE,$$(DIST)/lib/$(1),$$(INSTALL) -m 755,$$(DIST)/bin)
 endif
 
 install::
