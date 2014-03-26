@@ -322,6 +322,7 @@ main(int argc, char **argv)
 
 	    if (ftruncate(tofd, sb.st_size) < 0)
 		fail("cannot truncate %s", toname);
+#if !defined(__OS2__)
 	    if (dotimes) {
 		utb.actime = sb.st_atime;
 		utb.modtime = sb.st_mtime;
@@ -334,6 +335,7 @@ main(int argc, char **argv)
 	    if (chmod(toname, mode) < 0)
 #endif
 		fail("cannot change mode of %s", toname);
+#endif
 	    if ((owner || group) && fchown(tofd, uid, gid) < 0)
 		fail("cannot change owner of %s", toname);
 
@@ -341,6 +343,16 @@ main(int argc, char **argv)
 	    if (close(tofd) < 0)
 		fail("cannot write to %s", toname);
 	    close(fromfd);
+#if defined(__OS2__)
+	    if (chmod(toname, (mode & (S_IREAD | S_IWRITE))) < 0)
+		fail("cannot change mode of %s", toname);
+	    if (dotimes) {
+		utb.actime = sb.st_atime;
+		utb.modtime = sb.st_mtime;
+		if (utime(toname, &utb) < 0)
+		    fail("cannot set times of %s", toname);
+	    }
+#endif
 	}
 
 	free(toname);

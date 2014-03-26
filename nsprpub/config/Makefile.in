@@ -26,14 +26,9 @@ RELEASE_BINS	= nspr-config
 
 include $(topsrcdir)/config/config.mk
 
-CSRCS	= now.c
+CSRCS	= now.c nsinstall.c
 
-# This version hasn't been ported for us; the one in mozilla/config has
-ifneq ($(OS_ARCH),OS2)
-CSRCS  += nsinstall.c
- 
 PLSRCS	= nfspwd.pl
-endif
 
 ifeq (,$(CROSS_COMPILE)$(filter-out WINNT OS2,$(OS_ARCH)))
 PROG_SUFFIX = .exe
@@ -78,14 +73,17 @@ include $(topsrcdir)/config/rules.mk
 
 PROGS	= $(OBJDIR)/now$(PROG_SUFFIX)
 
-ifeq (,$(CROSS_COMPILE)$(filter-out OS2 WINNT,$(OS_ARCH)))
+ifeq (,$(CROSS_COMPILE)$(filter-out WINNT,$(OS_ARCH)))
 TARGETS = $(PROGS)
 else
 ifeq (,$(filter-out SYMBIAN WINCE,$(OS_ARCH)))
 TARGETS = $(PROGS)
 else
 PROGS	+= $(OBJDIR)/nsinstall$(PROG_SUFFIX)
-TARGETS = $(PROGS) $(PLSRCS:.pl=)
+TARGETS = $(PROGS)
+ifneq ($(OS_ARCH),OS2)
+TARGETS += $(PLSRCS:.pl=)
+endif
 endif
 endif
 

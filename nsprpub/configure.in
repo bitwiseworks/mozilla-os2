@@ -2488,7 +2488,6 @@ tools are selected during the Xcode/Developer Tools installation.])
     RC=rc.exe
     PR_MD_ARCH_DIR=os2
     PROG_SUFFIX=.exe
-    NSINSTALL=nsinstall
     MDCPUCFG_H=_os2.cfg
     RESOLVE_LINK_SYMBOLS=1
 
