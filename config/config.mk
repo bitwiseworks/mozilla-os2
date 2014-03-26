@@ -646,15 +646,11 @@ NSINSTALL_NATIVECMD := %nsinstall nsinstall
 ifdef NSINSTALL_BIN
 NSINSTALL = $(NSINSTALL_BIN)
 else
-ifeq (OS2,$(CROSS_COMPILE)$(OS_ARCH))
-NSINSTALL = $(MOZ_TOOLS_DIR)/nsinstall
-else
 ifeq ($(HOST_OS_ARCH),WINNT)
 NSINSTALL = $(NSINSTALL_PY)
 else
 NSINSTALL = $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX)
 endif # WINNT
-endif # OS2
 endif # NSINSTALL_BIN
 
 

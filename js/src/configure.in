@@ -1878,11 +1878,6 @@ ia64*-hpux*)
     RCFLAGS='-n'
     MOZ_USER_DIR="Mozilla"
 
-    if test "$MOZTOOLS"; then
-        MOZ_TOOLS_DIR=`echo $MOZTOOLS | sed -e 's|\\\\|/|g'`
-    else
-        AC_MSG_ERROR([MOZTOOLS is not set])
-    fi
     if test -n "$MOZ_OS2_HIGH_MEMORY"; then
         DSO_LDOPTS="$DSO_LDOPTS -Zhigh-mem"
         LDFLAGS="$LDFLAGS -Zhigh-mem"
