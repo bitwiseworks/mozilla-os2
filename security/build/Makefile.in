@@ -274,9 +274,11 @@ DEFAULT_GMAKE_FLAGS += MODULE_INCLUDES='$$(addprefix -I$$(SOURCE_XP_DIR)/include
 # Work around NSS's MAKE_OBJDIR being racy. See bug #836220
 DEFAULT_GMAKE_FLAGS += MAKE_OBJDIR='$$(INSTALL) -D $$(OBJDIR)'
 
+ifneq ($(OS_ARCH),OS2)
 # Work around NSS adding IMPORT_LIBRARY to TARGETS with no rule for
 # it, creating race conditions. See bug #836220
 DEFAULT_GMAKE_FLAGS += TARGETS='$$(LIBRARY) $$(SHARED_LIBRARY) $$(PROGRAM)'
+endif
 
 ifdef MOZ_B2G_CERTDATA
 include $(srcdir)/b2g-certdata.mk
