@@ -21,6 +21,9 @@ ID
 /.clang_complete
 /mach.ini
 
+# NSPR configury
+/nsprpub/configure
+
 # Empty marker file that's generated when we check out NSS
 security/manager/.nss.checkout
 
