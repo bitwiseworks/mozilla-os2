@@ -1029,6 +1029,9 @@ JSRuntime::setOwnerThread()
 #ifdef XP_MACOSX
     asmJSMachExceptionHandler.setCurrentThread();
 #endif
+#ifdef XP_OS2
+    asmJSOS2ExceptionHandler.setCurrentThread();
+#endif
 }
 
 void
@@ -1047,6 +1050,9 @@ JSRuntime::clearOwnerThread()
 #endif
 #ifdef XP_MACOSX
     asmJSMachExceptionHandler.clearCurrentThread();
+#endif
+#ifdef XP_OS2
+    asmJSOS2ExceptionHandler.clearCurrentThread();
 #endif
 }
 

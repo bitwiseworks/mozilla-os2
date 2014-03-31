@@ -1264,6 +1264,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     js::AsmJSMachExceptionHandler asmJSMachExceptionHandler;
 #endif
 
+#ifdef XP_OS2
+    js::AsmJSOS2ExceptionHandler asmJSOS2ExceptionHandler;
+#endif
+
 #ifdef JS_THREADSAFE
 # ifdef JS_ION
     js::WorkerThreadState *workerThreadState;

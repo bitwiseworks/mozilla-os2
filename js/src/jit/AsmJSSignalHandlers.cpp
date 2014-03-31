@@ -36,6 +36,17 @@ using namespace mozilla;
 # define R13_sig(p) ((p)->R13)
 # define R14_sig(p) ((p)->R14)
 # define R15_sig(p) ((p)->R15)
+#elif defined(XP_OS2)
+# define EIP_sig(p) ((p)->ctx_RegEip)
+# define RIP_sig(p) ((p)->ctx_RegRip)
+# define RAX_sig(p) ((p)->ctx_RegRax)
+# define RCX_sig(p) ((p)->ctx_RegRcx)
+# define RDX_sig(p) ((p)->ctx_RegRdx)
+# define RBX_sig(p) ((p)->ctx_RegRbx)
+# define RSP_sig(p) ((p)->ctx_RegRsp)
+# define RBP_sig(p) ((p)->ctx_RegRbp)
+# define RSI_sig(p) ((p)->ctx_RegRsi)
+# define RDI_sig(p) ((p)->ctx_RegRdi)
 #elif defined(__OpenBSD__)
 # define XMM_sig(p,i) ((p)->sc_fpstate->fx_xmm[i])
 # define EIP_sig(p) ((p)->sc_eip)
@@ -149,7 +160,7 @@ InnermostAsmJSActivation()
 // For platforms that install a single, process-wide signal handler (Unix and
 // Windows), the InstallSignalHandlersMutex prevents races between JSRuntimes
 // installing signal handlers.
-#if !defined(XP_MACOSX)
+#if !defined(XP_MACOSX) && !defined(XP_OS2)
 # ifdef JS_THREADSAFE
 #  include "jslock.h"
 
@@ -257,6 +268,8 @@ LookupHeapAccess(const AsmJSModule &module, uint8_t *pc)
 
 # if defined(XP_WIN)
 #  include "jswin.h"
+# elif defined(XP_OS2)
+// nothing
 # else
 #  include <signal.h>
 #  include <sys/mman.h>
@@ -322,7 +335,11 @@ enum { REG_EIP = 14 };
 
 
 # if !defined(XP_WIN)
-#  define CONTEXT ucontext_t
+#  if defined(XP_OS2)
+#   define CONTEXT CONTEXTRECORD
+#  else
+#   define CONTEXT ucontext_t
+#  endif
 # endif
 
 # if !defined(XP_MACOSX)
@@ -473,6 +490,81 @@ AsmJSExceptionHandler(LPEXCEPTION_POINTERS exception)
 
     // No need to worry about calling other handlers, the OS does this for us.
     return EXCEPTION_CONTINUE_SEARCH;
+}
+
+# elif defined(XP_OS2)
+
+static bool
+HandleException(PEXCEPTIONREPORTRECORD pReport,
+                PCONTEXTRECORD pContext)
+{
+    if (pReport->ExceptionNum != XCPT_ACCESS_VIOLATION)
+        return false;
+
+    AsmJSActivation *activation = InnermostAsmJSActivation();
+    if (!activation)
+        return false;
+
+    uint8_t **ppc = ContextToPC(pContext);
+    uint8_t *pc = *ppc;
+    JS_ASSERT(pc == pReport->ExceptionAddress);
+
+    const AsmJSModule &module = activation->module();
+    if (!module.containsPC(pc))
+        return false;
+
+    if (pReport->cParameters < 2)
+        return false;
+
+    void *faultingAddress = (void*)pReport->ExceptionInfo[1];
+
+    // If we faulted trying to execute code in 'module', this must be an
+    // operation callback (see TriggerOperationCallbackForAsmJSCode). Redirect
+    // execution to a trampoline which will call js_HandleExecutionInterrupt.
+    // The trampoline will jump to activation->resumePC if execution isn't
+    // interrupted.
+    if (module.containsPC(faultingAddress)) {
+        activation->setResumePC(pc);
+        *ppc = module.operationCallbackExit();
+        if (!DosSetMem(module.functionCode(), module.functionBytes(), PAG_COMMIT | PAG_DEFAULT))
+            MOZ_CRASH();
+        return true;
+    }
+
+    return false;
+}
+
+static ULONG _System
+AsmJSExceptionHandler(PEXCEPTIONREPORTRECORD pReport,
+                      PEXCEPTIONREGISTRATIONRECORD,
+                      PCONTEXTRECORD pContext,
+                      PVOID)
+{
+    if (HandleException(pReport, pContext))
+        return XCPT_CONTINUE_EXECUTION;
+
+    // No need to worry about calling other handlers, the OS does this for us.
+    return XCPT_CONTINUE_SEARCH;
+}
+
+void
+AsmJSOS2ExceptionHandler::clearCurrentThread()
+{
+    if (!installed())
+        return;
+
+    DosUnsetExceptionHandler(&regrec_);
+    memset(&regrec_, 0, sizeof(regrec_));
+}
+
+bool
+AsmJSOS2ExceptionHandler::setCurrentThread()
+{
+    if (installed())
+        return true;
+
+    regrec_.ExceptionHandler = AsmJSExceptionHandler;
+    return DosSetExceptionHandler(&regrec_) == 0;
 }
 
 # elif defined(XP_MACOSX)
@@ -836,7 +928,7 @@ AsmJSMachExceptionHandler::install(JSRuntime *rt)
     return false;
 }
 
-# else  // If not Windows or Mac, assume Unix
+# else  // If not Windows or OS/2 or Mac, assume Unix
 
 // Be very cautious and default to not handling; we don't want to accidentally
 // silence real crashes from real bugs.
@@ -940,6 +1032,8 @@ EnsureAsmJSSignalHandlersInstalled(JSRuntime *rt)
 #if defined(XP_MACOSX)
     // On OSX, each JSRuntime gets its own handler.
     return rt->asmJSMachExceptionHandler.installed() || rt->asmJSMachExceptionHandler.install(rt);
+#elif defined(XP_OS2)
+    return rt->asmJSOS2ExceptionHandler.installed() || rt->asmJSOS2ExceptionHandler.setCurrentThread();
 #else
     // Assume Windows or Unix. For these platforms, there is a single,
     // process-wide signal handler installed. Take care to only install it once.
@@ -990,6 +1084,9 @@ js::TriggerOperationCallbackForAsmJSCode(JSRuntime *rt)
 #if defined(XP_WIN)
     DWORD oldProtect;
     if (!VirtualProtect(module.functionCode(), module.functionBytes(), PAGE_NOACCESS, &oldProtect))
+        MOZ_CRASH();
+#elif defined(XP_OS2)
+    if (!DosSetMem(module.functionCode(), module.functionBytes(), PAG_DECOMMIT))
         MOZ_CRASH();
 #else  // assume Unix
     if (mprotect(module.functionCode(), module.functionBytes(), PROT_NONE))

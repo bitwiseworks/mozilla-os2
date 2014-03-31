@@ -41,9 +41,8 @@ size_t ExecutableAllocator::determinePageSize()
 ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n)
 {
     void* allocation = NULL;
-    if (DosAllocMem(&allocation, n, OBJ_ANY|PAG_COMMIT|PAG_READ|PAG_WRITE) &&
-        DosAllocMem(&allocation, n, PAG_COMMIT|PAG_READ|PAG_WRITE))
-        CRASH();
+    if (DosAllocMem(&allocation, n, OBJ_ANY|PAG_COMMIT|PAG_READ|PAG_WRITE))
+        DosAllocMem(&allocation, n, PAG_COMMIT|PAG_READ|PAG_WRITE);
     ExecutablePool::Allocation alloc = { reinterpret_cast<char*>(allocation), n };
     return alloc;
 }

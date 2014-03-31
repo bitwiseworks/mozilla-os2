@@ -12,6 +12,13 @@
 # include <mach/mach.h>
 #endif
 
+#ifdef XP_OS2
+# define INCL_DOSEXCEPTIONS
+# define INCL_DOSMEMMGR
+# include <os2.h>
+# undef ADDRESS // used as an identifier somewhere
+#endif
+
 namespace js {
 
 class ScriptSource;
@@ -119,6 +126,20 @@ class AsmJSMachExceptionHandler
     bool install(JSRuntime *rt);
     void clearCurrentThread();
     void setCurrentThread();
+};
+#endif
+
+#ifdef XP_OS2
+class AsmJSOS2ExceptionHandler
+{
+    EXCEPTIONREGISTRATIONRECORD regrec_;
+
+  public:
+    AsmJSOS2ExceptionHandler() { memset(&regrec_, 0, sizeof(regrec_)); }
+    ~AsmJSOS2ExceptionHandler() { clearCurrentThread(); }
+    bool installed() const { return regrec_.ExceptionHandler != NULL; }
+    void clearCurrentThread();
+    bool setCurrentThread();
 };
 #endif
 
