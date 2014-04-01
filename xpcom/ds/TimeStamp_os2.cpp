@@ -4,9 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Dummy TimeStamp implementation using PR_IntervalNow(). Its possible
-// resolution is limited to 100000 ticks per second max (as set by
+// Implement TimeStamp::Now() with the OS/2 high-resolution timer. When the timer is not
+// available, use the dummy TimeStamp implementation using PR_IntervalNow() as a fallback
+// (its possible resolution is limited to 100000 ticks per second max (as set by
 // PR_INTERVAL_MAX).
+
+#define INCL_DOS
+#define INCL_DOSERRORS
+#include <os2.h>
 
 #include "mozilla/TimeStamp.h"
 #include "prlock.h"
@@ -24,15 +29,24 @@ struct TimeStampInitialization
 };
 
 static TimeStampInitialization initOnce;
+static bool gInitialized = false;
 
+// Variables for the high-res timer
+static bool gUseHighResTimer = false;
+
+// Variables for the PR_IntervalNow fallback
 static PRLock* gTimeStampLock = 0;
 static PRUint32 gRolloverCount;
 static PRIntervalTime gLastNow;
 
+static ULONG gTicksPerSec = 0;
+static double gTicksPerSecDbl = .0;
+static double gTicksPerMsDbl = .0;
+
 double
 TimeDuration::ToSeconds() const
 {
- return double(mValue)/PR_TicksPerSecond();
+  return double(mValue)/gTicksPerSecDbl;
 }
 
 double
@@ -44,33 +58,50 @@ TimeDuration::ToSecondsSigDigits() const
 TimeDuration
 TimeDuration::FromMilliseconds(double aMilliseconds)
 {
-  static double kTicksPerMs = double(PR_TicksPerSecond()) / 1000.0;
-  return TimeDuration::FromTicks(aMilliseconds * kTicksPerMs);
+  return TimeDuration::FromTicks(aMilliseconds * gTicksPerMsDbl);
 }
 
 TimeDuration
 TimeDuration::Resolution()
 {
-  // This is grossly nonrepresentative of actual system capabilities
-  // on some platforms
-  return TimeDuration::FromTicks(PRInt64(1));
+  return TimeDuration::FromTicks(int64_t(gTicksPerSec));
 }
 
 nsresult
 TimeStamp::Startup()
 {
-  if (gTimeStampLock)
+  if (gInitialized)
     return NS_OK;
 
-  // TimeStamp has to use bare PRLock instead of mozilla::Mutex
-  // because TimeStamp can be used very early in startup.
-  gTimeStampLock = PR_NewLock();
-  if (!gTimeStampLock)
-    return NS_ERROR_OUT_OF_MEMORY;
+  const char *envp;
+  APIRET rc;
 
-  gRolloverCount = 1;
-  gLastNow = 0;
+  // Use the same variable as NSPR's os2inrval.c does to let the user disable the
+  // high-resolution timer (it is known that it doesn't work well on some hardware)
+  if ((envp = getenv("NSPR_OS2_NO_HIRES_TIMER")) != NULL) {
+    if (atoi(envp) != 1) {
+      // Attempt to use the high-res timer
+      rc = DosTmrQueryFreq(&gTicksPerSec);
+      if (rc == NO_ERROR)
+        gUseHighResTimer = true;
+    }
+  }
 
+  if (!gUseHighResTimer) {
+    // TimeStamp has to use bare PRLock instead of mozilla::Mutex
+    // because TimeStamp can be used very early in startup.
+    gTimeStampLock = PR_NewLock();
+    if (!gTimeStampLock)
+      return NS_ERROR_OUT_OF_MEMORY;
+    gRolloverCount = 1;
+    gLastNow = 0;
+    gTicksPerSec = PR_TicksPerSecond();
+  }
+
+  gTicksPerSecDbl = gTicksPerSec;
+  gTicksPerMsDbl = gTicksPerSecDbl / 1000.0;
+
+  gInitialized = true;
   sFirstTimeStamp = TimeStamp::Now();
   sProcessCreation = TimeStamp();
 
@@ -80,15 +111,28 @@ TimeStamp::Startup()
 void
 TimeStamp::Shutdown()
 {
-  if (gTimeStampLock) {
-    PR_DestroyLock(gTimeStampLock);
-    gTimeStampLock = 0;
+  if (gInitialized) {
+    if (!gUseHighResTimer) {
+      PR_DestroyLock(gTimeStampLock);
+      gTimeStampLock = 0;
+    }
   }
 }
 
 TimeStamp
 TimeStamp::Now(bool aHighResolution)
 {
+  // Note: we don't use aHighResolution; this was introduced to solve Windows bugs (see
+  // TimeStamp.h). We solve ours globally with the NSPR_OS2_NO_HIRES_TIMER check.
+
+  if (gUseHighResTimer) {
+    QWORD timestamp;
+    APIRET rc = DosTmrQueryTime(&timestamp);
+    if (rc != NO_ERROR)
+      NS_RUNTIMEABORT("DosTmrQueryTime failed!");
+    return TimeStamp((uint64_t(timestamp.ulHi) << 32) + timestamp.ulLo);
+  }
+
   // XXX this could be considerably simpler and faster if we had
   // 64-bit atomic operations
   PR_Lock(gTimeStampLock);
@@ -101,7 +145,7 @@ TimeStamp::Now(bool aHighResolution)
   }
 
   gLastNow = now;
-  TimeStamp result((PRUint64(gRolloverCount) << 32) + now);
+  TimeStamp result((uint64_t(gRolloverCount) << 32) + now);
 
   PR_Unlock(gTimeStampLock);
   return result;
@@ -115,6 +159,5 @@ TimeStamp::ComputeProcessUptime()
 {
   return 0;
 }
-
 
 } // namespace mozilla
