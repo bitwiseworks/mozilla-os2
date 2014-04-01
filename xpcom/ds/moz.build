@@ -110,7 +110,11 @@ elif CONFIG['OS_ARCH'] == 'WINNT':
     CPP_SOURCES += [
         'TimeStamp_windows.cpp',
     ]
-elif CONFIG['OS_ARCH'] != 'OS2':
+elif CONFIG['OS_ARCH'] == 'OS2':
+    CPP_SOURCES += [
+        'TimeStamp_os2.cpp',
+    ]
+else:
     error('No TimeStamp implementation on this platform.  Build will not succeed')
 
 LIBRARY_NAME = 'xpcomds_s'
