@@ -108,7 +108,7 @@ static NSFuncPtr
 GetSymbol(LibHandleType aLibHandle, const char *aSymbol)
 {
     ULONG ulrc = NO_ERROR;
-    GetFrozenFunctionsFunc sym;
+    NSFuncPtr sym;
     ulrc = DosQueryProcAddr(aLibHandle, 0, aSymbol, (PFN*)&sym);
     return (ulrc == NO_ERROR) ? sym : nullptr;
 }
