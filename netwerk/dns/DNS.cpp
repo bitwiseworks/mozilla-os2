@@ -12,6 +12,11 @@
 #include "ws2tcpip.h"
 #endif
 
+#if defined(XP_OS2) && !defined(_SOCKLEN_T_DECLARED)
+// see http://trac.netlabs.org/libc/ticket/244
+typedef __socklen_t socklen_t;
+#endif
+
 namespace mozilla {
 namespace net {
 
@@ -104,6 +109,7 @@ bool NetAddrToString(const NetAddr *addr, char *buf, uint32_t bufSize)
     nativeAddr.s_addr = addr->inet.ip;
     return !!inet_ntop_internal(AF_INET, &nativeAddr, buf, bufSize);
   }
+#if !defined(XP_OS2)
   else if (addr->raw.family == AF_INET6) {
     if (bufSize < INET6_ADDRSTRLEN) {
       return false;
@@ -112,6 +118,7 @@ bool NetAddrToString(const NetAddr *addr, char *buf, uint32_t bufSize)
     memcpy(&nativeAddr.s6_addr, &addr->inet6.ip, sizeof(addr->inet6.ip.u8));
     return !!inet_ntop_internal(AF_INET6, &nativeAddr, buf, bufSize);
   }
+#endif
 #if defined(XP_UNIX) || defined(XP_OS2)
   else if (addr->raw.family == AF_LOCAL) {
     if (bufSize < sizeof(addr->local.path)) {
@@ -129,6 +136,7 @@ bool IsLoopBackAddress(const NetAddr *addr)
   if (addr->raw.family == AF_INET) {
     return (addr->inet.ip == htonl(INADDR_LOOPBACK));
   }
+#if !defined(XP_OS2)
   else if (addr->raw.family == AF_INET6) {
     if (IPv6ADDR_IS_LOOPBACK(&addr->inet6.ip)) {
       return true;
@@ -137,6 +145,7 @@ bool IsLoopBackAddress(const NetAddr *addr)
       return true;
     }
   }
+#endif
   return false;
 }
 
@@ -147,6 +156,7 @@ bool IsIPAddrAny(const NetAddr *addr)
       return true;
     }
   }
+#if !defined(XP_OS2)
   else if (addr->raw.family == AF_INET6) {
     if (IPv6ADDR_IS_UNSPECIFIED(&addr->inet6.ip)) {
       return true;
@@ -155,14 +165,17 @@ bool IsIPAddrAny(const NetAddr *addr)
       return true;
     }
   }
+#endif
   return false;
 }
 
 bool IsIPAddrV4Mapped(const NetAddr *addr)
 {
+#if !defined(XP_OS2)
   if (addr->raw.family == AF_INET6) {
     return IPv6ADDR_IS_V4MAPPED(&addr->inet6.ip);
   }
+#endif
   return false;
 }
 

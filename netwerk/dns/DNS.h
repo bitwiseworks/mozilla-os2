@@ -10,7 +10,7 @@
 #include "prnetdb.h"
 #include "mozilla/LinkedList.h"
 
-#if !defined(XP_WIN) && !defined(XP_OS2)
+#if !defined(XP_WIN)
 #include <arpa/inet.h>
 #endif
 
