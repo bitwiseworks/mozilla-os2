@@ -60,7 +60,7 @@ nsOS2Locale::GetPlatformLocale(const nsAString& locale, PULONG os2Codepage)
   tempLocale.ReplaceChar('-', '_');
 
  
-  int  ret = UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)PromiseFlatString(tempLocale).get(), &locObj);
+  int  ret = UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)tempLocale.get(), &locObj);
   if (ret != ULS_SUCCESS)
     UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)L"C", &locObj);
 

@@ -32,7 +32,7 @@ nsPlatformCharset::nsPlatformCharset()
   int32_t acpint = (int32_t)(acp & 0x00FFFF);
   nsAutoString acpKey(NS_LITERAL_STRING("os2."));
   acpKey.AppendInt(acpint, 10);
-  nsresult res = MapToCharset(acpKey, mCharset);
+  MapToCharset(acpKey, mCharset);
 }
 
 nsPlatformCharset::~nsPlatformCharset()
@@ -81,7 +81,6 @@ nsPlatformCharset::GetDefaultCharsetForLocale(const nsAString& localeName, nsACS
 {
   nsCOMPtr<nsIOS2Locale>	os2Locale;
   ULONG						codepage;
-  char						acp_name[6];
 
   //
   // convert locale name to a code page
