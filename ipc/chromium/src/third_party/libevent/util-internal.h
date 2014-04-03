@@ -36,6 +36,9 @@
 #ifdef _EVENT_HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
+#ifdef _EVENT_HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
 #include "event2/util.h"
 
 #include "ipv6-internal.h"
