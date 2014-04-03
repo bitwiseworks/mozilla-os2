@@ -120,7 +120,7 @@ class TransportDIB {
   XID x_shm_;  // X id for the shared segment
   Display* display_;  // connection to the X server
 #endif
-#ifdef OS_WIN
+#if defined(OS_WIN) || defined(OS_OS2)
   uint32_t sequence_num_;
 #endif
   size_t size_;  // length, in bytes

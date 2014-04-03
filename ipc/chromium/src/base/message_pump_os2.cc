@@ -82,7 +82,7 @@ int MessagePumpOS2::GetCurrentDelay() const {
   // Be careful here.  TimeDelta has a precision of microseconds, but we want a
   // value in milliseconds.  If there are 5.5ms left, should the delay be 5 or
   // 6?  It should be 6 to avoid executing delayed work too early.
-  double timeout = ceil((delayed_work_time_ - Time::Now()).InMillisecondsF());
+  double timeout = ceil((delayed_work_time_ - TimeTicks::Now()).InMillisecondsF());
 
   // If this value is negative, then we need to run delayed work soon.
   int delay = static_cast<int>(timeout);
@@ -111,7 +111,7 @@ void MessagePumpForUI::ScheduleWork() {
   WinPostMsg(message_hwnd_, kMsgHaveWork, reinterpret_cast<MPARAM>(this), 0);
 }
 
-void MessagePumpForUI::ScheduleDelayedWork(const Time& delayed_work_time) {
+void MessagePumpForUI::ScheduleDelayedWork(const TimeTicks& delayed_work_time) {
   //
   // NOTE: OS/2 PM timers are very similar to Windows ones and the comments
   // apply to it most of the time; so we don't bother ourselves changing

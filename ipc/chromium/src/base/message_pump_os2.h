@@ -101,7 +101,7 @@ class MessagePumpOS2 : public MessagePump {
   ObserverList<Observer> observers_;
 
   // The time at which delayed work should run.
-  Time delayed_work_time_;
+  TimeTicks delayed_work_time_;
 
   // A boolean value used to indicate if there is a kMsgDoWork message pending
   // in the Windows Message queue.  There is at most one such message, and it
@@ -174,7 +174,7 @@ class MessagePumpForUI : public MessagePumpOS2 {
 
   // MessagePump methods:
   virtual void ScheduleWork();
-  virtual void ScheduleDelayedWork(const Time& delayed_work_time);
+  virtual void ScheduleDelayedWork(const TimeTicks& delayed_work_time);
 
   // Applications can call this to encourage us to process all pending WM_PAINT
   // messages.  This method will process all paint messages the Windows Message

@@ -423,7 +423,7 @@ int ProcessMetrics::GetCPUUsage() {
   QSPTRREC *ptr_rec = (QSPTRREC *)sys_state;
   QSPREC *proc_rec = ptr_rec->pProcRec;
   QSTREC *thrd_rec = proc_rec->pThrdRec;
-  int64 system_time = 0;
+  int64_t system_time = 0;
   int i;
   for (i = 0; i < proc_rec->cTCB; ++i) {
       system_time += thrd_rec->systime + thrd_rec->usertime;
@@ -440,10 +440,10 @@ int ProcessMetrics::GetCPUUsage() {
       last_system_time_ = system_time;
   }
 
-  int64 time = clock() * 1000 / CLOCKS_PER_SEC;
+  int64_t time = clock() * 1000 / CLOCKS_PER_SEC;
   int cpu = 0;
 
-  int64 time_delta = time - last_time_;
+  int64_t time_delta = time - last_time_;
   if (time_delta > 0) {
     // We add time_delta / 2 so the result is rounded.
     cpu = ((system_time - last_system_time_) * 100 + time_delta / 2) / time_delta;

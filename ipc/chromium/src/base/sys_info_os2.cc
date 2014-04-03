@@ -25,7 +25,7 @@ int SysInfo::NumberOfProcessors() {
 }
 
 // static
-int64 SysInfo::AmountOfPhysicalMemory() {
+int64_t SysInfo::AmountOfPhysicalMemory() {
   ULONG ul;
   APIRET arc = DosQuerySysInfo(QSV_TOTPHYSMEM, QSV_TOTPHYSMEM, &ul, sizeof(ul));
   if (arc != NO_ERROR) {
@@ -33,7 +33,7 @@ int64 SysInfo::AmountOfPhysicalMemory() {
     return 0;
   }
 
-  return static_cast <int64>(static_cast<uint64>(ul));
+  return static_cast <int64_t>(static_cast<uint64_t>(ul));
 }
 
 }  // namespace base

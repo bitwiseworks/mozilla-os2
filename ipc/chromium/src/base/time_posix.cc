@@ -208,7 +208,7 @@ TimeTicks TimeTicks::Now() {
       (static_cast<int64_t>(ts.tv_nsec) / Time::kNanosecondsPerMicrosecond);
 
 #elif defined(OS_POSIX)
-  int64 absolute_micro;
+  int64_t absolute_micro;
   absolute_micro = clock() * Time::kMicrosecondsPerSecond / CLOCKS_PER_SEC;
 #else
 #error No usable tick clock function on this platform.

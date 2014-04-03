@@ -11,10 +11,10 @@
 
 namespace base {
 
-uint64 RandUint64() {
-  uint64 number;
+uint64_t RandUint64() {
+  uint64_t number;
 
-  for (size_t i = 0; i < sizeof(uint64)/sizeof(long); i++) {
+  for (size_t i = 0; i < sizeof(uint64_t)/sizeof(long); i++) {
     ((long *)&number)[i] = random();
   }
 
