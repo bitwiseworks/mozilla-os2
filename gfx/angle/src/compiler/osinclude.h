@@ -21,7 +21,7 @@
       defined(__QNX__)
 #define ANGLE_OS_POSIX
 #elif defined (__OS2__)
-#define ANGLE_USE_NSPR
+#define ANGLE_OS_OS2
 #else
 #error Unsupported platform.
 #endif
@@ -30,6 +30,9 @@
 #define STRICT
 #define VC_EXTRALEAN 1
 #include <windows.h>
+#elif defined(ANGLE_OS_OS2)
+#define INCL_DOS
+#include <os2.h>
 #elif defined(ANGLE_OS_POSIX)
 #include <pthread.h>
 #include <semaphore.h>
@@ -45,6 +48,9 @@
 #if defined(ANGLE_OS_WIN)
 typedef DWORD OS_TLSIndex;
 #define OS_INVALID_TLS_INDEX (TLS_OUT_OF_INDEXES)
+#elif defined(ANGLE_OS_OS2)
+typedef PULONG OS_TLSIndex;
+#define OS_INVALID_TLS_INDEX 0
 #elif defined(ANGLE_OS_POSIX)
 typedef pthread_key_t OS_TLSIndex;
 #define OS_INVALID_TLS_INDEX (static_cast<OS_TLSIndex>(-1))
@@ -59,6 +65,8 @@ inline void* OS_GetTLSValue(OS_TLSIndex nIndex)
     ASSERT(nIndex != OS_INVALID_TLS_INDEX);
 #if defined(ANGLE_OS_WIN)
     return TlsGetValue(nIndex);
+#elif defined(ANGLE_OS_OS2)
+    return (void*)*nIndex;
 #elif defined(ANGLE_OS_POSIX)
     return pthread_getspecific(nIndex);
 #endif  // ANGLE_OS_WIN

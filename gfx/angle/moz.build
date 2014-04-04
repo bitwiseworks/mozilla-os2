@@ -91,7 +91,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
     CPP_SOURCES += [
-        'ossource_nspr.cpp',
+        'ossource_os2.cpp',
     ]
 else:
     CPP_SOURCES += [

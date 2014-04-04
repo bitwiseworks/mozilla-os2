@@ -89,6 +89,10 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     CPP_SOURCES += [
         'ossource_win.cpp'
     ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    CPP_SOURCES += [
+        'ossource_os2.cpp',
+    ]
 else:
     CPP_SOURCES += [
         'ossource_posix.cpp'
