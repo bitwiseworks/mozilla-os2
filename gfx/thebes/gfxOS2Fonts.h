@@ -78,9 +78,9 @@ public:
 
 #ifdef DEBUG_thebes_2
         printf("gfxOS2FontGroup[%#x]::GetFontAt(%d), %#x, %#x\n",
-               (unsigned)this, i, (unsigned)&mFonts, (unsigned)&mFonts[i]);
+               (unsigned)this, i, (unsigned)&mFonts, (unsigned)mFonts[i].Font());
 #endif
-        return static_cast<gfxOS2Font*>(static_cast<gfxFont*>(mFonts[i]));
+        return static_cast<gfxOS2Font*>(mFonts[i].Font());
     }
 
 protected:

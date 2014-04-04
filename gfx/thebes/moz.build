@@ -150,8 +150,8 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
         'gfxOS2Surface.cpp',
         'nsUnicodeRange.cpp',
         'gfxFontconfigUtils.cpp',
-        'gfxPDFSurface.cpp'
-        'gfxPSSurface.cpp'
+        'gfxPDFSurface.cpp',
+        'gfxPSSurface.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
     EXPORTS += [

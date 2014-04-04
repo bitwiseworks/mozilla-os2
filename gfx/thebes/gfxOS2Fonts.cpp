@@ -531,7 +531,7 @@ gfxOS2FontGroup::gfxOS2FontGroup(const nsAString& aFamilies,
     for (uint32_t i = 0; i < familyArray.Length(); i++) {
         nsRefPtr<gfxOS2Font> font = gfxOS2Font::GetOrMakeFont(familyArray[i], &mStyle);
         if (font) {
-            mFonts.AppendElement(font);
+            mFonts.AppendElement(FamilyFace(NULL, font));
         }
     }
 }
@@ -676,7 +676,6 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
     gfxOS2Font *font0 = GetFontAt(0);
     const uint8_t *p = aUTF8;
     uint32_t utf16Offset = 0;
-    gfxTextRun::CompressedGlyph g;
     const uint32_t appUnitsPerDevUnit = aTextRun->GetAppUnitsPerDevUnit();
     gfxOS2Platform *platform = gfxOS2Platform::GetPlatform();
 
@@ -696,7 +695,7 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
 
         if (ch == 0 || platform->noFontWithChar(ch)) {
             // null bytes or missing characters cannot be displayed
-            aTextRun->SetMissingGlyph(utf16Offset, ch);
+            aTextRun->SetMissingGlyph(utf16Offset, ch, font0);
         } else {
             // Try to get a glyph from all fonts available to us.
             // Once we found it in one of the fonts we quit the loop early.
@@ -735,7 +734,7 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
                         gid = FT_Get_Char_Index(face, ch);
                         // likely to find more chars in this font, append it
                         // to the font list to find it quicker next time
-                        mFonts.AppendElement(fontX);
+                        mFonts.AppendElement(FamilyFace(NULL, fontX));
                         lastFont = FontListLength()-1;
                     }
                 }
@@ -793,18 +792,18 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
 #endif
 
                 if (advance >= 0 &&
-                    gfxTextRun::CompressedGlyph::IsSimpleAdvance(advance) &&
-                    gfxTextRun::CompressedGlyph::IsSimpleGlyphID(gid))
+                    gfxShapedText::CompressedGlyph::IsSimpleAdvance(advance) &&
+                    gfxShapedText::CompressedGlyph::IsSimpleGlyphID(gid))
                 {
-                    aTextRun->SetSimpleGlyph(utf16Offset,
-                                             g.SetSimpleGlyph(advance, gid));
+                    aTextRun->GetCharacterGlyphs()[utf16Offset].
+                        SetSimpleGlyph(advance, gid);
                     glyphFound = true;
                 } else if (gid == 0) {
                     // gid = 0 only happens when the glyph is missing from the font
                     if (i == lastFont) {
                         // set the missing glyph only when it's missing from the very
                         // last font
-                        aTextRun->SetMissingGlyph(utf16Offset, ch);
+                        aTextRun->SetMissingGlyph(utf16Offset, ch, font0);
                     }
                     glyphFound = false;
                 } else {
@@ -814,6 +813,7 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
                     details.mAdvance = advance;
                     details.mXOffset = 0;
                     details.mYOffset = 0;
+                    gfxShapedText::CompressedGlyph g;
                     g.SetComplex(aTextRun->IsClusterStart(utf16Offset), true, 1);
                     aTextRun->SetGlyphs(utf16Offset, g, &details);
                     glyphFound = true;
