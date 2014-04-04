@@ -890,7 +890,7 @@ FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
         {
           nsAutoCString url;
           url.AppendPrintf("file:///%c|/", volNum + 'A');
-          rv = mRDFService->GetResource(nsDependentCString(url), getter_AddRefs(vol));
+          rv = mRDFService->GetResource(url, getter_AddRefs(vol));
 
           if (NS_FAILED(rv)) return rv;
                 volumes.AppendObject(vol);

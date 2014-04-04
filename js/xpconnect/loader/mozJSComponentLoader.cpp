@@ -930,11 +930,11 @@ mozJSComponentLoader::ObjectForLocation(nsIFile *aComponentFile,
 
             if (!mReuseLoaderGlobal) {
                 script = JS::Compile(cx, obj, options, buf,
-                                     fileSize32);
+                                     rlen);
             } else {
                 function = JS::CompileFunction(cx, obj, options,
                                                nullptr, 0, nullptr,
-                                               buf, fileSize32);
+                                               buf, rlen);
             }
 
             free(buf);
