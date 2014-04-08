@@ -8,7 +8,6 @@ DIRS += [
     'failures/editing/conformancetest',
     'failures/editing/selecttest',
     'failures/html/html/browsers/the-window-object',
-    'failures/html/html/browsers/the-window-object/named-access-on-the-window-object',
     'failures/html/html/dom/documents/dta',
     'failures/html/html/dom/documents/dta/doc.gEBN',
     'failures/html/html/dom/elements/global-attributes',
@@ -29,6 +28,10 @@ DIRS += [
     'failures/webapps/WebStorage/tests/submissions/Ms2ger',
     'failures/webapps/XMLHttpRequest/tests/submissions/Ms2ger'
 ]
+
+# make has a bug that causes processing of VPATH to fail with "File name too long" for these
+if CONFIG['OS_ARCH'] != 'OS2':
+    DIRS += ['failures/html/html/browsers/the-window-object/named-access-on-the-window-object']
 
 include('editing.mozbuild')
 include('html.mozbuild')
