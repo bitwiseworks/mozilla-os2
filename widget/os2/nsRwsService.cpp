@@ -41,17 +41,17 @@
 //#endif
 
 #ifdef RWS_DEBUG
-  #define ERRMSG(x,y)       { printf(y " failed - rc= %d\n", (int)x); }
+  #define ERRMSG(x,y)       do { printf(y " failed - rc= %d\n", (int)x); } while(0)
 
   #define ERRBREAK(x,y)     if (x) { ERRMSG(x,y); break; }
 
-  #define ERRPRINTF(x,y)    { printf(y "\n", x); }
+  #define ERRPRINTF(x,y)    do { printf(y "\n", x); } while(0)
 #else
-  #define ERRMSG(x,y)       ;
+  #define ERRMSG(x,y)       do {} while(0)
 
-  #define ERRBREAK(x,y)     if (x) break;
+  #define ERRBREAK(x,y)     if (x) { break; }
 
-  #define ERRPRINTF(x,y)    ;
+  #define ERRPRINTF(x,y)    do {} while(0)
 #endif
 
 //------------------------------------------------------------------------
@@ -278,7 +278,7 @@ nsRwsService::HandlerFromPath(const char *aPath, uint32_t *aHandle,
                   RWSP_MNAM, (ULONG)"wpQueryDefaultView",
                   RWSR_ASIS,  0, 1,
                   RWSI_OPATH, 0, (ULONG)aPath);
-    ERRBREAK(rc, "wpQueryDefaultView")
+    ERRBREAK(rc, "wpQueryDefaultView");
 
     uint32_t defView = sRwsGetResult(pHdr, 0, 0);
     if (defView == (uint32_t)-1)
@@ -319,7 +319,7 @@ nsRwsService::HandlerFromPath(const char *aPath, uint32_t *aHandle,
           rv = NS_OK;
         }
         else
-          ERRMSG(rc, "wpQueryAssociatedProgram")
+          ERRMSG(rc, "wpQueryAssociatedProgram");
         break;
       }
 
@@ -327,7 +327,7 @@ nsRwsService::HandlerFromPath(const char *aPath, uint32_t *aHandle,
       // both the object handle we requested & the raw WPS object ptr
       PRWSDSC pRtn;
       rc = sRwsGetArgPtr(pHdr, 0, &pRtn);
-      ERRBREAK(rc, "GetArgPtr")
+      ERRBREAK(rc, "GetArgPtr");
       *aHandle = *((uint32_t*)pRtn->pget);
       uint32_t wpsPgmPtr = pRtn->value;
 
@@ -341,7 +341,7 @@ nsRwsService::HandlerFromPath(const char *aPath, uint32_t *aHandle,
                     RWSP_CONV, 0,
                     RWSR_ASIS, 0, 1,
                     RWSC_OBJ_OTITLE, 0, wpsPgmPtr);
-      ERRBREAK(rc, "convert pgm object to title")
+      ERRBREAK(rc, "convert pgm object to title");
 
       // retrieve the title, massage it & assign to _retval, then exit
       // N.B. no need to free pHdr here, it will be freed below
@@ -417,7 +417,7 @@ nsRwsService::HandlerFromPath(const char *aPath, uint32_t *aHandle,
                   RWSP_CONV, 0,
                   RWSR_ASIS, 0, 1,
                   RWSC_OBJ_CNAME, 0, wpsFilePtr);
-    ERRBREAK(rc, "convert object to classname")
+    ERRBREAK(rc, "convert object to classname");
 
     char *pszTitle = (char*)sRwsGetResult(pHdr, 1, 0);
     if (pszTitle == (char*)-1)
@@ -489,7 +489,7 @@ nsRwsService::MenuFromPath(const char *aPath, bool aAbstract)
                     RWSI_ASIS, 0, 0);
 
   if (rc)
-    ERRMSG(rc, "RWSCMD_POPUPMENU")
+    ERRMSG(rc, "RWSCMD_POPUPMENU");
   else
     rv = NS_OK;
 
@@ -519,7 +519,7 @@ nsRwsService::OpenWithAppHandle(const char *aFilePath, uint32_t aAppHandle)
                 RWSI_OPATH, 0, aFilePath,
                 RWSI_OHNDL, 0, aAppHandle);
   if (rc)
-    ERRMSG(rc, "RWSCMD_OPENUSING")
+    ERRMSG(rc, "RWSCMD_OPENUSING");
   else
     rv = NS_OK;
 
@@ -548,7 +548,7 @@ nsRwsService::OpenWithAppPath(const char *aFilePath, const char *aAppPath)
                 RWSI_OPATH, 0, aFilePath,
                 RWSI_OPATH, 0, aAppPath);
   if (rc)
-    ERRMSG(rc, "RWSCMD_OPENUSING")
+    ERRMSG(rc, "RWSCMD_OPENUSING");
   else
     rv = NS_OK;
 
@@ -577,7 +577,7 @@ nsRwsService::RwsConvert(uint32_t type, uint32_t value, uint32_t *result)
                          type,      0, value);
 
   if (rc)
-    ERRMSG(rc, "RwsConvert to ULONG")
+    ERRMSG(rc, "RwsConvert to ULONG");
   else {
     *result = sRwsGetResult(pHdr, 1, 0);
     if (*result == (uint32_t)-1)
@@ -610,7 +610,7 @@ nsRwsService::RwsConvert(uint32_t type, uint32_t value, nsAString& result)
                          type,      0, value);
 
   if (rc)
-    ERRMSG(rc, "RwsConvert to string")
+    ERRMSG(rc, "RwsConvert to string");
   else {
     char *string = (char*)sRwsGetResult(pHdr, 1, 0);
     if (string != (char*)-1)
@@ -663,7 +663,7 @@ static nsresult IsDescendedFrom(uint32_t wpsFilePtr, const char *pszClassname)
                          RWSI_CNAME, 0, pszClassname);
 
   if (rc)
-    ERRMSG(rc, "somIsA")
+    ERRMSG(rc, "somIsA");
   else
     if (sRwsGetResult(pHdr, 0, 0) == TRUE)
       rv = NS_OK;
@@ -728,7 +728,7 @@ static nsresult DeleteFileForExtension(const char *aPath)
 
 static void AssignNLSString(const PRUnichar *aKey, nsAString& result)
 {
-  nsresult      rv;
+  nsresult      rv = NS_ERROR_FAILURE;
   nsXPIDLString title;
 
   do {
@@ -816,7 +816,7 @@ ExtCache::ExtCache() : mCount(0), mSize(0), mExtInfo(0)
 
   uint32_t rc = DosCreateMutexSem(0, (PHMTX)&mMutex, 0, 0);
   if (rc)
-    ERRMSG(rc, "DosCreateMutexSem")
+    ERRMSG(rc, "DosCreateMutexSem");
 }
 
 ExtCache::~ExtCache() {}
@@ -830,7 +830,7 @@ nsresult ExtCache::GetIcon(const char *aExt, bool aNeedMini,
 {
   uint32_t rc = DosRequestMutexSem(mMutex, kMutexTimeout);
   if (rc) {
-    ERRMSG(rc, "DosRequestMutexSem")
+    ERRMSG(rc, "DosRequestMutexSem");
     return NS_ERROR_FAILURE;
   }
 
@@ -847,7 +847,7 @@ nsresult ExtCache::GetIcon(const char *aExt, bool aNeedMini,
 
   rc = DosReleaseMutexSem(mMutex);
   if (rc)
-    ERRMSG(rc, "DosReleaseMutexSem")
+    ERRMSG(rc, "DosReleaseMutexSem");
 
   return (*oIcon ? NS_OK : NS_ERROR_FAILURE);
 }
@@ -861,7 +861,7 @@ nsresult ExtCache::SetIcon(const char *aExt, bool aIsMini,
 {
   uint32_t rc = DosRequestMutexSem(mMutex, kMutexTimeout);
   if (rc) {
-    ERRMSG(rc, "DosRequestMutexSem")
+    ERRMSG(rc, "DosRequestMutexSem");
     return NS_ERROR_FAILURE;
   }
 
@@ -872,7 +872,7 @@ nsresult ExtCache::SetIcon(const char *aExt, bool aIsMini,
   // the icon has to be made non-deletable or else
   // it will be destroyed if the WPS terminates
   if (!WinSetPointerOwner(aIcon, mPid, FALSE)) {
-    ERRPRINTF(info->ext, "WinSetPointerOwner failed for %s icon")
+    ERRPRINTF(info->ext, "WinSetPointerOwner failed for %s icon");
     return NS_ERROR_FAILURE;
   }
 
@@ -881,11 +881,11 @@ nsresult ExtCache::SetIcon(const char *aExt, bool aIsMini,
   else
     info->icon = aIcon;
 
-  ERRPRINTF(info->ext, "ExtCache - added icon for %s")
+  ERRPRINTF(info->ext, "ExtCache - added icon for %s");
 
   rc = DosReleaseMutexSem(mMutex);
   if (rc)
-    ERRMSG(rc, "DosReleaseMutexSem")
+    ERRMSG(rc, "DosReleaseMutexSem");
 
   return NS_OK;
 }
@@ -899,7 +899,7 @@ nsresult ExtCache::GetHandler(const char *aExt, uint32_t *oHandle,
 {
   uint32_t rc = DosRequestMutexSem(mMutex, kMutexTimeout);
   if (rc) {
-    ERRMSG(rc, "DosRequestMutexSem")
+    ERRMSG(rc, "DosRequestMutexSem");
     return NS_ERROR_FAILURE;
   }
 
@@ -915,7 +915,7 @@ nsresult ExtCache::GetHandler(const char *aExt, uint32_t *oHandle,
 
   rc = DosReleaseMutexSem(mMutex);
   if (rc)
-    ERRMSG(rc, "DosReleaseMutexSem")
+    ERRMSG(rc, "DosReleaseMutexSem");
 
   return rv;
 }
@@ -929,7 +929,7 @@ nsresult ExtCache::SetHandler(const char *aExt, uint32_t aHandle,
 {
   uint32_t rc = DosRequestMutexSem(mMutex, kMutexTimeout);
   if (rc) {
-    ERRMSG(rc, "DosRequestMutexSem")
+    ERRMSG(rc, "DosRequestMutexSem");
     return NS_ERROR_FAILURE;
   }
 
@@ -942,13 +942,13 @@ nsresult ExtCache::SetHandler(const char *aExt, uint32_t aHandle,
     if (info->title) {
       info->handler = aHandle;
       rv = NS_OK;
-      ERRPRINTF(info->ext, "ExtCache - added handler for %s")
+      ERRPRINTF(info->ext, "ExtCache - added handler for %s");
     }
   }
 
   rc = DosReleaseMutexSem(mMutex);
   if (rc)
-    ERRMSG(rc, "DosReleaseMutexSem")
+    ERRMSG(rc, "DosReleaseMutexSem");
 
   return rv;
 }
@@ -1023,7 +1023,7 @@ void ExtCache::EmptyCache()
 
   uint32_t rc = DosRequestMutexSem(mMutex, kMutexTimeout);
   if (rc) {
-    ERRMSG(rc, "DosRequestMutexSem")
+    ERRMSG(rc, "DosRequestMutexSem");
     return;
   }
 
@@ -1035,18 +1035,18 @@ void ExtCache::EmptyCache()
 
   for (ctr = 0, info = mExtInfo; ctr < mCount; ctr++, info++) {
 
-    ERRPRINTF(info->ext, "ExtCache - deleting entry for %s")
+    ERRPRINTF(info->ext, "ExtCache - deleting entry for %s");
 
     if (info->icon) {
       if (WinSetPointerOwner(info->icon, mPid, TRUE) == FALSE ||
           WinDestroyPointer(info->icon) == FALSE)
-        ERRPRINTF(info->ext, "unable to destroy icon for %s")
+        ERRPRINTF(info->ext, "unable to destroy icon for %s");
     }
 
     if (info->mini) {
       if (WinSetPointerOwner(info->mini, mPid, TRUE) == FALSE ||
           WinDestroyPointer(info->mini) == FALSE)
-        ERRPRINTF(info->ext, "unable to destroy mini for %s")
+        ERRPRINTF(info->ext, "unable to destroy mini for %s");
     }
 
     if (info->title)
@@ -1060,10 +1060,10 @@ void ExtCache::EmptyCache()
 
   rc = DosReleaseMutexSem(saveMutex);
   if (rc)
-    ERRMSG(rc, "DosReleaseMutexSem")
+    ERRMSG(rc, "DosReleaseMutexSem");
   rc = DosCloseMutexSem(saveMutex);
   if (rc)
-    ERRMSG(rc, "DosCloseMutexSem")
+    ERRMSG(rc, "DosCloseMutexSem");
 }
 
 //------------------------------------------------------------------------
@@ -1159,14 +1159,14 @@ static nsresult nsRwsServiceInit(nsRwsService **aClass)
       DosQueryProcAddr(hmod, ORD_RWSSETTIMEOUT,  0, (PFN*)&sRwsSetTimeout) ||
       DosQueryProcAddr(hmod, ORD_RWSCLIENTTERMINATE, 0, (PFN*)&sRwsClientTerminate)) {
     DosFreeModule(hmod);
-    ERRPRINTF("", "nsRwsServiceInit - DosQueryProcAddr failed%s")
+    ERRPRINTF("", "nsRwsServiceInit - DosQueryProcAddr failed%s");
     return NS_ERROR_NOT_AVAILABLE;
   }
 
   // init RWS and have it register the WPS class if needed
   rc = sRwsClientInit(TRUE);
   if (rc) {
-    ERRMSG(rc, "RwsClientInit")
+    ERRMSG(rc, "RwsClientInit");
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -1176,12 +1176,12 @@ static nsresult nsRwsServiceInit(nsRwsService **aClass)
   uint32_t  userTO;
   rc = sRwsGetTimeout((PULONG)&currentTO, (PULONG)&userTO);
   if (rc)
-    ERRMSG(rc, "RwsGetTimeout")
+    ERRMSG(rc, "RwsGetTimeout");
   else
     if (userTO == 0) {
       rc = sRwsSetTimeout(2);
       if (rc)
-        ERRMSG(rc, "RwsSetTimeout")
+        ERRMSG(rc, "RwsSetTimeout");
     }
 
   // create an instance of nsRwsService
