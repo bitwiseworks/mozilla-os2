@@ -122,7 +122,7 @@ HDC os2PrintQ::OpenHDC()
 nsAString* os2PrintQ::PrinterTitle()
 {
   if (mPrinterTitle.IsEmpty()) {
-    nsCAutoString cName(mpPQI3->pszComment);
+    nsAutoCString cName(mpPQI3->pszComment);
     if (cName.IsEmpty())
       cName.Assign(mpPQI3->pszName);
     cName.ReplaceChar('\r', ' ');

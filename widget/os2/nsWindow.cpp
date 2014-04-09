@@ -40,6 +40,7 @@
 #include "nsIRollupListener.h"
 #include "nsIScreenManager.h"
 #include "nsIXULRuntime.h"
+#include "nsIContent.h"
 #include "nsIWidgetListener.h"
 #include "nsOS2Uni.h"
 #include "nsTHashtable.h"
@@ -681,8 +682,8 @@ NS_METHOD nsWindow::Destroy()
     rollupWidget = rollupListener->GetRollupWidget();
   }
   if (this == rollupWidget) {
-    rollupListener->Rollup(UINT32_MAX);
-    CaptureRollupEvents(nullptr, false, true);
+    rollupListener->Rollup(UINT32_MAX, nullptr);
+    CaptureRollupEvents(nullptr, false);
   }
 
   HWND hMain = GetMainWindow();
@@ -1763,7 +1764,7 @@ bool nsWindow::RollupOnButtonDown(ULONG aMsg)
   }
 
   // Exit if the event is inside the most recent popup.
-  if (EventIsInsideWindow((nsWindow*)rollupWidget)) {
+  if (EventIsInsideWindow((nsWindow*)rollupWidget.get())) {
     return false;
   }
 
@@ -1789,7 +1790,7 @@ bool nsWindow::RollupOnButtonDown(ULONG aMsg)
   // We only need to deal with the last rollup for left mouse down events.
   NS_ASSERTION(!mLastRollup, "mLastRollup is null");
   bool consumeRollupEvent =
-    rollupListener->Rollup(popupsToRollup, aMsg == WM_LBUTTONDOWN ? &mLastRollup : nullptr);
+    rollupListener->Rollup(popupsToRollup, aMsg == WM_BUTTON1DOWN ? &mLastRollup : nullptr);
   NS_IF_ADDREF(mLastRollup);
 
   // If true, the buttondown event won't be passed on to the wndproc.
@@ -1806,7 +1807,7 @@ void nsWindow::RollupOnFocusLost(HWND aFocus)
   if (rollupListener) {
     rollupWidget = rollupListener->GetRollupWidget();
   }
-  HWND hRollup = rollupWidget ? ((nsWindow*)rollupWidget)->mWnd : NULL;
+  HWND hRollup = rollupWidget ? ((nsWindow*)rollupWidget.get())->mWnd : NULL;
 
   // Exit if focus was lost to the most recent popup.
   if (hRollup == aFocus) {
@@ -1824,7 +1825,7 @@ void nsWindow::RollupOnFocusLost(HWND aFocus)
     }
 
     // Rollup all popups.
-    rollupListener->Rollup(UINT32_MAX);
+    rollupListener->Rollup(UINT32_MAX, nullptr);
   }
 }
 
@@ -1855,21 +1856,27 @@ MRESULT EXPENTRY fnwpNSWindow(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
   }
 
   // Pre-process msgs that may cause a rollup.
-  }
-  switch (msg) {
-    case WM_BUTTON1DOWN:
-    case WM_BUTTON2DOWN:
-    case WM_BUTTON3DOWN:
-      if (nsWindow::RollupOnButtonDown(msg)) {
-        return (MRESULT)true;
-      }
-      break;
+  nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  nsCOMPtr<nsIWidget> rollupWidget;
+  if (rollupListener) {
+    rollupWidget = rollupListener->GetRollupWidget();
+    if (rollupWidget) {
+      switch (msg) {
+        case WM_BUTTON1DOWN:
+        case WM_BUTTON2DOWN:
+        case WM_BUTTON3DOWN:
+          if (nsWindow::RollupOnButtonDown(msg)) {
+            return (MRESULT)true;
+          }
+          break;
 
-    case WM_SETFOCUS:
-      if (!mp2) {
-        nsWindow::RollupOnFocusLost((HWND)mp1);
+        case WM_SETFOCUS:
+          if (!mp2) {
+            nsWindow::RollupOnFocusLost((HWND)mp1);
+          }
+          break;
       }
-      break;
+    }
   }
 
   return wnd->ProcessMessage(msg, mp1, mp2);
@@ -2096,6 +2103,12 @@ void nsWindow::OnDestroy()
 {
   mOnDestroyCalled = true;
 
+  if (mInputContext.mNativeIMEContext && mInputContext.mNativeIMEContext != this) {
+    HIMI himi = reinterpret_cast<HIMI>(mInputContext.mNativeIMEContext);
+    spfnImReleaseInstance(mWnd, himi);
+    mInputContext.mNativeIMEContext = nullptr;
+  }
+
   SetNSWindowPtr(mWnd, 0);
   mWnd = 0;
 
@@ -2233,7 +2246,7 @@ do {
 
   #define MAX_CLIPRECTS 10
   bool    useRegion = false;
-  uint32  ndx;
+  uint32_t  ndx;
   RECTL*    pr;
   RECTL     arect[MAX_CLIPRECTS];
   RGNRECT   rgnrect = { 1, 1024, 0, RECTDIR_LFRT_TOPBOT };
@@ -2244,8 +2257,8 @@ do {
     GpiQueryRegionRects(hPS, hrgn, 0, &rgnrect, arect);
 
     useRegion = true;
-    int32  rgnArea = 0;
-    int32  rclArea = (rcl.xRight - rcl.xLeft) * (rcl.yTop - rcl.yBottom) * 4 / 5;
+    int32_t rgnArea = 0;
+    int32_t rclArea = (rcl.xRight - rcl.xLeft) * (rcl.yTop - rcl.yBottom) * 4 / 5;
     for (ndx = rgnrect.crcReturned, pr = arect; ndx; ndx--, pr++) {
       rgnArea += (pr->xRight - pr->xLeft) * (pr->yTop - pr->yBottom);
       if (rgnArea >= rclArea) {
@@ -2284,7 +2297,7 @@ do {
     // If it returns false there's nothing to paint, so exit.
     AutoLayerManagerSetup
         setupLayerManager(this, thebesContext, mozilla::layers::BUFFER_NONE);
-    result = mWidgetListener->PaintWindow(this, region, true, true);
+    result = mWidgetListener->PaintWindow(this, region);
 
     // Have Thebes display the rectangle(s).
     mThebesSurface->Refresh(arect, rgnrect.crcReturned, hPS);
@@ -2901,7 +2914,7 @@ NS_IMETHODIMP_(InputContext) nsWindow::GetInputContext()
 {
   HIMI himi;
   if (sIm32Mod && spfnImGetInstance(mWnd, &himi)) {
-    mInputContext.mNativeIMEContext = static_cast<void*>(himi);
+    mInputContext.mNativeIMEContext = reinterpret_cast<void*>(himi);
   }
   if (!mInputContext.mNativeIMEContext) {
     mInputContext.mNativeIMEContext = this;

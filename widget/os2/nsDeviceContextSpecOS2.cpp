@@ -652,7 +652,7 @@ char* GetACPString(const PRUnichar* aStr)
 
    nsAutoCharBuffer buffer;
    int32_t bufLength;
-   WideCharToMultiByte(0, PromiseFlatString(str).get(), str.Length(),
+   WideCharToMultiByte(0, str.get(), str.Length(),
                        buffer, bufLength);
    return ToNewCString(nsDependentCString(buffer.Elements()));
 }
@@ -1094,7 +1094,8 @@ nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
 #ifdef debug_thebes_print
       printf("SplQueryDevice for bufsize failed - rc= %ld\n", rc);
 #endif
-      return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
+      return rc == NERR_DestNotFound ?
+             NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND : NS_ERROR_FAILURE;
     }
 
     PRDINFO3 * pInfo = (PRDINFO3*)malloc(ulSize);
@@ -1106,7 +1107,8 @@ nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
 #ifdef debug_thebes_print
       printf("SplQueryDevice failed - rc= %ld\n", rc);
 #endif
-      return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
+      return rc == NERR_DestNotFound ?
+             NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND : NS_ERROR_FAILURE;
     }
 
     nsCString drivers(pInfo->pszDrivers);
@@ -1121,7 +1123,7 @@ nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
 #ifdef debug_thebes_print
         printf("SplSetDevice failed - rc= %ld\n", rc);
 #endif
-        return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
+        return NS_ERROR_FAILURE;
       }
     }
   }
@@ -1149,7 +1151,8 @@ nsresult os2SpoolerStream::Init(os2PrintQ* aQueue, const char* aTitle)
 #ifdef debug_thebes_print
     printf("SplQmOpen failed\n");
 #endif
-    return NS_ERROR_GFX_PRINTER_DRIVER_CONFIGURATION_ERROR;
+    return WinGetLastError(0) == PMERR_SPL_QUEUE_NOT_FOUND ?
+           NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND : NS_ERROR_FAILURE;
   }
 
   DBGX();

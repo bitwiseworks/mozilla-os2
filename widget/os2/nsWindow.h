@@ -170,7 +170,7 @@ public:
   NS_IMETHOD            SetCursor(imgIContainer* aCursor,
                                   uint32_t aHotspotX, uint32_t aHotspotY);
   NS_IMETHOD            CaptureRollupEvents(nsIRollupListener* aListener,
-                                            bool aDoCapture, bool aConsumeRollupEvent);
+                                            bool aDoCapture);
   NS_IMETHOD            GetToggledKeyState(uint32_t aKeyCode,
                                            bool* aLEDState);
   NS_IMETHOD            DispatchEvent(nsGUIEvent* event,

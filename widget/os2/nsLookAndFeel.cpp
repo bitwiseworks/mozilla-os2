@@ -429,7 +429,8 @@ QueryFontFromINI(char* fontType, char* fontName, ULONG ulLength)
  */
 bool
 nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
-                           gfxFontStyle& aFontStyle)
+                           gfxFontStyle& aFontStyle,
+                           float aDevPixPerCSSPixel)
 {
   char szFontNameSize[MAXNAMEL];
 
@@ -490,6 +491,9 @@ nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
 
   // now scale to make pixels from points (1 pt = 1/72in)
   aFontStyle.size *= vertScreenRes / 72.0;
+
+  // now convert the logical font size into device pixels for layout
+  aFontStyle.size *= aDevPixPerCSSPixel;
 
   NS_ConvertUTF8toUTF16 fontFace(szFacename);
   int pos = 0;

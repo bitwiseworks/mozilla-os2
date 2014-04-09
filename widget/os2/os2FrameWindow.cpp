@@ -127,8 +127,8 @@ HWND os2FrameWindow::CreateFrameWindow(nsWindow* aParent,
   // the width includes the width of the frame controls (minmax, etc.).
   SWP swp;
   WinQueryWindowPos(hClient, &swp);
-  mOwner->SetBounds(nsIntRect(swp.x, mFrameBounds.height - swp.y - swp.cy,
-                              swp.cx, swp.cy));
+  mOwner->mBounds = nsIntRect(swp.x, mFrameBounds.height - swp.y - swp.cy,
+                              swp.cx, swp.cy);
 
   // Subclass the frame.
   mPrevFrameProc = WinSubclassWindow(mFrameWnd, fnwpFrame);
@@ -593,8 +593,8 @@ MRESULT EXPENTRY fnwpFrame(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
         msg == WM_BUTTON1DOWN || msg == WM_BUTTON2DOWN ||
         msg == WM_BUTTON3DOWN) {
       // Rollup if the event is outside the popup
-      if (!nsWindow::EventIsInsideWindow((nsWindow*)rollupWidget)) {
-        rollupListener->Rollup(UINT32_MAX);
+      if (!nsWindow::EventIsInsideWindow((nsWindow*)rollupWidget.get())) {
+        rollupListener->Rollup(UINT32_MAX, nullptr);
       }
     }
   }
