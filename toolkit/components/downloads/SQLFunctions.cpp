@@ -12,6 +12,7 @@
 #include "plbase64.h"
 #include "prio.h"
 #if defined(XP_OS2)
+#include "nsIServiceManager.h"
 #include "nsIRandomGenerator.h"
 #endif
 

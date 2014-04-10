@@ -7,6 +7,10 @@
 #include "prtypes.h"
 #include "jsapi.h"
 
+#if defined(__OS2__)
+#include <sys/types.h>
+#endif
+
 #define EXPORT_CDECL(type)   NS_EXPORT type
 #define EXPORT_STDCALL(type) NS_EXPORT type NS_STDCALL
 
