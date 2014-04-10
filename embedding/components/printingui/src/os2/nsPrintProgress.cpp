@@ -27,7 +27,7 @@ nsPrintProgress::nsPrintProgress()
   m_closeProgress = false;
   m_processCanceled = false;
   m_pendingStateFlags = -1;
-  m_pendingStateValue = 0;
+  m_pendingStateValue = NS_OK;
 }
 
 nsPrintProgress::~nsPrintProgress()
@@ -174,7 +174,7 @@ NS_IMETHODIMP nsPrintProgress::OnProgressChange(nsIWebProgress *aWebProgress, ns
   uint32_t count = m_listenerList.Count();
   for (uint32_t i = count - 1; i < count; i --)
   {
-    nsCOMPtr<nsIWebProgressListener> progressListener = m_listenerList.safeObjectAt(i);
+    nsCOMPtr<nsIWebProgressListener> progressListener = m_listenerList.SafeObjectAt(i);
     if (progressListener)
       progressListener->OnProgressChange(aWebProgress, aRequest, aCurSelfProgress, aMaxSelfProgress, aCurTotalProgress, aMaxTotalProgress);
   }
