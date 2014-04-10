@@ -79,3 +79,9 @@ ifdef SOLARIS_SUNPRO_CXX
 nsTextFragmentSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-xarch=sse2 -xO4
 endif
 endif
+
+# emxomf fails witn "Index too large" when compiling this with -g
+# (see Issue 24)
+ifeq ($(OS_ARCH),OS2)
+nsDocument.$(OBJ_SUFFIX): CXXFLAGS+=-s
+endif
