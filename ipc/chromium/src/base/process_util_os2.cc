@@ -11,6 +11,10 @@
 
 namespace base {
 
+void SetCurrentProcessPrivileges(ChildPrivileges privs) {
+
+}
+
 NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
                                            const ProcessFilter* filter)
     : executable_name_(executable_name), proc_rec(NULL), filter_(filter) {
