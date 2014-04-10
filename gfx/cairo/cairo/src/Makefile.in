@@ -134,7 +134,7 @@ ifdef MOZ_OS2_HIGH_MEMORY
 DEFINES += -DOS2_HIGH_MEMORY
 endif
 CSRCS   += cairo-os2-surface.c cairo-system.c cairo-os2-printing-surface.c
-CSRCS   += $(PSPDF_BASE_CSRCS) $(PDF_CSRCS)
+CSRCS   += $(PSPDF_BASE_CSRCS) $(PDF_CSRCS) $(PS_CSRCS)
 endif
 
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
