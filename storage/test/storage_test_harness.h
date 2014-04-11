@@ -54,11 +54,13 @@ static int gPassedTests = 0;
 #else
 #include <sstream>
 
+#if defined(MOZ_HAVE_CXX11_STRONG_ENUMS)
 // Print nsresult as uint32_t
 std::ostream& operator<<(std::ostream& aStream, const nsresult aInput)
 {
   return aStream << static_cast<uint32_t>(aInput);
 }
+#endif
 
 #define do_check_eq(aExpected, aActual) \
   PR_BEGIN_MACRO \
