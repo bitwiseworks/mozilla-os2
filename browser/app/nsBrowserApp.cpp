@@ -21,6 +21,9 @@
 #include <stdlib.h>
 #include <io.h>
 #include <fcntl.h>
+#elif defined(XP_OS2)
+#include <time.h>
+#include <unistd.h>
 #elif defined(XP_UNIX)
 #include <sys/resource.h>
 #include <time.h>
@@ -49,9 +52,6 @@
 #include "nsWindowsWMain.cpp"
 #define snprintf _snprintf
 #define strcasecmp _stricmp
-#endif
-#ifdef __EMX__
-#include <sys/time.h>
 #endif
 #include "BinaryPath.h"
 
@@ -462,10 +462,25 @@ TimeStamp_Now()
      * then use our fallback implementation based on GetTickCount. */
     sGetTickCount64 = MozGetTickCount64;
   }
-
   return sGetTickCount64() * freq.QuadPart;
 #elif defined(XP_MACOSX)
   return mach_absolute_time();
+#elif defined(XP_OS2)
+  const char *envp;
+  // Use the same variable as NSPR's os2inrval.c does to let the user disable the
+  // high-resolution timer (it is known that it doesn't work well on some hardware)
+  if ((envp = getenv("NSPR_OS2_NO_HIRES_TIMER")) != NULL) {
+    if (atoi(envp) != 1) {
+      // Attempt to use the high-res timer
+      QWORD timestamp;
+      APIRET rc = DosTmrQueryTime(&timestamp);
+      if (rc == NO_ERROR)
+        return (uint64_t(timestamp.ulHi) << 32) + timestamp.ulLo;
+    }
+  }
+  ULONG msCount = -1;
+  DosQuerySysInfo(QSV_MS_COUNT, QSV_MS_COUNT, &msCount, sizeof(msCount));
+  return msCount;
 #elif defined(HAVE_CLOCK_MONOTONIC)
   struct timespec ts;
   int rv = clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -492,6 +507,14 @@ FileExists(const char *path)
 #endif
 }
 
+#ifdef LIBXUL_SDK
+#  define XPCOM_PATH "xulrunner" XPCOM_FILE_PATH_SEPARATOR XPCOM_DLL
+#else
+#  define XPCOM_PATH XPCOM_DLL
+#endif
+static nsresult
+InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
+{
   char exePath[MAXPATHLEN];
 
   nsresult rv = mozilla::BinaryPath::Get(argv0, exePath);
