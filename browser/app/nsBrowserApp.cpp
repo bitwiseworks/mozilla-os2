@@ -582,7 +582,7 @@ InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
 
   rv = XPCOMGlueStartup(exePath);
   if (NS_FAILED(rv)) {
-    Output("Couldn't load XPCOM.\n");
+    Output("Couldn't load %s.\n", XPCOM_DLL);
     return rv;
   }
 
