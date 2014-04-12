@@ -2323,9 +2323,9 @@ ia64*-hpux*)
     FILTER='true'
     LDFLAGS="$LDFLAGS -Zomf -Zmap"
     WARNINGS_AS_ERRORS='-Werror'
-    MOZ_DEBUG_FLAGS="-g -fno-inline"
+    MOZ_DEBUG_FLAGS="-fno-inline"
     MOZ_OPTIMIZE_FLAGS="-O2"
-    MOZ_OPTIMIZE_LDFLAGS="-s -Zlinker /EXEPACK:2 -Zlinker /PACKCODE -Zlinker /PACKDATA"
+    MOZ_OPTIMIZE_LDFLAGS="-Zlinker /EXEPACK:2 -Zlinker /PACKCODE -Zlinker /PACKDATA"
     DYNAMIC_XPCOM_LIBS='-L$(LIBXUL_DIST)/lib $(LIBXUL_DIST)/lib/xul.lib $(LIBXUL_DIST)/lib/xpcom_core.lib $(LIBXUL_DIST)/lib/mozalloc.lib'
     LIBXUL_LIBS='-L$(LIBXUL_DIST)/lib $(LIBXUL_DIST)/lib/xul.lib $(LIBXUL_DIST)/lib/mozalloc.lib'
     TARGET_MD_ARCH=os2
@@ -7057,7 +7057,7 @@ MOZ_ARG_ENABLE_STRING(debug-symbols,
   fi ],
   MOZ_DEBUG_SYMBOLS=1)
 
-if test -n "$MOZ_DEBUG" -o -n "$MOZ_DEBUG_SYMBOLS"; then
+if test \( -n "$MOZ_DEBUG" -a "$OS_ARCH" != "OS2" \) -o -n "$MOZ_DEBUG_SYMBOLS"; then
     AC_DEFINE(MOZ_DEBUG_SYMBOLS)
     export MOZ_DEBUG_SYMBOLS
 fi
