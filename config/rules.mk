@@ -252,7 +252,8 @@ SHARED_LIBRARY		:= $(DLL_PREFIX)$(SHARED_LIBRARY_NAME)$(DLL_SUFFIX)
 endif
 
 ifeq ($(OS_ARCH),OS2)
-DEF_FILE		:= $(SHARED_LIBRARY:.dll=.def)
+DEF_FILE			:= $(SHARED_LIBRARY:.dll=.def)
+SHARED_LIBRARY_XQS	:= $(SHARED_LIBRARY:.dll=.xqs)
 endif
 
 EMBED_MANIFEST_AT=2
@@ -331,17 +332,6 @@ endif
 endif # !GNU_CC
 
 endif # WINNT
-
-ifeq ($(OS_ARCH),OS2)
-GENERATE_SYMFILE = \
-	if test -f $(basename $(1)).map ; then \
-		mapxqs $(basename $(1)).map -o $(basename $(1)).xqs ; \
-	fi
-PROCESS_SYMFILE = \
-	if test -f $(basename $(1)).xqs ; then \
-		$(2) $(basename $(1)).xqs $(3) ; \
-	fi
-endif
 
 ifeq ($(SOLARIS_SUNPRO_CXX),1)
 ifeq (86,$(findstring 86,$(OS_TEST)))
@@ -899,12 +889,17 @@ else # !WINNT || GNU_CC
 	@$(call CHECK_STDCXX,$@)
 endif # WINNT && !GNU_CC
 
-	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif
 ifdef MOZ_POST_PROGRAM_COMMAND
 	$(MOZ_POST_PROGRAM_COMMAND) $@
+endif
+
+ifeq ($(OS_ARCH),OS2)
+PROGRAM_XQS	:= $(PROGRAM:.exe=.xqs)
+$(PROGRAM_XQS): $(PROGRAM)
+	mapxqs $(basename $^).map -o $@
 endif
 
 $(HOST_PROGRAM): $(HOST_PROGOBJS) $(HOST_LIBS_DEPS) $(HOST_EXTRA_DEPS) $(GLOBAL_DEPS)
@@ -954,7 +949,6 @@ else
 	@$(call CHECK_STDCXX,$@)
 endif # WINNT && !GNU_CC
 
-	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif
@@ -1014,6 +1008,9 @@ $(IMPORT_LIBRARY): $(SHARED_LIBRARY)
 	$(RM) $@
 	$(IMPLIB) $@ $^
 	$(RANLIB) $@
+
+$(SHARED_LIBRARY_XQS): $(SHARED_LIBRARY)
+	mapxqs $(basename $^).map -o $@
 endif # OS/2
 
 $(HOST_LIBRARY): $(HOST_OBJS) Makefile
@@ -1069,7 +1066,6 @@ endif
 endif	# WINNT && !GCC
 	@$(RM) foodummyfilefoo $(DELETE_AFTER_LINK)
 	chmod +x $@
-	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif
