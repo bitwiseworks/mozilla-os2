@@ -30,7 +30,7 @@ else
 	CSRCS += transform-sse1.c
 ifdef GNU_CC
 	SSE1_FLAGS=-msse
-	SSE2_FLAGS=-msse2
+	# SSE2_FLAGS is set in config.mk
 else
 ifeq ($(SOLARIS_SUNPRO_CC),1)
 ifneq (64,$(findstring 64,$(OS_TEST)))

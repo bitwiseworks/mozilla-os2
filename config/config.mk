@@ -468,6 +468,23 @@ endif # CROSS_COMPILE
 CFLAGS += $(MOZ_FRAMEPTR_FLAGS)
 CXXFLAGS += $(MOZ_FRAMEPTR_FLAGS)
 
+# gcc requires -msse2 for this file since it uses SSE2 intrinsics.  (See bug
+# 585538 comment 12.)
+ifneq (,$(INTEL_ARCHITECTURE))
+ifdef GNU_CC
+ifeq ($(OS_ARCH),OS2)
+# On OS/2, GCC is bogus and doesn't align m128i vars on 16 byte boundary
+# (causing a crash). Fix it by forcing stack realign.
+SSE2_FLAGS = -msse2 -mstackrealign
+else
+SSE2_FLAGS = -msse2
+endif
+endif
+ifdef SOLARIS_SUNPRO_CXX
+SSE2_FLAGS = -xarch=sse2 -xO4
+endif
+endif
+
 # Check for FAIL_ON_WARNINGS & FAIL_ON_WARNINGS_DEBUG (Shorthand for Makefiles
 # to request that we use the 'warnings as errors' compile flags)
 

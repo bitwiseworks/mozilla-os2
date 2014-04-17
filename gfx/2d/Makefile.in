@@ -59,16 +59,7 @@ DEFINES := $(filter-out -DUNICODE -D_UNICODE,$(DEFINES))
 
 # The file uses SSE2 intrinsics, so it needs special compile flags on some
 # compilers.
-ifneq (,$(INTEL_ARCHITECTURE))
-ifdef GNU_CC
-ImageScalingSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
-BlurSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
-endif
-
-ifdef SOLARIS_SUNPRO_CXX
-ImageScalingSSE2.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
-BlurSSE2.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
-endif
-endif
+ImageScalingSSE2.$(OBJ_SUFFIX): CXXFLAGS+=$(SSE2_FLAGS)
+BlurSSE2.$(OBJ_SUFFIX): CXXFLAGS+=$(SSE2_FLAGS)
 
 CXXFLAGS += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS)

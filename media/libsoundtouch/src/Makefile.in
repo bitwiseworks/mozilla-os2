@@ -19,14 +19,5 @@ DEFINES += -DST_NO_EXCEPTION_HANDLING=1
 
 include $(topsrcdir)/config/rules.mk
 
-ifneq (,$(INTEL_ARCHITECTURE))
-ifdef GNU_CC
-mmx_optimized.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
-sse_optimized.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
-endif
-ifdef SOLARIS_SUNPRO_CXX
-mmx_optimized.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
-sse_optimized.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
-endif
-endif
-
+mmx_optimized.$(OBJ_SUFFIX): CXXFLAGS+=$(SSE2_FLAGS)
+sse_optimized.$(OBJ_SUFFIX): CXXFLAGS+=$(SSE2_FLAGS)
