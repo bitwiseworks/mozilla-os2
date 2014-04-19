@@ -52,3 +52,8 @@ CXXFLAGS += $(TK_CFLAGS)
 LDFLAGS += $(TK_LIBS)
 endif
 
+# emxomf fails witn "Index too large" when compiling this with -g
+# (see Issue 24)
+ifeq ($(OS_ARCH),OS2)
+nsGlobalWindow.$(OBJ_SUFFIX): CXXFLAGS+=-s
+endif
