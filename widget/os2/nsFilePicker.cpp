@@ -258,6 +258,7 @@ NS_IMETHODIMP nsFilePicker::Show(int16_t *retval)
       result = true;
       if (mMode == modeOpenMultiple) {
         nsresult rv;
+        bool brc;
 
         if (filedlg.papszFQFilename) {
           for (ULONG i=0;i<filedlg.ulFQFCount;i++) {
@@ -267,8 +268,8 @@ NS_IMETHODIMP nsFilePicker::Show(int16_t *retval)
             rv = file->InitWithNativePath(nsDependentCString(*(filedlg.papszFQFilename)[i]));
             NS_ENSURE_SUCCESS(rv,rv);
 
-            rv = mFiles.AppendObject(file);
-            NS_ENSURE_SUCCESS(rv,rv);
+            brc = mFiles.AppendObject(file);
+            NS_ENSURE_TRUE(brc,NS_ERROR_OUT_OF_MEMORY);
           }
           WinFreeFileDlgList(filedlg.papszFQFilename);
         } else {
@@ -278,8 +279,8 @@ NS_IMETHODIMP nsFilePicker::Show(int16_t *retval)
           rv = file->InitWithNativePath(nsDependentCString(filedlg.szFullFile));
           NS_ENSURE_SUCCESS(rv,rv);
 
-          rv = mFiles.AppendObject(file);
-          NS_ENSURE_SUCCESS(rv,rv);
+          brc = mFiles.AppendObject(file);
+          NS_ENSURE_TRUE(brc,NS_ERROR_OUT_OF_MEMORY);
         }
       } else {
         mFile.Assign(filedlg.szFullFile);

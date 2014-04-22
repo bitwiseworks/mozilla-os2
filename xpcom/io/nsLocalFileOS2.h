@@ -64,7 +64,7 @@ public:
 
 private:
     nsLocalFile(const nsLocalFile& other);
-    ~nsLocalFile() {}
+    virtual ~nsLocalFile() {}
 
     // cached information can only be used when this is false
     bool mDirty;

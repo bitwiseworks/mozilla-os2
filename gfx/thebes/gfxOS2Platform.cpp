@@ -55,15 +55,14 @@ gfxOS2Platform::CreateOffscreenSurface(const gfxIntSize& aSize,
     // for small images (32x32x4 or 64x64x1).  Their bitmaps will be
     // be allocated from libc's heap rather than system memory.
 
-    gfxASurface* surf;
+    nsRefPtr<gfxASurface> surf;
     if (stride * aSize.height <= 4096) {
         surf = new gfxImageSurface(aSize, format);
     } else {
         surf = new gfxOS2Surface(aSize, format);
     }
 
-    NS_IF_ADDREF(surf);
-    return surf;
+    return surf.forget();
 }
 
 nsresult

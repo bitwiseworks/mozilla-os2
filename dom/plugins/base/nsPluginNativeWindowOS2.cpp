@@ -166,8 +166,8 @@ static bool ProcessFlashMessageDelayed(nsPluginNativeWindowOS2 * aWin,
                                          HWND hWnd, ULONG msg,
                                          MPARAM mp1, MPARAM mp2)
 {
-  NS_ENSURE_TRUE(aWin, NS_ERROR_NULL_POINTER);
-  NS_ENSURE_TRUE(aInst, NS_ERROR_NULL_POINTER);
+  NS_ENSURE_TRUE(aWin, false);
+  NS_ENSURE_TRUE(aInst, false);
 
   if (msg == sWM_FLASHBOUNCEMSG) {
     // See PluginWindowEvent::Run() below.

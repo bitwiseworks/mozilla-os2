@@ -73,7 +73,7 @@ public:
   NS_DECL_NSIPRINTERENUMERATOR
 
 protected:
-  ~nsPrinterEnumeratorOS2();
+  virtual ~nsPrinterEnumeratorOS2();
 };
 
 //---------------------------------------------------------------------------

@@ -101,7 +101,7 @@ GetLibHandle(pathstr_t aDependentLib)
     ULONG ulrc = NO_ERROR;
     LibHandleType libHandle;
     ulrc = DosLoadModule(pszError, _MAX_PATH, aDependentLib, &libHandle);
-    return (ulrc == NO_ERROR) ? libHandle : nullptr;
+    return (ulrc == NO_ERROR) ? libHandle : NULLHANDLE;
 }
 
 static NSFuncPtr

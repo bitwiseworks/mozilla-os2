@@ -36,7 +36,7 @@ using namespace mozilla;
 // static helper functions
 //-----------------------------------------------------------------------------
 
-static nsresult ConvertOS2Error(int err)
+static nsresult ConvertOS2Error(APIRET err)
 {
     nsresult rv;
 
@@ -169,25 +169,20 @@ static nsresult
 CreateDirectoryA(PSZ path, PEAOP2 ppEABuf)
 {
     APIRET rc;
-    nsresult rv;
     FILESTATUS3 pathInfo;
 
     rc = DosCreateDir(path, ppEABuf);
     if (rc != NO_ERROR)
     {
-        rv = ConvertOS2Error(rc);
-
         // Check if directory already exists and if so,
         // reflect that in the return value
         rc = DosQueryPathInfo(path, FIL_STANDARD,
                               &pathInfo, sizeof(pathInfo));
         if (rc == NO_ERROR)
-            rv = ERROR_FILE_EXISTS;
+            rc = ERROR_FILE_EXISTS;
     }
-    else
-        rv = rc;
 
-    return rv;
+    return ConvertOS2Error(rc);
 }
 
 static int isleadbyte(int c)
@@ -351,9 +346,7 @@ class nsDirEnumerator : public nsISimpleEnumerator,
             return NS_OK;
         }
 
-        // dtor can be non-virtual since there are no subclasses, but must be
-        // public to use the class on the stack.
-        ~nsDirEnumerator()
+        virtual ~nsDirEnumerator()
         {
             Close();
         }
@@ -405,8 +398,8 @@ nsresult nsDriveEnumerator::Init()
     DosError(FERR_DISABLEHARDERR);
     APIRET rc = DosQueryCurrentDisk(&ulCurrent, (PULONG)&mDrives);
     DosError(FERR_ENABLEHARDERR);
-    if (rc)
-        return NS_ERROR_FAILURE;
+    if (rc != NO_ERROR)
+        return ConvertOS2Error(rc);
 
     mLetter = 'A';
     return NS_OK;
@@ -472,7 +465,7 @@ class TypeEaEnumerator
 {
 public:
     TypeEaEnumerator() : mEaBuf(nullptr) { }
-    ~TypeEaEnumerator() { if (mEaBuf) NS_Free(mEaBuf); }
+    virtual ~TypeEaEnumerator() { if (mEaBuf) NS_Free(mEaBuf); }
 
     nsresult Init(nsLocalFile * aFile);
     char *   GetNext(uint32_t *lth);
@@ -717,7 +710,7 @@ nsLocalFile::OpenANSIFileDesc(const char *mode, FILE * *_retval)
     if (*_retval)
         return NS_OK;
 
-    return NS_ERROR_FAILURE;
+    return NSRESULT_FOR_ERRNO();
 }
 
 NS_IMETHODIMP
@@ -768,8 +761,7 @@ nsLocalFile::Create(uint32_t type, uint32_t attributes)
             *slash = '\0';
 
             rv = CreateDirectoryA(const_cast<char*>(mWorkingPath.get()), NULL);
-            if (rv) {
-                rv = ConvertOS2Error(rv);
+            if (NS_FAILED(rv)) {
                 if (rv != NS_ERROR_FILE_ALREADY_EXISTS)
                     return rv;
             }
@@ -791,11 +783,7 @@ nsLocalFile::Create(uint32_t type, uint32_t attributes)
 
     if (type == DIRECTORY_TYPE)
     {
-        rv = CreateDirectoryA(const_cast<char*>(mWorkingPath.get()), NULL);
-        if (rv)
-            return ConvertOS2Error(rv);
-        else
-            return NS_OK;
+        return CreateDirectoryA(const_cast<char*>(mWorkingPath.get()), NULL);
     }
 
     return NS_ERROR_FILE_UNKNOWN_TYPE;
@@ -1667,6 +1655,8 @@ nsLocalFile::Remove(bool recursive)
     if (NS_FAILED(rv))
         return rv;
 
+    int rc = 0;
+
     if (isDir)
     {
         if (recursive)
@@ -1687,15 +1677,15 @@ nsLocalFile::Remove(bool recursive)
                     file->Remove(recursive);
             }
         }
-        rv = rmdir(mWorkingPath.get());
+        rc = rmdir(mWorkingPath.get());
     }
     else
     {
-        rv = remove(mWorkingPath.get());
+        rc = remove(mWorkingPath.get());
     }
 
     // fixup error code if necessary...
-    if (rv == (nsresult)-1)
+    if (rc == -1)
         rv = NSRESULT_FOR_ERRNO();
 
     MakeDirty();
@@ -1754,16 +1744,14 @@ nsLocalFile::SetModDate(PRTime aLastModifiedTime)
 
     PRExplodedTime pret;
     FILESTATUS3 pathInfo;
+    APIRET rc;
 
     // Level 1 info
-    rv = DosQueryPathInfo(mWorkingPath.get(), FIL_STANDARD,
+    rc = DosQueryPathInfo(mWorkingPath.get(), FIL_STANDARD,
                           &pathInfo, sizeof(pathInfo));
 
-    if (NS_FAILED(rv))
-    {
-       rv = ConvertOS2Error(rv);
-       return rv;
-    }
+    if (rc != NO_ERROR)
+        return ConvertOS2Error(rc);
 
     // PR_ExplodeTime expects usecs...
     PR_ExplodeTime(aLastModifiedTime * PR_USEC_PER_MSEC, PR_LocalTimeParameters, &pret);
@@ -1781,14 +1769,14 @@ nsLocalFile::SetModDate(PRTime aLastModifiedTime)
     pathInfo.ftimeLastWrite.minutes     = pret.tm_min;
     pathInfo.ftimeLastWrite.twosecs     = pret.tm_sec / 2;
 
-    rv = DosSetPathInfo(mWorkingPath.get(), FIL_STANDARD,
+    rc = DosSetPathInfo(mWorkingPath.get(), FIL_STANDARD,
                         &pathInfo, sizeof(pathInfo), 0UL);
 
-    if (NS_FAILED(rv))
-       return rv;
+    if (rc != NO_ERROR)
+       return ConvertOS2Error(rc);
 
     MakeDirty();
-    return rv;
+    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1916,7 +1904,7 @@ nsLocalFile::SetFileSize(int64_t aFileSize)
     if (rc != NO_ERROR)
     {
         MakeDirty();
-        return NS_ERROR_FAILURE;
+        return ConvertOS2Error(rc);
     }
 
     // Seek to new, desired end of file
@@ -1928,7 +1916,7 @@ nsLocalFile::SetFileSize(int64_t aFileSize)
     MakeDirty();
 
     if (rc != NO_ERROR)
-        return NS_ERROR_FAILURE;
+        return ConvertOS2Error(rc);
 
     return NS_OK;
 }
@@ -1954,7 +1942,7 @@ nsLocalFile::GetDiskSpaceAvailable(int64_t *aDiskSpaceAvailable)
                                sizeof(fsAllocate));
 
     if (rc != NO_ERROR)
-       return NS_ERROR_FAILURE;
+       return ConvertOS2Error(rc);
 
     *aDiskSpaceAvailable = fsAllocate.cUnitAvail;
     *aDiskSpaceAvailable *= fsAllocate.cSectorUnit;
@@ -2039,10 +2027,7 @@ nsLocalFile::IsWritable(bool *_retval)
                           &pathInfo, sizeof(pathInfo));
 
     if (rc != NO_ERROR)
-    {
-       rc = ConvertOS2Error(rc);
-       return rc;
-    }
+        return ConvertOS2Error(rc);
 
     // on OS/2, unlike Windows, directories on writable media
     // can not be assigned a readonly attribute
@@ -2172,8 +2157,8 @@ nsLocalFile::IsHidden(bool *_retval)
 
     if (rc != NO_ERROR)
     {
-       rc = ConvertOS2Error(rc);
-       return rc;
+       rv = ConvertOS2Error(rc);
+       return rv;
     }
 
     *_retval = ((pathInfo.attrFile & FILE_HIDDEN) != 0);

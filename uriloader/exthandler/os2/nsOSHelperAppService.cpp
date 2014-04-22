@@ -1140,7 +1140,7 @@ nsOSHelperAppService::GetFromExtension(const nsCString& aFileExt) {
   }
 
   nsAutoCString mimeType(asciiMajorType + NS_LITERAL_CSTRING("/") + asciiMinorType);
-  nsMIMEInfoOS2* mimeInfo = new nsMIMEInfoOS2(mimeType);
+  nsRefPtr<nsMIMEInfoOS2> mimeInfo = new nsMIMEInfoOS2(mimeType);
   if (!mimeInfo)
     return nullptr;
   NS_ADDREF(mimeInfo);
@@ -1187,7 +1187,7 @@ nsOSHelperAppService::GetFromExtension(const nsCString& aFileExt) {
     mimeInfo->SetPreferredAction(nsIMIMEInfo::saveToDisk);
   }
 
-  return mimeInfo;
+  return mimeInfo.forget();
 }
 
 already_AddRefed<nsMIMEInfoOS2>
@@ -1262,7 +1262,7 @@ nsOSHelperAppService::GetFromType(const nsCString& aMIMEType) {
                                  extensions,
                                  mime_types_description);
 
-  nsMIMEInfoOS2* mimeInfo = new nsMIMEInfoOS2(aMIMEType);
+  nsRefPtr<nsMIMEInfoOS2> mimeInfo = new nsMIMEInfoOS2(aMIMEType);
   if (!mimeInfo)
     return nullptr;
   NS_ADDREF(mimeInfo);
@@ -1285,7 +1285,7 @@ nsOSHelperAppService::GetFromType(const nsCString& aMIMEType) {
     mimeInfo->SetPreferredAction(nsIMIMEInfo::saveToDisk);
   }
 
-  return mimeInfo;
+  return mimeInfo.forget();
 }
 
 //------------------------------------------------------------------------
@@ -1499,7 +1499,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aType,
                                         const nsACString& aFileExt,
                                         bool       *aFound) {
   *aFound = true;
-  nsMIMEInfoOS2* retval = GetFromType(PromiseFlatCString(aType)).get();
+  nsRefPtr<nsMIMEInfoOS2> retval = GetFromType(PromiseFlatCString(aType)).get();
   bool hasDefault = false;
   if (retval)
     retval->GetHasDefaultHandler(&hasDefault);
@@ -1507,7 +1507,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aType,
     nsRefPtr<nsMIMEInfoOS2> miByExt = GetFromExtension(PromiseFlatCString(aFileExt));
     // If we had no extension match, but a type match, use that
     if (!miByExt && retval)
-      return retval;
+      return retval.forget();
     // If we had an extension match but no type match, set the mimetype and use
     // it
     if (!retval && miByExt) {
@@ -1515,7 +1515,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aType,
         miByExt->SetMIMEType(aType);
       miByExt.swap(retval);
 
-      return retval;
+      return retval.forget();
     }
     // If we got nothing, make a new mimeinfo
     if (!retval) {
@@ -1527,7 +1527,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aType,
           retval->AppendExtension(aFileExt);
       }
       
-      return retval;
+      return retval.forget();
     }
 
     // Copy the attributes of retval onto miByExt, to return it
@@ -1535,7 +1535,7 @@ nsOSHelperAppService::GetMIMEInfoFromOS(const nsACString& aType,
 
     miByExt.swap(retval);
   }
-  return retval;
+  return retval.forget();
 }
 
 NS_IMETHODIMP

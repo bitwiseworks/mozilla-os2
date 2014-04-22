@@ -51,7 +51,9 @@ using namespace mozilla;
 
 //---------------------------------------------------------------------------
 
+#ifndef DEBUG
 #define DEBUG
+#endif
 #define debug_thebes_print
 #define debug_enterexit
 
@@ -105,7 +107,7 @@ public:
   os2NullOutputStream();
 
 private:
-  ~os2NullOutputStream()  { DBGNX(); }
+  virtual ~os2NullOutputStream()  { DBGNX(); }
 #ifdef debug_enterexit
   int32_t   mWrites;
 #endif
@@ -130,7 +132,7 @@ public:
   void      IncPageCount()  { mPages++; }
 
 private:
-  ~os2SpoolerStream()       { DBGNX(); }
+  virtual ~os2SpoolerStream()       { DBGNX(); }
 
   HSPL      mSpl;
   uint32_t  mPages;

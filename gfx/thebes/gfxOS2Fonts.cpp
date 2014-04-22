@@ -481,9 +481,8 @@ already_AddRefed<gfxOS2Font> gfxOS2Font::GetOrMakeFont(const nsAString& aName,
             return nullptr;
         gfxFontCache::GetCache()->AddNew(font);
     }
-    gfxFont *f = nullptr;
-    font.swap(f);
-    return static_cast<gfxOS2Font *>(f);
+    nsRefPtr<gfxOS2Font> f = static_cast<gfxOS2Font *>(font.get());
+    return f.forget();
 }
 
 /**********************************************************************
