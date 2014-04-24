@@ -562,7 +562,16 @@ static int32_t AppendDirectionalIndicatorUTF8(bool aIsRTL, nsACString& aString)
 gfxTextRun *gfxOS2FontGroup::MakeTextRun(const PRUnichar* aString, uint32_t aLength,
                                          const Parameters* aParams, uint32_t aFlags)
 {
-    NS_ASSERTION(aLength > 0, "should use MakeEmptyTextRun for zero-length text");
+    if (aLength == 0) {
+        return MakeEmptyTextRun(aParams, aFlags);
+    }
+    if (aLength == 1 && aString[0] == ' ') {
+        return MakeSpaceTextRun(aParams, aFlags);
+    }
+    if (GetStyle()->size == 0) {
+        return MakeBlankTextRun(aLength, aParams, aFlags);
+    }
+
     gfxTextRun *textRun = gfxTextRun::Create(aParams, aLength, this, aFlags);
     if (!textRun)
         return nullptr;
@@ -595,8 +604,23 @@ gfxTextRun *gfxOS2FontGroup::MakeTextRun(const uint8_t* aString, uint32_t aLengt
     printf("gfxOS2FontGroup[%#x]::MakeTextRun(uint8_t %s, %d, %#x, %d)\n",
            (unsigned)this, NS_LossyConvertUTF16toASCII(us).get(), aLength, (unsigned)aParams, aFlags);
 #endif
-    NS_ASSERTION(aLength > 0, "should use MakeEmptyTextRun for zero-length text");
-    NS_ASSERTION(aFlags & TEXT_IS_8BIT, "8bit should have been set");
+
+    if (aLength == 0) {
+        return MakeEmptyTextRun(aParams, aFlags);
+    }
+    if (aLength == 1 && aString[0] == ' ') {
+        return MakeSpaceTextRun(aParams, aFlags);
+    }
+
+    aFlags |= TEXT_IS_8BIT;
+
+    if (GetStyle()->size == 0) {
+        // Short-circuit for size-0 fonts, as Windows and ATSUI can't handle
+        // them, and always create at least size 1 fonts, i.e. they still
+        // render something for size 0 fonts.
+        return MakeBlankTextRun(aLength, aParams, aFlags);
+    }
+
     gfxTextRun *textRun = gfxTextRun::Create(aParams, aLength, this, aFlags);
     if (!textRun)
         return nullptr;
