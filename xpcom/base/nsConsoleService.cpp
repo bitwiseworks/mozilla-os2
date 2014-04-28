@@ -205,6 +205,14 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage *message, nsConsoleServic
             OutputDebugStringW(msg.get());
         }
 #endif
+#if defined(XP_OS2)
+        if (getenv("MOZ_CONSOLE_LOG")) {
+            nsString msg;
+            message->GetMessageMoz(getter_Copies(msg));
+            printf("GeckoConsole: %s\n", NS_LossyConvertUTF16toASCII(msg).get());
+        }
+
+#endif
 
         /*
          * If there's already a message in the slot we're about to replace,
