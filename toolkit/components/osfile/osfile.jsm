@@ -26,7 +26,11 @@ if (typeof Components != "undefined") {
   importScripts(
     "resource://gre/modules/osfile/osfile_shared_allthreads.jsm",
     "resource://gre/modules/osfile/osfile_unix_allthreads.jsm",
+#ifdef XP_OS2
+    "resource://gre/modules/osfile/ospath_os2_back.jsm",
+#else
     "resource://gre/modules/osfile/ospath_unix_back.jsm",
+#endif
     "resource://gre/modules/osfile/osfile_unix_back.jsm",
     "resource://gre/modules/osfile/osfile_shared_front.jsm",
     "resource://gre/modules/osfile/osfile_unix_front.jsm"

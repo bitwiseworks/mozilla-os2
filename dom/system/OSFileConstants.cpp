@@ -9,11 +9,11 @@
 
 #include "prsystem.h"
 
-#if defined(XP_UNIX)
+#if defined(XP_UNIX) || defined(XP_OS2)
 #include "unistd.h"
 #include "dirent.h"
 #include "sys/stat.h"
-#endif // defined(XP_UNIX)
+#endif // defined(XP_UNIX) || defined(XP_OS2)
 
 #if defined(XP_MACOSX)
 #include "copyfile.h"
@@ -426,7 +426,7 @@ static dom::ConstantSpec gLibcProperties[] =
   // and, if necessary, the offset of fields, so as to be able to
   // define the structure in JS.
 
-#if defined(XP_UNIX)
+#if defined(XP_UNIX) || defined(XP_OS2)
   // The size of |mode_t|.
   { "OSFILE_SIZEOF_MODE_T", INT_TO_JSVAL(sizeof (mode_t)) },
 
@@ -458,7 +458,7 @@ static dom::ConstantSpec gLibcProperties[] =
 
   // Under MacOS X and BSDs, |dirfd| is a macro rather than a
   // function, so we need a little help to get it to work
-#if defined(dirfd)
+#if defined(dirfd) && !defined(__KLIBC__)
   { "OSFILE_SIZEOF_DIR", INT_TO_JSVAL(sizeof (DIR)) },
 
   { "OSFILE_OFFSETOF_DIR_DD_FD", INT_TO_JSVAL(offsetof (DIR, __dd_fd)) },
@@ -595,6 +595,23 @@ static dom::ConstantSpec gWinProperties[] =
 #endif // defined(XP_WIN)
 
 
+#if defined(XP_OS2)
+/**
+ * The properties defined in os2.h.
+ *
+ * If you extend this list of properties, please
+ * separate categories ("errors", "open", etc.),
+ * keep properties organized by alphabetical order
+ * and #ifdef-away properties that are not portable.
+ */
+static dom::ConstantSpec gOS2Properties[] =
+{
+  // Nothing here so far
+  PROP_END
+};
+#endif // defined(XP_OS2)
+
+
 /**
  * Get a field of an object as an object.
  *
@@ -687,6 +704,18 @@ bool DefineOSFileConstants(JSContext *cx, JS::Handle<JSObject*> global)
     return false;
   }
 #endif // defined(XP_WIN)
+
+#if defined(XP_OS2)
+  // Build OS.Constants.OS2
+
+  JS::Rooted<JSObject*> objOS2(cx);
+  if (!(objOS2 = GetOrCreateObjectProperty(cx, objConstants, "OS2"))) {
+    return false;
+  }
+  if (!dom::DefineConstants(cx, objOS2, gOS2Properties)) {
+    return false;
+  }
+#endif // defined(XP_OS2)
 
   // Build OS.Constants.Sys
 

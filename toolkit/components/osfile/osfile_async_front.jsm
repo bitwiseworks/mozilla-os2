@@ -37,7 +37,11 @@ if (OS.Constants.Win) {
   OSError = OS.Shared.Win.Error;
 } else if (OS.Constants.libc) {
   Components.utils.import("resource://gre/modules/osfile/osfile_unix_allthreads.jsm", this);
-  Components.utils.import("resource://gre/modules/osfile/ospath_unix_back.jsm", this);
+  if (OS.Constants.OS2) {
+    Components.utils.import("resource://gre/modules/osfile/ospath_os2_back.jsm", this);
+  } else {
+    Components.utils.import("resource://gre/modules/osfile/ospath_unix_back.jsm", this);
+  }
   OSError = OS.Shared.Unix.Error;
 } else {
   throw new Error("I am neither under Windows nor under a Posix system");

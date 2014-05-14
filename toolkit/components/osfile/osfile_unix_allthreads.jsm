@@ -39,15 +39,27 @@ if (typeof Components != "undefined") {
 
   // Open libc
   let libc;
-  let libc_candidates =  [ "libSystem.B.dylib",
-                           "libc.so.6",
-                           "libc.so" ];
+  let libc_candidates;
+  let libc_func;
+  if (OS.Constants.OS2) {
+    libc_candidates =  [ "libc065.dll", "libc064.dll" ];
+    libc_func = function libc_func(name) {
+      return "_std_" + name;
+    };
+  } else {
+    libc_candidates =  [ "libSystem.B.dylib",
+                         "libc.so.6",
+                         "libc.so" ];
+    libc_func = function libc_func(name) {
+      return name;
+    };
+  }
   for (let i = 0; i < libc_candidates.length; ++i) {
     try {
       libc = ctypes.open(libc_candidates[i]);
       break;
     } catch (x) {
-      LOG("Could not open libc ", libc_candidates[i]);
+      LOG("Could not open libc", libc_candidates[i]);
     }
   }
   if (!libc) {
@@ -55,13 +67,14 @@ if (typeof Components != "undefined") {
     throw new Error("Could not open system library: no libc");
   }
   exports.OS.Shared.Unix.libc = libc;
+  exports.OS.Shared.Unix.libc_func = libc_func;
 
   // Define declareFFI
   let declareFFI = OS.Shared.declareFFI.bind(null, libc);
   exports.OS.Shared.Unix.declareFFI = declareFFI;
 
   // Define Error
-  let strerror = libc.declare("strerror",
+  let strerror = libc.declare(libc_func("strerror"),
     ctypes.default_abi,
     /*return*/ ctypes.char.ptr,
     /*errnum*/ ctypes.int);
