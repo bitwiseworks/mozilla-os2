@@ -12,6 +12,7 @@
 #include "mozilla/Attributes.h"
 #include "XPCWrapper.h"
 #include "JavaScriptParent.h"
+#include "nsPrintfCString.h"
 
 using namespace mozilla::dom;
 using namespace JS;
@@ -799,6 +800,14 @@ nsJSCID::GetService(const JS::Value& iidval, JSContext* cx,
     nsCOMPtr<nsISupports> srvc;
     rv = svcMgr->GetService(mDetails.ID(), *iid, getter_AddRefs(srvc));
     NS_ASSERTION(NS_FAILED(rv) || srvc, "service manager returned success, but service is null!");
+#ifdef DEBUG
+    if (NS_FAILED(rv)) {
+      nsAutoCString details;
+      mDetails.ToString (getter_Copies(details));
+      NS_WARNING(nsPrintfCString("service manager returned %X from GetService for class '%s' (%s)",
+                                 rv, details.get(), mDetails.ID().ToString()).get());
+    }
+#endif
     if (NS_FAILED(rv) || !srvc)
         return NS_ERROR_XPC_GS_RETURNED_FAILURE;
 

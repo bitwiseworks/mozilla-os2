@@ -67,6 +67,7 @@
 #include "nsArrayEnumerator.h"
 #include "nsStringEnumerator.h"
 #include "mozilla/FileUtils.h"
+#include "nsPrintfCString.h"
 
 #include NEW_H     // for placement new
 
@@ -758,6 +759,8 @@ nsComponentManagerImpl::KnownModule::Load()
 
         if (!mModule) {
             mFailed = true;
+            NS_WARNING(nsPrintfCString("LoadModule failed for module '%s'",
+                                       Description().get()).get());
             return false;
         }
     }
@@ -766,6 +769,8 @@ nsComponentManagerImpl::KnownModule::Load()
             nsresult rv = mModule->loadProc();
             if (NS_FAILED(rv)) {
                 mFailed = true;
+                NS_WARNING(nsPrintfCString("Module's loadProc failed with %X for module '%s'",
+                                           rv, Description().get()).get());
                 return false;
             }
         }
