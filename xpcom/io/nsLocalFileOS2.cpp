@@ -76,8 +76,10 @@ static nsresult ConvertOS2Error(APIRET err)
             break;
         case 0:
             rv = NS_OK;
+            break;
         default:
             rv = NS_ERROR_FAILURE;
+            break;
     }
     return rv;
 }
