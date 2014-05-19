@@ -780,7 +780,7 @@ nsNativeAppSupportOS2::Start( bool *aResult ) {
      * then make sure to clean up the message queue.
      */
     MQINFO mqinfo;
-    HAB hab;
+    HAB hab = NULLHANDLE;
     HMQ hmqCurrent = WinQueryQueueInfo( HMQ_CURRENT, &mqinfo, 
                                         sizeof( MQINFO ) );
     if( !hmqCurrent ) {
@@ -1407,9 +1407,9 @@ nsNativeAppSupportOS2::HandleCommandLine(const char* aCmdLineString,
     char **argv = 0;
     // Flags, etc.
     int init = 1;
-    int between, quoted, bSlashCount;
-    int argc;
-    const char *p;
+    int between, quoted = 0, bSlashCount = 0;
+    int argc = 0;
+    const char *p = 0;
     nsAutoCString arg;
 
     nsCOMPtr<nsICommandLineRunner> cmdLine
