@@ -86,15 +86,15 @@
       ftp://ftp.netlabs.org/incoming/mozilla
 
 5. INSTALL 'pthr01.dll' and 'mmap.dll' from
-      http://rpm.netlabs.org/release/00/zip/pthread-20120924-11_oc00.zip and
+      http://rpm.netlabs.org/release/00/zip/pthread-20140425-15_oc00.zip and
       http://rpm.netlabs.org/release/00/zip/mmap-20111102-8_oc00.zip,
       respectively. If you use RPM/YUM, just run:
       'yum install pthread mmap' from the command line.
 
-6. INSTALL 'gcc446.dll' and 'stdcpp.dll' from
-      http://rpm.netlabs.org/release/00/zip/gcc-4_4_6-15_oc00.zip.
+6. INSTALL 'gcc473.dll' and 'stdcpp.dll' from
+      http://rpm.netlabs.org/release/00/zip/gcc-4_7_3_1-1_oc00.zip.
       If you use RPM/YUM, just run:
-      'yum install libgcc446 libstdc++' from the command line.
+      'yum install libgcc473 libstdc++' from the command line.
 
 7. Optional: Use mozinst to create icons on desktop.
       http://hobbes.nmsu.edu/h-search.php?key=mozinst
