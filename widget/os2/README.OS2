@@ -257,10 +257,6 @@ Very few users have any need for any of these:
     saving attachments or using a default WPS application as a helper
     application.
 
-* NSPR_NO_EXCEPTQ=1
-    This disables Exceptq for the Mozilla apps without disabling it for
-    other programs that use it.
-
 The following enable additional logging:
 
 * MOZ_CONSOLE_LOG=1

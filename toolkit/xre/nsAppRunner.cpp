@@ -3,9 +3,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if defined(XP_OS2) && defined(MOZ_OS2_HIGH_MEMORY)
+#if defined(XP_OS2)
+#if defined(MOZ_OS2_HIGH_MEMORY)
 // os2safe.h has to be included before os2.h, needed for high mem
 #include <os2safe.h>
+#endif
+// exceptq trap file generator
+#define INCL_BASE
+#include <os2.h>
+#define INCL_LOADEXCEPTQ
+#define INCL_EXCEPTQ_CLASS
+#include <exceptq.h>
 #endif
 
 #define XPCOM_TRANSLATE_NSGM_ENTRY_POINT 1
@@ -3087,7 +3095,6 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   bool StartOS2App(int aArgc, char **aArgv);
   if (!StartOS2App(gArgc, gArgv))
     return 1;
-  ScopedFPHandler handler;
 #endif /* XP_OS2 */
 
   if (EnvHasValue("MOZ_SAFE_MODE_RESTART")) {
@@ -3869,6 +3876,11 @@ XREMain::XRE_mainRun()
 int
 XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
 {
+#if defined(XP_OS2)
+  ScopedExceptqLoader exceptq;
+  ScopedFPHandler fpHandler;
+#endif
+
   char aLocal;
   GeckoProfilerInitRAII profilerGuard(&aLocal);
   PROFILER_LABEL("Startup", "XRE_Main");

@@ -2,6 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#if defined(XP_OS2)
+// exceptq trap file generator
+#define INCL_BASE
+#define INCL_PM
+#include <os2.h>
+#define INCL_LOADEXCEPTQ
+#define INCL_EXCEPTQ_CLASS
+#include <exceptq.h>
+#endif
+
 #include "mozilla/DebugOnly.h"
 
 #if defined(MOZ_WIDGET_QT)
@@ -17,6 +27,9 @@
 #include <glib.h>
 #endif
 
+#if defined(XP_OS2)
+#include "private/pprthred.h"
+#endif
 #include "prenv.h"
 
 #include "nsIAppShell.h"
@@ -269,6 +282,18 @@ SetTaskbarGroupId(const nsString& aId)
 }
 #endif
 
+#if defined(XP_OS2)
+// because we use early returns, we use a stack-based helper to un-set the OS2 FP handler
+class ScopedFPHandler {
+private:
+  EXCEPTIONREGISTRATIONRECORD excpreg;
+
+public:
+  ScopedFPHandler() { PR_OS2_SetFloatExcpHandler(&excpreg); }
+  ~ScopedFPHandler() { PR_OS2_UnsetFloatExcpHandler(&excpreg); }
+};
+#endif
+
 nsresult
 XRE_InitChildProcess(int aArgc,
                      char* aArgv[],
@@ -277,6 +302,11 @@ XRE_InitChildProcess(int aArgc,
   NS_ENSURE_ARG_MIN(aArgc, 2);
   NS_ENSURE_ARG_POINTER(aArgv);
   NS_ENSURE_ARG_POINTER(aArgv[0]);
+
+#if defined(XP_OS2)
+  ScopedExceptqLoader exceptq;
+  ScopedFPHandler fpHandler;
+#endif
 
 #if defined(XP_WIN)
   // From the --attach-console support in nsNativeAppSupportWin.cpp, but

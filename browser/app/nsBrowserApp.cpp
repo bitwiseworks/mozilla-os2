@@ -4,12 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if defined(XP_OS2)
-// exceptq trap file generator
-#include <string.h>
 #define INCL_BASE
 #include <os2.h>
-#define INCL_LOADEXCEPTQ
-#include <exceptq.h>
 #endif
 
 #include "nsXULAppAPI.h"
@@ -607,31 +603,8 @@ InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
   return rv;
 }
 
-#if defined(XP_OS2)
-// Stack-based exceptq handler installation wrapper whose only function is to automatically
-// uninstall the handler when it leaves the scope (e.g. upon early return from a function)
-class ScopedExceptqLoader
-{
-public:
-  ScopedExceptqLoader(const char *mode = NULL, const char *appInfoString = NULL)
-  {
-    LoadExceptq(&xcptRegRec, mode, appInfoString);
-  }
-  ~ScopedExceptqLoader()
-  {
-    UninstallExceptq(&xcptRegRec);
-  }
-private:
-  EXCEPTIONREGISTRATIONRECORD xcptRegRec;
-};
-#endif
-
 int main(int argc, char* argv[])
 {
-#if defined(XP_OS2)
-  ScopedExceptqLoader exceptq;
-#endif
-
 #ifdef DEBUG_delay_start_metro
   Sleep(5000);
 #endif

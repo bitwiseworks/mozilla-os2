@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 // exceptq trap file generator
-#include <string.h>
 #define INCL_BASE
 #include <os2.h>
 #define INCL_LIBLOADEXCEPTQ
@@ -13,15 +12,22 @@
 
 #include "base/logging.h"
 
+#include "private/pprthred.h"
+
 namespace {
 
 void ThreadFunc(void* closure) {
   EXCEPTIONREGISTRATIONRECORD exceptqreg;
   LibLoadExceptq(&exceptqreg);
 
+  EXCEPTIONREGISTRATIONRECORD excpreg;
+  PR_OS2_SetFloatExcpHandler(&excpreg);
+
   PlatformThread::Delegate* delegate =
       static_cast<PlatformThread::Delegate*>(closure);
   delegate->ThreadMain();
+
+  PR_OS2_UnsetFloatExcpHandler(&excpreg);
 
   UninstallExceptq(&exceptqreg);
 }
