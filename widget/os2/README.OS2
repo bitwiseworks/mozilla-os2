@@ -91,8 +91,10 @@
       respectively. If you use RPM/YUM, just run:
       'yum install pthread mmap' from the command line.
 
-6. INSTALL 'gcc473.dll' and 'stdcpp.dll' from
+6. INSTALL 'gcc473.dll' and 'stdcpp6.dll' from
       http://rpm.netlabs.org/release/00/zip/gcc-4_7_3_1-1_oc00.zip.
+      If you use WarpIn, you may install a WPI from
+      ftp.netlabs.org/pub/gcc/gcc4core-1_2_2.wpi.
       If you use RPM/YUM, just run:
       'yum install libgcc473 libstdc++' from the command line.
 
