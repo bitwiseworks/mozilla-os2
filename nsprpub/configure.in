@@ -2502,10 +2502,15 @@ tools are selected during the Xcode/Developer Tools installation.])
     DSO_CFLAGS=
     DSO_LDOPTS='-Zdll'
     LDFLAGS="$LDFLAGS -Zomf -Zmap"
+    if test "$EMXOMFLD_TYPE" = "WLINK" -o "$EMXOMFLD_TYPE" = "wlink"; then
+      LDFLAGS="$LDFLAGS -Zlinker 'DISABLE 1121'"
+    fi
     _OPTIMIZE_FLAGS="-O2"
     _DEBUG_FLAGS="-fno-inline"
     if test -n "$MOZ_OPTIMIZE"; then
-      DSO_LDOPTS="$DSO_LDOPTS -Zlinker /EXEPACK:2 -Zlinker /PACKCODE -Zlinker /PACKDATA"
+      if test "$EMXOMFLD_TYPE" != "WLINK" -a "$EMXOMFLD_TYPE" != "wlink"; then
+        DSO_LDOPTS="$DSO_LDOPTS -Zlinker /EXEPACK:2 -Zlinker /PACKCODE -Zlinker /PACKDATA"
+      fi
     fi
     IMPLIB='emximp -o'
     FILTER='emxexp -o'
@@ -2711,12 +2716,8 @@ echo "
             pthread_join(t, 0);
         }
         return 0;
-    }" > dummy.c ;
-    echo "${CC-cc} -o dummy${ac_exeext} dummy.c $CFLAGS $CPPFLAGS -l[$1] $LDFLAGS $LIBS" 1>&5;
-    ${CC-cc} -o dummy${ac_exeext} dummy.c $CFLAGS $CPPFLAGS -l[$1] $LDFLAGS $LIBS 2>&5;
-    _res=$? ;
-    rm -f dummy.c dummy${ac_exeext} ;
-    if test "$_res" = "0"; then
+    }" > conftest.${ac_ext} ;
+    if AC_TRY_COMMAND(${CC-cc} -o conftest${ac_exeext} conftest.${ac_ext} $CFLAGS $CPPFLAGS -l[$1] $LDFLAGS $LIBS); then
         AC_MSG_RESULT([yes])
         [$2]
     else
