@@ -99,12 +99,8 @@ echo "
             pthread_join(t, 0);
         }
         exit(0);
-    }" > dummy.c ;
-    echo "${CC-cc} -o dummy${ac_exeext} dummy.c $CFLAGS $CPPFLAGS -l[$1] $LDFLAGS $LIBS" 1>&5;
-    ${CC-cc} -o dummy${ac_exeext} dummy.c $CFLAGS $CPPFLAGS -l[$1] $LDFLAGS $LIBS 2>&5;
-    _res=$? ;
-    rm -f dummy.c dummy${ac_exeext} ;
-    if test "$_res" = "0"; then
+    }" > conftest.${ac_ext} ;
+    if AC_TRY_COMMAND(${CC-cc} -o conftest${ac_exeext} conftest.${ac_ext} $CFLAGS $CPPFLAGS -l[$1] $LDFLAGS $LIBS); then
         AC_MSG_RESULT([yes])
         [$2]
     else
