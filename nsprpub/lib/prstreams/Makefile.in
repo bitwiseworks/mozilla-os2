@@ -138,11 +138,15 @@ endif
 export:: $(TARGETS) $(HEADERS)
 	$(INSTALL) -m 444 $(HEADERS) $(dist_includedir)
 	$(INSTALL) -m 444 $(TARGETS) $(dist_libdir)
-ifeq ($(OS_ARCH),OS2)
-	$(INSTALL) -m 444 $(TARGETS) $(dist_bindir)
-endif
-ifeq ($(OS_ARCH),HP-UX)
+
 ifdef SHARED_LIBRARY
+ifeq ($(OS_ARCH),HP-UX)
 	$(INSTALL) -m 755 $(SHARED_LIBRARY) $(dist_libdir)
+	$(INSTALL) -m 755 $(SHARED_LIBRARY) $(dist_bindir)
+else
+	$(INSTALL) -m 444 $(SHARED_LIBRARY) $(dist_bindir)
+ifdef SHARED_LIBRARY_XQS
+	$(INSTALL) -m 444 $(SHARED_LIBRARY_XQS) $(dist_bindir)
+endif
 endif
 endif

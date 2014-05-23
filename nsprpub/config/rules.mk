@@ -92,6 +92,10 @@ IMPORT_LIBRARY	= $(OBJDIR)/lib$(LIBRARY_NAME)$(LIBRARY_VERSION).$(LIB_SUFFIX)
 SHARED_LIB_PDB	= $(OBJDIR)/lib$(LIBRARY_NAME)$(LIBRARY_VERSION).pdb
 endif
 
+ifeq ($(OS_ARCH),OS2)
+SHARED_LIBRARY_XQS	= $(SHARED_LIBRARY:.$(DLL_SUFFIX)=.xqs)
+endif
+
 else
 
 LIBRARY		= $(OBJDIR)/lib$(LIBRARY_NAME)$(LIBRARY_VERSION).$(LIB_SUFFIX)
@@ -116,20 +120,12 @@ TARGETS		+= $(SHARED_LIB_PDB)
 endif
 endif
 endif
+ifeq ($(OS_ARCH),OS2)
+TARGETS		+= $(SHARED_LIBRARY_XQS)
+endif
 else
 TARGETS		= $(LIBRARY) $(SHARED_LIBRARY)
 endif
-endif
-
-ifeq ($(OS_ARCH),OS2)
-GENERATE_SYMFILE = \
-	if test -f $(basename $(1)).map ; then \
-		mapxqs $(basename $(1)).map -o $(basename $(1)).xqs ; \
-	fi
-PROCESS_SYMFILE = \
-	if test -f $(basename $(1)).xqs ; then \
-		$(2) $(basename $(1)).xqs $(3) ; \
-	fi
 endif
 
 #
@@ -189,14 +185,12 @@ distclean::
 install:: $(RELEASE_BINS) $(RELEASE_HEADERS) $(RELEASE_LIBS)
 ifdef RELEASE_BINS
 	$(NSINSTALL) -t -m 0755 $(RELEASE_BINS) $(DESTDIR)$(bindir)
-	$(call PROCESS_SYMFILE,$(RELEASE_BINS),$(NSINSTALL) -t -m 0755,$(DESTDIR)$(bindir))
 endif
 ifdef RELEASE_HEADERS
 	$(NSINSTALL) -t -m 0644 $(RELEASE_HEADERS) $(DESTDIR)$(includedir)/$(include_subdir)
 endif
 ifdef RELEASE_LIBS
 	$(NSINSTALL) -t -m 0755 $(RELEASE_LIBS) $(DESTDIR)$(libdir)/$(lib_subdir)
-	$(call PROCESS_SYMFILE,$(RELEASE_LIBS),$(NSINSTALL) -t -m 0755,$(lib_subdir))
 endif
 	+$(LOOP_OVER_DIRS)
 
@@ -216,7 +210,6 @@ ifdef RELEASE_BINS
 		true; \
 	fi
 	cp $(RELEASE_BINS) $(RELEASE_BIN_DIR)
-	$(call PROCESS_SYMFILE,$(RELEASE_BINS),cp,$(RELEASE_BIN_DIR))
 endif
 ifdef RELEASE_LIBS
 	@echo "Copying libraries to release directory"
@@ -233,7 +226,6 @@ ifdef RELEASE_LIBS
 		true; \
 	fi
 	cp $(RELEASE_LIBS) $(RELEASE_LIBS_DEST)
-	$(call PROCESS_SYMFILE,$(RELEASE_LIBS),cp,$(RELEASE_LIBS_DEST))
 endif
 ifdef RELEASE_HEADERS
 	@echo "Copying header files to release directory"
@@ -286,9 +278,14 @@ endif	# MOZ_PROFILE_GENERATE
 else	# WINNT && !GCC
 	$(CC) -o $@ $(CFLAGS) $(OBJS) $(LDFLAGS) $(WRAP_LDFLAGS)
 endif	# WINNT && !GCC
-	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
+endif
+
+ifeq ($(OS_ARCH),OS2)
+PROGRAM_XQS	:= $(PROGRAM:.exe=.xqs)
+$(PROGRAM_XQS): $(PROGRAM)
+	mapxqs $(basename $^).map -o $@
 endif
 
 $(LIBRARY): $(OBJS)
@@ -301,6 +298,8 @@ ifeq ($(OS_TARGET), OS2)
 $(IMPORT_LIBRARY): $(MAPFILE)
 	rm -f $@
 	$(IMPLIB) $@ $(MAPFILE)
+$(SHARED_LIBRARY_XQS): $(SHARED_LIBRARY)
+	mapxqs $(basename $^).map -o $@
 else
 ifeq (,$(filter-out WIN95 WINCE WINMO,$(OS_TARGET)))
 # PDBs and import libraries need to depend on the shared library to
@@ -341,7 +340,6 @@ else	# WINNT && !GCC
 	$(MKSHLIB) $(OBJS) $(RES) $(LDFLAGS) $(WRAP_LDFLAGS) $(EXTRA_LIBS)
 endif	# WINNT && !GCC
 endif	# AIX 4.1
-	$(call GENERATE_SYMFILE,$@)
 ifdef ENABLE_STRIP
 	$(STRIP) $@
 endif

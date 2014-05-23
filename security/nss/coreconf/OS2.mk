@@ -144,7 +144,7 @@ endif
 # override the TARGETS defined in ruleset.mk, adding IMPORT_LIBRARY
 #
 ifndef TARGETS
-    TARGETS = $(LIBRARY) $(SHARED_LIBRARY) $(IMPORT_LIBRARY) $(PROGRAM)
+    TARGETS = $(LIBRARY) $(SHARED_LIBRARY) $(SHARED_LIBRARY_XQS) $(IMPORT_LIBRARY) $(PROGRAM) $(PROGRAM_XQS)
 endif
 
 
@@ -153,11 +153,5 @@ ifdef LIBRARY_NAME
 endif
 
 
-GENERATE_SYMFILE = \
-	if test -f $(basename $(1)).map ; then \
-		mapxqs $(basename $(1)).map -o $(basename $(1)).xqs ; \
-	fi
-PROCESS_SYMFILE = \
-	if test -f $(basename $(1)).xqs ; then \
-		$(2) $(basename $(1)).xqs $(3) ; \
-	fi
+SHARED_LIBRARY_XQS = $(SHARED_LIBRARY:.$(DLL_SUFFIX)=.xqs)
+PROGRAM_XQS = $(PROGRAM:.$(PROG_SUFFIX)=.xqs)

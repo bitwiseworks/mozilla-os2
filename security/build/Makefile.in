@@ -350,6 +350,9 @@ endif # MOZ_FOLD_LIBS
 
 # Filter-out $(LIBRARY_NAME) because it's already handled in config/rules.mk.
 NSS_DIST_DLL_FILES := $(addprefix $(DIST)/lib/$(DLL_PREFIX),$(addsuffix $(DLL_SUFFIX),$(filter-out $(LIBRARY_NAME),$(NSS_DLLS)) $(NSS_EXTRA_DLLS)))
+ifeq (OS2,$(OS_TARGET))
+NSS_DIST_DLL_FILES += $(addprefix $(DIST)/lib/$(DLL_PREFIX),$(addsuffix .xqs,$(filter-out $(LIBRARY_NAME),$(NSS_DLLS)) $(NSS_EXTRA_DLLS)))
+endif
 NSS_DIST_DLL_DEST := $(DIST)/bin
 INSTALL_TARGETS += NSS_DIST_DLL
 

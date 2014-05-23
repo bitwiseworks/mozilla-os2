@@ -78,11 +78,13 @@ ifdef LIBRARY
 endif
 ifdef SHARED_LIBRARY
 	$(INSTALL) -m 775 $(SHARED_LIBRARY) $(SOURCE_LIB_DIR)
-	$(call PROCESS_SYMFILE,$(SHARED_LIBRARY),$(INSTALL) -m 775,$(SOURCE_LIB_DIR))
 ifdef MOZ_DEBUG_SYMBOLS
 ifeq (,$(filter-out _WIN%,$(NS_USE_GCC)_$(OS_TARGET)))
 	$(INSTALL) -m 644 $(SHARED_LIBRARY:$(DLL_SUFFIX)=pdb) $(SOURCE_LIB_DIR)
 endif
+endif
+ifdef SHARED_LIBRARY_XQS
+	$(INSTALL) -m 644 $(SHARED_LIBRARY_XQS) $(SOURCE_LIB_DIR)
 endif
 endif
 ifdef IMPORT_LIBRARY
@@ -90,16 +92,17 @@ ifdef IMPORT_LIBRARY
 endif
 ifdef PROGRAM
 	$(INSTALL) -m 775 $(PROGRAM) $(SOURCE_BIN_DIR)
-	$(call PROCESS_SYMFILE,$(PROGRAM),$(INSTALL) -m 775,$(SOURCE_BIN_DIR))
 ifdef MOZ_DEBUG_SYMBOLS
 ifeq (,$(filter-out _WIN%,$(NS_USE_GCC)_$(OS_TARGET)))
 	$(INSTALL) -m 644 $(PROGRAM:$(PROG_SUFFIX)=.pdb) $(SOURCE_BIN_DIR)
 endif
 endif
+ifdef PROGRAM_XQS
+	$(INSTALL) -m 644 $(PROGRAM_XQS) $(SOURCE_BIN_DIR)
+endif
 endif
 ifdef PROGRAMS
 	$(INSTALL) -m 775 $(PROGRAMS) $(SOURCE_BIN_DIR)
-	$(call PROCESS_SYMFILE,$(PROGRAMS),$(INSTALL) -m 775,$(SOURCE_BIN_DIR))
 endif
 	+$(LOOP_OVER_DIRS)
 
@@ -253,7 +256,11 @@ ifdef MT
 endif	# MSVC with manifest tool
 else
 	$(MKPROG) -o $@ $(CFLAGS) $(OBJS) $(LDFLAGS) $(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS)
-	$(call GENERATE_SYMFILE,$@)
+endif
+
+ifeq ($(OS_TARGET),OS2)
+$(PROGRAM_XQS): $(PROGRAM)
+	mapxqs $(basename $^).map -o $@
 endif
 
 get_objs:
@@ -275,6 +282,8 @@ $(IMPORT_LIBRARY): $(MAPFILE)
 	rm -f $@
 	$(IMPLIB) $@ $<
 	$(RANLIB) $@
+$(SHARED_LIBRARY_XQS): $(SHARED_LIBRARY)
+	mapxqs $(basename $^).map -o $@
 endif
 
 ifdef SHARED_LIBRARY_LIBS
@@ -312,7 +321,6 @@ endif
 else
 	$(MKSHLIB) -o $@ $(OBJS) $(SUB_SHLOBJS) $(LD_LIBS) $(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS)
 	chmod +x $@
-	$(call GENERATE_SYMFILE,$@)
 endif
 endif
 

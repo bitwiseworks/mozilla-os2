@@ -51,7 +51,6 @@ ifdef IS_COMPONENT
 ifdef SHARED_LIBRARY_XQS
 	$(INSTALL) $(IFLAGS2) $(SHARED_LIBRARY_XQS) $(FINAL_TARGET)/components
 endif
-	$(call PROCESS_SYMFILE,$(SHARED_LIBRARY),$(INSTALL) $(IFLAGS2),$(FINAL_TARGET)/components)
 	$(ELF_DYNSTR_GC) $(FINAL_TARGET)/components/$(SHARED_LIBRARY)
 ifndef NO_COMPONENTS_MANIFEST
 	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/chrome.manifest "manifest components/components.manifest"
