@@ -253,7 +253,6 @@ endif
 
 ifeq ($(OS_ARCH),OS2)
 DEF_FILE			:= $(SHARED_LIBRARY:.dll=.def)
-SHARED_LIBRARY_XQS	:= $(SHARED_LIBRARY:.dll=.xqs)
 endif
 
 EMBED_MANIFEST_AT=2
@@ -333,6 +332,22 @@ endif # !GNU_CC
 
 endif # WINNT
 
+DEBUG_SYMFILE =
+DEBUG_SYMFILE_GEN =
+
+ifeq ($(OS_ARCH),OS2)
+ifdef MOZ_DEBUG_SYMBOLS
+ifneq ($(filter WLINK wlink,$(EMXOMFLD_TYPE)),)
+DEBUG_SYMFILE = $(basename $(1)).dbg
+OS_LDFLAGS += -Zlinker 'option symfile=$(basename $(@)).dbg'
+endif
+endif
+ifndef DEBUG_SYMFILE
+DEBUG_SYMFILE = $(basename $(1)).xqs
+DEBUG_SYMFILE_GEN = mapxqs $(basename $(1)).map -o $(basename $(1)).xqs
+endif
+endif # OS2
+
 ifeq ($(SOLARIS_SUNPRO_CXX),1)
 ifeq (86,$(findstring 86,$(OS_TEST)))
 OS_LDFLAGS += -M $(topsrcdir)/config/solaris_ia32.map
@@ -393,7 +408,7 @@ ifeq ($(OS_ARCH),OS2)
 ALL_TRASH += \
 	$(foreach f, \
 		$(PROGRAM) $(SIMPLE_PROGRAMS) $(SHARED_LIBRARY) $(HOST_PROGRAM) $(HOST_SIMPLE_PROGRAMS), \
-		$(basename $f).map $(basename $f).xqs)
+		$(basename $f).map $(call DEBUG_SYMFILE,$f))
 endif
 
 ifdef QTDIR
@@ -895,11 +910,12 @@ endif
 ifdef MOZ_POST_PROGRAM_COMMAND
 	$(MOZ_POST_PROGRAM_COMMAND) $@
 endif
+ifdef DEBUG_SYMFILE_GEN
+	$(call DEBUG_SYMFILE_GEN,$@)
+endif
 
-ifeq ($(OS_ARCH),OS2)
-PROGRAM_XQS	:= $(PROGRAM:.exe=.xqs)
-$(PROGRAM_XQS): $(PROGRAM)
-	mapxqs $(basename $^).map -o $@
+ifdef DEBUG_SYMFILE
+$(call DEBUG_SYMFILE,$(PROGRAM)): $(PROGRAM)
 endif
 
 $(HOST_PROGRAM): $(HOST_PROGOBJS) $(HOST_LIBS_DEPS) $(HOST_EXTRA_DEPS) $(GLOBAL_DEPS)
@@ -955,6 +971,13 @@ endif
 ifdef MOZ_POST_PROGRAM_COMMAND
 	$(MOZ_POST_PROGRAM_COMMAND) $@
 endif
+ifdef DEBUG_SYMFILE_GEN
+	$(call DEBUG_SYMFILE_GEN,$@)
+endif
+
+ifdef DEBUG_SYMFILE
+$(foreach f,$(SIMPLE_PROGRAMS),$(call DEBUG_SYMFILE,$f): $f)
+endif
 
 $(HOST_SIMPLE_PROGRAMS): host_%$(HOST_BIN_SUFFIX): host_%.$(OBJ_SUFFIX) $(HOST_LIBS_DEPS) $(HOST_EXTRA_DEPS) $(GLOBAL_DEPS)
 ifeq (WINNT_,$(HOST_OS_ARCH)_$(GNU_CC))
@@ -1008,9 +1031,6 @@ $(IMPORT_LIBRARY): $(SHARED_LIBRARY)
 	$(RM) $@
 	$(IMPLIB) $@ $^
 	$(RANLIB) $@
-
-$(SHARED_LIBRARY_XQS): $(SHARED_LIBRARY)
-	mapxqs $(basename $^).map -o $@
 endif # OS/2
 
 $(HOST_LIBRARY): $(HOST_OBJS) Makefile
@@ -1071,6 +1091,13 @@ ifdef ENABLE_STRIP
 endif
 ifdef MOZ_POST_DSO_LIB_COMMAND
 	$(MOZ_POST_DSO_LIB_COMMAND) $@
+endif
+ifdef DEBUG_SYMFILE_GEN
+	$(call DEBUG_SYMFILE_GEN,$@)
+endif
+
+ifdef DEBUG_SYMFILE
+$(call DEBUG_SYMFILE,$(SHARED_LIBRARY)): $(SHARED_LIBRARY)
 endif
 
 ifeq ($(SOLARIS_SUNPRO_CC),1)

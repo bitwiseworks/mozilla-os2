@@ -147,8 +147,9 @@ ifeq ($(OS_ARCH),HP-UX)
 	$(INSTALL) -m 755 $(SHARED_LIBRARY) $(dist_bindir)
 else
 	$(INSTALL) -m 444 $(SHARED_LIBRARY) $(dist_bindir)
-ifdef SHARED_LIBRARY_XQS
-	$(INSTALL) -m 444 $(SHARED_LIBRARY_XQS) $(dist_bindir)
+ifdef DEBUG_SYMFILE
+	$(INSTALL) -m 444 $(call DEBUG_SYMFILE,$(SHARED_LIBRARY)) $(dist_libdir)
+	$(INSTALL) -m 444 $(call DEBUG_SYMFILE,$(SHARED_LIBRARY)) $(dist_bindir)
 endif
 endif
 endif

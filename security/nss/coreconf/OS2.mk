@@ -63,26 +63,28 @@ PROCESS_MAP_FILE = \
 
 endif   #NO_SHARED_LIB
 
-OS_CFLAGS          = -Wall -Wno-unused -Wpointer-arith -Wcast-align -Wno-switch -Zomf -DDEBUG -DTRACING -g
+OS_CFLAGS          = -Wall -Wno-unused -Wpointer-arith -Wcast-align -Wno-switch -Zomf
 
 ifdef BUILD_OPT
 ifeq (11,$(ALLOW_OPT_CODE_SIZE)$(OPT_CODE_SIZE))
-	OPTIMIZER += -Os -s
+	OPTIMIZER += -Os
 else
-	OPTIMIZER += -O2 -s
+	OPTIMIZER += -O2
 endif
 DEFINES 		+= -UDEBUG -U_DEBUG -DNDEBUG
-DLLFLAGS		= -DLL -OUT:$@ -MAP:$(@:.dll=.map) $(HIGHMEM_LDFLAG)
-EXEFLAGS    		= -PMTYPE:VIO -OUT:$@ -MAP:$(@:.exe=.map) -nologo -NOE $(HIGHMEM_LDFLAG)
-OBJDIR_TAG 		= _OPT
-else
-#OPTIMIZER		= -O+ -Oi
+else    # BUILD_OPT
 DEFINES 		+= -DDEBUG -D_DEBUG -DDEBUGPRINTS     #HCT Need += to avoid overidding manifest.mn 
-DLLFLAGS		= -DEBUG -DLL -OUT:$@ -MAP:$(@:.dll=.map) $(HIGHMEM_LDFLAG)
-EXEFLAGS    		= -DEBUG -PMTYPE:VIO -OUT:$@ -MAP:$(@:.exe=.map) -nologo -NOE $(HIGHMEM_LDFLAG)
-OBJDIR_TAG 		= _DBG
-LDFLAGS 		= -DEBUG $(HIGHMEM_LDFLAG)
 endif   # BUILD_OPT
+
+LDFLAGS 		= -Zomf -Zmap $(HIGHMEM_LDFLAG)
+
+ifdef MOZ_DEBUG_SYMBOLS
+DSO_LDOPTS      += -g
+LDFLAGS         += -g
+else
+DSO_LDOPTS      += -s
+LDFLAGS         += -s
+endif
 
 # OS/2 use nsinstall that is included in the toolkit.
 # since we do not wish to support and maintain 3 version of nsinstall in mozilla, nspr and nss
@@ -144,7 +146,7 @@ endif
 # override the TARGETS defined in ruleset.mk, adding IMPORT_LIBRARY
 #
 ifndef TARGETS
-    TARGETS = $(LIBRARY) $(SHARED_LIBRARY) $(SHARED_LIBRARY_XQS) $(IMPORT_LIBRARY) $(PROGRAM) $(PROGRAM_XQS)
+    TARGETS = $(LIBRARY) $(SHARED_LIBRARY) $(IMPORT_LIBRARY) $(PROGRAM)
 endif
 
 
@@ -153,5 +155,17 @@ ifdef LIBRARY_NAME
 endif
 
 
-SHARED_LIBRARY_XQS = $(SHARED_LIBRARY:.$(DLL_SUFFIX)=.xqs)
-PROGRAM_XQS = $(PROGRAM:.$(PROG_SUFFIX)=.xqs)
+DEBUG_SYMFILE =
+DEBUG_SYMFILE_GEN =
+
+ifdef MOZ_DEBUG_SYMBOLS
+ifneq ($(filter WLINK wlink,$(EMXOMFLD_TYPE)),)
+DEBUG_SYMFILE = $(basename $(1)).dbg
+DSO_LDOPTS += -Zlinker 'option symfile=$(basename $(@)).dbg'
+LDFLAGS += -Zlinker 'option symfile=$(basename $(@)).dbg'
+endif
+endif
+ifndef DEBUG_SYMFILE
+DEBUG_SYMFILE = $(basename $(1)).xqs
+DEBUG_SYMFILE_GEN = mapxqs $(basename $(1)).map -o $(basename $(1)).xqs
+endif
