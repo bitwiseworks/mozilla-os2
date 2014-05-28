@@ -51,11 +51,10 @@ using namespace mozilla;
 
 //---------------------------------------------------------------------------
 
-#ifndef DEBUG
-#define DEBUG
-#endif
+#ifdef DEBUG
 #define debug_thebes_print
 #define debug_enterexit
+#endif
 
 #ifdef debug_enterexit
   #define DBGN()    printf("enter %s\n", __FUNCTION__)
