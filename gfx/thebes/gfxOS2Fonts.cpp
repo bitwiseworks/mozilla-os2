@@ -719,6 +719,14 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
         if (ch == 0 || platform->noFontWithChar(ch)) {
             // null bytes or missing characters cannot be displayed
             aTextRun->SetMissingGlyph(utf16Offset, ch, font0);
+        } else if (ch == '\n') {
+            // tab and newline are not to be displayed as hexboxes,
+            // but do need to be recorded in the textrun
+            aTextRun->SetIsNewline(utf16Offset);
+        } else if (ch == '\t') {
+            aTextRun->SetIsTab(utf16Offset);
+        } else if (IsInvalidChar(PRUnichar(ch))) {
+            // invalid chars are left as zero-width/invisible
         } else {
             // Try to get a glyph from all fonts available to us.
             // Once we found it in one of the fonts we quit the loop early.
@@ -744,7 +752,6 @@ void gfxOS2FontGroup::CreateGlyphRunsFT(gfxTextRun *aTextRun, const uint8_t *aUT
                     continue; // next font
                 }
 
-                NS_ASSERTION(!IsInvalidChar(PRUnichar(ch)), "Invalid char detected");
                 FT_UInt gid = FT_Get_Char_Index(face, ch); // find the glyph id
 
                 if (gid == 0 && i == lastFont) {
