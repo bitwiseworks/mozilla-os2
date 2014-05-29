@@ -254,6 +254,45 @@ _PR_MD_READ(PRFileDesc *fd, void *buf, PRInt32 len)
     return (PRInt32)bytes;
 }
 
+#if defined(MOZ_OS2_HIGH_MEMORY)
+/* DosWrite can't cope with high memory and there is no Safe wrapper for it yet, provide one. */
+ULONG SafeDosWrite(HFILE hFile, CPVOID pBuffer, ULONG ulLength, PULONG pulBytesWritten)
+{
+    APIRET arc;
+    PVOID safe_pBuffer = NULL;
+    ULONG safe_pulBytesWritten = pulBytesWritten ? *pulBytesWritten : 0;
+
+    if (((unsigned)pBuffer) >= 512*1024*1024)
+    {
+        ULONG hType, hFlags;
+        arc = DosQueryHType(hFile, &hType, &hFlags);
+        if (arc != NO_ERROR)
+            return arc;
+
+        if (hType == HANDTYPE_DEVICE)
+        {
+            /* This is a KBD/VIO or another character device, most likely it can't work
+             * with high memory. Transfer the buffer to low area. */
+            safe_pBuffer = _lmalloc(ulLength);
+            if (safe_pBuffer == NULL)
+                return ERROR_NOT_ENOUGH_MEMORY;
+            memcpy(safe_pBuffer, pBuffer, ulLength);
+        }
+    }
+
+    arc = DosWrite(hFile, safe_pBuffer ? safe_pBuffer : pBuffer, ulLength, &safe_pulBytesWritten);
+
+    if (pulBytesWritten)
+        *pulBytesWritten = safe_pulBytesWritten;
+
+    if (safe_pBuffer)
+        free(safe_pBuffer);
+
+    return arc;
+}
+#define DosWrite SafeDosWrite
+#endif
+
 PRInt32
 _PR_MD_WRITE(PRFileDesc *fd, const void *buf, PRInt32 len)
 {
