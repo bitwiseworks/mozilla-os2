@@ -744,6 +744,10 @@ int main(int argc, char **argv)
 
 
     program_name = strrchr(argv[0], '/');
+#if defined(XP_OS2) || defined(XP_WIN)
+    if (!program_name)
+        program_name = strrchr(argv[0], '\\');
+#endif
     program_name = program_name ? (program_name + 1) : argv[0];
     optstate = PL_CreateOptState (argc, argv, "i:o:f:Fd:hH?k:p:P:vVs:");
     if (optstate == NULL) {
