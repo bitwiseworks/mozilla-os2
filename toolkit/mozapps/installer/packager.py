@@ -72,11 +72,19 @@ class ToolLauncher(object):
         if not extra_linker_path:
             extra_linker_path = os.path.join(self.tooldir, 'bin')
         env = dict(os.environ)
-        for p in ['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH']:
-            if p in env:
-                env[p] = extra_linker_path + ':' + env[p]
-            else:
-                env[p] = extra_linker_path
+        if os.name == 'os2':
+            # extra_linker_path has to go to the parent environment since
+            # Popen can't handle this special case so far (in Python 2.7.6)
+            old_beginlibpath = os.environ['BEGINLIBPATH']
+            old_libpathstrict = os.environ['LIBPATHSTRICT']
+            os.environ['BEGINLIBPATH'] = extra_linker_path + ';' + old_beginlibpath
+            os.environ['LIBPATHSTRICT'] = 'T'
+        else:
+            for p in ['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH']:
+                if p in env:
+                    env[p] = extra_linker_path + ':' + env[p]
+                else:
+                    env[p] = extra_linker_path
         for e in extra_env:
             env[e] = extra_env[e]
 
@@ -88,7 +96,11 @@ class ToolLauncher(object):
 
         print >>errors.out, 'Executing', ' '.join(cmd)
         errors.out.flush()
-        return subprocess.call(cmd, env=env)
+        result = subprocess.call(cmd, env=env)
+        if os.name == 'os2':
+            os.environ['BEGINLIBPATH'] = old_beginlibpath
+            os.environ['LIBPATHSTRICT'] = old_libpathstrict
+        return result
 
     def can_launch(self):
         return self.tooldir is not None
@@ -135,6 +147,9 @@ def precompile_cache(formatter, source_path, gre_path, app_path):
     gre_path = os.path.join(source_path, gre_path)
 
     fd, cache = mkstemp('.zip')
+    if os.name == 'os2':
+        # NS_NewLocalFile is strict about slashes
+        cache = cache.replace('/', '\\')
     os.close(fd)
     os.remove(cache)
     try:
