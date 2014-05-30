@@ -736,8 +736,6 @@ bin/libfreebl_32int64_3.so
 @BINPATH@/MozSounds.cmd
 @BINPATH@/README.OS2
 @BINPATH@/CHANGES.OS2
-@BINPATH@/*.xqs
-@BINPATH@/components/*.xqs
 #endif
 
 #ifdef MOZ_WEBAPP_RUNTIME

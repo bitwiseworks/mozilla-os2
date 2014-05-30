@@ -604,12 +604,27 @@ ifneq (android,$(MOZ_WIDGET_TOOLKIT))
 OPTIMIZEJARS = 1
 endif
 
+ifeq ($(OS_ARCH),OS2)
+package-symbols: # $(PACKAGE_BASE_DIR)/$(PACKAGE)
+	@echo gathering symbols
+	$(RM) "$(DIST)/$(STAGEPATH)$(SYMBOL_ARCHIVE_BASENAME).zip"
+	$(foreach f,\
+		$(shell cd $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR) && find -name "*.exe" -or -name "*.dll"),\
+		cp -pf $(DIST)/bin/$(call DEBUG_SYMFILE,$f) $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)/$(dir $f) &&)
+	@echo packing symbols
+	cd $(DIST)/$(STAGEPATH) && \
+		$(ZIP) -r9D "$(SYMBOL_ARCHIVE_BASENAME).zip" $(MOZ_PKG_DIR) -i "$(call DEBUG_SYMFILE,*)"
+endif
+
 export NO_PKG_FILES USE_ELF_HACK ELF_HACK_FLAGS
 
 # Override the value of OMNIJAR_NAME from config.status with the value
 # set earlier in this file.
 
 stage-package: $(MOZ_PKG_MANIFEST)
+ifeq ($(OS_ARCH),OS2)
+	@rm -rf $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)
+endif
 	@rm -rf $(DIST)/$(PKG_PATH)$(PKG_BASENAME).tar $(DIST)/$(PKG_PATH)$(PKG_BASENAME).dmg $@ $(EXCLUDE_LIST)
 	OMNIJAR_NAME=$(OMNIJAR_NAME) \
 	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/packager.py $(DEFINES) \
