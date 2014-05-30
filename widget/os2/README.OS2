@@ -467,8 +467,12 @@ posted to other forums may not be seen by the developers.
   Cross-platform problems are usually listed in the release notes of each
   milestone release.
 
-  Other known problems can be found by following the link "Current Open
-  Warpzilla Bugs" on the OS/2 Mozilla page <http://www.mozilla.org/ports/os2/>.
+  Other known problems can be found by following this link:
+  <https://github.com/bitwiseworks/mozilla-os2/issues>.
+
+  The old list of bugs (for historical purposes, as it is mostly outdated)
+  can be found by following the link "Current Open Warpzilla Bugs" on the
+  OS/2 Mozilla page <http://www.mozilla.org/ports/os2/>.
 
 
 ===============================================================================

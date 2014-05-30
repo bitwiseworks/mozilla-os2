@@ -4,6 +4,18 @@ in the Mozilla product series from release to release.
 
 CHANGES
 
+
+Firefox 24.3.0 Beta (2014-05-30)
+
+   - Update Firefox to version 24.3.0 ESR.
+
+   - Fix SIGFPE crashes in JavaScript module.
+
+   - Use newer GCC 4.7.3 compiler (requires GCC 4.7.3 runtime)
+
+   - Provide full debug info (in spearate package) for better error finding.
+
+
 Firefox 17.0.5 Beta 2 (2014-02-19)
 
   - Fix crash in Print dialog when no printers installed.
@@ -16,12 +28,14 @@ Firefox 17.0.5 Beta 2 (2014-02-19)
 
   - Fix distorted application icon.
 
+
 Firefox 17.0.5 Beta (2013-11-04)
 
   - First public release of Firefox 17 for OS/2.
 
   - Make new IPC code work on OS/2 (used by the Content Processes feature and
     others).
+
 
 Firefox 10.0.12 and below
 
