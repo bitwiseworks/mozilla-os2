@@ -158,6 +158,7 @@ endif
 DEBUG_SYMFILE =
 DEBUG_SYMFILE_GEN =
 
+ifndef MOZ_DEBUG
 ifdef MOZ_DEBUG_SYMBOLS
 ifneq ($(filter WLINK wlink,$(EMXOMFLD_TYPE)),)
 DEBUG_SYMFILE = $(basename $(1)).dbg
@@ -168,4 +169,5 @@ endif
 ifndef DEBUG_SYMFILE
 DEBUG_SYMFILE = $(basename $(1)).xqs
 DEBUG_SYMFILE_GEN = mapxqs $(basename $(1)).map -o $(basename $(1)).xqs
+endif
 endif
