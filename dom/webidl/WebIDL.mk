@@ -469,8 +469,6 @@ webidl_files += \
   $(NULL)
 endif
 
-# On OS/2, TestCodeGenBindings.cpp (at least) causes emxomf to fail with "Index too large"
-ifneq ($(OS_ARCH),OS2)
 ifdef ENABLE_TESTS
 test_webidl_files := \
   TestCodeGen.webidl \
@@ -480,9 +478,6 @@ test_webidl_files := \
   TestJSImplInheritanceGen.webidl \
   TestTypedef.webidl \
   $(NULL)
-else
-test_webidl_files := $(NULL)
-endif
 else
 test_webidl_files := $(NULL)
 endif

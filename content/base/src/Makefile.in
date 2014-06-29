@@ -71,9 +71,3 @@ DEFINES += -DHB_DONT_DEFINE_STDINT
 # gcc requires -msse2 for this file since it uses SSE2 intrinsics.  (See bug
 # 585538 comment 12.)
 nsTextFragmentSSE2.$(OBJ_SUFFIX): CXXFLAGS+=$(SSE2_FLAGS)
-
-# emxomf fails witn "Index too large" when compiling this with -g
-# (see Issue 24)
-ifeq ($(OS_ARCH),OS2)
-nsDocument.$(OBJ_SUFFIX): CXXFLAGS+=-s
-endif
