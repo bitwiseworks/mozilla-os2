@@ -77,8 +77,6 @@ class MUse;
 class MIRGraph;
 class MResumePoint;
 
-static inline bool isOSRLikeValue (MDefinition *def);
-
 // Represents a use of a node.
 class MUse : public TempObject, public InlineListNode<MUse>
 {
@@ -213,14 +211,16 @@ class AliasSet {
         FixedSlot         = 1 << 3, // A member of obj->fixedSlots().
         TypedArrayElement = 1 << 4, // A typed array element.
         DOMProperty       = 1 << 5, // A DOM property
-        Last              = DOMProperty,
+        TypedArrayLength  = 1 << 6, // A typed array's length
+        Last              = TypedArrayLength,
         Any               = Last | (Last - 1),
 
-        NumCategories     = 6,
+        NumCategories     = 7,
 
         // Indicates load or store.
         Store_            = 1 << 31
     };
+
     AliasSet(uint32_t flags)
       : flags_(flags)
     {
@@ -2157,6 +2157,9 @@ class MCreateThisWithProto
     // Although creation of |this| modifies global state, it is safely repeatable.
     AliasSet getAliasSet() const {
         return AliasSet::None();
+    }
+    bool congruentTo(MDefinition *ins) const {
+        return false;
     }
     TypePolicy *typePolicy() {
         return this;
@@ -4339,9 +4342,7 @@ class MTypedArrayLength
         return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
-        // The typed array |length| property is immutable, so there is no
-        // implicit dependency.
-        return AliasSet::None();
+        return AliasSet::Load(AliasSet::TypedArrayLength);
     }
 };
 
@@ -8265,17 +8266,6 @@ MInstruction *MDefinition::toInstruction()
 {
     JS_ASSERT(!isPhi());
     return (MInstruction *)this;
-}
-
-static inline bool isOSRLikeValue (MDefinition *def) {
-    if (def->isOsrValue())
-        return true;
-
-    if (def->isUnbox())
-        if (def->getOperand(0)->isOsrValue())
-            return true;
-
-    return false;
 }
 
 typedef Vector<MDefinition *, 8, IonAllocPolicy> MDefinitionVector;

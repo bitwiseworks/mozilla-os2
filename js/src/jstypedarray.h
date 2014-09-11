@@ -9,6 +9,7 @@
 
 #include "jsapi.h"
 #include "jsclass.h"
+#include "jsfriendapi.h"
 #include "jsobj.h"
 
 #include "gc/Barrier.h"
@@ -137,8 +138,26 @@ class ArrayBufferObject : public JSObject
     static bool saveArrayBufferList(JSCompartment *c, ArrayBufferVector &vector);
     static void restoreArrayBufferLists(ArrayBufferVector &vector);
 
-    static bool stealContents(JSContext *cx, JSObject *obj, void **contents,
-                              uint8_t **data);
+    bool hasStealableContents() const {
+        // Inline elements strictly adhere to the corresponding buffer.
+        if (!hasDynamicElements())
+            return false;
+
+        // asm.js buffer contents are transferred by copying, just like inline
+        // elements.
+        if (isAsmJSArrayBuffer())
+            return false;
+
+        // Neutered contents aren't transferrable because we want a neutered
+        // array's contents to be backed by zeroed memory equal in length to
+        // the original buffer contents.  Transferring these contents would
+        // allocate new ones based on the current byteLength, which is 0 for a
+        // neutered array -- not the original byteLength.
+        return !isNeutered();
+    }
+
+    static bool stealContents(JSContext *cx, JSObject *obj, NeuterDataDisposition changeData,
+                              void **contents, uint8_t **data);
 
     static inline void setElementsHeader(js::ObjectElements *header, uint32_t bytes);
     static inline uint32_t getElementsHeaderInitializedLength(const js::ObjectElements *header);
@@ -164,10 +183,17 @@ class ArrayBufferObject : public JSObject
      */
     inline bool hasData() const;
 
-    inline bool isAsmJSArrayBuffer() const;
+    bool isAsmJSArrayBuffer() const {
+        return getElementsHeader()->isAsmJSArrayBuffer();
+    }
+
     static bool prepareForAsmJS(JSContext *cx, Handle<ArrayBufferObject*> buffer);
     static void neuterAsmJSArrayBuffer(ArrayBufferObject &buffer);
     static void releaseAsmJSArrayBuffer(FreeOp *fop, JSObject *obj);
+
+    bool isNeutered() const {
+        return getElementsHeader()->isNeuteredBuffer();
+    }
 };
 
 /*
@@ -283,7 +309,7 @@ struct TypedArray : public BufferView {
   public:
     static bool isArrayIndex(JSObject *obj, jsid id, uint32_t *ip = NULL);
 
-    static void neuter(JSObject *tarray);
+    static void neuter(JSObject *view);
 
     static inline uint32_t slotWidth(int atype);
     static inline int slotWidth(JSObject *obj);
@@ -297,6 +323,9 @@ struct TypedArray : public BufferView {
     static int lengthOffset();
     static int dataOffset();
 };
+
+MOZ_STATIC_ASSERT(js::detail::TypedArrayLengthSlot == TypedArray::LENGTH_SLOT,
+                  "bad inlined constant in jsfriendapi.h");
 
 inline bool
 IsTypedArrayClass(const Class *clasp)
@@ -350,6 +379,10 @@ private:
     static Class protoClass;
 
     static inline bool is(const Value &v);
+
+    template <typename NativeType>
+    static uint8_t *
+    getDataPointer(JSContext *cx, Handle<DataViewObject*> obj, uint32_t offset);
 
     template<Value ValueGetter(DataViewObject &view)>
     static bool
@@ -434,8 +467,6 @@ private:
     inline void *dataPointer();
     inline bool hasBuffer() const;
     static JSObject *initClass(JSContext *cx);
-    static bool getDataPointer(JSContext *cx, Handle<DataViewObject*> obj,
-                               CallArgs args, size_t typeSize, uint8_t **data);
     template<typename NativeType>
     static bool read(JSContext *cx, Handle<DataViewObject*> obj,
                      CallArgs &args, NativeType *val, const char *method);

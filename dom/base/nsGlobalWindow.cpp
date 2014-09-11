@@ -426,6 +426,14 @@ nsGlobalWindow::DOMMinTimeoutValue() const {
   }                                                                           \
   PR_END_MACRO
 
+#define NS_ENSURE_OUTER_WINDOW_OR_ACTIVE_DOCUMENT                              \
+  NS_ENSURE_TRUE(!IsInnerWindow() ||                                           \
+                 (mOuterWindow &&                                              \
+                  ((mOuterWindow->GetCurrentInnerWindow() == this) ||          \
+                   (mOuterWindow->GetCurrentInnerWindow() &&                   \
+                    mOuterWindow->GetCurrentInnerWindow()->GetDoc() == mDoc))),\
+                 NS_ERROR_NOT_INITIALIZED);
+
 // CIDs
 static NS_DEFINE_CID(kXULControllersCID, NS_XULCONTROLLERS_CID);
 
@@ -6425,6 +6433,7 @@ NS_IMETHODIMP
 nsGlobalWindow::OpenJS(const nsAString& aUrl, const nsAString& aName,
                        const nsAString& aOptions, nsIDOMWindow **_retval)
 {
+  NS_ENSURE_OUTER_WINDOW_OR_ACTIVE_DOCUMENT
   return OpenInternal(aUrl, aName, aOptions,
                       false,          // aDialog
                       false,          // aContentModal
@@ -7742,6 +7751,7 @@ nsGlobalWindow::ShowModalDialog(const nsAString& aURI, nsIVariant *aArgs_,
                                 const nsAString& aOptions, uint8_t aArgc,
                                 nsIVariant **aRetVal)
 {
+  NS_ENSURE_OUTER_WINDOW_OR_ACTIVE_DOCUMENT
   FORWARD_TO_OUTER(ShowModalDialog, (aURI, aArgs_, aOptions, aArgc, aRetVal),
                    NS_ERROR_NOT_INITIALIZED);
 
@@ -10819,14 +10829,12 @@ nsGlobalWindow::GetScrollFrame()
 
 nsresult
 nsGlobalWindow::BuildURIfromBase(const char *aURL, nsIURI **aBuiltURI,
-                                 bool *aFreeSecurityPass,
                                  JSContext **aCXused)
 {
   nsIScriptContext *scx = GetContextInternal();
   JSContext *cx = nullptr;
 
   *aBuiltURI = nullptr;
-  *aFreeSecurityPass = false;
   if (aCXused)
     *aCXused = nullptr;
 
@@ -10867,17 +10875,14 @@ nsGlobalWindow::BuildURIfromBase(const char *aURL, nsIURI **aBuiltURI,
 
   if (!sourceWindow) {
     sourceWindow = do_QueryInterface(NS_ISUPPORTS_CAST(nsIDOMWindow *, this));
-    *aFreeSecurityPass = true;
   }
 
-  if (sourceWindow) {
-    nsCOMPtr<nsIDOMDocument> domDoc;
-    sourceWindow->GetDocument(getter_AddRefs(domDoc));
-    nsCOMPtr<nsIDocument> doc(do_QueryInterface(domDoc));
-    if (doc) {
-      baseURI = doc->GetDocBaseURI();
-      charset = doc->GetDocumentCharacterSet();
-    }
+  nsCOMPtr<nsIDOMDocument> domDoc;
+  sourceWindow->GetDocument(getter_AddRefs(domDoc));
+  nsCOMPtr<nsIDocument> doc(do_QueryInterface(domDoc));
+  if (doc) {
+    baseURI = doc->GetDocBaseURI();
+    charset = doc->GetDocumentCharacterSet();
   }
 
   if (aCXused)
@@ -10889,17 +10894,22 @@ nsresult
 nsGlobalWindow::SecurityCheckURL(const char *aURL)
 {
   JSContext       *cxUsed;
-  bool             freePass;
   nsCOMPtr<nsIURI> uri;
 
-  if (NS_FAILED(BuildURIfromBase(aURL, getter_AddRefs(uri), &freePass, &cxUsed)))
+  if (NS_FAILED(BuildURIfromBase(aURL, getter_AddRefs(uri), &cxUsed))) {
     return NS_ERROR_FAILURE;
+  }
+
+  if (!cxUsed) {
+    return NS_OK;
+  }
 
   AutoPushJSContext cx(cxUsed);
 
-  if (!freePass && NS_FAILED(nsContentUtils::GetSecurityManager()->
-        CheckLoadURIFromScript(cx, uri)))
+  if (NS_FAILED(nsContentUtils::GetSecurityManager()->
+        CheckLoadURIFromScript(cx, uri))) {
     return NS_ERROR_FAILURE;
+  }
 
   return NS_OK;
 }
