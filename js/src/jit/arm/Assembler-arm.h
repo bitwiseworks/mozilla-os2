@@ -11,6 +11,8 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Util.h"
 
+#include "jsprf.h"
+
 #include "jit/shared/Assembler-shared.h"
 #include "assembler/assembler/AssemblerBufferWithConstantPool.h"
 #include "jit/CompactBuffer.h"
@@ -957,6 +959,15 @@ class VFPImm {
     }
 };
 
+inline void
+AssemblerCrashAtUnhandlableOOM(const char *reason)
+{
+    char msgbuf[1024];
+    JS_snprintf(msgbuf, sizeof(msgbuf), "[unhandlable oom] %s", reason);
+    MOZ_ReportAssertionFailure(msgbuf, __FILE__, __LINE__);
+    MOZ_CRASH();
+}
+
 // A BOffImm is an immediate that is used for branches. Namely, it is the offset that will
 // be encoded in the branch instruction. This is the only sane way of constructing a branch.
 class BOffImm
@@ -975,7 +986,8 @@ class BOffImm
       : data ((offset - 8) >> 2 & 0x00ffffff)
     {
         JS_ASSERT((offset & 0x3) == 0);
-        JS_ASSERT(isInRange(offset));
+        if (!isInRange(offset))
+            AssemblerCrashAtUnhandlableOOM("BOffImm");
     }
     static bool isInRange(int offset)
     {

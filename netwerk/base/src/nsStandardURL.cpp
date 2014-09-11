@@ -351,6 +351,7 @@ nsStandardURL::Clear()
 
     mPort = -1;
 
+    mScheme.Reset();
     mAuthority.Reset();
     mUsername.Reset();
     mPassword.Reset();
@@ -1132,11 +1133,16 @@ nsStandardURL::SetSpec(const nsACString &input)
 
     // parse the given URL...
     nsresult rv = ParseURL(spec, specLength);
-    if (NS_FAILED(rv)) return rv;
+    if (NS_SUCCEEDED(rv)) {
+        // finally, use the URLSegment member variables to build a normalized
+        // copy of |spec|
+        rv = BuildNormalizedSpec(spec);
+    }
 
-    // finally, use the URLSegment member variables to build a normalized
-    // copy of |spec|
-    rv = BuildNormalizedSpec(spec);
+    if (NS_FAILED(rv)) {
+        Clear();
+        return rv;
+    }
 
 #if defined(PR_LOGGING)
     if (LOG_ENABLED()) {
@@ -1169,16 +1175,16 @@ nsStandardURL::SetScheme(const nsACString &input)
     LOG(("nsStandardURL::SetScheme [scheme=%s]\n", scheme.get()));
 
     if (scheme.IsEmpty()) {
-        NS_ERROR("cannot remove the scheme from an url");
+        NS_WARNING("cannot remove the scheme from an url");
         return NS_ERROR_UNEXPECTED;
     }
     if (mScheme.mLen < 0) {
-        NS_ERROR("uninitialized");
+        NS_WARNING("uninitialized");
         return NS_ERROR_NOT_INITIALIZED;
     }
 
     if (!net_IsValidScheme(scheme)) {
-        NS_ERROR("the given url scheme contains invalid characters");
+        NS_WARNING("the given url scheme contains invalid characters");
         return NS_ERROR_UNEXPECTED;
     }
 
@@ -1211,11 +1217,11 @@ nsStandardURL::SetUserPass(const nsACString &input)
     if (mURLType == URLTYPE_NO_AUTHORITY) {
         if (userpass.IsEmpty())
             return NS_OK;
-        NS_ERROR("cannot set user:pass on no-auth url");
+        NS_WARNING("cannot set user:pass on no-auth url");
         return NS_ERROR_UNEXPECTED;
     }
     if (mAuthority.mLen < 0) {
-        NS_ERROR("uninitialized");
+        NS_WARNING("uninitialized");
         return NS_ERROR_NOT_INITIALIZED;
     }
 
@@ -1312,7 +1318,7 @@ nsStandardURL::SetUsername(const nsACString &input)
     if (mURLType == URLTYPE_NO_AUTHORITY) {
         if (username.IsEmpty())
             return NS_OK;
-        NS_ERROR("cannot set username on no-auth url");
+        NS_WARNING("cannot set username on no-auth url");
         return NS_ERROR_UNEXPECTED;
     }
 
@@ -1357,11 +1363,11 @@ nsStandardURL::SetPassword(const nsACString &input)
     if (mURLType == URLTYPE_NO_AUTHORITY) {
         if (password.IsEmpty())
             return NS_OK;
-        NS_ERROR("cannot set password on no-auth url");
+        NS_WARNING("cannot set password on no-auth url");
         return NS_ERROR_UNEXPECTED;
     }
     if (mUsername.mLen <= 0) {
-        NS_ERROR("cannot set password without existing username");
+        NS_WARNING("cannot set password without existing username");
         return NS_ERROR_FAILURE;
     }
 
@@ -1470,7 +1476,14 @@ nsStandardURL::SetHost(const nsACString &input)
         len = flat.Length();
 
     if (mHost.mLen < 0) {
-        mHost.mPos = mAuthority.mPos;
+        int port_length = 0;
+        if (mPort != -1) {
+            nsAutoCString buf;
+            buf.Assign(':');
+            buf.AppendInt(mPort);
+            port_length = buf.Length();
+        }
+        mHost.mPos = mAuthority.mPos + mAuthority.mLen - port_length;
         mHost.mLen = 0;
     }
 
@@ -1514,7 +1527,7 @@ nsStandardURL::SetPort(int32_t port)
         nsAutoCString buf;
         buf.Assign(':');
         buf.AppendInt(port);
-        mSpec.Insert(buf, mHost.mPos + mHost.mLen);
+        mSpec.Insert(buf, mAuthority.mPos + mAuthority.mLen);
         mAuthority.mLen += buf.Length();
         ShiftFromPath(buf.Length());
     }
@@ -1522,9 +1535,14 @@ nsStandardURL::SetPort(int32_t port)
         // Don't allow mPort == mDefaultPort
         port = -1;
 
+        // compute length of the current port
+        nsAutoCString buf;
+        buf.Assign(':');
+        buf.AppendInt(mPort);
+
         // need to remove the port number from the URL spec
-        uint32_t start = mHost.mPos + mHost.mLen;
-        int32_t lengthToCut = mPath.mPos - start;
+        uint32_t start = mAuthority.mPos + mAuthority.mLen - buf.Length();
+        int32_t lengthToCut = buf.Length();
         mSpec.Cut(start, lengthToCut);
         mAuthority.mLen -= lengthToCut;
         ShiftFromPath(-lengthToCut);
@@ -1532,9 +1550,13 @@ nsStandardURL::SetPort(int32_t port)
     else {
         // need to replace the existing port
         nsAutoCString buf;
+        buf.Assign(':');
+        buf.AppendInt(mPort);
+        uint32_t start = mAuthority.mPos + mAuthority.mLen - buf.Length();
+        uint32_t length = buf.Length();
+
+        buf.Assign(':');
         buf.AppendInt(port);
-        uint32_t start = mHost.mPos + mHost.mLen + 1;
-        uint32_t length = mPath.mPos - start;
         mSpec.Replace(start, length, buf);
         if (buf.Length() != length) {
             mAuthority.mLen += buf.Length() - length;
@@ -1783,7 +1805,7 @@ nsStandardURL::Resolve(const nsACString &in, nsACString &out)
     // initialize a nsStandardURL object.
 
     if (mScheme.mLen < 0) {
-        NS_ERROR("unable to Resolve URL: this URL not initialized");
+        NS_WARNING("unable to Resolve URL: this URL not initialized");
         return NS_ERROR_NOT_INITIALIZED;
     }
 
@@ -2483,12 +2505,12 @@ nsStandardURL::EnsureFile()
 
     // Parse the spec if we don't have a cached result
     if (mSpec.IsEmpty()) {
-        NS_ERROR("url not initialized");
+        NS_WARNING("url not initialized");
         return NS_ERROR_NOT_INITIALIZED;
     }
 
     if (!SegmentIs(mScheme, "file")) {
-        NS_ERROR("not a file URL");
+        NS_WARNING("not a file URL");
         return NS_ERROR_FAILURE;
     }
 

@@ -71,6 +71,16 @@ class RefTest(object):
       prefsFile.write('user_pref("reftest.filter", %s);\n' % self.makeJSString(options.filter))
     prefsFile.write('user_pref("reftest.focusFilterMode", %s);\n' % self.makeJSString(options.focusFilterMode))
 
+    # Ensure that telemetry is disabled, so we don't connect to the telemetry
+    # server in the middle of the tests.
+    prefsFile.write('user_pref("toolkit.telemetry.enabled", false);\n')
+    # Likewise for safebrowsing.
+    prefsFile.write('user_pref("browser.safebrowsing.enabled", false);\n')
+    prefsFile.write('user_pref("browser.safebrowsing.malware.enabled", false);\n')
+    # And for snippets.
+    prefsFile.write('user_pref("browser.snippets.enabled", false);\n')
+    prefsFile.write('user_pref("browser.snippets.syncPromo.enabled", false);\n')
+
     for v in options.extraPrefs:
       thispref = v.split("=")
       if len(thispref) < 2:

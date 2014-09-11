@@ -9,6 +9,7 @@
 #include "RasterImage.h"
 #include "imgDecoderObserver.h"
 #include "mozilla/RefPtr.h"
+#include "DecodeStrategy.h"
 #include "ImageMetadata.h"
 
 namespace mozilla {
@@ -48,7 +49,7 @@ public:
    *
    * Notifications Sent: TODO
    */
-  void Write(const char* aBuffer, uint32_t aCount);
+  void Write(const char* aBuffer, uint32_t aCount, DecodeStrategy aStrategy);
 
   /**
    * Informs the decoder that all the data has been written.
@@ -90,16 +91,6 @@ public:
   {
     NS_ABORT_IF_FALSE(!mInitialized, "Can't set size decode after Init()!");
     mSizeDecode = aSizeDecode;
-  }
-
-  void SetSynchronous(bool aSynchronous)
-  {
-    mSynchronous = aSynchronous;
-  }
-
-  bool IsSynchronous() const
-  {
-    return mSynchronous;
   }
 
   void SetObserver(imgDecoderObserver* aObserver)
@@ -180,7 +171,7 @@ protected:
    * only these methods.
    */
   virtual void InitInternal();
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount);
+  virtual void WriteInternal(const char* aBuffer, uint32_t aCount, DecodeStrategy aStrategy);
   virtual void FinishInternal();
 
   /*
@@ -278,7 +269,6 @@ private:
   bool mSizeDecode;
   bool mInFrame;
   bool mIsAnimated;
-  bool mSynchronous;
 };
 
 } // namespace image
