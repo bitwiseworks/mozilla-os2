@@ -34,6 +34,9 @@
 #elif defined(XP_OS2)
 #define INCL_DOSFILEMGR
 #include <os2.h>
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #endif
 
 // Functions that are not to be used in standalone glue must be implemented
@@ -191,7 +194,7 @@ mozilla::ReadAheadLib(nsIFile* aFile)
     return;
   }
   ReadAheadLib(path.get());
-#elif defined(LINUX) && !defined(ANDROID) || defined(XP_MACOSX)
+#elif defined(LINUX) && !defined(ANDROID) || defined(XP_MACOSX) || defined(XP_OS2)
   nsAutoCString nativePath;
   if (!aFile || NS_FAILED(aFile->GetNativePath(nativePath))) {
     return;
@@ -210,7 +213,7 @@ mozilla::ReadAheadFile(nsIFile* aFile, const size_t aOffset,
     return;
   }
   ReadAheadFile(path.get(), aOffset, aCount, aOutFd);
-#elif defined(LINUX) && !defined(ANDROID) || defined(XP_MACOSX)
+#elif defined(LINUX) && !defined(ANDROID) || defined(XP_MACOSX) || defined(XP_OS2)
   nsAutoCString nativePath;
   if (!aFile || NS_FAILED(aFile->GetNativePath(nativePath))) {
     return;
@@ -347,6 +350,30 @@ mozilla::ReadAhead(mozilla::filedesc_t aFd, const size_t aOffset,
   // Restore the file pointer
   SetFilePointerEx(aFd, fpOriginal, nullptr, FILE_BEGIN);
 
+#elif defined(XP_OS2)
+
+  // Do it similar to Windows
+
+  // Save the current position and go to the given offset
+  off_t curPos = tell(aFd);
+  if (curPos == -1)
+      return;
+  if (lseek(aFd, aOffset, SEEK_SET) == -1)
+      return;
+
+  char buf[64 * 1024];
+  size_t totalBytesRead = 0;
+  size_t bytesRead;
+
+  // Dummy read the file into the buffer hoping the kernel will cache it
+  while (totalBytesRead < aCount &&
+         (bytesRead = read(aFd, buf, sizeof(buf))) == sizeof(buf)) {
+    totalBytesRead += bytesRead;
+  }
+
+  // Restore the file position
+   lseek(aFd, curPos, SEEK_SET);
+
 #elif defined(LINUX) && !defined(ANDROID)
 
   readahead(aFd, aOffset, aCount);
@@ -368,7 +395,7 @@ mozilla::ReadAheadLib(mozilla::pathstr_t aFilePath)
   if (!aFilePath) {
     return;
   }
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
   ReadAheadFile(aFilePath);
 #elif defined(LINUX) && !defined(ANDROID)
   int fd = open(aFilePath, O_RDONLY);
@@ -492,7 +519,7 @@ mozilla::ReadAheadFile(mozilla::pathstr_t aFilePath, const size_t aOffset,
   if (!aOutFd) {
     CloseHandle(fd);
   }
-#elif defined(LINUX) && !defined(ANDROID) || defined(XP_MACOSX)
+#elif defined(LINUX) && !defined(ANDROID) || defined(XP_MACOSX) || defined(XP_OS2)
   if (!aFilePath) {
     if (aOutFd) {
       *aOutFd = -1;
