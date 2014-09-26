@@ -5,6 +5,15 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 24.8.1 Beta 2 (2014-09-26)
+
+   - Update Firefox to latest version 24.8.1 ESR.
+
+   - Fix spell checking in text input fields.
+
+   - Update EXCEPTQ Add-On download link in README.OS2.
+
+
 Firefox 24.3.0 Beta (2014-05-30)
 
    - Update Firefox to version 24.3.0 ESR.
