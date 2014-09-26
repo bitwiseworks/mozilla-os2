@@ -196,8 +196,8 @@ Note:  For best performance of most browser plugins, you may want
 * Exceptq - Crash Reporting
     If the app crashes, Exceptq will beep and then create an exception
     report containing details of the crash.  You can send these reports
-    to the developers at <crash@e-vertise.com>.
-        http://hobbes.nmsu.edu/h-search.php?&key=exceptq
+    to the developers via Issue Tracker reports (see the Links section).
+        http://home.earthlink.net/~steve53/betas/
 
 * ConfigApps & Internet Application Integration - Set Default Browser
     These two utilities make it easier to set your default browser,
