@@ -54,8 +54,10 @@
 #include "plstr.h"
 #include "prenv.h"
 #include "prmem.h"
+#if !defined(OS_OS2)
 /* Temporary until we have PR_DuplicateEnvironment in prenv.h */
 extern "C" { NSPR_API(pthread_mutex_t *)PR_GetEnvLock(void); }
+#endif
 #endif
 
 namespace {
@@ -72,6 +74,7 @@ static mozilla::EnvironmentLog gProcessLog("MOZ_PROCESS_LOG");
 namespace base {
 
 #ifdef HAVE_PR_DUPLICATE_ENVIRONMENT
+#if !defined(OS_OS2)
 /*
  * I tried to put PR_DuplicateEnvironment down in mozglue, but on android
  * this winds up failing because the strdup/free calls wind up mismatching.
@@ -95,12 +98,15 @@ PR_DuplicateEnvironment(void)
     pthread_mutex_unlock(PR_GetEnvLock());
     return result;
 }
+#endif
 
 class EnvironmentEnvp
 {
 public:
+#if !defined(OS_OS2)
   EnvironmentEnvp()
     : mEnvp(PR_DuplicateEnvironment()) {}
+#endif
 
   EnvironmentEnvp(const environment_map &em)
   {
@@ -154,11 +160,13 @@ private:
 class Environment : public environment_map
 {
 public:
+#if !defined(OS_OS2)
   Environment()
   {
     EnvironmentEnvp envp;
     envp.ToMap(*this);
   }
+#endif
 
   Environment(const environment_map &m) : environment_map(m)
   {
