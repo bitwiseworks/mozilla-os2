@@ -12,7 +12,6 @@
 #define INCL_BASE
 #include <os2.h>
 #define INCL_LOADEXCEPTQ
-#define INCL_EXCEPTQ_CLASS
 #include <exceptq.h>
 #endif
 
@@ -2579,14 +2578,25 @@ static void MakeOrSetMinidumpPath(nsIFile* profD)
 const nsXREAppData* gAppData = nullptr;
 
 #if defined(XP_OS2)
-// because we use early returns, we use a stack-based helper to un-set the OS2 FP handler
+// Because we use early returns, we use a stack-based helper to set and un-set the OS2 FPU exception
+// handler. This helper also installs the EXCEPTQ handler on the current thread to make sure it
+// is chained so that it gets control after the FPU exception handler. This can't be done with
+// ScopedExceptqLoader since the proper stack order for locals is not guaranteed by the compiler.
 class ScopedFPHandler {
 private:
-  EXCEPTIONREGISTRATIONRECORD excpreg;
+  // For arrays it's guaranteed that &[1] < &[2] — the registration record of the top (last)
+  // exception handler must have a greater address (i.e. be located higher on the stack).
+  EXCEPTIONREGISTRATIONRECORD excpreg[2];
 
 public:
-  ScopedFPHandler() { PR_OS2_SetFloatExcpHandler(&excpreg); }
-  ~ScopedFPHandler() { PR_OS2_UnsetFloatExcpHandler(&excpreg); }
+  ScopedFPHandler() {
+    LoadExceptq(&excpreg[2], NULL, NULL);
+    PR_OS2_SetFloatExcpHandler(&excpreg[1]);
+  }
+  ~ScopedFPHandler() {
+    PR_OS2_UnsetFloatExcpHandler(&excpreg[1]);
+    UninstallExceptq(&excpreg[2]);
+  }
 };
 #endif
 
@@ -3877,7 +3887,6 @@ int
 XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
 {
 #if defined(XP_OS2)
-  ScopedExceptqLoader exceptq;
   ScopedFPHandler fpHandler;
 #endif
 

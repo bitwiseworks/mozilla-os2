@@ -17,19 +17,21 @@
 namespace {
 
 void ThreadFunc(void* closure) {
-  EXCEPTIONREGISTRATIONRECORD exceptqreg;
-  LibLoadExceptq(&exceptqreg);
+  // For arrays it's guaranteed that &[1] < &[2] — the registration record of the top (last)
+  // exception handler must have a greater address (i.e. be located higher on the stack).
+  EXCEPTIONREGISTRATIONRECORD excpreg[2];
 
-  EXCEPTIONREGISTRATIONRECORD excpreg;
-  PR_OS2_SetFloatExcpHandler(&excpreg);
+  LibLoadExceptq(&excpreg[2]);
+
+  PR_OS2_SetFloatExcpHandler(&excpreg[1]);
 
   PlatformThread::Delegate* delegate =
       static_cast<PlatformThread::Delegate*>(closure);
   delegate->ThreadMain();
 
-  PR_OS2_UnsetFloatExcpHandler(&excpreg);
+  PR_OS2_UnsetFloatExcpHandler(&excpreg[1]);
 
-  UninstallExceptq(&exceptqreg);
+  UninstallExceptq(&excpreg[2]);
 }
 
 }  // namespace
