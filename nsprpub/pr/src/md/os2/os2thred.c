@@ -163,23 +163,24 @@ typedef struct param_store
 static void
 ExcpStartFunc(void* arg)
 {
-    // For arrays it's guaranteed that &[1] < &[2] — the registration record of the top (last)
-    // exception handler must have a greater address (i.e. be located higher on the stack).
+    // For arrays it's guaranteed that &[0] < &[1] which we use to make sure that the registration
+    // record of the top (last) exception handler has a smaller address (i.e. located lower on the
+    // stack) — this is a requirement of the SEH logic.
     EXCEPTIONREGISTRATIONRECORD excpreg[2];
 
     PARAMSTORE params, *pParams = arg;
 
-    LibLoadExceptq(&excpreg[2]);
+    LibLoadExceptq(&excpreg[1]);
 
-    PR_OS2_SetFloatExcpHandler(&excpreg[1]);
+    PR_OS2_SetFloatExcpHandler(&excpreg[0]);
 
     params = *pParams;
     PR_Free(pParams);
     params.start(params.thread);
 
-    PR_OS2_UnsetFloatExcpHandler(&excpreg[1]);
+    PR_OS2_UnsetFloatExcpHandler(&excpreg[0]);
 
-    UninstallExceptq(&excpreg[2]);
+    UninstallExceptq(&excpreg[1]);
 }
 
 PRStatus

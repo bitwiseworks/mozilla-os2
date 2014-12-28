@@ -288,18 +288,19 @@ SetTaskbarGroupId(const nsString& aId)
 // ScopedExceptqLoader since the proper stack order for locals is not guaranteed by the compiler.
 class ScopedFPHandler {
 private:
-  // For arrays it's guaranteed that &[1] < &[2] — the registration record of the top (last)
-  // exception handler must have a greater address (i.e. be located higher on the stack).
+  // For arrays it's guaranteed that &[0] < &[1] which we use to make sure that the registration
+  // record of the top (last) exception handler has a smaller address (i.e. located lower on the
+  // stack) — this is a requirement of the SEH logic.
   EXCEPTIONREGISTRATIONRECORD excpreg[2];
 
 public:
   ScopedFPHandler() {
-    LoadExceptq(&excpreg[2], NULL, NULL);
-    PR_OS2_SetFloatExcpHandler(&excpreg[1]);
+    LoadExceptq(&excpreg[1], NULL, NULL);
+    PR_OS2_SetFloatExcpHandler(&excpreg[0]);
   }
   ~ScopedFPHandler() {
-    PR_OS2_UnsetFloatExcpHandler(&excpreg[1]);
-    UninstallExceptq(&excpreg[2]);
+    PR_OS2_UnsetFloatExcpHandler(&excpreg[0]);
+    UninstallExceptq(&excpreg[1]);
   }
 };
 #endif
