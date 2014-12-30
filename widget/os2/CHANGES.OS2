@@ -5,6 +5,13 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 24.8.1 Beta 3 (2014-12-30)
+
+   - Fix EXCEPTQ report generation.
+
+   - Rebuild with newer LIBOS2 to allow loading XUL.DLL to high memory.
+
+
 Firefox 24.8.1 Beta 2 (2014-09-26)
 
    - Update Firefox to latest version 24.8.1 ESR.
