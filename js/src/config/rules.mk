@@ -1781,6 +1781,7 @@ endif
 define install_file_template
 $(or $(3),libs):: $(2)/$(notdir $(1))
 $(call install_cmd_override,$(2)/$(notdir $(1)))
+.NOTPARALLEL: $(2)/$(notdir $(1))
 $(2)/$(notdir $(1)): $(1) $(word 1,$(install_cmd))
 	$$(call install_cmd,$(4) "$$<" "$${@D}")
 endef
