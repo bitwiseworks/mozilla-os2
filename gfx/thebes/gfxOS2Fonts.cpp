@@ -5,7 +5,8 @@
 
 #include <os2.h>
 #include "cairo-ft.h" // includes fontconfig.h, too
-#include <freetype/tttables.h>
+#include <ft2build.h>
+#include FT_TRUETYPE_TABLES_H
 
 #include "gfxContext.h"
 

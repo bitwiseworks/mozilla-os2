@@ -8302,8 +8302,8 @@ if test "$MOZ_TREE_CAIRO"; then
         PS_SURFACE_FEATURE="#define CAIRO_HAS_PS_SURFACE 1"
         FT_FONT_FEATURE="#define CAIRO_HAS_FT_FONT 1"
         MOZ_ENABLE_CAIRO_FT=1
-        CAIRO_FT_CFLAGS="-I${MZFTCFGFT2}/include"
-        CAIRO_FT_OSLIBS="-L${MZFTCFGFT2}/lib -lmozft -lmzfntcfg"
+        CAIRO_FT_CFLAGS="$FT2_CFLAGS $_FONTCONFIG_CFLAGS"
+        CAIRO_FT_OSLIBS="$FT2_LIBS $_FONTCONFIG_LIBS"
         CAIRO_FT_LIBS=""
         ;;
     esac
