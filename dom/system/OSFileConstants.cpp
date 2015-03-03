@@ -307,6 +307,10 @@ static dom::ConstantSpec gLibcProperties[] =
 #if defined(O_SYNC)
   INT_CONSTANT(O_SYNC),
 #endif // defined(O_SYNC)
+#if defined(O_TEXT)
+  INT_CONSTANT(O_TEXT),
+  INT_CONSTANT(O_BINARY),
+#endif // defined(O_TEXT)
   INT_CONSTANT(O_TRUNC),
   INT_CONSTANT(O_WRONLY),
 

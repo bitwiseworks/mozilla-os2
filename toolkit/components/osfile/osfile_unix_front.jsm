@@ -193,6 +193,11 @@
       *  writing. The file may also be opened for reading, depending
       *  on the other fields of |mode|. If neither |truncate| nor
       *  |create| is specified, the file is opened for appending.
+      * - {bool} text If |true|, the file will be opened in O_TEXT mode
+      *  on platofmrs that have such support (e.g. OS/2). This mode
+      *  translates LF to CRLF on output and CRLF back to LF on input.
+      *  If text is |false| or not specified, O_BINARY is used (which
+      *  assumes no translation).
       *
       * If neither |truncate|, |create| or |write| is specified, the file
       * is opened for reading.
@@ -243,6 +248,13 @@
              flags |= Const.O_APPEND;
            } else {
              flags |= Const.O_APPEND | Const.O_CREAT;
+           }
+         }
+         if (typeof Const.O_TEXT != "undefined") {
+           if (mode.text) {
+             flags |= Const.O_TEXT;
+           } else {
+             flags |= Const.O_BINARY;
            }
          }
        }

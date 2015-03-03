@@ -226,11 +226,12 @@ AbstractFile.AbstractIterator.prototype = {
  * object.
  *
  * @param {*=} mode An object that may contain fields |read|,
- * |write|, |truncate|, |create|, |existing|. These fields
- * are interpreted only if true-ish.
+ * |write|, |truncate|, |create|, |existing|, |text|. The |text|
+ * field is only recognized on platforms that support O_TEXT and
+ * O_BINARY modes (e.g. OS/2). Other platforms will ignore it.
  * @return {{read:bool, write:bool, trunc:bool, create:bool,
- * existing:bool}} an object recapitulating the options set
- * by |mode|.
+ * existing:bool, text:bool}} an object recapitulating the options
+ * set by |mode|.
  * @throws {TypeError} If |mode| contains other fields, or
  * if it contains both |create| and |truncate|, or |create|
  * and |existing|.
@@ -241,7 +242,8 @@ AbstractFile.normalizeOpenMode = function normalizeOpenMode(mode) {
     write: false,
     trunc: false,
     create: false,
-    existing: false
+    existing: false,
+    text: false
   };
   for (let key in mode) {
     if (!mode[key]) continue; // Only interpret true-ish keys
@@ -264,6 +266,9 @@ AbstractFile.normalizeOpenMode = function normalizeOpenMode(mode) {
     case "existing": // fallthrough
     case "exist":
       result.existing = true;
+      break;
+    case "text":
+      result.text = true;
       break;
     default:
       throw new TypeError("Mode " + key + " not understood");
