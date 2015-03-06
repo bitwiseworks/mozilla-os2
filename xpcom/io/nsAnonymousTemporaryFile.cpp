@@ -12,7 +12,7 @@
 #include "nsString.h"
 #include "nsAppDirectoryServiceDefs.h"
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
@@ -55,7 +55,7 @@ GetTempDir(nsIFile** aTempDir)
   nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(tmpFile));
   NS_ENSURE_SUCCESS(rv,rv);
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
   // On windows DELETE_ON_CLOSE is unreliable, so we store temporary files
   // in a subdir of the temp dir and delete that in an idle service observer
   // to ensure it's been cleared.
@@ -101,7 +101,7 @@ NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
   return rv;    
 }
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
 
 // On Windows we have an idle service observer that runs some time after
 // startup and deletes any stray anonymous temporary files...

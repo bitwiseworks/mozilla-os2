@@ -690,14 +690,21 @@ nsLocalFile::OpenNSPRFileDesc(int32_t flags, int32_t mode, PRFileDesc **_retval)
         return rv;
 
     *_retval = PR_Open(mWorkingPath.get(), flags, mode);
-    if (*_retval)
-        return NS_OK;
+    if (! *_retval)
+        return NS_ErrorAccordingToNSPR();
 
+     // DELETE_ON_CLOSE isn't supported on OS/2 and deprecated in favor of
+     // NS_OpenAnonymousTemporaryFile. The code is left here just in case if
+     // NSPR file I/O is repmplemented using LIBC one day (for LIBC we have a
+     // re-implemented version of unlink via the urpo library that is capable
+     // of DELETE_ON_CLOSE semantics).
+#if 0
     if (flags & DELETE_ON_CLOSE) {
         PR_Delete(mWorkingPath.get());
     }
+#endif
 
-    return NS_ErrorAccordingToNSPR();
+    return NS_OK;
 }
 
 

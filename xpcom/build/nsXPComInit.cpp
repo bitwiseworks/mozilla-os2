@@ -153,7 +153,7 @@ static BrowserProcessSubThread* sIOThread;
 extern nsresult NS_RegistryGetFactory(nsIFactory** aFactory);
 extern nsresult NS_CategoryManagerGetFactory( nsIFactory** );
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
 extern nsresult CreateAnonTempFileRemover();
 #endif
 
@@ -495,7 +495,7 @@ NS_InitXPCOM2(nsIServiceManager* *result,
     NS_CreateServicesFromCategory(NS_XPCOM_STARTUP_CATEGORY, 
                                   nullptr,
                                   NS_XPCOM_STARTUP_OBSERVER_ID);
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_OS2)
     CreateAnonTempFileRemover();
 #endif
 
