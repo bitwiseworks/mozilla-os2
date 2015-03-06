@@ -190,8 +190,8 @@ public:
       // The idle service will drop its reference to this object after
       // we exit, destroying this object.
       RemoveAnonTempFileFiles();
-      Cleanup();
     } else if (nsCRT::strcmp(aTopic, XPCOM_SHUTDOWN_TOPIC) == 0) {
+      RemoveAnonTempFileFiles();
       Cleanup();
     }
     return NS_OK;
