@@ -88,10 +88,12 @@ If you don't have ArcView installed, you may download it from:
       If you use RPM/YUM, just run this command:
          yum install libc
 
-4. INSTALL 'freetyp6.dll' and 'fntcfg2.dll' into one of the directories
+4. INSTALL 'freetyp6.dll', 'fntcfg2.dll', 'png1616.dll' and 'z.dll' into one of the directories
       on your "LIBPATH". You can download RPMs with these files from:
          http://rpm.netlabs.org/release/00/i386/i386/freetype-2.5.5-1.oc00.i386.rpm
          http://rpm.netlabs.org/release/00/i386/i386/fontconfig-2.8.0-1.oc00.i386.rpm
+         http://rpm.netlabs.org/release/00/i386/i386/libpng-1.6.16-1.oc00.i386.rpm
+         http://rpm.netlabs.org/release/00/i386/i386/zlib-1.2.5-5.oc00.i386.rpm
       If you use RPM/YUM, just run this command:
          yum install freetype fontconfig
 
@@ -194,7 +196,7 @@ Note:  For best performance of most browser plugins, you may want
     by WarpSans.  The app will use it by default if it's available.
     Many users prefer the bitmapped version as it looks cleaner at small
     point sizes.
-       http://users.socis.ca/~ataylo00/creative/fonts/workplace/#wpsu
+       http://www.altsan.org/creative/fonts/workplace/#wpsu
 
 * RWS - WPS Integration
     With RWS, you can open downloads using their default WPS association
@@ -487,12 +489,12 @@ posted to other forums may not be seen by the developers.
   milestone release.
 
 * Other known problems can be found by following this link:
-    https://github.com/bitwiseworks/mozilla-os2/issues
+     https://github.com/bitwiseworks/mozilla-os2/issues
 
 * The old list of bugs (for historical purposes, as it is mostly outdated)
   can be found by following the link "Current Open Warpzilla Bugs" on the
   OS/2 Mozilla page:
-    http://www.mozilla.org/ports/os2
+     http://www.mozilla.org/ports/os2
 
 
 ===============================================================================
