@@ -127,7 +127,7 @@ endif # MOZ_PKG_PRETTYNAMES
 
 # Symbol package naming
 ifeq ($(OS_ARCH),OS2)
-SYMBOL_ARCHIVE_BASENAME = $(PKG_BASENAME).symbols
+SYMBOL_ARCHIVE_BASENAME = $(subst $(MOZ_APP_NAME),$(MOZ_APP_NAME)-dbgsym,$(PKG_BASENAME))
 else
 SYMBOL_FULL_ARCHIVE_BASENAME = $(PKG_BASENAME).crashreporter-symbols-full
 SYMBOL_ARCHIVE_BASENAME = $(PKG_BASENAME).crashreporter-symbols
