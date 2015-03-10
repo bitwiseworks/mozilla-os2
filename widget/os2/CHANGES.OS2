@@ -5,6 +5,27 @@ in the Mozilla product series from release to release.
 CHANGES
 
 
+Firefox 24.8.1 Beta 4 (2015-03-10)
+
+   - Clean up temporary files (mozilla-temp-XXX) in %TEMP% directory.
+
+   - Fix check boxes in "Clear Recent History" dialog.
+
+   - Make most visited sites' thumbnails on new tab canvas work again.
+
+   - Set correct defaults for "gfx.os2.font.*" preferences.
+
+   - Finally allow loading XUL.DLL into high memory.
+
+   - Get rid of MOZJS.DLL (it's now part of XUL.DLL).
+
+   - Use universal builds of FreeType and FontConfig (see README).
+
+   - Use newer GCC 4.9.2 compiler (requires a new GCC runtime, see README).
+
+   - Use newer LIBC 0.6.6 library (requires a new LIBC runtime, see README).
+
+
 Firefox 24.8.1 Beta 3 (2014-12-30)
 
    - Fix EXCEPTQ report generation.
