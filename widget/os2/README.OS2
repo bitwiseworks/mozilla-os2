@@ -109,7 +109,7 @@ If you don't have ArcView installed, you may download it from:
          http://rpm.netlabs.org/release/00/i386/i386/libgcc1-4.9.2.1-3.oc00.i386.rpm
          http://rpm.netlabs.org/release/00/i386/i386/libstdc++6-4.9.2.1-3.oc00.i386.rpm
       If you use RPM/YUM, just run this command:
-         yum install libgcc1 libstdc++
+         yum install libgcc1 libstdc++6
 
 7. Optional: Use mozinst to create icons on desktop.
       http://hobbes.nmsu.edu/h-search.php?key=mozinst
